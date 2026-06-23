@@ -1,0 +1,23 @@
+{
+  "navigation": {
+    "options": "Options",
+    "preferences": "Preferences",
+    "theme": "Theme",
+    "language": "Language",
+    "home": "Home",
+    "search": "Search",
+    "about": "About",
+    "components": "Components",
+    "contact": "Contact",
+    "themes": {
+      "light": "Light",
+      "dark": "Dark",
+      "system": "System"
+    },
+    "locales": {
+      "en": "English",
+      "zh-cn": "简体中文",
+      "zh-hk": "繁體中文"
+    }
+  }
+}

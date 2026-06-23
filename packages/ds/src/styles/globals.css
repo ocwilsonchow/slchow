@@ -1,0 +1,143 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@source "../components";
+@source "../lib";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  /* Brand */
+  --brand-content-primary: #473982;
+  --brand-content-on-primary: #f4f3f3;
+  --brand-surface-primary: #473982;
+  --brand-surface-hover: #47398210;
+  --brand-surface-active: #47398215;
+  --brand-surface-alpha: #47398210;
+  --brand-surface-alpha-hover: #47398210;
+  --brand-stroke-default: #473982;
+
+  /* Surface */
+  --surface-canvas: #ffffff;
+  --surface-card: #f9fafb;
+  --surface-card-hover: #eaedf1;
+  --surface-popover: #ffffff;
+  --surface-hover: #01010110;
+  --surface-alpha: #01010105;
+
+  /* Stroke */
+  --stroke-default: #dadde6;
+  --stroke-strong: #aab1c5;
+
+  /* Text */
+  --content-ink: #101047;
+  --content-body: #6a738e;
+  --content-link: #2152b0;
+  --content-subdued: #6a738e70;
+  --content-muted: #6a738e35;
+}
+
+.dark {
+  /* Brand */
+  --brand-content-primary: #f5c0c0;
+  --brand-content-on-primary: #1a1a23;
+  --brand-surface-primary: #f5c0c0;
+  --brand-surface-hover: #fae0e0;
+  --brand-surface-active: #f5c0c015;
+  --brand-surface-alpha: #f5c0c010;
+  --brand-surface-alpha-hover: #fae0e015;
+  --brand-stroke-default: #f5c0c0;
+
+  /* Surface */
+  --surface-canvas: #1a1a23;
+  --surface-card: #1f1f29;
+  --surface-card-hover: #292937;
+  --surface-popover: #20202c;
+  --surface-hover: #ffffff10;
+  --surface-alpha: #ffffff10;
+
+  /* Stroke */
+  --stroke-default: #353548;
+  --stroke-strong: #45455e;
+
+  /* Text */
+  --content-ink: #e4e6ec;
+  --content-body: #b1b6c4;
+  --content-link: #84a6e8;
+  --content-subdued: #6c758e;
+  --content-muted: #51586b;
+}
+
+@theme inline {
+  /* Brand */
+  --color-brand-content-primary: var(--brand-content-primary);
+  --color-brand-content-on-primary: var(--brand-content-on-primary);
+  --color-brand-surface-primary: var(--brand-surface-primary);
+  --color-brand-surface-hover: var(--brand-surface-hover);
+  --color-brand-surface-active: var(--brand-surface-active);
+  --color-brand-surface-alpha: var(--brand-surface-alpha);
+  --color-brand-surface-alpha-hover: var(--brand-surface-alpha-hover);
+  --color-brand-stroke-default: var(--brand-stroke-default);
+
+  /* Surface */
+  --color-surface-canvas: var(--surface-canvas);
+  --color-surface-card: var(--surface-card);
+  --color-surface-card-hover: var(--surface-card-hover);
+  --color-surface-popover: var(--surface-popover);
+  --color-surface-hover: var(--surface-hover);
+  --color-surface-alpha: var(--surface-alpha);
+
+  /* Stroke */
+  --color-stroke-default: var(--stroke-default);
+  --color-stroke-strong: var(--stroke-strong);
+
+  /* Text */
+  --color-content-ink: var(--content-ink);
+  --color-content-body: var(--content-body);
+  --color-content-link: var(--content-link);
+  --color-content-subdued: var(--content-subdued);
+  --color-content-muted: var(--content-muted);
+
+  /* Layout */
+  --breakpoint-3xl: 120rem;
+  --breakpoint-4xl: 160rem;
+}
+
+@layer base {
+  * {
+    @apply border-stroke-default divide-stroke-default outline-brand-surface-primary/75;
+  }
+
+  a {
+    @apply active:opacity-80;
+  }
+
+  html,
+  body {
+    overscroll-behavior: none;
+  }
+
+  body {
+    @apply bg-surface-canvas text-content-body text-sm font-medium;
+    font-family: var(--font-sans);
+  }
+}
+
+@layer components {
+  /* TipTap mention editor surface */
+  .tiptap.ProseMirror {
+    outline: none;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  /* Placeholder requires a ::before pseudo-element with attr() content,
+     which cannot be expressed with Tailwind utilities alone. */
+  .tiptap p.is-editor-empty:first-child::before {
+    content: attr(data-placeholder);
+    color: var(--content-subdued);
+    float: left;
+    height: 0;
+    pointer-events: none;
+  }
+}

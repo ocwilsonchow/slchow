@@ -1,0 +1,23 @@
+{
+  "navigation": {
+    "options": "選項",
+    "preferences": "偏好設定",
+    "theme": "主題",
+    "language": "語言",
+    "home": "首頁",
+    "search": "搜尋",
+    "about": "關於",
+    "components": "組件",
+    "contact": "聯絡",
+    "themes": {
+      "light": "淺色",
+      "dark": "深色",
+      "system": "系統"
+    },
+    "locales": {
+      "en": "English",
+      "zh-cn": "简体中文",
+      "zh-hk": "繁體中文"
+    }
+  }
+}

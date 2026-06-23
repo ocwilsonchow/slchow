@@ -1,0 +1,17 @@
+{
+  "name": "@slchow/intl",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "lint": "biome check ."
+  },
+  "exports": {
+    ".": "./index.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}
