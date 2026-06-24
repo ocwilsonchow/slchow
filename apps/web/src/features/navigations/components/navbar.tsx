@@ -61,7 +61,7 @@ export const NavbarItem = (props: NavbarItemProps) => {
     cn(
       "uppercase tracking-wide flex-1 flex items-center gap-2 px-3 py-1 rounded hover:bg-surface-hover hover:text-content-ink cursor-pointer",
       isActive &&
-        "bg-brand-surface-active text-brand-content-primary hover:text-brand-content-primary",
+        "text-brand-content-primary hover:text-brand-content-primary",
       className
     )
 
