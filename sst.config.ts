@@ -25,7 +25,10 @@ export default $config({
     // ----- Website -----
     const website = new sst.aws.Nextjs("WEB", {
       path: "apps/web",
-      domain: secrets.DOMAIN.value,
+      domain: {
+        name: "slchow.com",
+        redirects: ["www.slchow.com"],
+      },
       dev: {
         command: "bun run dev",
         directory: "apps/web",

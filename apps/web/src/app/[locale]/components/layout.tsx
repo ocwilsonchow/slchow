@@ -1,11 +1,14 @@
+import { Locale } from "next-intl"
+import { setRequestLocale } from "next-intl/server"
 import type { PropsWithChildren } from "react"
 
-type LayoutProps = PropsWithChildren<{
-  params: Promise<{ locale: string }>
-}>
-
-export default async function Layout({ children, params }: LayoutProps) {
+export default async function Layout({
+  params,
+  children,
+}: PropsWithChildren<{ params: Promise<{ locale: Locale }> }>) {
   const { locale } = await params
 
-  return <div className="">{children}</div>
+  setRequestLocale(locale)
+
+  return <div>{children}</div>
 }

@@ -19,7 +19,7 @@ import { Button } from "@slchow/ds/components/ui/button"
 import { useTheme } from "@slchow/ds"
 import { routing } from "@/i18n/routing"
 import { useLocale, useTranslations } from "next-intl"
-import { CheckIcon } from "lucide-react"
+import { CheckIcon, ChevronDownIcon } from "lucide-react"
 
 export const NavbarRoot = (props: React.ComponentProps<"nav">) => {
   return (
@@ -35,6 +35,10 @@ export const NavbarRoot = (props: React.ComponentProps<"nav">) => {
       </nav>
     </div>
   )
+}
+
+export const NavbarSeparator = () => {
+  return <div className="h-4 w-px" />
 }
 
 export const NavbarGroup = (props: React.ComponentProps<"div">) => {
@@ -55,7 +59,7 @@ export const NavbarItem = (props: NavbarItemProps) => {
 
   const itemClassName = (isActive = false) =>
     cn(
-      "uppercase tracking-wide flex-1 flex items-center gap-2 px-3 py-1 rounded-md hover:bg-surface-hover hover:text-content-ink cursor-pointer",
+      "uppercase tracking-wide flex-1 flex items-center gap-2 px-3 py-1 rounded hover:bg-surface-hover hover:text-content-ink cursor-pointer",
       isActive &&
         "bg-brand-surface-active text-brand-content-primary hover:text-brand-content-primary",
       className
@@ -85,14 +89,23 @@ export const Navbar = () => {
   return (
     <NavbarRoot>
       <NavbarGroup>
+        <NavbarItem href="/">{t("home")}</NavbarItem>
+        <NavbarSeparator />
+        <NavbarItem href="/about">{t("about")}</NavbarItem>
+        <NavbarSeparator />
+        <NavbarItem href="/components">{t("components")}</NavbarItem>
+        <NavbarSeparator />
+        <NavbarItem href="/search">{t("search")}</NavbarItem>
+        <NavbarSeparator />
         <NavbarItem asChild>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
-                className="uppercase tracking-wide flex-1 justify-start"
+                className="uppercase tracking-wide flex-1 justify-start pr-1.5"
                 variant="ghost"
               >
                 {t("options")}
+                <ChevronDownIcon className="ml-auto" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent>
@@ -117,7 +130,9 @@ export const Navbar = () => {
                   </DropdownMenuSubContent>
                 </DropdownMenuSub>
                 <DropdownMenuSub>
-                  <DropdownMenuSubTrigger>{t("language")}</DropdownMenuSubTrigger>
+                  <DropdownMenuSubTrigger>
+                    {t("language")}
+                  </DropdownMenuSubTrigger>
                   <DropdownMenuSubContent>
                     <DropdownMenuGroup>
                       {routing.locales.map((loc) => (
@@ -140,10 +155,7 @@ export const Navbar = () => {
             </DropdownMenuContent>
           </DropdownMenu>
         </NavbarItem>
-        <NavbarItem href="/">{t("home")}</NavbarItem>
-        <NavbarItem href="/search">{t("search")}</NavbarItem>
-        <NavbarItem href="/about">{t("about")}</NavbarItem>
-        <NavbarItem href="/components">{t("components")}</NavbarItem>
+        <NavbarSeparator />
         <NavbarItem href="/contact">{t("contact")}</NavbarItem>
       </NavbarGroup>
     </NavbarRoot>
