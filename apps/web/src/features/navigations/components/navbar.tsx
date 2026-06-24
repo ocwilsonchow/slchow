@@ -142,7 +142,7 @@ export const NavbarMenuGroup = ({
   ...props
 }: HTMLMotionProps<"div">) => {
   return (
-    <motion.div className={cn("grid content-start py-5", className)} {...props}>
+    <motion.div className={cn("grid content-start pt-5", className)} {...props}>
       {children}
     </motion.div>
   )
@@ -194,7 +194,7 @@ export function Navbar() {
     <NavbarProvider>
       <NavbarRoot>
         <NavbarTrigger />
-        <NavbarContent className="grid lg:grid-cols-2">
+        <NavbarContent className="grid lg:grid-cols-2 pb-5">
           <NavbarMenuGroup>
             <NavbarMenuGroupLabel>Menu</NavbarMenuGroupLabel>
             <NavbarMenuGroupItem href="/">Home</NavbarMenuGroupItem>
@@ -204,8 +204,9 @@ export function Navbar() {
             </NavbarMenuGroupItem>
             <NavbarMenuGroupItem href="/contact">Contact</NavbarMenuGroupItem>
           </NavbarMenuGroup>
-
-          <div></div>
+          <NavbarMenuGroup>
+            <NavbarMenuGroupLabel>Preferences</NavbarMenuGroupLabel>
+          </NavbarMenuGroup>
         </NavbarContent>
       </NavbarRoot>
     </NavbarProvider>
