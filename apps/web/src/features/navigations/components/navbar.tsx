@@ -1,163 +1,213 @@
 "use client"
 
-import { Link, usePathname, useRouter } from "@/i18n/navigation"
-import { Slot } from "@slchow/ds/components/ui/slot"
-import { isActivePath } from "@slchow/ds/lib/is-active-path"
-import { cn } from "@slchow/ds/lib/utils"
+import { cn, isActivePath } from "@slchow/ds"
+import { Portal } from "@slchow/ds/components/ui/portal"
+import { type HTMLMotionProps, motion } from "motion/react"
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
-  DropdownMenuTrigger,
-} from "@slchow/ds/components/ui/dropdown-menu"
-import { Button } from "@slchow/ds/components/ui/button"
-import { useTheme } from "@slchow/ds"
-import { routing } from "@/i18n/routing"
-import { useLocale, useTranslations } from "next-intl"
-import { CheckIcon, ChevronDownIcon } from "lucide-react"
+  createContext,
+  type ReactNode,
+  useContext,
+  useEffect,
+  useState,
+} from "react"
+import { Link, usePathname } from "@/i18n/navigation"
 
-export const NavbarRoot = (props: React.ComponentProps<"nav">) => {
+type NavbarContextValue = {
+  open: boolean
+  setOpen: (open: boolean) => void
+}
+
+const NavbarContext = createContext<NavbarContextValue | null>(null)
+
+export function NavbarProvider({ children }: { children: ReactNode }) {
+  const [open, setOpen] = useState(false)
+
+  useEffect(() => {
+    if (!open) {
+      return
+    }
+
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = "hidden"
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpen(false)
+      }
+    }
+
+    document.addEventListener("keydown", onKeyDown)
+
+    return () => {
+      document.body.style.overflow = previousOverflow
+      document.removeEventListener("keydown", onKeyDown)
+    }
+  }, [open])
+
   return (
-    <div className="fixed top-0 left-0 right-0 p-3 pb-0">
-      <nav
-        className={cn(
-          "border rounded-md overflow-hidden bg-surface-card",
-          props.className
-        )}
-        {...props}
-      >
-        {props.children}
-      </nav>
-    </div>
+    <NavbarContext.Provider value={{ open, setOpen }}>
+      {children}
+    </NavbarContext.Provider>
   )
 }
 
-export const NavbarSeparator = () => {
-  return <div className="h-4 w-px" />
-}
+export function useNavbar() {
+  const context = useContext(NavbarContext)
 
-export const NavbarGroup = (props: React.ComponentProps<"div">) => {
-  return (
-    <div className={cn("flex items-center", props.className)} {...props}>
-      {props.children}
-    </div>
-  )
-}
-
-type NavbarItemProps =
-  | (React.ComponentProps<typeof Link> & { asChild?: false })
-  | (React.ComponentProps<typeof Slot> & { asChild: true })
-
-export const NavbarItem = (props: NavbarItemProps) => {
-  const pathname = usePathname()
-  const { className } = props
-
-  const itemClassName = (isActive = false) =>
-    cn(
-      "uppercase tracking-wide flex-1 flex items-center gap-2 px-3 py-1 rounded hover:bg-surface-hover hover:text-content-ink cursor-pointer",
-      isActive &&
-        "text-brand-content-primary hover:text-brand-content-primary",
-      className
-    )
-
-  if (props.asChild) {
-    const { asChild: _, className: __, ...slotProps } = props
-    return <Slot className={itemClassName()} {...slotProps} />
+  if (!context) {
+    throw new Error("useNavbar must be used within NavbarProvider")
   }
 
-  const { asChild: _, className: __, href, ...linkProps } = props
-  const hrefString = typeof href === "string" ? href : undefined
-  const isActive = hrefString ? isActivePath(pathname, hrefString) : false
-
-  return <Link className={itemClassName(isActive)} href={href} {...linkProps} />
+  return context
 }
 
-export const Navbar = () => {
-  const t = useTranslations("navigation")
-  const { theme, setTheme } = useTheme()
-  const router = useRouter()
-  const pathname = usePathname()
-  const locale = useLocale()
+export const NavbarRoot = ({
+  children,
+  className,
+  ...props
+}: React.ComponentProps<"nav">) => {
+  return (
+    <nav
+      className={cn(
+        "h-[50px] fixed top-0 left-0 right-0 z-50 bg-surface-canvas flex border-b max-w-screen-2xl mx-auto",
+        className
+      )}
+      {...props}
+    >
+      {children}
+    </nav>
+  )
+}
 
-  const themes = ["light", "dark", "system"] as const
+export const NavbarTrigger = ({
+  className,
+  onClick,
+  ...props
+}: React.ComponentProps<"button">) => {
+  const { open, setOpen } = useNavbar()
 
   return (
-    <NavbarRoot>
-      <NavbarGroup>
-        <NavbarItem href="/">{t("home")}</NavbarItem>
-        <NavbarSeparator />
-        <NavbarItem href="/about">{t("about")}</NavbarItem>
-        <NavbarSeparator />
-        <NavbarItem href="/components">{t("components")}</NavbarItem>
-        <NavbarSeparator />
-        <NavbarItem href="/search">{t("search")}</NavbarItem>
-        <NavbarSeparator />
-        <NavbarItem asChild>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                className="uppercase tracking-wide flex-1 justify-start pr-1.5"
-                variant="ghost"
-              >
-                {t("options")}
-                <ChevronDownIcon className="ml-auto" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent>
-              <DropdownMenuGroup className="uppercase">
-                <DropdownMenuLabel>{t("preferences")}</DropdownMenuLabel>
-                <DropdownMenuSub>
-                  <DropdownMenuSubTrigger>{t("theme")}</DropdownMenuSubTrigger>
-                  <DropdownMenuSubContent>
-                    <DropdownMenuGroup>
-                      {themes.map((value) => (
-                        <DropdownMenuItem
-                          key={value}
-                          onSelect={() => setTheme(value)}
-                        >
-                          {t(`themes.${value}`)}
-                          {theme === value && (
-                            <CheckIcon className="ml-auto size-3" />
-                          )}
-                        </DropdownMenuItem>
-                      ))}
-                    </DropdownMenuGroup>
-                  </DropdownMenuSubContent>
-                </DropdownMenuSub>
-                <DropdownMenuSub>
-                  <DropdownMenuSubTrigger>
-                    {t("language")}
-                  </DropdownMenuSubTrigger>
-                  <DropdownMenuSubContent>
-                    <DropdownMenuGroup>
-                      {routing.locales.map((loc) => (
-                        <DropdownMenuItem
-                          key={loc}
-                          onSelect={() =>
-                            router.replace(pathname, { locale: loc })
-                          }
-                        >
-                          {t(`locales.${loc}`)}
-                          {locale === loc && (
-                            <CheckIcon className="ml-auto size-3" />
-                          )}
-                        </DropdownMenuItem>
-                      ))}
-                    </DropdownMenuGroup>
-                  </DropdownMenuSubContent>
-                </DropdownMenuSub>
-              </DropdownMenuGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </NavbarItem>
-        <NavbarSeparator />
-        <NavbarItem href="/contact">{t("contact")}</NavbarItem>
-      </NavbarGroup>
-    </NavbarRoot>
+    <button
+      type="button"
+      aria-expanded={open}
+      className={cn(
+        "uppercase text-content-ink w-64 hover:text-brand-content-primary cursor-pointer px-5 flex justify-start items-center",
+        className
+      )}
+      onClick={(event) => {
+        onClick?.(event)
+        if (!event.defaultPrevented) {
+          setOpen(!open)
+        }
+      }}
+      {...props}
+    >
+      {open ? "Close" : "Menu"}
+    </button>
+  )
+}
+
+export const NavbarContent = ({
+  children,
+  className,
+  ...props
+}: HTMLMotionProps<"div">) => {
+  const { open } = useNavbar()
+
+  return (
+    <Portal className="fixed inset-y-0 inset-0 z-40 grid pt-[50px] overflow-hidden max-w-screen-2xl mx-auto">
+      <motion.div
+        className={cn(
+          "grid overflow-hidden bg-surface-canvas 2xl:border-x",
+          open && "border-b",
+          className
+        )}
+        variants={{
+          closed: { height: 0, opacity: 0 },
+          open: { height: "fit-content", opacity: 1 },
+        }}
+        initial="closed"
+        animate={open ? "open" : "closed"}
+        {...props}
+      >
+        {children}
+      </motion.div>
+    </Portal>
+  )
+}
+
+export const NavbarMenuGroup = ({
+  children,
+  className,
+  ...props
+}: HTMLMotionProps<"div">) => {
+  return (
+    <motion.div className={cn("grid content-start py-5", className)} {...props}>
+      {children}
+    </motion.div>
+  )
+}
+
+export const NavbarMenuGroupLabel = ({
+  className,
+  ...props
+}: React.ComponentProps<"div">) => {
+  return (
+    <div
+      className={cn(
+        "uppercase text-content-muted text-xs tracking-wide px-5 pb-1.5",
+        className
+      )}
+      {...props}
+    />
+  )
+}
+
+export const NavbarMenuGroupItem = ({
+  children,
+  className,
+  href,
+  ...props
+}: React.ComponentProps<typeof Link>) => {
+  const { setOpen } = useNavbar()
+  const pathname = usePathname()
+  const isActive =
+    typeof href === "string" ? isActivePath(pathname, href) : false
+  return (
+    <Link
+      href={href}
+      onClick={() => setOpen(false)}
+      {...props}
+      className={cn(
+        "px-5 py-1.5 uppercase text-content-ink hover:text-brand-content-primary text-base",
+        isActive && "text-brand-content-primary",
+        className
+      )}
+    >
+      {children}
+    </Link>
+  )
+}
+
+export function Navbar() {
+  return (
+    <NavbarProvider>
+      <NavbarRoot>
+        <NavbarTrigger />
+        <NavbarContent className="grid lg:grid-cols-2">
+          <NavbarMenuGroup>
+            <NavbarMenuGroupLabel>Menu</NavbarMenuGroupLabel>
+            <NavbarMenuGroupItem href="/">Home</NavbarMenuGroupItem>
+            <NavbarMenuGroupItem href="/about">About</NavbarMenuGroupItem>
+            <NavbarMenuGroupItem href="/components">
+              Components
+            </NavbarMenuGroupItem>
+            <NavbarMenuGroupItem href="/contact">Contact</NavbarMenuGroupItem>
+          </NavbarMenuGroup>
+
+          <div></div>
+        </NavbarContent>
+      </NavbarRoot>
+    </NavbarProvider>
   )
 }

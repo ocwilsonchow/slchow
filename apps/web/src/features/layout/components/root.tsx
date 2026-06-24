@@ -1,12 +1,11 @@
-import { Navbar } from "@/features/navigations/components/navbar"
 import { cn } from "@slchow/ds"
-import React from "react"
+import { Navbar } from "@/features/navigations/components/navbar"
 
 const RootLayout = (props: React.ComponentProps<"div">) => {
   return (
-    <div className={cn("flex items-start", props.className)} {...props}>
+    <div className={cn("px-10", props.className)} {...props}>
       <Navbar />
-      <div className="flex-1 shrink-0">{props.children}</div>
+      {props.children}
     </div>
   )
 }

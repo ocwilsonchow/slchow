@@ -1,4 +1,4 @@
-import { Locale } from "next-intl"
+import type { Locale } from "next-intl"
 import { setRequestLocale } from "next-intl/server"
 
 const Page = async ({ params }: { params: Promise<{ locale: Locale }> }) => {
@@ -6,11 +6,7 @@ const Page = async ({ params }: { params: Promise<{ locale: Locale }> }) => {
 
   setRequestLocale(locale)
 
-  return (
-    <div className="">
-      <div></div>
-    </div>
-  )
+  return <div className="h-[400vh] pt-[50px] max-w-screen-2xl mx-auto"></div>
 }
 
 export default Page
