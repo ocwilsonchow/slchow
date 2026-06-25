@@ -13,6 +13,7 @@
     "@slchow/ds": "workspace:*",
     "@slchow/intl": "workspace:*",
     "@tanstack/react-query": "^5.101.1",
+    "lenis": "^1.3.24",
     "lucide-react": "^1.21.0",
     "motion": "^12.41.0",
     "next": "16.2.9",

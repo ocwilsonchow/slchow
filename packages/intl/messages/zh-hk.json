@@ -5,8 +5,11 @@
     "theme": "主題",
     "language": "語言",
     "home": "首頁",
+    "menu": "選單",
+    "close": "關閉",
     "search": "搜尋",
     "about": "關於",
+    "services": "服務",
     "components": "組件",
     "contact": "聯絡",
     "themes": {
@@ -18,6 +21,11 @@
       "en": "English",
       "zh-cn": "简体中文",
       "zh-hk": "繁體中文"
+    },
+    "localeShort": {
+      "en": "EN",
+      "zh-cn": "簡",
+      "zh-hk": "繁"
     }
   }
 }

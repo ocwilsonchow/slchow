@@ -6,7 +6,7 @@ const Page = async ({ params }: { params: Promise<{ locale: Locale }> }) => {
 
   setRequestLocale(locale)
 
-  return <div className="h-[400vh] pt-[50px] max-w-screen-2xl mx-auto"></div>
+  return <div className="max-w-screen-2xl mx-auto"></div>
 }
 
 export default Page

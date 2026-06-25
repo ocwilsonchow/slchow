@@ -1,130 +1,211 @@
-"use client"
+"use client";
 
-import { cn, isActivePath } from "@slchow/ds"
-import { Portal } from "@slchow/ds/components/ui/portal"
-import { type HTMLMotionProps, motion } from "motion/react"
+import { cn, isActivePath } from "@slchow/ds";
+import { Portal } from "@slchow/ds/components/ui/portal";
+import { useLenis } from "lenis/react";
+import { PlusIcon } from "lucide-react";
+import { type HTMLMotionProps, motion } from "motion/react";
+import { useTranslations } from "next-intl";
 import {
   createContext,
   type ReactNode,
   useContext,
   useEffect,
+  useRef,
   useState,
-} from "react"
-import { Link, usePathname } from "@/i18n/navigation"
+} from "react";
+import { LocaleSelect } from "@/features/navigations/components/locale-select";
+import { Link, usePathname } from "@/i18n/navigation";
 
 type NavbarContextValue = {
-  open: boolean
-  setOpen: (open: boolean) => void
-}
+  open: boolean;
+  setOpen: (open: boolean) => void;
+  menuRef: React.RefObject<HTMLDivElement | null>;
+};
 
-const NavbarContext = createContext<NavbarContextValue | null>(null)
+const NavbarContext = createContext<NavbarContextValue | null>(null);
 
 export function NavbarProvider({ children }: { children: ReactNode }) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const lenis = useLenis();
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target;
+
+      if (
+        target instanceof HTMLElement &&
+        target.closest("input, textarea, select, [contenteditable=true]")
+      ) {
+        return;
+      }
+
+      if (event.key === "Escape") {
+        setOpen(false);
+        return;
+      }
+
+      if (event.key.toLowerCase() === "k" && (event.metaKey || event.ctrlKey)) {
+        event.preventDefault();
+        setOpen((previous) => !previous);
+        return;
+      }
+
+      if (!open || (event.key !== "ArrowDown" && event.key !== "ArrowUp")) {
+        return;
+      }
+
+      const items = Array.from(
+        menuRef.current?.querySelectorAll<HTMLElement>("[data-navbar-item]") ??
+          [],
+      );
+
+      if (!items.length) {
+        return;
+      }
+
+      event.preventDefault();
+
+      const currentIndex = items.indexOf(document.activeElement as HTMLElement);
+      const nextIndex =
+        event.key === "ArrowDown"
+          ? currentIndex === -1 || currentIndex === items.length - 1
+            ? 0
+            : currentIndex + 1
+          : currentIndex <= 0
+            ? items.length - 1
+            : currentIndex - 1;
+
+      items[nextIndex]?.focus();
+    };
+
+    document.addEventListener("keydown", onKeyDown);
+
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
 
   useEffect(() => {
     if (!open) {
-      return
+      return;
     }
 
-    const previousOverflow = document.body.style.overflow
-    document.body.style.overflow = "hidden"
+    requestAnimationFrame(() => {
+      menuRef.current
+        ?.querySelector<HTMLElement>("[data-navbar-item]")
+        ?.focus();
+    });
+  }, [open]);
 
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setOpen(false)
-      }
+  useEffect(() => {
+    if (!open) {
+      return;
     }
 
-    document.addEventListener("keydown", onKeyDown)
+    lenis?.stop();
 
     return () => {
-      document.body.style.overflow = previousOverflow
-      document.removeEventListener("keydown", onKeyDown)
-    }
-  }, [open])
+      lenis?.start();
+    };
+  }, [open, lenis]);
 
   return (
-    <NavbarContext.Provider value={{ open, setOpen }}>
+    <NavbarContext.Provider value={{ open, setOpen, menuRef }}>
       {children}
     </NavbarContext.Provider>
-  )
+  );
 }
 
 export function useNavbar() {
-  const context = useContext(NavbarContext)
+  const context = useContext(NavbarContext);
 
   if (!context) {
-    throw new Error("useNavbar must be used within NavbarProvider")
+    throw new Error("useNavbar must be used within NavbarProvider");
   }
 
-  return context
+  return context;
 }
 
 export const NavbarRoot = ({
   children,
   className,
   ...props
-}: React.ComponentProps<"nav">) => {
+}: HTMLMotionProps<"nav">) => {
   return (
-    <nav
+    <motion.nav
       className={cn(
-        "h-[50px] fixed top-0 left-0 right-0 z-50 bg-surface-canvas flex border-b max-w-screen-2xl mx-auto",
-        className
+        "h-[64px] fixed top-0 left-0 right-0 z-50 bg-surface-canvas flex items-center justify-between px-3 lg:px-10 max-w-screen-2xl mx-auto",
+        className,
       )}
       {...props}
     >
-      {children}
-    </nav>
-  )
-}
+      <motion.div className="flex items-center">{children}</motion.div>
+      <div className="flex items-center gap-2">
+        <LocaleSelect />
+      </div>
+    </motion.nav>
+  );
+};
 
 export const NavbarTrigger = ({
   className,
   onClick,
   ...props
 }: React.ComponentProps<"button">) => {
-  const { open, setOpen } = useNavbar()
+  const { open, setOpen } = useNavbar();
+  const t = useTranslations("navigation");
 
   return (
     <button
       type="button"
       aria-expanded={open}
       className={cn(
-        "uppercase text-content-ink w-64 hover:text-brand-content-primary cursor-pointer px-5 flex justify-start items-center",
-        className
+        "uppercase py-1 px-3 pr-1.5 hover:bg-surface-hover text-content-ink w-36 hover:text-brand-content-primary cursor-pointer flex justify-start items-center outline-none",
+        className,
+        open && "bg-brand-surface-alpha text-brand-content-primary",
       )}
       onClick={(event) => {
-        onClick?.(event)
+        onClick?.(event);
         if (!event.defaultPrevented) {
-          setOpen(!open)
+          setOpen(!open);
         }
       }}
       {...props}
     >
-      {open ? "Close" : "Menu"}
+      {open ? t("close") : t("menu")}
+      <PlusIcon
+        size={15}
+        strokeWidth={1.25}
+        className={cn(
+          "ml-auto transition-transform duration-300",
+          open ? "rotate-135" : "rotate-0",
+        )}
+      />
     </button>
-  )
-}
+  );
+};
 
 export const NavbarContent = ({
   children,
   className,
   ...props
 }: HTMLMotionProps<"div">) => {
-  const { open } = useNavbar()
+  const { open, menuRef } = useNavbar();
 
   return (
-    <Portal className="fixed inset-y-0 inset-0 z-40 grid pt-[50px] overflow-hidden max-w-screen-2xl mx-auto">
+    <Portal className="fixed inset-[64px] left-0 right-0 z-40 px-3 lg:px-10 grid overflow-hidden max-w-screen-2xl mx-auto">
       <motion.div
+        ref={menuRef}
         className={cn(
-          "grid overflow-hidden bg-surface-canvas 2xl:border-x",
-          open && "border-b",
-          className
+          "grid overflow-hidden bg-surface-popover",
+
+          className,
         )}
         variants={{
-          closed: { height: 0, opacity: 0 },
-          open: { height: "fit-content", opacity: 1 },
+          closed: { height: 0, opacity: 1 },
+          open: { height: "100%", opacity: 1 },
         }}
         initial="closed"
         animate={open ? "open" : "closed"}
@@ -133,8 +214,8 @@ export const NavbarContent = ({
         {children}
       </motion.div>
     </Portal>
-  )
-}
+  );
+};
 
 export const NavbarMenuGroup = ({
   children,
@@ -142,11 +223,14 @@ export const NavbarMenuGroup = ({
   ...props
 }: HTMLMotionProps<"div">) => {
   return (
-    <motion.div className={cn("grid content-start pt-5", className)} {...props}>
+    <motion.div
+      className={cn("grid content-start px-0 pt-3 gap-px", className)}
+      {...props}
+    >
       {children}
     </motion.div>
-  )
-}
+  );
+};
 
 export const NavbarMenuGroupLabel = ({
   className,
@@ -155,13 +239,13 @@ export const NavbarMenuGroupLabel = ({
   return (
     <div
       className={cn(
-        "uppercase text-content-muted text-xs tracking-wide px-5 pb-1.5",
-        className
+        "uppercase opacity-75 text-xs pb-1 px-3 border border-transparent",
+        className,
       )}
       {...props}
     />
-  )
-}
+  );
+};
 
 export const NavbarMenuGroupItem = ({
   children,
@@ -169,46 +253,56 @@ export const NavbarMenuGroupItem = ({
   href,
   ...props
 }: React.ComponentProps<typeof Link>) => {
-  const { setOpen } = useNavbar()
-  const pathname = usePathname()
+  const { setOpen } = useNavbar();
+  const pathname = usePathname();
   const isActive =
-    typeof href === "string" ? isActivePath(pathname, href) : false
+    typeof href === "string" ? isActivePath(pathname, href) : false;
   return (
     <Link
+      data-navbar-item
       href={href}
       onClick={() => setOpen(false)}
       {...props}
       className={cn(
-        "px-5 py-1.5 uppercase text-content-ink hover:text-brand-content-primary text-base",
-        isActive && "text-brand-content-primary",
-        className
+        "hover:border-stroke-default text-base tracking-tight border border-transparent px-3 py-0.5 hover:bg-surface-hover uppercase text-content-ink hover:text-brand-content-primary focus-visible:outline-none focus-visible:bg-surface-hover focus-visible:text-brand-content-primary",
+        isActive &&
+          "border-stroke-default bg-brand-surface-alpha text-brand-content-primary hover:text-brand-content-primary",
+        className,
       )}
     >
       {children}
     </Link>
-  )
-}
+  );
+};
 
 export function Navbar() {
+  const t = useTranslations("navigation");
+
   return (
     <NavbarProvider>
       <NavbarRoot>
         <NavbarTrigger />
-        <NavbarContent className="grid lg:grid-cols-2 pb-5">
-          <NavbarMenuGroup>
-            <NavbarMenuGroupLabel>Menu</NavbarMenuGroupLabel>
-            <NavbarMenuGroupItem href="/">Home</NavbarMenuGroupItem>
-            <NavbarMenuGroupItem href="/about">About</NavbarMenuGroupItem>
-            <NavbarMenuGroupItem href="/components">
-              Components
-            </NavbarMenuGroupItem>
-            <NavbarMenuGroupItem href="/contact">Contact</NavbarMenuGroupItem>
-          </NavbarMenuGroup>
-          <NavbarMenuGroup>
-            <NavbarMenuGroupLabel>Preferences</NavbarMenuGroupLabel>
-          </NavbarMenuGroup>
+        <NavbarContent className="grid ">
+          <div className="grid lg:grid-cols-2">
+            <NavbarMenuGroup>
+              <NavbarMenuGroupLabel>{t("menu")}</NavbarMenuGroupLabel>
+              <NavbarMenuGroupItem href="/">{t("home")}</NavbarMenuGroupItem>
+              <NavbarMenuGroupItem href="/about">
+                {t("about")}
+              </NavbarMenuGroupItem>
+              <NavbarMenuGroupItem href="/components">
+                {t("components")}
+              </NavbarMenuGroupItem>
+              <NavbarMenuGroupItem href="/contact">
+                {t("contact")}
+              </NavbarMenuGroupItem>
+            </NavbarMenuGroup>
+            <NavbarMenuGroup>
+              <NavbarMenuGroupLabel>{t("preferences")}</NavbarMenuGroupLabel>
+            </NavbarMenuGroup>
+          </div>
         </NavbarContent>
       </NavbarRoot>
     </NavbarProvider>
-  )
+  );
 }

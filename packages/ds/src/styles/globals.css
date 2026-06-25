@@ -49,23 +49,23 @@
   --brand-stroke-default: #f5c0c0;
 
   /* Surface */
-  --surface-canvas: #1a1a23;
-  --surface-card: #1f1f29;
-  --surface-card-hover: #292937;
-  --surface-popover: #20202c;
-  --surface-hover: #e4e6ec10;
-  --surface-alpha: #e4e6ec10;
+  --surface-canvas: #101010;
+  --surface-card: #141414;
+  --surface-card-hover: #ffffff10;
+  --surface-popover: #1A1A1A;
+  --surface-hover: #ffffff10;
+  --surface-alpha: #ffffff10;
 
   /* Stroke */
-  --stroke-default: #353548;
-  --stroke-strong: #45455e;
+  --stroke-default: #f5c0c020;
+  --stroke-strong: #F2F2F2;
 
   /* Text */
-  --content-ink: #e4e6ec;
-  --content-body: #b1b6c4;
+  --content-ink: #F2F2F2;
+  --content-body: #E6E6E6;
   --content-link: #84a6e8;
-  --content-subdued: #6c758e;
-  --content-muted: #51586b;
+  --content-subdued: #B3B3B3;
+  --content-muted: #666666;
 }
 
 @theme inline {
@@ -108,13 +108,19 @@
     @apply border-stroke-default divide-stroke-default outline-brand-surface-primary/75;
   }
 
-  a {
+  a,
+  button {
     @apply active:opacity-80;
+  }
+
+  button {
+    @apply cursor-pointer;
   }
 
   html,
   body {
     overscroll-behavior: none;
+    scrollbar-gutter: stable;
   }
 
   body {

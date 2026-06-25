@@ -1,7 +1,9 @@
 import { cn, DesignSystemProvider } from "@slchow/ds"
-import { FontAero, FontMono, FontSans } from "@slchow/ds/lib/fonts"
+import { FontMono, FontSans } from "@slchow/ds/lib/fonts"
 import { getLocale } from "next-intl/server"
+import "lenis/dist/lenis.css"
 
+import { Lenis } from "lenis/react"
 import { Providers } from "./providers"
 import "./styles.css"
 
@@ -25,7 +27,9 @@ export default async function RootLayout({
         )}
       >
         <DesignSystemProvider>
-          <Providers>{children}</Providers>
+          <Lenis root>
+            <Providers>{children}</Providers>
+          </Lenis>
         </DesignSystemProvider>
       </body>
     </html>
