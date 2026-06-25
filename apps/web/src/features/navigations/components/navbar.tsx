@@ -262,7 +262,7 @@ export const NavbarMenuGroupItem = ({
       onClick={() => setOpen(false)}
       {...props}
       className={cn(
-        "hover:border-stroke-default border border-transparent px-3 py-1 focus:border-stroke-default hover:bg-surface-hover uppercase text-content-ink hover:text-brand-content-primary focus-visible:outline-none focus-visible:bg-surface-hover focus-visible:text-brand-content-primary",
+        "hover:border-stroke-default border border-transparent px-3 py-1 focus:bg-surface-hover hover:bg-surface-hover uppercase text-content-ink hover:text-brand-content-primary focus-visible:outline-none focus-visible:bg-surface-hover focus-visible:text-brand-content-primary",
         isActive &&
           "border-stroke-default bg-brand-surface-alpha text-brand-content-primary hover:text-brand-content-primary",
         className
