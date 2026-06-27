@@ -20,10 +20,9 @@ export default async function RootLayout({
         className={cn(
           "antialiased",
           FontSans.className,
-          FontMono.className,
-          FontSans.variable
-          // FontAero.variable,
-          // FontAero.className
+          FontMono.className
+          // FontSans.variable,
+          // FontMono.variable
         )}
       >
         <DesignSystemProvider>

@@ -1,0 +1,18 @@
+{
+  "name": "@slchow/content",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "lint": "biome check ."
+  },
+  "dependencies": {
+    "@slchow/ds": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "react": "^19",
+    "typescript": "^5"
+  }
+}

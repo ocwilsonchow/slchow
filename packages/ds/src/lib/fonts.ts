@@ -2,6 +2,7 @@ import {
   IBM_Plex_Mono as IBMPlexMonoFont,
   IBM_Plex_Sans as IBMPlexSansFont,
   IBM_Plex_Serif as IBMPlexSerifFont,
+  // Sofia_Sans,
 } from "next/font/google"
 import localFont from "next/font/local"
 
@@ -12,6 +13,14 @@ export const FontSans = IBMPlexSansFont({
   display: "swap",
   fallback: ["system-ui", "sans-serif"],
 })
+
+// export const FontSans = Sofia_Sans({
+//   subsets: ["latin"],
+//   weight: ["100", "200", "300", "400", "500", "600", "700"],
+//   variable: "--font-sans",
+//   display: "swap",
+//   fallback: ["system-ui", "sans-serif"],
+// })
 
 export const FontMono = IBMPlexMonoFont({
   subsets: ["latin"],

@@ -3,9 +3,11 @@ import { Navbar } from "@/features/navigations/components/navbar"
 
 const RootLayout = (props: React.ComponentProps<"div">) => {
   return (
-    <div className={cn("px-10", props.className)} {...props}>
+    <div className={cn("", props.className)} {...props}>
       <Navbar />
-      {props.children}
+      <div className="pt-[64px] max-w-screen-2xl mx-auto px-3 lg:px-10">
+        {props.children}
+      </div>
     </div>
   )
 }

@@ -193,7 +193,14 @@ export const NavbarContent = ({
   const { open, menuRef } = useNavbar()
 
   return (
-    <Portal className="fixed inset-[64px] left-0 right-0 z-40 px-3 lg:px-10 grid overflow-hidden max-w-screen-2xl mx-auto">
+    <Portal
+      aria-hidden={!open}
+      inert={!open}
+      className={cn(
+        "fixed inset-[64px] left-0 right-0 z-40 px-3 lg:px-10 grid overflow-hidden max-w-screen-2xl mx-auto",
+        open ? "pointer-events-auto" : "pointer-events-none"
+      )}
+    >
       <motion.div
         ref={menuRef}
         className={cn(
@@ -262,7 +269,7 @@ export const NavbarMenuGroupItem = ({
       onClick={() => setOpen(false)}
       {...props}
       className={cn(
-        "hover:border-stroke-default border border-transparent px-3 py-1 focus:bg-surface-hover hover:bg-surface-hover uppercase text-content-ink hover:text-brand-content-primary focus-visible:outline-none focus-visible:bg-surface-hover focus-visible:text-brand-content-primary",
+        "hover:border-stroke-default border border-transparent px-3 py-1 hover:bg-surface-hover uppercase text-content-ink hover:text-brand-content-primary focus-visible:outline-none focus-visible:bg-surface-hover focus-visible:text-brand-content-primary",
         isActive &&
           "border-stroke-default bg-brand-surface-alpha text-brand-content-primary hover:text-brand-content-primary",
         className

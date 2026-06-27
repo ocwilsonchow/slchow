@@ -124,7 +124,7 @@
   }
 
   body {
-    @apply bg-surface-canvas text-content-body text-sm font-medium;
+    @apply bg-surface-canvas text-content-body text-sm ;
     font-family: var(--font-sans);
   }
 }

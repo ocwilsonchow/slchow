@@ -1,12 +1,12 @@
 import type { Locale } from "next-intl"
 import { setRequestLocale } from "next-intl/server"
 
-const Page = async ({ params }: { params: Promise<{ locale: string }> }) => {
+const Page = async ({ params }: { params: Promise<{ locale: Locale }> }) => {
   const { locale } = await params
 
-  setRequestLocale(locale as Locale)
+  setRequestLocale(locale)
 
-  return <div></div>
+  return <div className="grid gap-2"></div>
 }
 
 export default Page
