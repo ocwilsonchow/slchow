@@ -3,14 +3,15 @@
   "private": true,
   "scripts": {
     "build": "turbo run build",
-    "lint": "turbo run lint",
-    "format": "prettier --write \"**/*.{ts,tsx,md}\"",
     "check-types": "turbo run check-types",
-    "sso": "aws sso login --sso-session=sinlongchow",
+    "deploy": "bunx sst deploy --stage production",
     "dev": "bunx sst dev --stage local",
-    "deploy": "bunx sst deploy --stage production"
+    "format": "prettier --write \"**/*.{ts,tsx,md}\"",
+    "lint": "turbo run lint",
+    "sso": "aws sso login --sso-session=sinlongchow"
   },
   "devDependencies": {
+    "@types/aws-lambda": "8.10.162",
     "prettier": "^3.7.4",
     "turbo": "^2.10.5",
     "typescript": "5.9.2"
@@ -27,5 +28,8 @@
   "workspaces": [
     "apps/*",
     "packages/*"
-  ]
+  ],
+  "dependencies": {
+    "sst": "4.17.1"
+  }
 }
