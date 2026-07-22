@@ -1,0 +1,10 @@
+{
+  "name": "@repo/content",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "MDX content for the web app, consumed via Fumadocs MDX",
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
+}

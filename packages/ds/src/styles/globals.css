@@ -1,0 +1,86 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@source "../components";
+@source "../lib";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  /* Surface */
+  --surface-canvas: #ffffff;
+  --surface-inverse: #0B0B0B;
+
+  /* Stroke */
+  --stroke-default: #0B0B0B10;
+  --stroke-strong: #0B0B0B;
+
+  /* Text */
+  --content-ink: #0B0B0B;
+  --content-article: #0B0B0B90;
+  --content-ink-on-inverse: #f2f2f2;
+  --content-subdued: #0B0B0B70;
+  --content-muted: #0B0B0B35;
+}
+
+.dark {
+  /* Surface */
+  --surface-canvas: #0B0B0B;
+  --surface-inverse: #f2f2f2;
+
+  /* Stroke */
+  --stroke-default: #f2f2f225;
+  --stroke-strong: #f2f2f2;
+
+  /* Text */
+  --content-ink: #f2f2f2;
+  --content-article: #f2f2f290;
+  --content-ink-on-inverse: #0B0B0B;
+  --content-subdued: #f2f2f270;
+  --content-muted: #f2f2f235;
+}
+
+@theme inline {
+  /* Surface */
+  --color-surface-canvas: var(--surface-canvas);
+  --color-surface-inverse: var(--surface-inverse);
+
+  /* Stroke */
+  --color-stroke-default: var(--stroke-default);
+  --color-stroke-strong: var(--stroke-strong);
+
+  /* Text */
+  --color-content-ink: var(--content-ink);
+  --color-content-article: var(--content-article);
+  --color-content-ink-on-inverse: var(--content-ink-on-inverse);
+  --color-content-subdued: var(--content-subdued);
+  --color-content-muted: var(--content-muted);
+
+  /* Layout */
+  --breakpoint-3xl: 120rem;
+  --breakpoint-4xl: 160rem;
+}
+
+@layer base {
+  * {
+    @apply border-stroke-default divide-stroke-default;
+  }
+
+  *::-webkit-scrollbar {
+    display: none;
+  }
+
+  button {
+    @apply cursor-pointer;
+  }
+
+  html,
+  body {
+    overscroll-behavior: none;
+    scrollbar-gutter: stable;
+  }
+
+  body {
+    @apply bg-surface-canvas text-content-ink text-sm;
+  }
+}
