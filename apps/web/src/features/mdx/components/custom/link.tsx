@@ -1,0 +1,36 @@
+import { cn } from "@repo/ds"
+import type { ComponentProps } from "react"
+import { Link } from "@/i18n/navigation"
+import { ArrowUpRight } from "lucide-react"
+
+export function MDXLink({ href, className, ...props }: ComponentProps<"a">) {
+  const classes = cn(
+    "inline-flex text-emerald-500 hover:underline",
+    className
+  )
+
+  if (!href) return <a className={classes} {...props} />
+
+  const isExternal =
+    href.startsWith("http://") ||
+    href.startsWith("https://") ||
+    href.startsWith("mailto:") ||
+    href.startsWith("#")
+
+  if (isExternal) {
+    return (
+      <a
+        {...props}
+        className={cn(classes, "")}
+        href={href}
+        rel={href.startsWith("http") ? "noopener noreferrer" : undefined}
+        target={href.startsWith("http") ? "_blank" : undefined}
+      >
+        {props.children}
+        <ArrowUpRight size={12} color="currentColor" />
+      </a>
+    )
+  }
+
+  return <Link href={href} {...props} className={cn(classes)} />
+}

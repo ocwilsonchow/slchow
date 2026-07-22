@@ -24,10 +24,7 @@ const Root = (props: HTMLMotionProps<"nav">) => {
 
 const Header = (props: HTMLMotionProps<"div">) => {
   return (
-    <motion.div
-      {...props}
-      className={cn("h-14 flex items-center px-3")}
-    ></motion.div>
+    <motion.div {...props} className={cn("flex items-center p-4")}></motion.div>
   )
 }
 
@@ -39,23 +36,7 @@ const Trigger = (props: HTMLMotionProps<"button">) => {
       className={cn("p-2")}
       onClick={() => setIsOpen(!isOpen)}
       {...props}
-    >
-      <motion.div
-        variants={{
-          closed: {
-            rotate: 0,
-          },
-          open: {
-            rotate: 135,
-          },
-        }}
-        initial="closed"
-        animate={isOpen ? "open" : "closed"}
-        transition={{ type: "spring", stiffness: 400, damping: 40 }}
-      >
-        <PlusIcon size={18} />
-      </motion.div>
-    </motion.button>
+    ></motion.button>
   )
 }
 
@@ -78,7 +59,7 @@ export const RenderNavbar = () => {
   return (
     <Navbar.Root>
       <Navbar.Header>
-        <Navbar.Trigger />
+        <div></div>
       </Navbar.Header>
       <Navbar.Content></Navbar.Content>
     </Navbar.Root>

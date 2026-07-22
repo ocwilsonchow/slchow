@@ -1,14 +1,23 @@
-import { loader, type InferPageType } from "fumadocs-core/source"
-import type { Folder, Item, Node } from "fumadocs-core/page-tree"
-import { toFumadocsSource } from "fumadocs-mdx/runtime/server"
 import { docs } from "collections/server"
+import type { Folder, Item, Node } from "fumadocs-core/page-tree"
+import { type InferPageType, loader, type PageData } from "fumadocs-core/source"
+import { toFumadocsSource } from "fumadocs-mdx/runtime/server"
+import type { DocData, DocMethods } from "fumadocs-mdx/runtime/types"
 import { fumadocsI18n } from "@/lib/fumadocs-i18n"
 
 const WRITINGS_CATEGORY = "writings"
 
+/** Generated `.source/server` is `@ts-nocheck`, so assert the doc entry shape for loader inference. */
+type DocsEntry = DocData &
+  DocMethods &
+  PageData & {
+    author?: string
+    date?: string | Date
+  }
+
 export const content = loader({
   baseUrl: "/",
-  source: toFumadocsSource(docs, []),
+  source: toFumadocsSource(docs as DocsEntry[], []),
   i18n: fumadocsI18n,
 })
 
@@ -102,6 +111,6 @@ export function getWritingsStaticParams() {
     }))
 }
 
-export function getMdxBySlug(category: string, slug: string, locale: string) {
+export function getMdxContent(category: string, slug: string, locale: string) {
   return content.getPage([category, slug], locale)
 }

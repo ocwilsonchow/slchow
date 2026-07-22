@@ -8,18 +8,21 @@
 
 :root {
   --surface-canvas: #faf8f6;
+  --surface-alpha: #3f3d3910;
   --content-ink: #3f3d39;
   --stroke-soft: #3f3d3910;
 }
 
 .dark {
-  --surface-canvas: #0F0F10;
+  --surface-canvas: #0f0f10;
+  --surface-alpha: #fafafa10;
   --content-ink: #fafafa;
   --stroke-soft: #fafafa10;
 }
 
 @theme inline {
   --color-surface-canvas: var(--surface-canvas);
+  --color-surface-alpha: var(--surface-alpha);
   --color-content-ink: var(--content-ink);
   --color-stroke-soft: var(--stroke-soft);
 }
@@ -34,7 +37,7 @@
   }
 
   button {
-    @apply cursor-pointer;
+    @apply cursor-pointer disabled:pointer-events-none disabled:opacity-50;
   }
 
   html,
@@ -42,4 +45,5 @@
     overscroll-behavior: none;
     scrollbar-gutter: stable;
   }
+
 }
