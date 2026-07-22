@@ -8,22 +8,34 @@
 
 :root {
   --surface-canvas: #faf8f6;
+  --surface-canvas-inverse: #0f0f10;
   --surface-alpha: #3f3d3910;
   --content-ink: #3f3d39;
+  --content-body: #3f3d3980;
+  --content-subdued: #3f3d3940;
+  --content-ink-inverse: #fafafa;
   --stroke-soft: #3f3d3910;
 }
 
 .dark {
   --surface-canvas: #0f0f10;
+  --surface-canvas-inverse: #faf8f6;
   --surface-alpha: #fafafa10;
   --content-ink: #fafafa;
+  --content-ink-inverse: #3f3d39;
+  --content-body: #fafafa80;
+  --content-subdued: #fafafa40;
   --stroke-soft: #fafafa10;
 }
 
 @theme inline {
   --color-surface-canvas: var(--surface-canvas);
+  --color-surface-canvas-inverse: var(--surface-canvas-inverse);
   --color-surface-alpha: var(--surface-alpha);
   --color-content-ink: var(--content-ink);
+  --color-content-body: var(--content-body);
+  --color-content-subdued: var(--content-subdued);
+  --color-content-ink-inverse: var(--content-ink-inverse);
   --color-stroke-soft: var(--stroke-soft);
 }
 
@@ -36,14 +48,16 @@
     display: none;
   }
 
-  button {
-    @apply cursor-pointer disabled:pointer-events-none disabled:opacity-50;
+  button,
+  a {
+    @apply cursor-pointer disabled:pointer-events-none disabled:opacity-50 uppercase;
   }
 
   html,
   body {
     overscroll-behavior: none;
     scrollbar-gutter: stable;
-  }
 
+    @apply uppercase;
+  }
 }

@@ -3,9 +3,9 @@ import {
   FontAero,
   FontGeist,
   FontInter,
-  FontMono,
   FontSans,
   FontSerif,
+  FontMono,
 } from "@repo/ds/lib/fonts"
 
 const presets = {
@@ -13,11 +13,6 @@ const presets = {
     FontSans.variable,
     FontSans.className,
     "font-normal text-sm leading-relaxed"
-  ),
-  mono: cn(
-    FontMono.variable,
-    FontMono.className,
-    "font-medium text-sm leading-relaxed uppercase"
   ),
   aero: cn(
     FontAero.variable,
@@ -39,13 +34,18 @@ const presets = {
     FontSerif.className,
     "font-normal leading-relaxed"
   ),
+  mono: cn(
+    FontMono.variable,
+    FontMono.className,
+    "font-medium text-sm leading-relaxed"
+  ),
 }
 
 export const StylesProvider = (props: React.ComponentProps<"div">) => {
   return (
     <div
       {...props}
-      className={cn("antialiased bg-surface-canvas", presets.serif)}
+      className={cn("antialiased bg-surface-canvas", presets.mono)}
     />
   )
 }

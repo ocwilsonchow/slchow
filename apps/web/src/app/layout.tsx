@@ -6,7 +6,6 @@ import { TanstackProviders } from "@/lib/tanstack-providers"
 
 import "./styles.css"
 import { StylesProvider } from "@/features/layout/components/styles"
-import { RenderNavbar } from "@/features/layout/components/navbar"
 
 export default async function RootLayout({
   children,
@@ -21,10 +20,7 @@ export default async function RootLayout({
         <DesignSystemProvider>
           <StylesProvider>
             <Lenis root>
-              <TanstackProviders>
-                <RenderNavbar />
-                {children}
-              </TanstackProviders>
+              <TanstackProviders>{children}</TanstackProviders>
             </Lenis>
           </StylesProvider>
         </DesignSystemProvider>

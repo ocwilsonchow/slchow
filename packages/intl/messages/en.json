@@ -1,6 +1,11 @@
 {
   "navigation": {
     "menu": "Menu",
-    "home": "Home"
+    "shut": "Shut",
+    "home": "Home",
+    "about": "About",
+    "work": "Work",
+    "settings": "Settings",
+    "location": "Hong Kong"
   }
 }

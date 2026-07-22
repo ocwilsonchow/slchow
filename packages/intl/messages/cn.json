@@ -1,6 +1,11 @@
 {
   "navigation": {
     "menu": "菜单",
-    "home": "首页"
+    "shut": "关闭",
+    "home": "首页",
+    "about": "关于",
+    "work": "作品",
+    "settings": "设置",
+    "location": "香港"
   }
 }

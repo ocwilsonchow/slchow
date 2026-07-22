@@ -1,5 +1,2 @@
 @import "../../../../packages/ds/src/styles/globals.css";
 @source "../**/*.{ts,tsx}";
-
-@layer base {
-}
