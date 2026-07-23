@@ -21,10 +21,10 @@
   --surface-canvas: #0f0f10;
   --surface-canvas-inverse: #faf8f6;
   --surface-alpha: #fafafa10;
-  --content-ink: #fafafa;
+  --content-ink: #ffffff;
   --content-ink-inverse: #3f3d39;
-  --content-body: #fafafa80;
-  --content-subdued: #fafafa40;
+  --content-body: #c7c7c7;
+  --content-subdued: #fafafa70;
   --stroke-soft: #fafafa10;
 }
 
@@ -50,14 +50,12 @@
 
   button,
   a {
-    @apply cursor-pointer disabled:pointer-events-none disabled:opacity-50 uppercase;
+    @apply cursor-pointer disabled:pointer-events-none disabled:opacity-50;
   }
 
   html,
   body {
     overscroll-behavior: none;
     scrollbar-gutter: stable;
-
-    @apply uppercase;
   }
 }

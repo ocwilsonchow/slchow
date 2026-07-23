@@ -26,7 +26,10 @@ const Root = (props: HTMLMotionProps<"nav">) => {
 
 const Header = (props: HTMLMotionProps<"div">) => {
   return (
-    <motion.div {...props} className={cn("flex items-start p-4")}></motion.div>
+    <motion.div
+      {...props}
+      className={cn("flex items-start px-5 py-5 md:py-4")}
+    ></motion.div>
   )
 }
 
@@ -69,7 +72,7 @@ const Content = (props: HTMLMotionProps<"div">) => {
           stiffness: 400,
           damping: 40,
         }}
-        className="overflow-hidden bg-surface-alpha text-content-ink-inverse"
+        className="overflow-hidden bg-surface-canvas text-content-ink-inverse"
       ></motion.div>
     </Portal>
   )
@@ -146,8 +149,10 @@ export const RenderNavbar = () => {
   return (
     <Navbar.Root>
       <Navbar.Header>
-        <div className="flex-1">Wilson.</div>
-        <div className="flex-1 lg:flex hidden items-center gap-4">
+        <div className="flex-1">
+          <span>Wilson. </span>
+        </div>
+        <div className="flex-1 lg:flex hidden items-center justify-start gap-4">
           <div>
             <Link href="/">{t("home")}</Link>
           </div>

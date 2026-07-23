@@ -11,7 +11,7 @@ const Page = async ({ params }: Props) => {
 
   setRequestLocale(locale)
 
-  return <PageLayout className=""></PageLayout>
+  return <PageLayout className="pt-30 sm:pt-40 px-5 lg:px-20"></PageLayout>
 }
 
 export default Page
