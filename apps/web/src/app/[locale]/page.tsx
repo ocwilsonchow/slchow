@@ -14,13 +14,13 @@ const Page = async ({ params }: Props) => {
   setRequestLocale(locale)
 
   return (
-    <PageLayout className="grid md:grid-cols-2">
+    <PageLayout className="md:grid md:grid-cols-2 space-y-20">
       <Header.Root>
         <Header.Info />
         <Header.Links />
       </Header.Root>
       <div className="">
-        <RenderMdxBlockByPath category="writings" slug="introduction" />
+        <RenderMdxBlockByPath category="blocks" slug="introduction" />
       </div>
     </PageLayout>
   )
