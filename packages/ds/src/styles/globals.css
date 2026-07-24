@@ -7,25 +7,25 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  --surface-canvas: #faf8f6;
+  --surface-canvas: #ffffff;
   --surface-canvas-inverse: #0f0f10;
   --surface-alpha: #3f3d3910;
   --content-ink: #3f3d39;
   --content-body: #3f3d3980;
   --content-subdued: #3f3d3940;
-  --content-ink-inverse: #fafafa;
-  --stroke-soft: #3f3d3910;
+  --content-ink-inverse: #ffffff;
+  --stroke-soft: #3f3d39;
 }
 
 .dark {
   --surface-canvas: #0f0f10;
-  --surface-canvas-inverse: #faf8f6;
+  --surface-canvas-inverse: #ffffff;
   --surface-alpha: #fafafa10;
   --content-ink: #ffffff;
   --content-ink-inverse: #3f3d39;
   --content-body: #c7c7c7;
   --content-subdued: #fafafa70;
-  --stroke-soft: #fafafa10;
+  --stroke-soft: #fafafa;
 }
 
 @theme inline {

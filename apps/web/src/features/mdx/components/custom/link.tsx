@@ -4,10 +4,7 @@ import { Link } from "@/i18n/navigation"
 import { ArrowUpRight } from "lucide-react"
 
 export function MDXLink({ href, className, ...props }: ComponentProps<"a">) {
-  const classes = cn(
-    "inline-flex text-emerald-500 hover:underline",
-    className
-  )
+  const classes = cn("inline-flex", className)
 
   if (!href) return <a className={classes} {...props} />
 

@@ -1,7 +1,6 @@
 import type { Locale } from "next-intl"
 import { setRequestLocale } from "next-intl/server"
 import { PageLayout } from "@/features/layout/components/page"
-import { RenderMdxBlockByPath } from "@/features/mdx/components/render-mdx-block"
 import { Header } from "@/features/layout/components/header"
 
 type Props = {
@@ -14,14 +13,14 @@ const Page = async ({ params }: Props) => {
   setRequestLocale(locale)
 
   return (
-    <PageLayout className="grid md:grid-cols-2">
+    <PageLayout className="grid lg:grid-cols-2">
       <Header.Root>
         <Header.Info />
-        <Header.Links />
+        <Header.Column>
+          <h1>Works</h1>
+        </Header.Column>
       </Header.Root>
-      <div className="">
-        <RenderMdxBlockByPath category="writings" slug="introduction" />
-      </div>
+      <div className=""></div>
     </PageLayout>
   )
 }

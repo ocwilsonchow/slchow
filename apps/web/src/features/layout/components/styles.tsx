@@ -2,12 +2,7 @@ import { cn } from "@repo/ds"
 import { FontInter, FontMono } from "@repo/ds/lib/fonts"
 
 const presets = {
-  mono: cn(
-    FontInter.variable,
-    FontMono.variable,
-    FontMono.className,
-    "text-sm leading-relaxed"
-  ),
+  mono: cn(FontMono.variable, FontMono.className, "text-sm font-medium"),
 }
 
 export const StylesProvider = (props: React.ComponentProps<"div">) => {

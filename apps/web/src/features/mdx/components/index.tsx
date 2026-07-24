@@ -1,11 +1,41 @@
 import type { MDXComponents } from "mdx/types"
-import { ul, MDXLink, Paragraph } from "./custom"
+import { MDXLink } from "./custom"
+import {
+  blockquote,
+  code,
+  em,
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6,
+  hr,
+  li,
+  ol,
+  p,
+  strong,
+  ul,
+} from "./custom/typography"
 
 export function getMDXComponents(components?: MDXComponents): MDXComponents {
   return {
     ...components,
-    ul: ul,
     a: MDXLink,
-    p: Paragraph,
+    blockquote,
+    code,
+    em,
+    h1,
+    h2,
+    h3,
+    h4,
+    h5,
+    h6,
+    hr,
+    li,
+    ol,
+    p,
+    strong,
+    ul,
   }
 }

@@ -7,7 +7,7 @@ export const PageLayout = (props: HTMLMotionProps<"div">) => {
   return (
     <motion.div
       {...props}
-      className={cn("min-h-screen", props.className)}
+      className={cn("min-h-screen p-4", props.className)}
     />
   )
 }
