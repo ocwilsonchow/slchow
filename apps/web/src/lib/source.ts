@@ -86,12 +86,10 @@ export function getWritings(locale: string): WritingsNode[] {
   return mapWritingsNodes(writingsFolder.children, [], locale)
 }
 
-export function getWritingsPages(locale: string) {
+export function getCategoryPages(category: string, locale: string) {
   return content
     .getPages(locale)
-    .filter(
-      (page) => page.slugs[0] === WRITINGS_CATEGORY && page.slugs.length > 1
-    )
+    .filter((page) => page.slugs[0] === category && page.slugs.length > 1)
 }
 
 export function getWritingsPage(slug: string[], locale: string) {

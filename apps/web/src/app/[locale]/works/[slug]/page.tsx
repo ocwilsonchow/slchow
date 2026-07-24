@@ -3,26 +3,30 @@ import { setRequestLocale } from "next-intl/server"
 import { PageLayout } from "@/features/layout/components/page"
 import { Header } from "@/features/layout/components/header"
 import { Link } from "@/i18n/navigation"
+import { RenderMdxBlockByPath } from "@/features/mdx/components/render-mdx-block"
 
 type Props = {
-  params: Promise<{ locale: Locale }>
+  params: Promise<{ locale: Locale; slug: string }>
 }
 
 const Page = async ({ params }: Props) => {
-  const { locale } = await params
+  const { locale, slug } = await params
 
   setRequestLocale(locale)
 
   return (
-    <PageLayout className="grid lg:grid-cols-2">
+    <PageLayout className="grid lg:grid-cols-2 content-start items-start">
       <Header.Root>
         <Header.Column>
-          <Link href="/works">Back</Link>
+          <Link href="/writings">Back</Link>
         </Header.Column>
         <Header.Column>
-          <h1>Works</h1>
+          <h1>Writings</h1>
         </Header.Column>
       </Header.Root>
+      <div className="p-4">
+        <RenderMdxBlockByPath category="works" slug={slug} />
+      </div>
     </PageLayout>
   )
 }

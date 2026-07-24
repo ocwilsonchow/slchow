@@ -1,11 +1,16 @@
 {
   "navigation": {
     "menu": "Menu",
-    "shut": "Shut",
+    "close": "Close",
     "home": "Home",
-    "about": "About",
-    "work": "Work",
-    "settings": "Settings",
-    "location": "Hong Kong"
+    "works": "Works",
+    "writings": "Writings",
+    "contact": "Contact",
+    "theme": "Theme",
+    "language": "Language",
+    "themeSystem": "System",
+    "themeLight": "Light",
+    "themeDark": "Dark",
+    "location": "HK"
   }
 }

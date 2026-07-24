@@ -3,7 +3,8 @@ import { setRequestLocale } from "next-intl/server"
 import { PageLayout } from "@/features/layout/components/page"
 import { Header } from "@/features/layout/components/header"
 import { Link } from "@/i18n/navigation"
-import { getWritingsPages } from "@/lib/source"
+import { getCategoryPages } from "@/lib/source"
+import { ListWritings } from "@/features/writings/components/list-writings"
 
 type Props = {
   params: Promise<{ locale: Locale }>
@@ -14,25 +15,18 @@ const Page = async ({ params }: Props) => {
 
   setRequestLocale(locale)
 
-  const writings = getWritingsPages(locale)
+  const works = getCategoryPages("works", locale)
 
   return (
-    <PageLayout className="grid lg:grid-cols-2">
+    <PageLayout className="grid lg:grid-cols-2 content-start items-start">
       <Header.Root>
-        <Header.Info />
         <Header.Column>
-          <h1>Writings</h1>
+          <Link href="/">Back</Link>
         </Header.Column>
+        <Header.Column></Header.Column>
       </Header.Root>
-      <div className="flex flex-col">
-        {writings.map((page) => {
-          const slug = page.slugs.slice(1).join("/")
-          return (
-            <Link key={page.url} href={`/writings/${slug}`}>
-              {page.data.title}
-            </Link>
-          )
-        })}
+      <div className="p-4">
+        <ListWritings locale={locale} />
       </div>
     </PageLayout>
   )

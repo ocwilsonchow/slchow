@@ -7,6 +7,7 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
+  --accent-surface-canvas: #f0fb29;
   --surface-canvas: #ffffff;
   --surface-canvas-inverse: #0f0f10;
   --surface-alpha: #3f3d3910;
@@ -14,21 +15,27 @@
   --content-body: #3f3d3980;
   --content-subdued: #3f3d3940;
   --content-ink-inverse: #ffffff;
-  --stroke-soft: #3f3d39;
+  --content-ink-on-accent: #0f0f10;
+  --stroke-soft: #3f3d3920;
+  --stroke-hard-on-accent: #0f0f10;
 }
 
 .dark {
+  --accent-surface-canvas: #f0fb29;
   --surface-canvas: #0f0f10;
   --surface-canvas-inverse: #ffffff;
   --surface-alpha: #fafafa10;
   --content-ink: #ffffff;
-  --content-ink-inverse: #3f3d39;
   --content-body: #c7c7c7;
   --content-subdued: #fafafa70;
-  --stroke-soft: #fafafa;
+  --content-ink-inverse: #3f3d39;
+  --content-ink-on-accent: #0f0f10;
+  --stroke-soft: #fafafa20;
+  --stroke-hard-on-accent: #0f0f10;
 }
 
 @theme inline {
+  --color-accent-surface-canvas: var(--accent-surface-canvas);
   --color-surface-canvas: var(--surface-canvas);
   --color-surface-canvas-inverse: var(--surface-canvas-inverse);
   --color-surface-alpha: var(--surface-alpha);
@@ -36,14 +43,12 @@
   --color-content-body: var(--content-body);
   --color-content-subdued: var(--content-subdued);
   --color-content-ink-inverse: var(--content-ink-inverse);
+  --color-content-ink-on-accent: var(--content-ink-on-accent);
   --color-stroke-soft: var(--stroke-soft);
+  --color-stroke-hard-on-accent: var(--stroke-hard-on-accent);
 }
 
 @layer base {
-  * {
-    @apply border-stroke-soft divide-stroke-soft text-content-ink;
-  }
-
   *::-webkit-scrollbar {
     display: none;
   }
@@ -55,6 +60,7 @@
 
   html,
   body {
+    @apply text-content-ink border-stroke-soft divide-stroke-soft bg-surface-canvas;
     overscroll-behavior: none;
     scrollbar-gutter: stable;
   }

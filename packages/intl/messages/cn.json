@@ -1,11 +1,16 @@
 {
   "navigation": {
     "menu": "菜单",
-    "shut": "关闭",
+    "close": "关闭",
     "home": "首页",
-    "about": "关于",
-    "work": "作品",
-    "settings": "设置",
+    "works": "作品",
+    "writings": "文章",
+    "contact": "联系",
+    "theme": "主题",
+    "language": "语言",
+    "themeSystem": "系统",
+    "themeLight": "浅色",
+    "themeDark": "深色",
     "location": "香港"
   }
 }

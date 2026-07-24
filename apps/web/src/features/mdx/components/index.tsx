@@ -1,5 +1,5 @@
 import type { MDXComponents } from "mdx/types"
-import { MDXLink } from "./custom"
+import { MDXLink, Pre } from "./custom"
 import {
   blockquote,
   code,
@@ -37,5 +37,6 @@ export function getMDXComponents(components?: MDXComponents): MDXComponents {
     p,
     strong,
     ul,
+    pre: Pre,
   }
 }

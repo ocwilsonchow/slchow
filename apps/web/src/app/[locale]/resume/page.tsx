@@ -6,26 +6,26 @@ import { Link } from "@/i18n/navigation"
 import { RenderMdxBlockByPath } from "@/features/mdx/components/render-mdx-block"
 
 type Props = {
-  params: Promise<{ locale: Locale; slug: string }>
+  params: Promise<{ locale: Locale }>
 }
 
 const Page = async ({ params }: Props) => {
-  const { locale, slug } = await params
+  const { locale } = await params
 
   setRequestLocale(locale)
 
   return (
-    <PageLayout className="grid lg:grid-cols-2 content-start items-start">
+    <PageLayout className="grid lg:grid-cols-2 items-start">
       <Header.Root>
         <Header.Column>
-          <Link href="/writings">Back</Link>
+          <Link href="/">Back</Link>
         </Header.Column>
         <Header.Column>
-          <h1>Writings</h1>
+          <h1>Resume</h1>
         </Header.Column>
       </Header.Root>
       <div className="p-4">
-        <RenderMdxBlockByPath category="writings" slug={slug} />
+        <RenderMdxBlockByPath category="blocks" slug="resume" />
       </div>
     </PageLayout>
   )

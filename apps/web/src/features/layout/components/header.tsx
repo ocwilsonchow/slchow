@@ -7,7 +7,7 @@ export const Root = ({ ...props }: ComponentProps<"div">) => {
     <div
       {...props}
       className={cn(
-        "lg:grid lg:grid-cols-2 space-y-5 lg:sticky lg:top-0",
+        "lg:grid lg:grid-cols-2 space-y-5 lg:sticky lg:top-0 p-4",
         props.className
       )}
     />
@@ -17,17 +17,20 @@ export const Root = ({ ...props }: ComponentProps<"div">) => {
 export const Info = ({ ...props }: ComponentProps<"div">) => {
   return (
     <div {...props} className={cn("", props.className)}>
-      <Link href="/">Nicolas Reos</Link>
+      <Link href="/">Wilson Chow</Link>
     </div>
   )
 }
 
 export const Links = ({ ...props }: ComponentProps<"div">) => {
   return (
-    <div {...props} className={cn("", props.className)}>
-      <div>Resume</div>
-      <div>GitHub</div>
-      <div>LinkedIn</div>
+    <div {...props} className={cn("hidden lg:block", props.className)}>
+      <div>
+        <Link href="/resume">Resume</Link>
+      </div>
+      <div>
+        <Link href="https://github.com/ocwilsonchow">GitHub</Link>
+      </div>
     </div>
   )
 }

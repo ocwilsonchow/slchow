@@ -1,12 +1,16 @@
 "use client"
 
-import { Link } from "@/i18n/navigation"
-import { cn } from "@repo/ds"
-import { Portal } from "@repo/ds/components/ui/portal"
-import { HTMLMotionProps, motion } from "motion/react"
-import { useLocale, useTranslations } from "next-intl"
-import { useEffect, useState } from "react"
 import { create } from "zustand"
+import { ComponentProps, Fragment, useEffect, useState } from "react"
+import { type HTMLMotionProps, motion, Variants } from "motion/react"
+import { Portal as ReactPortal } from "@repo/ds/components/ui/portal"
+import { cn, useTheme } from "@repo/ds"
+import { useClickAway } from "@uidotdev/usehooks"
+import { fontPresets } from "./styles"
+import { Link, usePathname, useRouter } from "@/i18n/navigation"
+import { useLenis } from "lenis/react"
+import { Locale, useLocale, useTranslations } from "next-intl"
+import { localeOptions } from "@/i18n/routing"
 
 export type NavbarState = {
   isOpen: boolean
@@ -18,79 +22,247 @@ export const useNavbar = create<NavbarState>((set) => ({
   setIsOpen: (isOpen) => set({ isOpen }),
 }))
 
-const Root = (props: HTMLMotionProps<"nav">) => {
-  return (
-    <motion.nav {...props} className={cn("fixed top-0 left-0 right-0 z-50")} />
-  )
+const Root = (props: HTMLMotionProps<"div">) => {
+  return <motion.div {...props}></motion.div>
 }
 
-const Header = (props: HTMLMotionProps<"div">) => {
+const Header = ({ className, ...props }: HTMLMotionProps<"div">) => {
+  const { isOpen, setIsOpen } = useNavbar()
+  const lenis = useLenis()
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key?.toLowerCase() !== "k") return
+      if (!(event.metaKey || event.ctrlKey)) return
+
+      const target = event.target
+      if (
+        target instanceof HTMLElement &&
+        target.closest('input, textarea, select, [contenteditable="true"]')
+      ) {
+        return
+      }
+
+      event.preventDefault()
+      setIsOpen(true)
+    }
+
+    document.addEventListener("keydown", onKeyDown)
+    return () => document.removeEventListener("keydown", onKeyDown)
+  }, [setIsOpen])
+
+  useEffect(() => {
+    if (!isOpen) {
+      return
+    }
+
+    lenis?.stop()
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsOpen(false)
+      }
+    }
+
+    document.addEventListener("keydown", onKeyDown)
+
+    return () => {
+      lenis?.start()
+      document.removeEventListener("keydown", onKeyDown)
+    }
+  }, [isOpen, lenis, setIsOpen])
   return (
     <motion.div
       {...props}
-      className={cn("flex items-start px-5 py-5 md:py-4")}
-    ></motion.div>
+      className={cn(
+        "p-4 fixed bottom-0 inset-x-0 z-50 grid grid-cols-2 lg:grid-cols-3 pointer-events-auto",
+        isOpen
+          ? "text-content-ink-on-accent delay-0"
+          : "text-content-ink delay-500",
+        className,
+        fontPresets.mono
+      )}
+    >
+      {props.children}
+    </motion.div>
   )
 }
 
-const Trigger = (props: HTMLMotionProps<"button">) => {
+const Portal = (props: ComponentProps<"div">) => {
   const { isOpen, setIsOpen } = useNavbar()
-  const t = useTranslations("navigation")
+  const ref = useClickAway<HTMLDivElement>(() => {
+    if (isOpen) setIsOpen(false)
+  })
 
   return (
-    <motion.button
-      className={cn("")}
-      onClick={() => setIsOpen(!isOpen)}
-      {...props}
+    <ReactPortal
+      ref={ref}
+      className={cn(
+        "fixed inset-0 grid z-49 content-end",
+        props.className,
+        isOpen ? "pointer-events-auto" : "pointer-events-none"
+      )}
     >
-      {isOpen ? t("shut") : t("menu")}
-    </motion.button>
+      {props.children}
+    </ReactPortal>
   )
 }
 
 const Content = (props: HTMLMotionProps<"div">) => {
   const { isOpen } = useNavbar()
+
   return (
-    <Portal className="fixed inset-0 z-49 grid">
-      <motion.div
+    <motion.div
+      {...props}
+      variants={{
+        close: {
+          height: "0vh",
+          transition: {
+            delay: 0,
+            when: "afterChildren",
+            staggerChildren: 0.05,
+            staggerDirection: -1,
+          },
+        },
+        open: {
+          height: "60vh",
+          transition: {
+            staggerChildren: 0.1,
+            delayChildren: 0.2,
+          },
+        },
+      }}
+      transition={{
+        ease: "easeInOut",
+        duration: 0.2,
+      }}
+      initial="close"
+      animate={isOpen ? "open" : "close"}
+      className={cn(
+        "overflow-hidden grid",
+        "bg-surface-canvas text-content-ink",
+        "bg-accent-surface-canvas text-content-ink-on-accent",
+        fontPresets.mono
+      )}
+    >
+      {props.children}
+    </motion.div>
+  )
+}
+
+const containerVariants: Variants = {
+  close: {
+    transition: {
+      staggerChildren: 0.05,
+      staggerDirection: -1,
+    },
+  },
+  open: {
+    transition: {
+      staggerChildren: 0.05,
+      // delayChildren: 0.05,
+    },
+  },
+}
+
+const listVariants: Variants = {
+  close: {
+    transition: {
+      staggerChildren: 0.05,
+      staggerDirection: -1,
+    },
+  },
+  open: {
+    transition: {
+      staggerChildren: 0.05,
+      delayChildren: 0.1,
+    },
+  },
+}
+
+const itemVariants: Variants = {
+  close: {
+    opacity: 0,
+    filter: "blur(2px)",
+  },
+  open: {
+    opacity: 1,
+    filter: "blur(0px)",
+    transition: {
+      delay: 0.25,
+      ease: "easeInOut",
+      duration: 0.5,
+    },
+  },
+}
+
+const Trigger = (props: ComponentProps<"button">) => {
+  const { isOpen, setIsOpen } = useNavbar()
+  const t = useTranslations("navigation")
+
+  return (
+    <div className="w-full">
+      <button
+        className={cn("h-6 text-left  w-full overflow-hidden")}
         {...props}
-        variants={{
-          close: {
-            height: 0,
-            transition: {
-              delay: 0.2,
-            },
+        onClick={() => setIsOpen(!isOpen)}
+      >
+        {isOpen ? t("close") : t("menu")}
+      </button>
+    </div>
+  )
+}
+
+const HeaderBackdrop = (props: HTMLMotionProps<"div">) => {
+  const { isOpen } = useNavbar()
+  if (isOpen) return null
+  return (
+    <motion.div
+      {...props}
+      className="fixed bottom-0 inset-x-0 z-40 h-13 bg-surface-canvas pointer-events-none"
+    />
+  )
+}
+
+const Backdrop = (props: HTMLMotionProps<"div">) => {
+  const { isOpen } = useNavbar()
+
+  return (
+    <motion.div
+      {...props}
+      variants={{
+        close: {
+          opacity: 0,
+          transition: {
+            duration: 0.2,
+            delay: 0.5,
           },
-          open: {
-            height: "100%",
-          },
-        }}
-        initial="close"
-        animate={isOpen ? "open" : "close"}
-        transition={{
-          type: "spring",
-          stiffness: 400,
-          damping: 40,
-        }}
-        className="overflow-hidden bg-surface-canvas text-content-ink-inverse"
-      ></motion.div>
-    </Portal>
+        },
+        open: {
+          opacity: 1,
+        },
+      }}
+      initial="close"
+      animate={isOpen ? "open" : "close"}
+      className="fixed inset-0 z-45 bg-surface-canvas/20 backdrop-blur-sm pointer-events-none"
+    />
   )
 }
 
 const formatLocaleTime = (date: Date, locale: string) => {
   return new Intl.DateTimeFormat(locale, {
-    hour: "numeric",
+    hour: "2-digit",
     minute: "2-digit",
-    hour12: true,
-    timeZone: "Asia/Hong_Kong",
+    second: "2-digit",
+    hour12: false,
   })
     .format(date)
     .replace(/\s/g, "")
 }
 
-export const Time = () => {
+const NavbarTime = () => {
   const locale = useLocale()
+  const t = useTranslations("navigation")
   const [time, setTime] = useState({ display: "", dateTime: "" })
 
   useEffect(() => {
@@ -105,15 +277,14 @@ export const Time = () => {
     update()
 
     const now = new Date()
-    const msUntilNextMinute =
-      (60 - now.getSeconds()) * 1000 - now.getMilliseconds()
+    const msUntilNextSecond = 1000 - now.getMilliseconds()
 
     let intervalId: number
 
     const timeoutId = window.setTimeout(() => {
       update()
-      intervalId = window.setInterval(update, 60_000)
-    }, msUntilNextMinute)
+      intervalId = window.setInterval(update, 1000)
+    }, msUntilNextSecond)
 
     return () => {
       window.clearTimeout(timeoutId)
@@ -122,57 +293,213 @@ export const Time = () => {
   }, [locale])
 
   return (
-    <time dateTime={time.dateTime} suppressHydrationWarning aria-live="polite">
-      {time.display}
-    </time>
+    <motion.time
+      dateTime={time.dateTime}
+      suppressHydrationWarning
+      aria-live="polite"
+    >
+      {time.display}, {t("location")}
+    </motion.time>
   )
 }
 
-const Location = () => {
+const LinkItem = (props: ComponentProps<typeof Link>) => {
+  const { isOpen, setIsOpen } = useNavbar()
+  return (
+    <Link
+      {...props}
+      className={cn("block", props.className)}
+      onClick={() => setIsOpen(false)}
+    >
+      {props.children}
+    </Link>
+  )
+}
+
+const themeOptions = [
+  {
+    id: "system",
+    labelKey: "themeSystem",
+    color: ["#ffffff", "#3f3d39"],
+  },
+  {
+    id: "light",
+    labelKey: "themeLight",
+    color: ["#ffffff"],
+  },
+  {
+    id: "dark",
+    labelKey: "themeDark",
+    color: ["#3f3d39"],
+  },
+] as const
+
+const ThemeSettings = (props: HTMLMotionProps<"div">) => {
+  const { theme, setTheme } = useTheme()
   const t = useTranslations("navigation")
 
-  return <div>{t("location")}</div>
+  return (
+    <motion.div className="flex flex-col justify-between space-y-1">
+      <div className="">{t("theme")}</div>
+      <div className="flex items-center gap-2">
+        {themeOptions.map((option, index) => (
+          <Fragment key={option.id}>
+            <button
+              onClick={() => setTheme(option.id)}
+              className={cn("flex-wrap flex items-center gap-2")}
+            >
+              <div
+                onClick={() => setTheme(option.id)}
+                className={cn(
+                  "aspect-square border overflow-hidden w-3 flex"
+                  // theme === option.id ? "outline-blue-500" : "outline-transparent"
+                )}
+              >
+                {option.color.map((c) => (
+                  <div
+                    key={c}
+                    className="flex-1 h-full w-full"
+                    style={{ backgroundColor: c }}
+                  />
+                ))}
+              </div>
+              <div
+                className={cn(
+                  theme === option.id ? "opacity-100" : "opacity-50"
+                )}
+              >
+                {t(option.labelKey)}
+              </div>
+            </button>
+            {index < themeOptions.length - 1 && (
+              <div className="opacity-50">/</div>
+            )}
+          </Fragment>
+        ))}
+      </div>
+    </motion.div>
+  )
+}
+
+const LanguageSettings = (props: HTMLMotionProps<"div">) => {
+  const currentLocale = useLocale()
+  const pathname = usePathname()
+  const router = useRouter()
+  const t = useTranslations("navigation")
+
+  const handleLocaleChange = (newLocale: Locale) => {
+    router.replace(pathname, { locale: newLocale })
+  }
+
+  return (
+    <motion.div className="flex flex-col justify-between space-y-1">
+      <div className="">{t("language")}</div>
+      <div className="flex items-center gap-2">
+        {localeOptions.map((option, index) => (
+          <Fragment key={option.id}>
+            <button
+              className={cn(
+                "uppercase",
+                currentLocale === option.id ? "opacity-100" : "opacity-50"
+              )}
+              onClick={() => handleLocaleChange(option.id)}
+            >
+              {option.title}
+            </button>
+            {index < localeOptions.length - 1 && (
+              <div className="opacity-50">/</div>
+            )}
+          </Fragment>
+        ))}
+      </div>
+    </motion.div>
+  )
 }
 
 export const Navbar = {
   Root,
   Header,
-  Trigger,
+  Portal,
   Content,
-  Time,
-  Location,
+  Trigger,
+  Backdrop,
+  HeaderBackdrop,
+  Variants: {
+    container: containerVariants,
+    list: listVariants,
+    item: itemVariants,
+  },
+  Time: NavbarTime,
+  LinkItem,
+  ThemeSettings,
+  LanguageSettings,
+}
+
+const LinkBox = (props: HTMLMotionProps<"div">) => {
+  return (
+    <motion.div
+      {...props}
+      className="lg:aspect-video w-full border-b grid pb-4"
+    />
+  )
 }
 
 export const RenderNavbar = () => {
   const t = useTranslations("navigation")
 
   return (
-    <Navbar.Root>
-      <Navbar.Header>
-        <div className="flex-1">
-          <span>Wilson. </span>
-        </div>
-        <div className="flex-1 lg:flex hidden items-center justify-start gap-4">
-          <div>
-            <Link href="/">{t("home")}</Link>
-          </div>
-          <div>
-            <Link href="/about">{t("about")}</Link>
-          </div>
-          <div>
-            <Link href="/work">{t("work")}</Link>
-          </div>
-        </div>
-        <div className="flex-1 lg:flex justify-end hidden">{t("settings")}</div>
-        <div className="flex-1 lg:flex justify-end hidden gap-3">
-          <Navbar.Time />
-          <Navbar.Location />
-        </div>
-        <div className="flex-1 flex justify-end lg:hidden">
+    <Fragment>
+      <Navbar.HeaderBackdrop />
+      <Navbar.Backdrop />
+      <Navbar.Portal>
+        <Navbar.Content>
+          <motion.div
+            variants={Navbar.Variants.container}
+            className="p-4 grid lg:grid-cols-2 border-t content-between lg:content-start gap-4 pb-20"
+          >
+            <motion.ul
+              className="grid grid-cols-2 gap-4"
+              variants={Navbar.Variants.item}
+            >
+              <LinkBox>
+                <Navbar.LinkItem href="/">{t("home")}</Navbar.LinkItem>
+              </LinkBox>
+
+              <LinkBox>
+                <Navbar.LinkItem href="/works">{t("works")}</Navbar.LinkItem>
+              </LinkBox>
+              <LinkBox>
+                <Navbar.LinkItem href="/writings">
+                  {t("writings")}
+                </Navbar.LinkItem>
+              </LinkBox>
+              <LinkBox>
+                <Navbar.LinkItem href="/contact">
+                  {t("contact")}
+                </Navbar.LinkItem>
+              </LinkBox>
+            </motion.ul>
+            <motion.div
+              variants={Navbar.Variants.item}
+              className="grid lg:grid-cols-2 gap-4"
+            >
+              <LinkBox>
+                <Navbar.ThemeSettings />
+              </LinkBox>
+              <LinkBox>
+                <Navbar.LanguageSettings />
+              </LinkBox>
+            </motion.div>
+          </motion.div>
+        </Navbar.Content>
+        <Navbar.Header>
           <Navbar.Trigger />
-        </div>
-      </Navbar.Header>
-      <Navbar.Content></Navbar.Content>
-    </Navbar.Root>
+          <div className="hidden lg:block"></div>
+          <div className="flex justify-end">
+            <Navbar.Time />
+          </div>
+        </Navbar.Header>
+      </Navbar.Portal>
+    </Fragment>
   )
 }
