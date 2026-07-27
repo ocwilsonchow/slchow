@@ -1,9 +1,10 @@
 import type { Locale } from "next-intl"
-import { setRequestLocale } from "next-intl/server"
+import { getTranslations, setRequestLocale } from "next-intl/server"
 import { PageLayout } from "@/features/layout/components/page"
 import { Header } from "@/features/layout/components/header"
 import { Link } from "@/i18n/navigation"
 import { RenderMdxBlockByPath } from "@/features/mdx/components/render-mdx-block"
+import { CornerDownLeftIcon } from "lucide-react"
 
 type Props = {
   params: Promise<{ locale: Locale }>
@@ -14,11 +15,16 @@ const Page = async ({ params }: Props) => {
 
   setRequestLocale(locale)
 
+  const t = await getTranslations("navigation")
+
   return (
     <PageLayout className="grid lg:grid-cols-2 items-start">
       <Header.Root>
         <Header.Column>
-          <Link href="/">Back</Link>
+          <Link href="/">
+            <CornerDownLeftIcon size={10} className="inline-block mr-1.5" />
+            {t("back")}
+          </Link>
         </Header.Column>
         <Header.Column>
           <h1>Resume</h1>

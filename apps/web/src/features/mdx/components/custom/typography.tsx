@@ -26,7 +26,7 @@ export function h6({ className, ...props }: ComponentProps<"h6">) {
 }
 
 export function p({ className, ...props }: ComponentProps<"p">) {
-  return <p className={cn("text-content-article", className)} {...props} />
+  return <p className={cn("", className)} {...props} />
 }
 
 export function ul({ className, ...props }: ComponentProps<"ul">) {

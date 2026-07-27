@@ -31,7 +31,7 @@ export const ListWritings = async ({
           const slug = page.slugs.slice(1).join("/")
           return (
             <li key={page.url} className="">
-              <Link href={`/writings/${slug}`} className="inline-block py-0.5">
+              <Link href={`/writings/${slug}`} className="inline-block">
                 {page.data.title}
               </Link>
             </li>
