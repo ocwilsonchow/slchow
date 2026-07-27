@@ -96,17 +96,21 @@ export function getWritingsPage(slug: string[], locale: string) {
   return content.getPage([WRITINGS_CATEGORY, ...slug], locale)
 }
 
-export function getWritingsStaticParams() {
+export function getCategoryStaticParams(category: string) {
   return content
     .generateParams("slug", "locale")
     .filter(
-      (param) =>
-        param.slug[0] === WRITINGS_CATEGORY && param.slug.length > 1
+      (param) => param.slug[0] === category && param.slug.length > 1
     )
     .map((param) => ({
       locale: param.locale,
-      slug: param.slug.slice(1),
+      // `[slug]` is a single segment; nested paths use `/` in the segment
+      slug: param.slug.slice(1).join("/"),
     }))
+}
+
+export function getWritingsStaticParams() {
+  return getCategoryStaticParams(WRITINGS_CATEGORY)
 }
 
 export function getMdxContent(category: string, slug: string, locale: string) {

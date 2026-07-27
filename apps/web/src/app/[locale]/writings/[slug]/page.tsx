@@ -4,6 +4,7 @@ import { PageLayout } from "@/features/layout/components/page"
 import { Header } from "@/features/layout/components/header"
 import { Link } from "@/i18n/navigation"
 import { RenderMdxBlockByPath } from "@/features/mdx/components/render-mdx-block"
+import { getWritingsStaticParams } from "@/lib/source"
 
 type Props = {
   params: Promise<{ locale: Locale; slug: string }>
@@ -25,10 +26,21 @@ const Page = async ({ params }: Props) => {
         </Header.Column>
       </Header.Root>
       <div className="p-4 pb-40">
-        <RenderMdxBlockByPath category="writings" slug={slug} />
+        <RenderMdxBlockByPath
+          category="writings"
+          slug={slug}
+          locale={locale}
+        />
       </div>
     </PageLayout>
   )
 }
 
 export default Page
+
+export function generateStaticParams() {
+  return getWritingsStaticParams()
+}
+
+export const dynamic = "force-static"
+export const dynamicParams = false

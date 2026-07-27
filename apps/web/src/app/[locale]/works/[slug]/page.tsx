@@ -4,6 +4,7 @@ import { PageLayout } from "@/features/layout/components/page"
 import { Header } from "@/features/layout/components/header"
 import { Link } from "@/i18n/navigation"
 import { RenderMdxBlockByPath } from "@/features/mdx/components/render-mdx-block"
+import { getCategoryStaticParams } from "@/lib/source"
 
 type Props = {
   params: Promise<{ locale: Locale; slug: string }>
@@ -18,17 +19,24 @@ const Page = async ({ params }: Props) => {
     <PageLayout className="grid lg:grid-cols-2 content-start items-start">
       <Header.Root>
         <Header.Column>
-          <Link href="/writings">Back</Link>
+          <Link href="/works">Back</Link>
         </Header.Column>
         <Header.Column>
-          <h1>Writings</h1>
+          <h1>Works</h1>
         </Header.Column>
       </Header.Root>
       <div className="p-4">
-        <RenderMdxBlockByPath category="works" slug={slug} />
+        <RenderMdxBlockByPath category="works" slug={slug} locale={locale} />
       </div>
     </PageLayout>
   )
 }
 
 export default Page
+
+export function generateStaticParams() {
+  return getCategoryStaticParams("works")
+}
+
+export const dynamic = "force-static"
+export const dynamicParams = false

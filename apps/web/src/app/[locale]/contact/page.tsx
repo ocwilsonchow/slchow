@@ -2,9 +2,6 @@ import type { Locale } from "next-intl"
 import { setRequestLocale } from "next-intl/server"
 import { PageLayout } from "@/features/layout/components/page"
 import { Header } from "@/features/layout/components/header"
-import { Link } from "@/i18n/navigation"
-import { RenderMdxBlockByPath } from "@/features/mdx/components/render-mdx-block"
-
 type Props = {
   params: Promise<{ locale: Locale }>
 }
@@ -28,3 +25,5 @@ const Page = async ({ params }: Props) => {
 }
 
 export default Page
+
+export const dynamic = "force-static"

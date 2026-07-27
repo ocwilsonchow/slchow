@@ -6,6 +6,9 @@ export const routing = defineRouting({
 
   // Used when no locale matches
   defaultLocale: "en",
+
+  // Avoid Accept-Language / cookie negotiation so `/` redirects are cacheable
+  localeDetection: false,
 })
 
 export const localeOptions = [

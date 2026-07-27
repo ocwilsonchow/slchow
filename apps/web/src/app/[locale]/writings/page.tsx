@@ -3,7 +3,6 @@ import { setRequestLocale } from "next-intl/server"
 import { PageLayout } from "@/features/layout/components/page"
 import { Header } from "@/features/layout/components/header"
 import { Link } from "@/i18n/navigation"
-import { getCategoryPages } from "@/lib/source"
 import { ListWritings } from "@/features/writings/components/list-writings"
 
 type Props = {
@@ -14,8 +13,6 @@ const Page = async ({ params }: Props) => {
   const { locale } = await params
 
   setRequestLocale(locale)
-
-  const works = getCategoryPages("works", locale)
 
   return (
     <PageLayout className="grid lg:grid-cols-2 content-start items-start">
@@ -33,3 +30,5 @@ const Page = async ({ params }: Props) => {
 }
 
 export default Page
+
+export const dynamic = "force-static"

@@ -25,10 +25,16 @@ const Page = async ({ params }: Props) => {
         </Header.Column>
       </Header.Root>
       <div className="p-4">
-        <RenderMdxBlockByPath category="blocks" slug="resume" />
+        <RenderMdxBlockByPath
+          category="blocks"
+          slug="resume"
+          locale={locale}
+        />
       </div>
     </PageLayout>
   )
 }
 
 export default Page
+
+export const dynamic = "force-static"

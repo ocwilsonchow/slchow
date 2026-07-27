@@ -1,4 +1,3 @@
-import { useLocale } from "next-intl"
 import Markdown, { type Components } from "react-markdown"
 import { getMdxContent } from "@/lib/source"
 import { getMDXComponents } from "."
@@ -8,14 +7,15 @@ import { cn } from "@repo/ds"
 type RenderMdxBlockProps = {
   category: string
   slug: string
+  locale: string
 }
 
 export const RenderMdxBlockByPath = ({
   category,
   slug,
+  locale,
   ...props
 }: RenderMdxBlockProps & ComponentProps<"div">) => {
-  const locale = useLocale()
   const content = getMdxContent(category, slug, locale)
   const MDX = content?.data.body
 

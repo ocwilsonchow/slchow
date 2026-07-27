@@ -23,7 +23,11 @@ const Page = async ({ params }: Props) => {
         <Header.Links />
       </Header.Root>
       <div className="p-4 space-y-4">
-        <RenderMdxBlockByPath category="blocks" slug="introduction" />
+        <RenderMdxBlockByPath
+          category="blocks"
+          slug="introduction"
+          locale={locale}
+        />
         <Divider />
         <ListWorks locale={locale} />
         <Divider />
