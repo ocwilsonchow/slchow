@@ -17,9 +17,11 @@ export const ListWritings = async ({
   limit = 5,
 }: ListWritingsProps) => {
   const t = await getTranslations("navigation")
-  const writings = getCategoryPages("writings", locale)
-    .sort((a, b) => getPageDate(b.data.date) - getPageDate(a.data.date))
-    .slice(0, limit)
+  const allWritings = getCategoryPages("writings", locale).sort(
+    (a, b) => getPageDate(b.data.date) - getPageDate(a.data.date)
+  )
+  const hasMore = allWritings.length > limit
+  const writings = allWritings.slice(0, limit)
 
   return (
     <div className="flex flex-col gap-2">
@@ -37,6 +39,13 @@ export const ListWritings = async ({
             </li>
           )
         })}
+        {hasMore ? (
+          <li>
+            <Link href="/writings" className="inline-block opacity-50">
+              {t("listAll")}
+            </Link>
+          </li>
+        ) : null}
       </ul>
     </div>
   )

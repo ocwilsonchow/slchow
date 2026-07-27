@@ -27,11 +27,7 @@ const Page = async ({ params }: Props) => {
             {t("back")}
           </Link>
         </Header.Column>
-        <Header.Column>
-          <div>
-            <h1>Writings</h1>
-          </div>
-        </Header.Column>
+        <Header.Column></Header.Column>
       </Header.Root>
       <div className="p-4 pb-40">
         <RenderMdxBlockByPath category="writings" slug={slug} locale={locale} />

@@ -24,7 +24,7 @@ export const Info = ({ ...props }: ComponentProps<"div">) => {
 
 export const Links = ({ ...props }: ComponentProps<"div">) => {
   return (
-    <div {...props} className={cn("hidden lg:block", props.className)}>
+    <div {...props} className={cn("hidden md:block", props.className)}>
       <div>
         <Link href="/resume">Resume</Link>
       </div>

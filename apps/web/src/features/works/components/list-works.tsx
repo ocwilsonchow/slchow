@@ -14,9 +14,11 @@ const getPageDate = (date?: string | Date) => {
 
 export const ListWorks = async ({ locale, limit = 5 }: ListWorksProps) => {
   const t = await getTranslations("navigation")
-  const works = getCategoryPages("works", locale)
-    .sort((a, b) => getPageDate(b.data.date) - getPageDate(a.data.date))
-    .slice(0, limit)
+  const allWorks = getCategoryPages("works", locale).sort(
+    (a, b) => getPageDate(b.data.date) - getPageDate(a.data.date)
+  )
+  const hasMore = allWorks.length > limit
+  const works = allWorks.slice(0, limit)
 
   return (
     <div className="flex flex-col gap-2">
@@ -34,6 +36,13 @@ export const ListWorks = async ({ locale, limit = 5 }: ListWorksProps) => {
             </li>
           )
         })}
+        {hasMore ? (
+          <li>
+            <Link href="/works" className="inline-block opacity-50">
+              {t("listAll")}
+            </Link>
+          </li>
+        ) : null}
       </ul>
     </div>
   )
