@@ -1,0 +1,15 @@
+import type { OpenNextConfig } from "@opennextjs/aws/types/open-next"
+
+const config = {
+  default: {
+    override: {
+      tagCache: "dynamodb-lite",
+      incrementalCache: "s3-lite",
+      queue: "sqs-lite",
+      wrapper: "aws-lambda-streaming"
+
+    },
+  },
+} satisfies OpenNextConfig
+
+export default config

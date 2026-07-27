@@ -75,7 +75,7 @@ const Header = ({ className, ...props }: HTMLMotionProps<"div">) => {
     <motion.div
       {...props}
       className={cn(
-        "p-4 fixed bottom-0 inset-x-0 z-50 grid grid-cols-2 lg:grid-cols-3 pointer-events-auto",
+        "fixed bottom-0 inset-x-0 z-50 grid grid-cols-2 lg:grid-cols-3 pointer-events-auto",
         isOpen
           ? "text-content-ink-on-accent delay-0"
           : "text-content-ink delay-500",
@@ -201,7 +201,7 @@ const Trigger = (props: ComponentProps<"button">) => {
   return (
     <div className="w-full">
       <button
-        className={cn("h-6 text-left  w-full overflow-hidden")}
+        className={cn("p-4 text-left  w-full overflow-hidden")}
         {...props}
         onClick={() => setIsOpen(!isOpen)}
       >
@@ -495,7 +495,7 @@ export const RenderNavbar = () => {
         <Navbar.Header>
           <Navbar.Trigger />
           <div className="hidden lg:block"></div>
-          <div className="flex justify-end">
+          <div className="flex justify-end p-4">
             <Navbar.Time />
           </div>
         </Navbar.Header>

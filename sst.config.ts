@@ -9,7 +9,7 @@ export default $config({
       home: "aws",
       providers: {
         aws: {
-          profile: "ocwilsonchow",
+          profile: "sinlongchow",
           region: "ap-east-1",
         },
       },
