@@ -183,15 +183,13 @@ const listVariants: Variants = {
 const itemVariants: Variants = {
   close: {
     opacity: 0,
-    filter: "blur(2px)",
   },
   open: {
     opacity: 1,
-    filter: "blur(0px)",
     transition: {
       delay: 0.25,
       ease: "easeInOut",
-      duration: 0.5,
+      duration: 0.25,
     },
   },
 }
@@ -351,7 +349,7 @@ const ThemeSettings = (props: HTMLMotionProps<"div">) => {
               <div
                 onClick={() => setTheme(option.id)}
                 className={cn(
-                  "aspect-square border overflow-hidden w-3 flex"
+                  "aspect-square border rounded-full overflow-hidden w-3 flex"
                   // theme === option.id ? "outline-blue-500" : "outline-transparent"
                 )}
               >
@@ -386,8 +384,10 @@ const LanguageSettings = (props: HTMLMotionProps<"div">) => {
   const pathname = usePathname()
   const router = useRouter()
   const t = useTranslations("navigation")
+  const { setIsOpen } = useNavbar()
 
   const handleLocaleChange = (newLocale: Locale) => {
+    setIsOpen(false)
     router.replace(pathname, { locale: newLocale })
   }
 

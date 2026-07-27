@@ -12,7 +12,7 @@ export const ThemeProvider = ({
 }: ThemeProviderProps): ReactElement => (
   <NextThemeProvider
     attribute="class"
-    defaultTheme="system"
+    defaultTheme="dark"
     disableTransitionOnChange
     enableSystem
     // next-themes injects an inline <script> for FOUC prevention. React 19.2

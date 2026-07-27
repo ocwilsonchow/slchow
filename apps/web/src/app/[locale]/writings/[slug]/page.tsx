@@ -24,7 +24,7 @@ const Page = async ({ params }: Props) => {
           <h1>Writings</h1>
         </Header.Column>
       </Header.Root>
-      <div className="p-4">
+      <div className="p-4 pb-40">
         <RenderMdxBlockByPath category="writings" slug={slug} />
       </div>
     </PageLayout>

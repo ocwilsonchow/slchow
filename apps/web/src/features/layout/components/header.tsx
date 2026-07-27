@@ -29,7 +29,13 @@ export const Links = ({ ...props }: ComponentProps<"div">) => {
         <Link href="/resume">Resume</Link>
       </div>
       <div>
-        <Link href="https://github.com/ocwilsonchow">GitHub</Link>
+        <Link
+          href="https://github.com/ocwilsonchow"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          GitHub
+        </Link>
       </div>
     </div>
   )

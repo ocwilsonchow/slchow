@@ -4,7 +4,7 @@ import { ComponentProps } from "react"
 
 export function Pre({ className, ...props }: ComponentProps<"pre">) {
   return (
-    <div className="grid overflow-x-auto border relative">
+    <div className="grid overflow-x-auto border bg-surface-alpha border-stroke-soft rounded-lg relative">
       <button className="absolute top-3.5 right-3">
         <ClipboardIcon size={14} />
       </button>
