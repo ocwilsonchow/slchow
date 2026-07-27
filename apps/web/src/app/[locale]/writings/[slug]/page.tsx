@@ -22,15 +22,13 @@ const Page = async ({ params }: Props) => {
           <Link href="/writings">Back</Link>
         </Header.Column>
         <Header.Column>
-          <h1>Writings</h1>
+          <div>
+            <h1>Writings</h1>
+          </div>
         </Header.Column>
       </Header.Root>
       <div className="p-4 pb-40">
-        <RenderMdxBlockByPath
-          category="writings"
-          slug={slug}
-          locale={locale}
-        />
+        <RenderMdxBlockByPath category="writings" slug={slug} locale={locale} />
       </div>
     </PageLayout>
   )

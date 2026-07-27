@@ -4,14 +4,14 @@ import { Link } from "@/i18n/navigation"
 import { ArrowUpRight } from "lucide-react"
 
 export function MDXLink({ href, className, ...props }: ComponentProps<"a">) {
-  const classes = cn("inline-flex", className)
+  const classes = cn("inline-flex underline underline-offset-4 decoration-content-ink/25 hover:decoration-content-ink/50", className)
 
   if (!href) return <a className={classes} {...props} />
 
   const isExternal =
     href.startsWith("http://") ||
     href.startsWith("https://") ||
-    href.startsWith("mailto:") ||
+    // href.startsWith("mailto:") ||
     href.startsWith("#")
 
   if (isExternal) {

@@ -12,7 +12,10 @@ const getPageDate = (date?: string | Date) => {
   return new Date(date).getTime()
 }
 
-export const ListWritings = async ({ locale, limit = 5 }: ListWritingsProps) => {
+export const ListWritings = async ({
+  locale,
+  limit = 5,
+}: ListWritingsProps) => {
   const t = await getTranslations("navigation")
   const writings = getCategoryPages("writings", locale)
     .sort((a, b) => getPageDate(b.data.date) - getPageDate(a.data.date))
@@ -23,12 +26,14 @@ export const ListWritings = async ({ locale, limit = 5 }: ListWritingsProps) => 
       <h2>
         <Link href="/writings">{t("writings")}</Link>
       </h2>
-      <ul className="flex flex-col list-disc list-inside">
+      <ul className="grid list-disc list-inside">
         {writings.map((page) => {
           const slug = page.slugs.slice(1).join("/")
           return (
-            <li key={page.url}>
-              <Link href={`/writings/${slug}`}>{page.data.title}</Link>
+            <li key={page.url} className="">
+              <Link href={`/writings/${slug}`} className="inline-block py-0.5">
+                {page.data.title}
+              </Link>
             </li>
           )
         })}

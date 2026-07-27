@@ -28,7 +28,9 @@ export const ListWorks = async ({ locale, limit = 5 }: ListWorksProps) => {
           const slug = page.slugs.slice(1).join("/")
           return (
             <li key={page.url}>
-              <Link href={`/works/${slug}`}>{page.data.title}</Link>
+              <Link href={`/works/${slug}`} className="inline-block py-0.5">
+                {page.data.title}
+              </Link>
             </li>
           )
         })}

@@ -57,7 +57,7 @@ export function blockquote({
 }
 
 export function hr({ className, ...props }: ComponentProps<"hr">) {
-  return <hr className={cn("opacity-0 my-4", className)} {...props} />
+  return <hr className={cn("opacity-0 my-3", className)} {...props} />
 }
 
 export function code({ className, ...props }: ComponentProps<"code">) {

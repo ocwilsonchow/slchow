@@ -388,7 +388,10 @@ const LanguageSettings = (props: HTMLMotionProps<"div">) => {
 
   const handleLocaleChange = (newLocale: Locale) => {
     setIsOpen(false)
-    router.replace(pathname, { locale: newLocale })
+
+    setTimeout(() => {
+      router.replace(pathname, { locale: newLocale })
+    }, 550)
   }
 
   return (
