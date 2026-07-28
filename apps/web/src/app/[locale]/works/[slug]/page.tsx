@@ -1,13 +1,37 @@
 import type { Locale } from "next-intl"
+import type { Metadata } from "next"
 import { setRequestLocale } from "next-intl/server"
 import { PageLayout } from "@/features/layout/components/page"
 import { Header } from "@/features/layout/components/header"
 import { BackLink } from "@/features/layout/components/back-link"
 import { RenderMdxBlockByPath } from "@/features/mdx/components/render-mdx-block"
-import { getCategoryStaticParams } from "@/lib/source"
+import { getCategoryStaticParams, getMdxContent } from "@/lib/source"
 
 type Props = {
   params: Promise<{ locale: Locale; slug: string }>
+}
+
+export async function generateMetadata({ params }: Props): Promise<Metadata> {
+  const { locale, slug } = await params
+  const page = getMdxContent("works", slug, locale)
+  const title = page?.data.title ?? slug
+  const description = page?.data.description
+
+  return {
+    title,
+    description,
+    openGraph: {
+      type: "article",
+      title,
+      description,
+      locale,
+    },
+    twitter: {
+      card: "summary_large_image",
+      title,
+      description,
+    },
+  }
 }
 
 const Page = async ({ params }: Props) => {

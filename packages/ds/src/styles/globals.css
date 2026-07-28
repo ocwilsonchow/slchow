@@ -11,8 +11,9 @@
   --surface-canvas: #ffffff;
   --surface-canvas-inverse: #0f0f10;
   --surface-alpha: #3f3d3910;
+  --content-accent: #f0fb29;
   --content-ink: #3f3d39;
-  --content-body: #6E6E6E;
+  --content-body: #6e6e6e;
   --content-subdued: #796969;
   --content-ink-inverse: #ffffff;
   --content-ink-on-accent: #0f0f10;
@@ -25,9 +26,10 @@
   --surface-canvas: #121212;
   --surface-canvas-inverse: #ffffff;
   --surface-alpha: #fafafa10;
+  --content-accent: #f0fb29;
   --content-ink: #ffffff;
-  --content-body: #C1C1C1;
-  --content-subdued: #8A8A8A;
+  --content-body: #c1c1c1;
+  --content-subdued: #8a8a8a;
   --content-ink-inverse: #3f3d39;
   --content-ink-on-accent: #0f0f10;
   --stroke-soft: #fafafa20;
@@ -39,6 +41,7 @@
   --color-surface-canvas: var(--surface-canvas);
   --color-surface-canvas-inverse: var(--surface-canvas-inverse);
   --color-surface-alpha: var(--surface-alpha);
+  --color-content-accent: var(--content-accent);
   --color-content-ink: var(--content-ink);
   --color-content-body: var(--content-body);
   --color-content-subdued: var(--content-subdued);
