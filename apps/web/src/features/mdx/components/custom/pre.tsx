@@ -8,7 +8,10 @@ export function Pre({ className, ...props }: ComponentProps<"pre">) {
       <button className="absolute top-3.5 right-3">
         <ClipboardIcon size={14} />
       </button>
-      <pre className={cn("px-4 py-3", className)} {...props}>
+      <pre
+        className={cn("px-4 py-3 text-xs", className)}
+        {...props}
+      >
         {props.children}
       </pre>
     </div>

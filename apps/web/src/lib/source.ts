@@ -13,6 +13,7 @@ type DocsEntry = DocData &
   PageData & {
     author?: string
     date?: string | Date
+    pinned?: boolean
   }
 
 export const content = loader({

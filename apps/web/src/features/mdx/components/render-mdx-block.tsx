@@ -24,7 +24,7 @@ export const RenderMdxBlockByPath = ({
   return (
     <div
       {...props}
-      className={cn("space-y-4 grid", props.className)}
+      className={cn("space-y-3 grid max-w-prose", props.className)}
     >
       <MDX components={getMDXComponents()} />
     </div>

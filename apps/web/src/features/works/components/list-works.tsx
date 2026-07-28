@@ -1,6 +1,7 @@
 import { getTranslations } from "next-intl/server"
 import { Link } from "@/i18n/navigation"
 import { getCategoryPages } from "@/lib/source"
+import { AsteriskIcon } from "lucide-react"
 
 type ListWorksProps = {
   locale: string

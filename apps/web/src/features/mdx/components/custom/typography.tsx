@@ -2,19 +2,19 @@ import { cn } from "@repo/ds"
 import type { ComponentProps } from "react"
 
 export function h1({ className, ...props }: ComponentProps<"h1">) {
-  return <h1 className={cn("", className)} {...props} />
+  return <h1 className={cn("font-bold tracking-tight", className)} {...props} />
 }
 
 export function h2({ className, ...props }: ComponentProps<"h2">) {
-  return <h2 className={cn("", className)} {...props} />
+  return <h2 className={cn("font-bold tracking-tight", className)} {...props} />
 }
 
 export function h3({ className, ...props }: ComponentProps<"h3">) {
-  return <h3 className={cn("", className)} {...props} />
+  return <h3 className={cn("font-bold tracking-tight", className)} {...props} />
 }
 
 export function h4({ className, ...props }: ComponentProps<"h4">) {
-  return <h4 className={cn("", className)} {...props} />
+  return <h4 className={cn("font-bold tracking-tight", className)} {...props} />
 }
 
 export function h5({ className, ...props }: ComponentProps<"h5">) {
@@ -30,11 +30,24 @@ export function p({ className, ...props }: ComponentProps<"p">) {
 }
 
 export function ul({ className, ...props }: ComponentProps<"ul">) {
-  return <ul className={cn("list-disc list-inside", className)} {...props} />
+  return (
+    <ul
+      className={cn(
+        "list-disc list-outside ml-3.75 space-y-1 marker:text-content-ink/30",
+        className
+      )}
+      {...props}
+    />
+  )
 }
 
 export function ol({ className, ...props }: ComponentProps<"ol">) {
-  return <ol className={cn("list-decimal", className)} {...props} />
+  return (
+    <ol
+      className={cn("list-decimal list-outside ml-3.75 space-y-1", className)}
+      {...props}
+    />
+  )
 }
 
 export function li({ className, ...props }: ComponentProps<"li">) {
@@ -42,7 +55,12 @@ export function li({ className, ...props }: ComponentProps<"li">) {
 }
 
 export function strong({ className, ...props }: ComponentProps<"strong">) {
-  return <strong className={cn("text-content-ink font-medium", className)} {...props} />
+  return (
+    <strong
+      className={cn("text-content-ink font-medium", className)}
+      {...props}
+    />
+  )
 }
 
 export function em({ className, ...props }: ComponentProps<"em">) {

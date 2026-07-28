@@ -18,8 +18,8 @@ const Page = async ({ params }: Props) => {
 
   return (
     <PageLayout className="md:grid md:grid-cols-2 items-start">
-      <Header.Root>
-        <Header.Info />
+      <Header.Root className="flex flex-col md:h-screen">
+        <Header.Info className="" />
         <Header.Links />
       </Header.Root>
       <div>

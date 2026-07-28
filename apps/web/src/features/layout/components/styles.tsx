@@ -10,7 +10,7 @@ export const fontPresets = {
   aero: cn(
     FontAero.variable,
     FontAero.className,
-    "text-sm font-medium"
+    "text-sm font-medium leading-normal"
   ),
 }
 

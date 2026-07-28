@@ -9,6 +9,7 @@ export const docs = defineCollections({
   schema: pageSchema.extend({
     author: z.string().optional(),
     date: z.iso.date().or(z.date()).optional(),
+    pinned: z.boolean().optional(),
   }),
 });
 
