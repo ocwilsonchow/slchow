@@ -1,5 +1,6 @@
 import { Link } from "@/i18n/navigation"
 import { cn } from "@repo/ds"
+import { getTranslations } from "next-intl/server"
 import type { ComponentProps } from "react"
 
 export const Root = ({ ...props }: ComponentProps<"div">) => {
@@ -22,11 +23,19 @@ export const Info = ({ ...props }: ComponentProps<"div">) => {
   )
 }
 
-export const Links = ({ ...props }: ComponentProps<"div">) => {
+export const Links = async ({ ...props }: ComponentProps<"div">) => {
+  const t = await getTranslations("navigation")
+
   return (
     <div {...props} className={cn("hidden md:block", props.className)}>
       <div>
-        <Link href="/resume">Resume</Link>
+        <Link href="/resume">{t("resume")}</Link>
+      </div>
+      <div>
+        <Link href="/works">{t("works")}</Link>
+      </div>
+      <div>
+        <Link href="/writings">{t("writings")}</Link>
       </div>
       <div>
         <Link

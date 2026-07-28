@@ -440,7 +440,7 @@ const LinkBox = (props: HTMLMotionProps<"div">) => {
   return (
     <motion.div
       {...props}
-      className="lg:aspect-video w-full border-b grid pb-4"
+      className="lg:aspect-21/9 w-full border-b grid pb-4"
     />
   )
 }
@@ -465,18 +465,15 @@ export const RenderNavbar = () => {
               <LinkBox>
                 <Navbar.LinkItem href="/">{t("home")}</Navbar.LinkItem>
               </LinkBox>
-
+              <LinkBox>
+                <Navbar.LinkItem href="/resume">{t("resume")}</Navbar.LinkItem>
+              </LinkBox>
               <LinkBox>
                 <Navbar.LinkItem href="/works">{t("works")}</Navbar.LinkItem>
               </LinkBox>
               <LinkBox>
                 <Navbar.LinkItem href="/writings">
                   {t("writings")}
-                </Navbar.LinkItem>
-              </LinkBox>
-              <LinkBox>
-                <Navbar.LinkItem href="/contact">
-                  {t("contact")}
                 </Navbar.LinkItem>
               </LinkBox>
             </motion.ul>
