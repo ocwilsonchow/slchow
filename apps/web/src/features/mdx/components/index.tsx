@@ -17,6 +17,7 @@ import {
   strong,
   ul,
 } from "./custom/typography"
+import { MotionCollections } from "@/features/motion/components/collections"
 
 export function getMDXComponents(components?: MDXComponents): MDXComponents {
   return {
@@ -38,5 +39,6 @@ export function getMDXComponents(components?: MDXComponents): MDXComponents {
     strong,
     ul,
     pre: Pre,
+    MotionCollections,
   }
 }

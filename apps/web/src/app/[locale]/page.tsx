@@ -41,9 +41,6 @@ const Page = async ({ params }: Props) => {
             <ListWritings locale={locale} />
           </section>
         </div>
-        <section className="h-[300vh]">
-          <div className="h-screen sticky top-0 p-5">sticky</div>
-        </section>
       </div>
     </PageLayout>
   )
