@@ -26,7 +26,10 @@ export const ListWritings = async ({
   return (
     <div className="flex flex-col gap-2">
       <h2>
-        <Link href="/writings">{t("writings")}</Link>
+        <Link href="/writings">
+          {t("writings")}{" "}
+          <sup className="text-content-subdued">{allWritings.length}</sup>
+        </Link>
       </h2>
       <ul className="grid list-disc list-inside">
         {writings.map((page) => {
@@ -48,8 +51,7 @@ export const ListWritings = async ({
               href="/writings"
               className="inline-block py-px text-content-subdued hover:text-content-ink/75"
             >
-              {t("listMore")}{" "}
-              <span className="text-xs">({allWritings.length - limit}+)</span>
+              {t("listAll")}{" "}
             </Link>
           </li>
         ) : null}

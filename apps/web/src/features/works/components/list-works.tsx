@@ -24,7 +24,10 @@ export const ListWorks = async ({ locale, limit = 5 }: ListWorksProps) => {
   return (
     <div className="flex flex-col gap-2">
       <h2>
-        <Link href="/works">{t("works")}</Link>
+        <Link href="/works">
+          {t("works")}{" "}
+          <sup className="text-content-subdued">{allWorks.length}</sup>
+        </Link>
       </h2>
       <ul className="flex flex-col list-disc list-inside">
         {works.map((page) => {
@@ -51,8 +54,7 @@ export const ListWorks = async ({ locale, limit = 5 }: ListWorksProps) => {
               href="/works"
               className="inline-block py-px text-content-subdued hover:text-content-ink/75"
             >
-              {t("listMore")}{" "}
-              <span className="text-xs">({allWorks.length - limit}+)</span>
+              {t("listAll")}
             </Link>
           </li>
         ) : null}

@@ -31,7 +31,7 @@ const Page = async ({ params }: Props) => {
           </Link>
         </Header.Column>
         <Header.Column className="mt-10 lg:mt-0 grid gap-5">
-          <h1 className="font-semibold tracking-tight">Resume</h1>
+          <h1 className="font-semibold tracking-tight text-content-ink">Resume</h1>
           <Toc toc={toc} />
         </Header.Column>
       </Header.Root>

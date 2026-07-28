@@ -57,7 +57,7 @@ export function li({ className, ...props }: ComponentProps<"li">) {
 export function strong({ className, ...props }: ComponentProps<"strong">) {
   return (
     <strong
-      className={cn("text-content-ink font-medium", className)}
+      className={cn("text-content-ink font-semibold", className)}
       {...props}
     />
   )

@@ -82,7 +82,8 @@ export const Toc = ({ toc }: { toc: TOCItemType[] }) => {
 
         // Keep the click selection until the user scrolls away from the settle position.
         if (
-          Math.abs(window.scrollY - lockScrollYRef.current) < LOCK_SCROLL_TOLERANCE
+          Math.abs(window.scrollY - lockScrollYRef.current) <
+          LOCK_SCROLL_TOLERANCE
         ) {
           setActiveId(lockedId)
           return
@@ -122,7 +123,10 @@ export const Toc = ({ toc }: { toc: TOCItemType[] }) => {
           >
             <a
               href={item.url}
-              className={cn("block opacity-50", active && "opacity-100")}
+              className={cn(
+                "block text-content-subdued/75",
+                active && "text-content-ink"
+              )}
               aria-current={active ? "location" : undefined}
               onClick={() => {
                 lockedIdRef.current = id
