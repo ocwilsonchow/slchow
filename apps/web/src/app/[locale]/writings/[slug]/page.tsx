@@ -4,8 +4,9 @@ import { PageLayout } from "@/features/layout/components/page"
 import { Header } from "@/features/layout/components/header"
 import { Link } from "@/i18n/navigation"
 import { RenderMdxBlockByPath } from "@/features/mdx/components/render-mdx-block"
-import { getWritingsStaticParams } from "@/lib/source"
+import { getMdxContent, getWritingsStaticParams } from "@/lib/source"
 import { CornerDownLeftIcon } from "lucide-react"
+import { Toc } from "@/features/mdx/components/toc"
 
 type Props = {
   params: Promise<{ locale: Locale; slug: string }>
@@ -18,6 +19,9 @@ const Page = async ({ params }: Props) => {
 
   const t = await getTranslations("navigation")
 
+  const page = getMdxContent("writings", slug, locale)
+  const toc = page?.data.toc ?? []
+
   return (
     <PageLayout className="grid lg:grid-cols-2 content-start items-start">
       <Header.Root>
@@ -27,7 +31,9 @@ const Page = async ({ params }: Props) => {
             {t("back")}
           </Link>
         </Header.Column>
-        <Header.Column></Header.Column>
+        <Header.Column>
+          <Toc toc={toc} />
+        </Header.Column>
       </Header.Root>
       <div className="p-5 pb-40">
         <RenderMdxBlockByPath category="writings" slug={slug} locale={locale} />
