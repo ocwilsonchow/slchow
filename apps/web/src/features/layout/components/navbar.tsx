@@ -347,7 +347,7 @@ const ThemeSettings = (props: HTMLMotionProps<"div">) => {
               <div
                 onClick={() => setTheme(option.id)}
                 className={cn(
-                  "aspect-square border rounded-full overflow-hidden w-3 flex"
+                  "aspect-square border-2 rounded-full overflow-hidden w-4 flex"
                   // theme === option.id ? "outline-blue-500" : "outline-transparent"
                 )}
               >

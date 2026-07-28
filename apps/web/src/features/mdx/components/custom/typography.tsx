@@ -2,27 +2,27 @@ import { cn } from "@repo/ds"
 import type { ComponentProps } from "react"
 
 export function h1({ className, ...props }: ComponentProps<"h1">) {
-  return <h1 className={cn("font-bold tracking-tight", className)} {...props} />
+  return <h1 className={cn("font-semibold tracking-tight text-content-ink", className)} {...props} />
 }
 
 export function h2({ className, ...props }: ComponentProps<"h2">) {
-  return <h2 className={cn("font-bold tracking-tight", className)} {...props} />
+  return <h2 className={cn("font-semibold tracking-tight text-content-ink", className)} {...props} />
 }
 
 export function h3({ className, ...props }: ComponentProps<"h3">) {
-  return <h3 className={cn("font-bold tracking-tight", className)} {...props} />
+  return <h3 className={cn("font-semibold tracking-tight text-content-ink", className)} {...props} />
 }
 
 export function h4({ className, ...props }: ComponentProps<"h4">) {
-  return <h4 className={cn("font-bold tracking-tight", className)} {...props} />
+  return <h4 className={cn("font-semibold tracking-tight text-content-ink", className)} {...props} />
 }
 
 export function h5({ className, ...props }: ComponentProps<"h5">) {
-  return <h5 className={cn("", className)} {...props} />
+  return <h5 className={cn("text-content-ink", className)} {...props} />
 }
 
 export function h6({ className, ...props }: ComponentProps<"h6">) {
-  return <h6 className={cn("", className)} {...props} />
+  return <h6 className={cn("text-content-ink", className)} {...props} />
 }
 
 export function p({ className, ...props }: ComponentProps<"p">) {

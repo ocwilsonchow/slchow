@@ -35,7 +35,7 @@ export const ListWritings = async ({
             <li key={page.url} className="">
               <Link
                 href={`/writings/${slug}`}
-                className="inline-block text-content-ink py-0.5"
+                className="inline-block text-content-ink py-px"
               >
                 {page.data.title}
               </Link>
@@ -46,9 +46,10 @@ export const ListWritings = async ({
           <li>
             <Link
               href="/writings"
-              className="inline-block py-0.5 text-content-subdued hover:text-content-ink/75"
+              className="inline-block py-px text-content-subdued hover:text-content-ink/75"
             >
-              {t("listMore")} <span className="text-xs">({allWritings.length - limit}+)</span>
+              {t("listMore")}{" "}
+              <span className="text-xs">({allWritings.length - limit}+)</span>
             </Link>
           </li>
         ) : null}
