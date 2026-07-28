@@ -1,2 +1,12 @@
 @import "../../../../packages/ds/src/styles/globals.css";
 @source "../**/*.{ts,tsx}";
+
+.shiki code span {
+  color: var(--shiki-light);
+  font-style: var(--shiki-light-font-style);
+}
+
+.dark .shiki code span {
+  color: var(--shiki-dark);
+  font-style: var(--shiki-dark-font-style);
+}

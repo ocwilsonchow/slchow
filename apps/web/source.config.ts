@@ -13,4 +13,13 @@ export const docs = defineCollections({
   }),
 });
 
-export default defineConfig();
+export default defineConfig({
+  mdxOptions: {
+    rehypeCodeOptions: {
+      themes: {
+        light: "github-light",
+        dark: "vesper",
+      },
+    },
+  },
+});
