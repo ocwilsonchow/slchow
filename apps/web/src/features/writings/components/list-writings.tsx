@@ -48,7 +48,7 @@ export const ListWritings = async ({
               href="/writings"
               className="inline-block py-0.5 text-content-subdued hover:text-content-ink/75"
             >
-              {t("listMore")} ({allWritings.length - limit}+)
+              {t("listMore")} <span className="text-xs">({allWritings.length - limit}+)</span>
             </Link>
           </li>
         ) : null}

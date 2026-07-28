@@ -51,7 +51,7 @@ export const ListWorks = async ({ locale, limit = 5 }: ListWorksProps) => {
               href="/works"
               className="inline-block py-0.5 text-content-subdued hover:text-content-ink/75"
             >
-              {t("listMore")} ({allWorks.length - limit}+)
+              {t("listMore")} <span className="text-xs">({allWorks.length - limit}+)</span>
             </Link>
           </li>
         ) : null}
