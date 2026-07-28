@@ -78,7 +78,7 @@ const Header = ({ className, ...props }: HTMLMotionProps<"div">) => {
         "fixed bottom-0 inset-x-0 z-50 grid grid-cols-2 lg:grid-cols-3 pointer-events-auto",
         isOpen
           ? "text-content-ink-on-accent delay-0"
-          : "text-content-ink delay-500",
+          : "text-content-body delay-500",
         className,
         fontPresets.mono
       )}
@@ -201,7 +201,7 @@ const Trigger = (props: ComponentProps<"button">) => {
   return (
     <div className="w-full">
       <button
-        className={cn("p-4 text-left  w-full overflow-hidden")}
+        className={cn("p-5 text-left w-full overflow-hidden")}
         {...props}
         onClick={() => setIsOpen(!isOpen)}
       >
@@ -458,10 +458,10 @@ export const RenderNavbar = () => {
         <Navbar.Content>
           <motion.div
             variants={Navbar.Variants.container}
-            className="p-4 grid lg:grid-cols-2 border-t content-between lg:content-start gap-4 pb-20"
+            className="p-5 grid lg:grid-cols-2 border-t content-between lg:content-start gap-5 pb-20"
           >
             <motion.ul
-              className="grid grid-cols-2 gap-4"
+              className="grid grid-cols-2 gap-5"
               variants={Navbar.Variants.item}
             >
               <LinkBox>
@@ -484,7 +484,7 @@ export const RenderNavbar = () => {
             </motion.ul>
             <motion.div
               variants={Navbar.Variants.item}
-              className="grid lg:grid-cols-2 gap-4"
+              className="grid lg:grid-cols-2 gap-5"
             >
               <LinkBox>
                 <Navbar.ThemeSettings />
@@ -498,7 +498,7 @@ export const RenderNavbar = () => {
         <Navbar.Header>
           <Navbar.Trigger />
           <div className="hidden lg:block"></div>
-          <div className="flex justify-end p-4">
+          <div className="flex justify-end p-5">
             <Navbar.Time />
           </div>
         </Navbar.Header>

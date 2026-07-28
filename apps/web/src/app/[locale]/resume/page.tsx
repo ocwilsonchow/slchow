@@ -30,7 +30,7 @@ const Page = async ({ params }: Props) => {
           <h1>Resume</h1>
         </Header.Column>
       </Header.Root>
-      <div className="p-4">
+      <div className="p-5 pb-40">
         <RenderMdxBlockByPath
           category="blocks"
           slug="resume"

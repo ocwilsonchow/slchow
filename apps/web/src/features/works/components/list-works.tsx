@@ -30,16 +30,24 @@ export const ListWorks = async ({ locale, limit = 5 }: ListWorksProps) => {
           const slug = page.slugs.slice(1).join("/")
           return (
             <li key={page.url}>
-              <Link href={`/works/${slug}`} className="inline-block">
-                {page.data.title}
+              <Link
+                href={`/works/${slug}`}
+                className="inline-block text-content-ink"
+              >
+                {page.data.title}{" "}
+                {page.data.description && (
+                  <span className="text-content-body">
+                    - {page.data.description}
+                  </span>
+                )}
               </Link>
             </li>
           )
         })}
         {hasMore ? (
           <li>
-            <Link href="/works" className="inline-block opacity-50">
-              {t("listAll")}
+            <Link href="/works" className="inline-block text-content-subdued">
+              {t("listMore")} ({allWorks.length - limit}+)
             </Link>
           </li>
         ) : null}

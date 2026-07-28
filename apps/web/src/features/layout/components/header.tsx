@@ -7,7 +7,7 @@ export const Root = ({ ...props }: ComponentProps<"div">) => {
     <div
       {...props}
       className={cn(
-        "lg:grid lg:grid-cols-2 space-y-4 lg:sticky lg:top-0 p-4",
+        "lg:grid lg:grid-cols-2 space-y-4 lg:sticky lg:top-0 p-5",
         props.className
       )}
     />
@@ -16,7 +16,7 @@ export const Root = ({ ...props }: ComponentProps<"div">) => {
 
 export const Info = ({ ...props }: ComponentProps<"div">) => {
   return (
-    <div {...props} className={cn("", props.className)}>
+    <div {...props} className={cn("text-content-ink", props.className)}>
       <Link href="/">Wilson Chow</Link>
     </div>
   )

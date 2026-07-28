@@ -17,22 +17,32 @@ const Page = async ({ params }: Props) => {
   setRequestLocale(locale)
 
   return (
-    <PageLayout className="md:grid md:grid-cols-2 md:space-y-20">
-      <Header.Root>
-        <Header.Info />
-        <Header.Links />
-      </Header.Root>
-      <div className="p-4 space-y-4">
-        <RenderMdxBlockByPath
-          category="blocks"
-          slug="introduction"
-          locale={locale}
-        />
-        <Divider />
-        <ListWorks locale={locale} />
-        <Divider />
-        <ListWritings locale={locale} />
+    <PageLayout>
+      <div className="md:grid md:grid-cols-2">
+        <Header.Root>
+          <Header.Info />
+          <Header.Links />
+        </Header.Root>
+        <div className="min-h-dvh">
+          <section id="introduction" className="p-5 min-h-dvh sm:min-h-fit">
+            <RenderMdxBlockByPath
+              category="blocks"
+              slug="introduction"
+              locale={locale}
+            />
+            <Divider />
+          </section>
+          <section
+            id="works-and-writings"
+            className="p-5 min-h-dvh sm:min-h-fit"
+          >
+            <ListWorks locale={locale} />
+            <Divider />
+            <ListWritings locale={locale} />
+          </section>
+        </div>
       </div>
+      <div className="min-h-screen"></div>
     </PageLayout>
   )
 }

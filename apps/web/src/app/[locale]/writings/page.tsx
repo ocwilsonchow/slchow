@@ -28,7 +28,7 @@ const Page = async ({ params }: Props) => {
         </Header.Column>
         <Header.Column></Header.Column>
       </Header.Root>
-      <div className="p-4">
+      <div className="p-5">
         <ListWritings locale={locale} limit={Infinity} />
       </div>
     </PageLayout>

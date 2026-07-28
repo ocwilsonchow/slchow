@@ -19,7 +19,7 @@ const Page = async ({ params }: Props) => {
           <h1>Contact</h1>
         </Header.Column>
       </Header.Root>
-      <div className="p-4"></div>
+      <div className="p-5"></div>
     </PageLayout>
   )
 }

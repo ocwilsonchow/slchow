@@ -33,7 +33,10 @@ export const ListWritings = async ({
           const slug = page.slugs.slice(1).join("/")
           return (
             <li key={page.url} className="">
-              <Link href={`/writings/${slug}`} className="inline-block">
+              <Link
+                href={`/writings/${slug}`}
+                className="inline-block text-content-ink"
+              >
                 {page.data.title}
               </Link>
             </li>
@@ -41,8 +44,11 @@ export const ListWritings = async ({
         })}
         {hasMore ? (
           <li>
-            <Link href="/writings" className="inline-block opacity-50">
-              {t("listAll")}
+            <Link
+              href="/writings"
+              className="inline-block text-content-subdued"
+            >
+              {t("listMore")} ({allWritings.length - limit}+)
             </Link>
           </li>
         ) : null}

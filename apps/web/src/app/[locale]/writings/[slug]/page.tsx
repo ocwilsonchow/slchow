@@ -29,7 +29,7 @@ const Page = async ({ params }: Props) => {
         </Header.Column>
         <Header.Column></Header.Column>
       </Header.Root>
-      <div className="p-4 pb-40">
+      <div className="p-5 pb-40">
         <RenderMdxBlockByPath category="writings" slug={slug} locale={locale} />
       </div>
     </PageLayout>

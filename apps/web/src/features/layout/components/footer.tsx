@@ -22,12 +22,12 @@ export const RenderFooter = () => {
       <div className="flex-1"></div>
       <div className="h-px bg-stroke-soft" />
       <div className="grid lg:grid-cols-4">
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-5">
           © {new Date().getFullYear()} Wilson Chow
         </div>
         <div></div>
         <div></div>
-        <div className="flex items-center lg:justify-end gap-4">
+        <div className="flex items-center lg:justify-end gap-5">
           <div>Github</div>
           <div>Instagram</div>
           <div>LinkedIn</div>

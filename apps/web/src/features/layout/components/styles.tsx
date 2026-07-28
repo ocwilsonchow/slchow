@@ -5,7 +5,7 @@ export const fontPresets = {
   mono: cn(
     FontMono.variable,
     FontMono.className,
-    "text-xs font-semibold leading-normal"
+    "text-sm font-medium "
   ),
 }
 
