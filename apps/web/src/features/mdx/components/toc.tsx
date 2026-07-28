@@ -1,11 +1,17 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { cn } from "@repo/ds"
 import type { TOCItemType } from "fumadocs-core/toc"
 
 /** Scroll progress (0–1) after which the activation line starts moving toward the viewport bottom. */
 const BOTTOM_ZONE = 0.75
+
+/** Ignore tiny scroll deltas when deciding the click-lock has been released. */
+const LOCK_SCROLL_TOLERANCE = 16
+
+/** Wait for Lenis / hash scroll to settle before capturing the lock scroll position. */
+const CLICK_SETTLE_MS = 500
 
 function getHeadingId(url: string) {
   return url.startsWith("#") ? url.slice(1) : url
@@ -57,12 +63,35 @@ export const Toc = ({ toc }: { toc: TOCItemType[] }) => {
   const [activeId, setActiveId] = useState(() =>
     getHeadingId(items[0]?.url ?? "")
   )
+  const lockedIdRef = useRef<string | null>(null)
+  const lockScrollYRef = useRef<number | null>(null)
+  const settleTimerRef = useRef<number | null>(null)
 
   useEffect(() => {
     const filtered = toc.filter((item) => item.depth !== 1)
     if (filtered.length === 0) return
 
     const update = () => {
+      const lockedId = lockedIdRef.current
+      if (lockedId) {
+        // Still animating to the clicked heading — keep it active.
+        if (lockScrollYRef.current === null) {
+          setActiveId(lockedId)
+          return
+        }
+
+        // Keep the click selection until the user scrolls away from the settle position.
+        if (
+          Math.abs(window.scrollY - lockScrollYRef.current) < LOCK_SCROLL_TOLERANCE
+        ) {
+          setActiveId(lockedId)
+          return
+        }
+
+        lockedIdRef.current = null
+        lockScrollYRef.current = null
+      }
+
       setActiveId(getActiveHeadingId(filtered, getActivationOffset()))
     }
 
@@ -73,11 +102,14 @@ export const Toc = ({ toc }: { toc: TOCItemType[] }) => {
     return () => {
       window.removeEventListener("scroll", update)
       window.removeEventListener("resize", update)
+      if (settleTimerRef.current !== null) {
+        window.clearTimeout(settleTimerRef.current)
+      }
     }
   }, [toc])
 
   return (
-    <ul className="hidden lg:grid gap-0.5 text-xs">
+    <ul className="hidden lg:grid gap-0.75 text-xs">
       {items.map((item) => {
         const id = getHeadingId(item.url)
         const active = id === activeId
@@ -92,6 +124,20 @@ export const Toc = ({ toc }: { toc: TOCItemType[] }) => {
               href={item.url}
               className={cn("block opacity-50", active && "opacity-100")}
               aria-current={active ? "location" : undefined}
+              onClick={() => {
+                lockedIdRef.current = id
+                lockScrollYRef.current = null
+                setActiveId(id)
+
+                if (settleTimerRef.current !== null) {
+                  window.clearTimeout(settleTimerRef.current)
+                }
+                settleTimerRef.current = window.setTimeout(() => {
+                  if (lockedIdRef.current === id) {
+                    lockScrollYRef.current = window.scrollY
+                  }
+                }, CLICK_SETTLE_MS)
+              }}
             >
               {item.title}
             </a>

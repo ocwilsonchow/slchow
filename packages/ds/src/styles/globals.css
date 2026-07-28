@@ -63,5 +63,10 @@
     @apply text-content-body border-stroke-soft divide-stroke-soft bg-surface-canvas;
     overscroll-behavior: none;
     scrollbar-gutter: stable;
+    scroll-padding-top: 5rem;
+  }
+
+  :is(h1, h2, h3, h4, h5, h6)[id] {
+    scroll-margin-top: 5rem;
   }
 }
