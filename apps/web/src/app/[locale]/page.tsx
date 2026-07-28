@@ -17,13 +17,13 @@ const Page = async ({ params }: Props) => {
   setRequestLocale(locale)
 
   return (
-    <PageLayout>
-      <div className="md:grid md:grid-cols-2">
-        <Header.Root>
-          <Header.Info />
-          <Header.Links />
-        </Header.Root>
-        <div className="min-h-dvh">
+    <PageLayout className="md:grid md:grid-cols-2 items-start">
+      <Header.Root>
+        <Header.Info />
+        <Header.Links />
+      </Header.Root>
+      <div>
+        <div className="min-h-screen">
           <section id="introduction" className="p-5 min-h-dvh sm:min-h-fit">
             <RenderMdxBlockByPath
               category="blocks"
@@ -41,8 +41,10 @@ const Page = async ({ params }: Props) => {
             <ListWritings locale={locale} />
           </section>
         </div>
+        <section className="h-[300vh]">
+          <div className="h-screen sticky top-0 p-5">sticky</div>
+        </section>
       </div>
-      <div className="min-h-screen"></div>
     </PageLayout>
   )
 }

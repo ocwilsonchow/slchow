@@ -7,7 +7,7 @@ export const Root = (props: HTMLMotionProps<"footer">) => {
   return (
     <motion.footer
       {...props}
-      className={cn("p-5 min-h-[50vh] gap-5 flex flex-col text-xs uppercase")}
+      className={cn("p-5 min-h-[50vh] gap-5 flex flex-col text-xs")}
     />
   )
 }

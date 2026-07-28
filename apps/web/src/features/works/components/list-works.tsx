@@ -32,7 +32,7 @@ export const ListWorks = async ({ locale, limit = 5 }: ListWorksProps) => {
             <li key={page.url}>
               <Link
                 href={`/works/${slug}`}
-                className="inline-block text-content-ink"
+                className="inline-block text-content-ink py-px"
               >
                 {page.data.title}{" "}
                 {page.data.description && (
@@ -46,7 +46,7 @@ export const ListWorks = async ({ locale, limit = 5 }: ListWorksProps) => {
         })}
         {hasMore ? (
           <li>
-            <Link href="/works" className="inline-block text-content-subdued">
+            <Link href="/works" className="inline-block py-px text-content-subdued hover:text-content-ink/75">
               {t("listMore")} ({allWorks.length - limit}+)
             </Link>
           </li>

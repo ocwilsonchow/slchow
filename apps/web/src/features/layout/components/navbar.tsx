@@ -76,11 +76,9 @@ const Header = ({ className, ...props }: HTMLMotionProps<"div">) => {
       {...props}
       className={cn(
         "fixed bottom-0 inset-x-0 z-50 grid grid-cols-2 lg:grid-cols-3 pointer-events-auto",
-        isOpen
-          ? "text-content-ink-on-accent delay-0"
-          : "text-content-body delay-500",
+        isOpen ? "text-content-ink-on-accent delay-0" : "delay-500",
         className,
-        fontPresets.mono
+        fontPresets.aero
       )}
     >
       {props.children}
@@ -142,7 +140,7 @@ const Content = (props: HTMLMotionProps<"div">) => {
         "overflow-hidden grid",
         "bg-surface-canvas text-content-ink",
         "bg-accent-surface-canvas text-content-ink-on-accent",
-        fontPresets.mono
+        fontPresets.aero
       )}
     >
       {props.children}
@@ -402,7 +400,7 @@ const LanguageSettings = (props: HTMLMotionProps<"div">) => {
           <Fragment key={option.id}>
             <button
               className={cn(
-                "uppercase",
+                "",
                 currentLocale === option.id ? "opacity-100" : "opacity-50"
               )}
               onClick={() => handleLocaleChange(option.id)}

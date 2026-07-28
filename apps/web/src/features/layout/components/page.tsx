@@ -19,7 +19,7 @@ export const PageLayout = (props: HTMLMotionProps<"div">) => {
         duration: 0.3,
         ease: "easeInOut",
       }}
-      className={cn("min-h-dvh", props.className)}
+      className={cn("", props.className)}
     />
   )
 }

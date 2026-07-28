@@ -18,7 +18,7 @@ const Page = async ({ params }: Props) => {
   const t = await getTranslations("navigation")
 
   return (
-    <PageLayout className="grid lg:grid-cols-2 items-start">
+    <PageLayout className="grid lg:grid-cols-2 items-start content-start">
       <Header.Root>
         <Header.Column>
           <Link href="/">
