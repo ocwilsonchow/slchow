@@ -26,7 +26,7 @@ const Page = async ({ params }: Props) => {
             {t("back")}
           </Link>
         </Header.Column>
-        <Header.Column>
+        <Header.Column className="mt-10 lg:mt-0">
           <h1>Resume</h1>
         </Header.Column>
       </Header.Root>
