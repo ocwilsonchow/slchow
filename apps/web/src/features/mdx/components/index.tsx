@@ -18,6 +18,12 @@ import {
   ul,
 } from "./custom/typography"
 import { MotionCollections } from "@/features/motion/components/collections"
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@repo/ds/components/ui/accordion"
 
 export function getMDXComponents(components?: MDXComponents): MDXComponents {
   return {
@@ -40,5 +46,9 @@ export function getMDXComponents(components?: MDXComponents): MDXComponents {
     ul,
     pre: Pre,
     MotionCollections,
+    Accordion,
+    AccordionItem,
+    AccordionTrigger,
+    AccordionContent,
   }
 }

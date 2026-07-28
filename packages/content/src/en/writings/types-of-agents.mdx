@@ -1,0 +1,104 @@
+---
+title: Types of AI Agents
+description: A note on the different types of AI agents
+---
+
+When choosing an **agent architecture**, it's important to understand the standard taxonomy.
+
+---
+
+## Types of AI Agents
+
+The following AI agent types map roughly to increasing complexity and autonomy:
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="simple-reflex">
+    <AccordionTrigger>Simple reflex agents</AccordionTrigger>
+    <AccordionContent>
+
+Map inputs to outputs using condition-action rules. No memory, no world model, no planning.
+
+**Example:** Email spam filter, Alexa skill responding to a wake word
+
+**When to use:** Structured, repeatable decisions where state is fully observable
+
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="model-based-reflex">
+    <AccordionTrigger>Model-based reflex agents</AccordionTrigger>
+    <AccordionContent>
+
+Maintain an internal model of the world, updated as new data arrives. Act under partial observability.
+
+**Example:** Warehouse robots inferring shelf contents from partial sensor data
+
+**When to use:** Environments where you can't observe full state at each step
+
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="goal-based">
+    <AccordionTrigger>Goal-based agents</AccordionTrigger>
+    <AccordionContent>
+
+Evaluate possible actions against a desired outcome and select the path most likely to achieve it.
+
+**Example:** A logistics AI agent rerouting deliveries based on traffic and weather
+
+**When to use:** Tasks with clear outcomes and multiple possible paths
+
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="utility-based">
+    <AccordionTrigger>Utility-based agents</AccordionTrigger>
+    <AccordionContent>
+
+Assign a score to each potential outcome and optimize for the highest utility.
+
+**Example:** Dynamic pricing systems balancing revenue, inventory levels, and competitor activity
+
+**When to use:** Multiple paths reach the goal and you need tradeoff reasoning
+
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="learning">
+    <AccordionTrigger>Learning agents</AccordionTrigger>
+    <AccordionContent>
+
+Improve performance over time by analyzing feedback from their own actions. Often use reinforcement learning or machine learning.
+
+**Example:** Fraud detection agents that learn to flag new attack methods from evolving threats
+
+**When to use:** Environments where patterns shift and the AI agent must adapt
+
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="multi-agent">
+    <AccordionTrigger>Multi-agent systems</AccordionTrigger>
+    <AccordionContent>
+
+Multiple specialized AI agents coordinate to solve tasks no individual agent could handle. Can use hierarchical agents with a supervisor or peer-to-peer topologies.
+
+**Example:** Orchestrated customer support, research, and sales pipelines
+
+**When to use:** Problems that genuinely require coordination across specialized roles
+
+    </AccordionContent>
+
+  </AccordionItem>
+</Accordion>
+
+---
+
+## References
+
+- [AI agent examples: Real-world use cases across industries](https://mastra.ai/articles/ai-agent-examples)

@@ -361,7 +361,9 @@ const ThemeSettings = (props: HTMLMotionProps<"div">) => {
               </div>
               <div
                 className={cn(
-                  theme === option.id ? "opacity-100" : "opacity-50"
+                  theme === option.id
+                    ? "opacity-100 underline underline-offset-4"
+                    : "opacity-50"
                 )}
               >
                 {t(option.labelKey)}
@@ -400,8 +402,9 @@ const LanguageSettings = (props: HTMLMotionProps<"div">) => {
           <Fragment key={option.id}>
             <button
               className={cn(
-                "",
-                currentLocale === option.id ? "opacity-100" : "opacity-50"
+                currentLocale === option.id
+                  ? "opacity-100 underline underline-offset-4"
+                  : "opacity-50"
               )}
               onClick={() => handleLocaleChange(option.id)}
             >
@@ -482,10 +485,10 @@ export const RenderNavbar = () => {
               className="grid lg:grid-cols-2 gap-5"
             >
               <LinkBox>
-                <Navbar.ThemeSettings />
+                <Navbar.LanguageSettings />
               </LinkBox>
               <LinkBox>
-                <Navbar.LanguageSettings />
+                <Navbar.ThemeSettings />
               </LinkBox>
             </motion.div>
           </motion.div>

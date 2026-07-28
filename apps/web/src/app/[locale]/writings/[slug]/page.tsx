@@ -1,11 +1,10 @@
 import type { Locale } from "next-intl"
-import { getTranslations, setRequestLocale } from "next-intl/server"
+import { setRequestLocale } from "next-intl/server"
 import { PageLayout } from "@/features/layout/components/page"
 import { Header } from "@/features/layout/components/header"
-import { Link } from "@/i18n/navigation"
+import { BackLink } from "@/features/layout/components/back-link"
 import { RenderMdxBlockByPath } from "@/features/mdx/components/render-mdx-block"
 import { getMdxContent, getWritingsStaticParams } from "@/lib/source"
-import { CornerDownLeftIcon } from "lucide-react"
 import { Toc } from "@/features/mdx/components/toc"
 
 type Props = {
@@ -17,8 +16,6 @@ const Page = async ({ params }: Props) => {
 
   setRequestLocale(locale)
 
-  const t = await getTranslations("navigation")
-
   const page = getMdxContent("writings", slug, locale)
   const toc = page?.data.toc ?? []
 
@@ -26,12 +23,17 @@ const Page = async ({ params }: Props) => {
     <PageLayout className="grid lg:grid-cols-2 content-start items-start">
       <Header.Root>
         <Header.Column>
-          <Link href="/writings">
-            <CornerDownLeftIcon size={10} className="inline-block mr-1.5" />
-            {t("back")}
-          </Link>
+          <BackLink href="/writings" />
         </Header.Column>
-        <Header.Column>
+        <Header.Column className="grid gap-5">
+          <div className="mt-5 lg:mt-0">
+            <h1 className="font-semibold tracking-tight text-content-ink">
+              {page?.data.title}
+            </h1>
+            {page?.data.description && (
+              <p className="text-content-subdued">{page?.data.description}</p>
+            )}
+          </div>
           <Toc toc={toc} />
         </Header.Column>
       </Header.Root>

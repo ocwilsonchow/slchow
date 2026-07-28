@@ -26,7 +26,7 @@
   --surface-canvas-inverse: #ffffff;
   --surface-alpha: #fafafa10;
   --content-ink: #ffffff;
-  --content-body: #BFBFBF;
+  --content-body: #C1C1C1;
   --content-subdued: #8A8A8A;
   --content-ink-inverse: #3f3d39;
   --content-ink-on-accent: #0f0f10;
@@ -46,6 +46,27 @@
   --color-content-ink-on-accent: var(--content-ink-on-accent);
   --color-stroke-soft: var(--stroke-soft);
   --color-stroke-hard-on-accent: var(--stroke-hard-on-accent);
+
+  --animate-accordion-down: accordion-down 0.2s ease-out;
+  --animate-accordion-up: accordion-up 0.2s ease-out;
+}
+
+@keyframes accordion-down {
+  from {
+    height: 0;
+  }
+  to {
+    height: var(--radix-accordion-content-height);
+  }
+}
+
+@keyframes accordion-up {
+  from {
+    height: var(--radix-accordion-content-height);
+  }
+  to {
+    height: 0;
+  }
 }
 
 @layer base {
