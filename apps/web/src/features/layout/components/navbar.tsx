@@ -76,7 +76,7 @@ const Header = ({ className, ...props }: HTMLMotionProps<"div">) => {
     <motion.div
       {...props}
       className={cn(
-        "fixed bottom-0 inset-x-0 z-50 grid grid-cols-2 lg:grid-cols-3 pointer-events-auto",
+        "fixed bottom-0 inset-x-0 z-50 grid grid-cols-2 lg:grid-cols-3 pointer-events-none",
         isOpen ? "text-content-ink-on-accent delay-0" : "delay-500",
         className,
         fontPresets.aero
@@ -198,7 +198,7 @@ const Trigger = (props: ComponentProps<"button">) => {
   const t = useTranslations("navigation")
 
   return (
-    <div className="w-full">
+    <div className="w-full pointer-events-auto">
       <button
         className={cn("p-5 text-left w-full overflow-hidden")}
         {...props}
@@ -497,7 +497,7 @@ export const RenderNavbar = () => {
         <Navbar.Header>
           <Navbar.Trigger />
           <div className="hidden lg:flex items-center justify-center p-5 min-w-0"></div>
-          <div className="flex justify-end p-5">
+          <div className="flex justify-end p-5 pointer-events-auto">
             <Navbar.Time />
           </div>
         </Navbar.Header>
