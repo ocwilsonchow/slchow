@@ -6,6 +6,7 @@ import { Header } from "@/features/layout/components/header"
 import { BackLink } from "@/features/layout/components/back-link"
 import { RenderMdxBlockByPath } from "@/features/mdx/components/render-mdx-block"
 import { getCategoryStaticParams, getMdxContent } from "@/lib/source"
+import { Toc } from "@/features/mdx/components/toc"
 
 type Props = {
   params: Promise<{ locale: Locale; slug: string }>
@@ -39,14 +40,25 @@ const Page = async ({ params }: Props) => {
 
   setRequestLocale(locale)
 
+  const page = getMdxContent("works", slug, locale)
+  const toc = page?.data.toc ?? []
+
   return (
     <PageLayout className="grid lg:grid-cols-2 content-start items-start">
       <Header.Root>
         <Header.Column>
           <BackLink href="/works" />
         </Header.Column>
-        <Header.Column>
-          <h1>Works</h1>
+        <Header.Column className="grid gap-5">
+          <div className="mt-5 lg:mt-0">
+            <h1 className="font-semibold tracking-tight text-content-ink">
+              {page?.data.title}
+            </h1>
+            {page?.data.description && (
+              <p className="text-content-subdued">{page?.data.description}</p>
+            )}
+          </div>
+          <Toc toc={toc} />
         </Header.Column>
       </Header.Root>
       <div className="p-5">

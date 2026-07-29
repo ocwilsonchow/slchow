@@ -61,7 +61,7 @@ const Page = async ({ params }: Props) => {
           <Toc toc={toc} />
         </Header.Column>
       </Header.Root>
-      <div className="p-5 pb-40">
+      <div className="p-5 pb-24">
         <RenderMdxBlockByPath category="writings" slug={slug} locale={locale} />
       </div>
     </PageLayout>

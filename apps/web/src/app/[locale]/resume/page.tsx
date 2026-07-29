@@ -32,7 +32,7 @@ const Page = async ({ params }: Props) => {
       </Header.Root>
       <article className="grid">
         <RenderMdxBlockByPath
-          className="col-span-2 p-5 pb-40"
+          className="col-span-2 p-5 pb-24"
           category="blocks"
           slug="resume"
           locale={locale}
