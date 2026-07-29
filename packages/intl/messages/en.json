@@ -15,6 +15,11 @@
     "themeSystem": "System",
     "themeLight": "Light",
     "themeDark": "Dark",
-    "location": "HK"
+    "location": "HK",
+    "play": "Play",
+    "pause": "Pause",
+    "next": "Next track",
+    "previous": "Previous track",
+    "nowPlaying": "Now playing"
   }
 }

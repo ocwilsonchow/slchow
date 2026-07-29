@@ -15,6 +15,11 @@
     "themeSystem": "系统",
     "themeLight": "浅色",
     "themeDark": "深色",
-    "location": "香港"
+    "location": "香港",
+    "play": "播放",
+    "pause": "暂停",
+    "next": "下一首",
+    "previous": "上一首",
+    "nowPlaying": "正在播放"
   }
 }

@@ -16,11 +16,16 @@ export default $config({
     }
   },
   async run() {
+    const domain = "dev.slchow.com"
+
     // ----- Website -----
     new sst.aws.Nextjs("WEB", {
       path: "apps/web",
       domain: {
-        name: "dev.slchow.com",
+        name: domain,
+      },
+      environment: {
+        NEXT_PUBLIC_SITE_URL: `https://${domain}`,
       },
       dev: {
         command: "bun run dev",

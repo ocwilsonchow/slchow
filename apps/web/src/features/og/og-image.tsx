@@ -46,7 +46,7 @@ export async function createOgImage({
         padding: 72,
       }}
     >
-      <div
+      {/* <div
         style={{
           display: "flex",
           fontSize: title.length > 32 ? 64 : 80,
@@ -72,7 +72,7 @@ export async function createOgImage({
       >
         <div style={{ display: "flex", maxWidth: 720 }}>{description}</div>
         <div style={{ display: "flex" }}>{url}</div>
-      </div>
+      </div> */}
     </div>,
     {
       ...ogSize,

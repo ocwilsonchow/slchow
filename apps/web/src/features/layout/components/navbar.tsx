@@ -11,6 +11,7 @@ import { Link, usePathname, useRouter } from "@/i18n/navigation"
 import { useLenis } from "lenis/react"
 import { Locale, useLocale, useTranslations } from "next-intl"
 import { localeOptions } from "@/i18n/routing"
+import { MusicPlayer } from "./music-player"
 
 export type NavbarState = {
   isOpen: boolean
@@ -495,7 +496,7 @@ export const RenderNavbar = () => {
         </Navbar.Content>
         <Navbar.Header>
           <Navbar.Trigger />
-          <div className="hidden lg:block"></div>
+          <div className="hidden lg:flex items-center justify-center p-5 min-w-0"></div>
           <div className="flex justify-end p-5">
             <Navbar.Time />
           </div>
