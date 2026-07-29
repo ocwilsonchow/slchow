@@ -2,19 +2,39 @@ import { cn } from "@repo/ds"
 import type { ComponentProps } from "react"
 
 export function h1({ className, ...props }: ComponentProps<"h1">) {
-  return <h1 className={cn("font-semibold tracking-tight text-content-ink", className)} {...props} />
+  return (
+    <h1
+      className={cn("font-semibold tracking-tight text-content-ink", className)}
+      {...props}
+    />
+  )
 }
 
 export function h2({ className, ...props }: ComponentProps<"h2">) {
-  return <h2 className={cn("font-semibold tracking-tight text-content-ink", className)} {...props} />
+  return (
+    <h2
+      className={cn("font-semibold tracking-tight text-content-ink", className)}
+      {...props}
+    />
+  )
 }
 
 export function h3({ className, ...props }: ComponentProps<"h3">) {
-  return <h3 className={cn("font-semibold tracking-tight text-content-ink", className)} {...props} />
+  return (
+    <h3
+      className={cn("font-semibold tracking-tight text-content-ink", className)}
+      {...props}
+    />
+  )
 }
 
 export function h4({ className, ...props }: ComponentProps<"h4">) {
-  return <h4 className={cn("font-semibold tracking-tight text-content-ink", className)} {...props} />
+  return (
+    <h4
+      className={cn("font-semibold tracking-tight text-content-ink", className)}
+      {...props}
+    />
+  )
 }
 
 export function h5({ className, ...props }: ComponentProps<"h5">) {
@@ -79,5 +99,13 @@ export function hr({ className, ...props }: ComponentProps<"hr">) {
 }
 
 export function code({ className, ...props }: ComponentProps<"code">) {
-  return <code className={cn("", className)} {...props} />
+  return (
+    <code
+      className={cn(
+        "text-[13px]",
+        className
+      )}
+      {...props}
+    />
+  )
 }

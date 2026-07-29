@@ -4,15 +4,7 @@ title: 简历
 
 ## 概要
 
-拥有 5 年经验的软件开发者，已交付超过 15 个生产应用。已获得 **AWS Solutions Architect Associate** 认证。
-
-在 **Typescript**、**React**、**Next.js**、**React Native** 方面拥有丰富经验。曾主导 **Figma 设计**及**设计系统**开发。擅长 Framer Motion、React 组件组合与 Storybook。
-
-精通使用 **Hono**、**Drizzle**、**OpenAPI**、**RPC** 进行后端开发。具备 **Strapi**、**Sanity** 及 **Meilisearch** 相关经验。
-
-曾使用 **Langchain**、**AI SDK** 及 **Mastra** 交付可用于生产环境的 agents 与 MCPs。
-
-具备使用 **SST**、**Pulumi** 及 **Terraform** 进行 AWS IaC 的经验。
+拥有 5 年经验的软件开发者，重心在 **frontend**（**React**、**TypeScript**、**Figma**），同时具备扎实的后端与云端能力。端到端交付产品：设计系统、headless CMS／搜索、serverless API，以及 **SST**／AWS 基础设施。已获得 **AWS Solutions Architect Associate** 认证。正在使用 **Mastra**、**AI SDK** 与 **Langchain** 打造生产级 **AI agents** 与 RAG UI。
 
 <br />
 
@@ -22,13 +14,15 @@ title: 简历
 
 ### 软件开发者，Vioo Company Limited，2022 年 5 月至今
 
-- 为各行业客户开发广泛类型的应用，包括 AI agents、电商、报名系统、会员忠诚系统、营销站点、CRM 等
-- 负责 15+ 个客户 Web 与 React Native 应用的 Figma 界面设计与前端开发
-- 负责全栈交付：TypeScript API（Hono、Drizzle、OpenAPI/RPC）以及 Next.js 与 React Native 客户端
-- 交付基于 CMS 与搜索驱动的站点（Strapi、Sanity、Meilisearch），并落地生产内容工作流
-- 使用 SST、Pulumi 与 Terraform 配置并运维 AWS 基础设施
-- 主导跨项目的前端代码审查、性能优化与端到端测试实践
-- 为客户平台构建生产级 AI agents（RAG、聊天、工作流、评估、可观测性）
+- 端到端开发并维护超过 15 个生产级 **React**／**React Native** 应用，包括 **Figma** UI/UX 与**设计系统**。
+- 与客户及跨职能团队协作，梳理需求、迭代 UX，并交付正式版本。
+- 建立可复用的组件／hook 库（**Radix**、**Tailwind CSS**），并以 **Storybook**／**Fumadocs**／**MDX** 编写文档，供多个客户项目使用。
+- 使用 **Framer Motion** 打造高级动画与微交互（scroll-based、animate presence、layout transitions），应用于多个客户产品。
+- 使用 **Mastra**、**AI SDK** 与 **Langchain** 打造生产级 **AI agents**（workflows、memory、workspaces、observability）；并交付可复用的 agent 聊天与 tool invocation UI。
+- 以现代 **headless CMS**（**Strapi**／**Sanity**）与搜索（**Meilisearch**／**Algolia**）取代旧有 **WordPress** 架构。网站加载时间减少 **80%**，内容搜索延迟减少 **90%**，PageSpeed Insights 分数达 **>90**。
+- 使用 **Hono**、**Drizzle**、**OpenAPI** 与 **tRPC** 在 **AWS Lambda**／**API Gateway** 上构建 typed API，数据层使用 **Postgres** 与 **DynamoDB**，并以 **Scalar** 提供 API 文档。
+- 引入 **SST** 管理应用部署与基础设施，构建与部署时间缩短超过 **50%**。
+- 主导前端代码与性能审查——推动 composable React patterns、route-level code splitting，以及重型 UI 的 lazy loading——并为关键流程加入 **Cypress** E2E 覆盖。
 
 <br />
 
@@ -36,45 +30,52 @@ title: 简历
 
 ## 精选项目
 
-### _Durable Agent，2026 年 1 月至今_
+### _Multi-channel Durable Agent，2026 年 4 月至今_
 
-- 主导设计并开发具备 RAG 与聊天机器人功能的多智能体平台
-- 使用 Mastra 作为 agent 框架，AI SDK 负责前端，Hono、Drizzle、Better Auth 负责后端
-- Pinecone 作为向量存储，S3 作为对象存储，postgres 存储核心数据，Clickhouse 用于可观测性
-- 在提示输入组件中基于 Tiptap 实现自定义 @mention，支持在向 agent 提问时标记文件
+- 主导 **multi-channel** agent 平台（web + Discord），支持 durable streaming，客户端可在 agent 执行中断线并在中途重连继续。
+- 使用 **Mastra** 与 **AI SDK** 打造 workflow、memory、scheduling 与 workspace 原语——支持 pause／resume、retries、文件存储、沙箱工具与 skills。
+- 端到端交付 RAG：ingest／parse、chunking、**Pinecone** retrieval（含 query／rerank，以及需要时的 graph query）。
+- 后端为 **Hono** + **Better Auth**，部署于 **ECS**；核心数据使用 **Postgres**，文件系统使用 **S3**。
+- 打造 agent 可观测性与评估：在 **ClickHouse** 记录 run／tool traces 与成本／延迟指标，并以 scored eval suites（golden prompts + LLM-as-judge）捕捉质量回退。
+- 使用 **TipTap** 设计并交付自定义 **@mention** 文件标记组件，用于 agent 提示输入。
 
-<br />
+---
 
-### _Shopping and Health Agent，2025 年 5 月_
+### _Incremental Static Regeneration Next.js Site，2025 年 11 月_
 
-- 为国际健康品牌打造的具备 RAG 与聊天机器人功能的 agent 平台
-- 该 agent 用于协助用户处理产品与健康相关查询
-- 主导设计、前端及 MCP tools 开发
-- 主导使用 Cypress 进行端到端测试
-- 使用 Langchain 作为 agent 框架，AI SDK 负责前端
+- 打造 **Next.js** 内容站点，后端为 **Strapi**、搜索为 **Meilisearch**，达到 **LCP < 0.5s**、**CLS < 0.1**，PageSpeed Insights **>90**。
+- 混合式 **ISR**：主要页面与最新 100 篇文章在构建时预渲染；其余页面按需以 fallback 生成。
+- 通过 Strapi 内容 webhook 进行 **tag-based revalidation**，发布后可更新线上页面而无需完整重建。
+- 交互 UI 使用 **TanStack Query** 服务端 prefetch／hydration；表单以 **TanStack Form**、**Zod** 与 Query mutations 处理。
+- **Turborepo** 通过 **SST** 部署至 **AWS ECS**，经 **API Gateway** 路由；媒体存放于 **S3**。
+- **无障碍（Accessibility）**：语义化 landmarks／标题、键盘可操作的导航与表单、可见 focus，以及 CMS 媒体的有意义 alt text。
+- **SEO**：来自 Strapi 的 metadata／OG tags、canonical URLs、sitemap + `robots.txt`，以及 Article JSON-LD 结构化数据，提升内容页可索引性。
 
-<br />
-
-### _Storefront with Shopify GraphQL API，2024 年 10 月_
-
-- 主导 Figma 设计与 Next.js storefront 开发
-- 为产品页采用静态再生成策略
-- 集成 Shopify GraphQL API，支持产品数据与 storefront 功能
-
-<br />
+---
 
 ### _React Native Skia App，2024 年 4 月_
 
-- 端到端开发 React Native Skia 应用，并配套 Next.js 管理后台
-- 提供画笔工具绘图与贴纸 playground 的 Canvas 编辑器
-- 在超过 100 个活跃图层的 Skia canvas 中保持 50+ fps 的稳定性能
+- 打造活动 photobooth 应用（拍摄 → 编辑 → 打印／邮件发送）。
+- 端到端负责 **Figma** UI/UX，并以 **Expo React Native** 落地，另提供 **Next.js** 管理后台处理 SVG 素材。
+- **React Native Skia** canvas 在 100+ 活跃图层下维持 50+ FPS（笔刷、橡皮擦、画笔、取色），搭配 **Reanimated** 与 **Unistyles**。
+- 将后台上传的 SVG 转换为可拖拽、缩放、旋转的 Skia 对象置于 canvas 上。
+- 通过 **Lambda** 预签名 URL 将导出结果持久化至 **S3**。
 
 <br />
 
-### _Static Marketing Content Site，2024 年 1 月_
+---
 
-- 静态 Next.js 站点，使用 Strapi 作为后端 CMS，Meilisearch 作为搜索引擎
-- 采用增量静态再生成策略，通过 Strapi 内容更新事件与 webhook 按 tag 重新验证静态内容
+## 其他项目
+
+- 健康与保健 RAG agent（Next.js、Langchain、Shopify 产品检索）
+- 餐厅忠诚度应用（React Native）
+- 商业组织会员入口（React Native）
+- 活动报名网站（Next.js）
+- 活动／营销网站（Next.js、Sanity／Strapi）
+- 资源管理系统（Next.js、RBAC）
+- 电商 storefront（Next.js、Shopify GraphQL）
+- 居家长者照护应用（Flutter）
+- 图书订购系统（Laravel、React）
 
 <br />
 
@@ -82,7 +83,7 @@ title: 简历
 
 ## 教育背景
 
-### _University College London_
+### _University College London（**UCL**）_
 
 - MPharm 药学，2016 - 2020
 - 一等荣誉学位
@@ -97,11 +98,5 @@ title: 简历
 - AWS Cloud Practitioner，2025
 
 <br />
-
----
-
-## 备注
-
-- 在意识到对技术与软件开发的热情后，从药剂师转型为软件开发者
 
 ---

@@ -124,7 +124,7 @@ export const Toc = ({ toc }: { toc: TOCItemType[] }) => {
             <a
               href={item.url}
               className={cn(
-                "block text-content-subdued/75",
+                "block text-content-subdued/75 line-clamp-1 py-px",
                 active && "text-content-ink"
               )}
               aria-current={active ? "location" : undefined}

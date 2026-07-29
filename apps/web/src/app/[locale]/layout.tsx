@@ -40,8 +40,8 @@ export async function generateMetadata({
   return {
     metadataBase: getMetadataBase(),
     title: {
-      default: "Wilson Chow",
-      template: "%s · Wilson Chow",
+      default: "wilsonchow",
+      template: "%s · wilsonchow",
     },
     description:
       "Software developer — product, design systems, and AI agents.",
