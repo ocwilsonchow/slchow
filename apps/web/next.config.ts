@@ -4,7 +4,15 @@ import createNextIntlPlugin from "next-intl/plugin"
 
 const nextConfig: NextConfig = {
   reactCompiler: true,
-  devIndicators: false
+  devIndicators: false,
+  images: {
+    remotePatterns: [
+      {
+        protocol: "https",
+        hostname: "cdn.dribbble.com",
+      },
+    ],
+  },
 }
 
 const withNextIntl = createNextIntlPlugin()

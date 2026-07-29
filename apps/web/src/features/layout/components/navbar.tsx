@@ -121,20 +121,23 @@ const Content = (props: HTMLMotionProps<"div">) => {
             when: "afterChildren",
             staggerChildren: 0.05,
             staggerDirection: -1,
+            type: "spring",
+            stiffness: 400,
+            damping: 40,
           },
         },
         open: {
-          height: "60vh",
+          height: "65vh",
           transition: {
             staggerChildren: 0.1,
             delayChildren: 0.2,
+            type: "spring",
+            stiffness: 400,
+            damping: 40,
           },
         },
       }}
-      transition={{
-        ease: "easeInOut",
-        duration: 0.2,
-      }}
+
       initial="close"
       animate={isOpen ? "open" : "close"}
       className={cn(
@@ -186,9 +189,9 @@ const itemVariants: Variants = {
   open: {
     opacity: 1,
     transition: {
-      delay: 0.25,
+      delay: 0.35,
       ease: "easeInOut",
-      duration: 0.25,
+      duration: 0.5,
     },
   },
 }
@@ -460,10 +463,10 @@ export const RenderNavbar = () => {
         <Navbar.Content>
           <motion.div
             variants={Navbar.Variants.container}
-            className="p-5 grid lg:grid-cols-2 border-t content-between lg:content-start gap-5 pb-20"
+            className="p-5 grid lg:grid-cols-2 content-between border-t lg:content-start gap-5 pb-20"
           >
             <motion.ul
-              className="grid grid-cols-2 gap-5"
+              className="grid grid-cols-2 gap-5 "
               variants={Navbar.Variants.item}
             >
               <LinkBox>

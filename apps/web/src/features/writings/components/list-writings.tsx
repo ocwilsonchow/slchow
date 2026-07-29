@@ -14,7 +14,7 @@ const getPageDate = (date?: string | Date) => {
 
 export const ListWritings = async ({
   locale,
-  limit = 5,
+  limit = 4,
 }: ListWritingsProps) => {
   const t = await getTranslations("navigation")
   const allWritings = getCategoryPages("writings", locale).sort(
