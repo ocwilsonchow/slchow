@@ -29,7 +29,7 @@ export const ListWritings = async ({
     <div className="flex flex-col gap-2">
       {showHeading && (
         <h2>
-          <Link href="/writings">
+          <Link href="/writings" className="font-semibold">
             {t("writings")}{" "}
             <sup className="text-content-subdued">{allWritings.length}</sup>
           </Link>
@@ -42,7 +42,7 @@ export const ListWritings = async ({
             <li key={page.url} className="">
               <Link
                 href={`/writings/${slug}`}
-                className="inline-block text-content-ink py-px"
+                className="inline-block text-content-ink py-px font-semibold"
               >
                 {page.data.title}
               </Link>

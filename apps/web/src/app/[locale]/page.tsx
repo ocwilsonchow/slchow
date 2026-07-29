@@ -6,7 +6,6 @@ import { Header } from "@/features/layout/components/header"
 import { ListWorks } from "@/features/works/components/list-works"
 import { ListWritings } from "@/features/writings/components/list-writings"
 import { Divider } from "@repo/ds/components/ui/divider"
-import { ListDesigns } from "@/features/design/components/list-designs"
 
 type Props = {
   params: Promise<{ locale: Locale }>

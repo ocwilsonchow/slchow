@@ -30,7 +30,7 @@ export const ListWorks = async ({
     <div className="flex flex-col gap-2">
       {showHeading && (
         <h2>
-          <Link href="/works">
+          <Link href="/works" className="font-semibold">
             {t("works")}{" "}
             <sup className="text-content-subdued">{allWorks.length}</sup>
           </Link>
@@ -45,7 +45,7 @@ export const ListWorks = async ({
                 href={`/works/${slug}`}
                 className="inline-block py-px text-content-ink"
               >
-                {page.data.title}{" "}
+                <span className="font-semibold">{page.data.title}</span>{" "}
                 {page.data.description && (
                   <span className="text-content-subdued">
                     - {page.data.description}

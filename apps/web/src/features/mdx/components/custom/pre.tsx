@@ -9,7 +9,7 @@ export function Pre({ className, children, ...props }: ComponentProps<"pre">) {
         <ClipboardIcon size={14} />
       </button>
       <div className="shiki grid overflow-x-auto border bg-surface-alpha/50 border-stroke-soft rounded-xl outline-none">
-        <pre className={cn("px-4 py-3 text-xs", className)} {...props}>
+        <pre className={cn("px-4 py-3 text-xs leading-tight", className)} {...props}>
           {children}
         </pre>
       </div>
