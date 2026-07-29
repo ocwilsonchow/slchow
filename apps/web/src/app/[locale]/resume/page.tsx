@@ -25,7 +25,7 @@ const Page = async ({ params }: Props) => {
         <Header.Column>
           <BackLink href="/" />
         </Header.Column>
-        <Header.Column className="mt-10 lg:mt-0 grid gap-5">
+        <Header.Column className="mt-10 lg:mt-0 grid gap-5 space-y-1">
           <h1 className="font-semibold tracking-tight text-content-ink">Resume</h1>
           <Toc toc={toc} />
         </Header.Column>

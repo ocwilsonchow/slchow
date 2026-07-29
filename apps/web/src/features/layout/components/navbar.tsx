@@ -308,7 +308,7 @@ const LinkItem = (props: ComponentProps<typeof Link>) => {
   return (
     <Link
       {...props}
-      className={cn("block", props.className)}
+      className={cn("block pb-5 lg:pb-10", props.className)}
       onClick={() => setIsOpen(false)}
     >
       {props.children}
@@ -339,7 +339,7 @@ const ThemeSettings = (props: HTMLMotionProps<"div">) => {
   const t = useTranslations("navigation")
 
   return (
-    <motion.div className="flex flex-col justify-between space-y-1">
+    <motion.div className="flex flex-col justify-between space-y-5 pb-5">
       <div className="">{t("theme")}</div>
       <div className="flex items-center gap-2">
         {themeOptions.map((option, index) => (
@@ -399,7 +399,7 @@ const LanguageSettings = (props: HTMLMotionProps<"div">) => {
   }
 
   return (
-    <motion.div className="flex flex-col justify-between space-y-1">
+    <motion.div className="flex flex-col justify-between space-y-5 pb-5">
       <div className="">{t("language")}</div>
       <div className="flex items-center gap-2">
         {localeOptions.map((option, index) => (
@@ -444,12 +444,7 @@ export const Navbar = {
 }
 
 const LinkBox = (props: HTMLMotionProps<"div">) => {
-  return (
-    <motion.div
-      {...props}
-      className="lg:aspect-21/9 w-full border-b grid pb-4"
-    />
-  )
+  return <motion.div {...props} className="w-full border-b grid" />
 }
 
 export const RenderNavbar = () => {
@@ -463,10 +458,10 @@ export const RenderNavbar = () => {
         <Navbar.Content>
           <motion.div
             variants={Navbar.Variants.container}
-            className="p-5 grid lg:grid-cols-2 content-between border-t lg:content-start gap-5 pb-20"
+            className="p-5 grid content-between border-t gap-5 pb-20"
           >
             <motion.ul
-              className="grid grid-cols-2 gap-5 "
+              className="grid grid-cols-2 lg:grid-cols-4 gap-5 "
               variants={Navbar.Variants.item}
             >
               <LinkBox>
@@ -486,7 +481,7 @@ export const RenderNavbar = () => {
             </motion.ul>
             <motion.div
               variants={Navbar.Variants.item}
-              className="grid lg:grid-cols-2 gap-5"
+              className="grid lg:grid-cols-4 content-start gap-5"
             >
               <LinkBox>
                 <Navbar.LanguageSettings />

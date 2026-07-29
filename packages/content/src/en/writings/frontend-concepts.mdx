@@ -1,6 +1,893 @@
 ---
 title: Frontend Concepts
-description: A list of frontend concepts
+description: A note on frontend concepts I keep coming back to
 ---
 
-A list of importantfrontend concepts.
+A running list of **frontend** concepts I revisit when building with **Next.js**, **React**, **TanStack**, and **TypeScript**. Each section has a short explanation and a code example.
+
+<br />
+
+---
+
+## 1. Critical Rendering Path
+
+The browser needs HTML for the **DOM**, CSS for the **CSSOM**, then a render tree before it can paint. Sync scripts block parsing; stylesheets block rendering. The chain is fetch → parse → style → layout → paint → composite — the **critical rendering path**.
+
+On Next.js App Router sites, cut what sits on that path for first paint: stream HTML early, keep **critical CSS** small, delay non-essential JS. Fonts and third-party scripts are common **LCP** killers on CMS pages.
+
+<br />
+
+```tsx
+import Script from "next/script"
+import { Inter } from "next/font/google"
+
+const inter = Inter({
+  subsets: ["latin"],
+  display: "swap", // avoid invisible text blocking LCP
+})
+
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode
+}) {
+  return (
+    <html lang="en" className={inter.className}>
+      <body>
+        {children}
+        {/* After interactive: analytics must not compete with LCP */}
+        <Script
+          src="https://www.googletagmanager.com/gtag/js?id=G-XXXX"
+          strategy="afterInteractive"
+        />
+      </body>
+    </html>
+  )
+}
+
+export function observeLcp(onMetric: (ms: number) => void) {
+  const observer = new PerformanceObserver((list) => {
+    const last = list.getEntries().at(-1)
+    if (last) onMetric(last.startTime)
+  })
+  observer.observe({ type: "largest-contentful-paint", buffered: true })
+  return () => observer.disconnect()
+}
+```
+
+<br />
+
+---
+
+## 2. JavaScript Event Loop & Scheduling
+
+JavaScript is single-threaded. The **event loop** drains the call stack, then **microtasks** (`Promise.then`, `queueMicrotask`), then may render, then **macrotasks** (`setTimeout`, I/O). React 18+ can yield **concurrent** work between frames so input stays responsive.
+
+For search-as-you-type (e.g. Meilisearch), keep the input urgent and let the list lag with `useDeferredValue`. Use `startTransition` for updates you trigger yourself (filters, tabs) — not for every keystroke on a controlled input.
+
+<br />
+
+```tsx
+"use client"
+
+import { useDeferredValue, useState } from "react"
+import { useQuery } from "@tanstack/react-query"
+
+type Hit = { id: string; title: string }
+
+export function ArticleSearch() {
+  const [query, setQuery] = useState("")
+  const deferredQuery = useDeferredValue(query)
+
+  const { data: hits = [] } = useQuery({
+    queryKey: ["meilisearch", "articles", deferredQuery],
+    queryFn: async (): Promise<Hit[]> => {
+      const res = await fetch(
+        `/api/search?q=${encodeURIComponent(deferredQuery)}`,
+      )
+      return res.json()
+    },
+  })
+
+  return (
+    <>
+      <input
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        placeholder="Search articles…"
+      />
+      <ul aria-busy={query !== deferredQuery}>
+        {hits.map((hit) => (
+          <li key={hit.id}>{hit.title}</li>
+        ))}
+      </ul>
+    </>
+  )
+}
+```
+
+<br />
+
+---
+
+## 3. Browser Layout, Paint & Compositing
+
+**Layout** (reflow) computes geometry. **Paint** fills pixels. **Composite** stitches layers on the GPU. Reading layout (`getBoundingClientRect`, `offsetWidth`) after writing styles forces sync reflow — **layout thrashing** — which kills **INP**.
+
+Animate with `transform` / `opacity` when you can. Framer Motion's `layout` prop is fine for real layout changes; animating `top` / `left` every frame is not. Batch reads, then batch writes.
+
+<br />
+
+```tsx
+"use client"
+
+import { motion } from "framer-motion"
+
+// Bad: top/left → layout every frame
+export function BadDrag({ x, y }: { x: number; y: number }) {
+  return <div style={{ position: "absolute", top: y, left: x }} />
+}
+
+// Good: transform stays on the compositor when possible
+export function GoodDrag({ x, y }: { x: number; y: number }) {
+  return (
+    <motion.div
+      style={{ position: "absolute", x, y }}
+      layout={false}
+    />
+  )
+}
+
+// Bad: interleave reads and writes
+export function thrash(els: HTMLElement[]) {
+  for (const el of els) {
+    const h = el.getBoundingClientRect().height // read
+    el.style.height = `${h + 8}px` // write → forced reflow next read
+  }
+}
+
+// Good: batch reads, then batch writes
+export function batch(els: HTMLElement[]) {
+  const heights = els.map((el) => el.getBoundingClientRect().height)
+  els.forEach((el, i) => {
+    el.style.height = `${heights[i]! + 8}px`
+  })
+}
+```
+
+<br />
+
+---
+
+## 4. Framework Rendering Models
+
+React models UI as a function of state. **Fiber** reconciles incrementally; concurrent features can interrupt low-priority work. **Server Components** run on the server and don't ship their logic to the client. **Client components** (`"use client"`) own hooks and events.
+
+Default pattern: fetch in Server Components, put interactivity in **client islands**, wrap slow slots in `Suspense` so the shell can stream.
+
+<br />
+
+```tsx
+// app/articles/page.tsx — Server Component (default)
+import { Suspense } from "react"
+import { ArticleFilters } from "./article-filters"
+import { ArticleList } from "./article-list"
+
+export default function ArticlesPage() {
+  return (
+    <main>
+      <h1>Articles</h1>
+      <ArticleFilters />
+      <Suspense fallback={<p>Loading articles…</p>}>
+        <ArticleList />
+      </Suspense>
+    </main>
+  )
+}
+```
+
+<br />
+
+```tsx
+// app/articles/article-filters.tsx
+"use client"
+
+import { useRouter, useSearchParams } from "next/navigation"
+
+export function ArticleFilters() {
+  const router = useRouter()
+  const params = useSearchParams()
+  const tag = params.get("tag") ?? "all"
+
+  return (
+    <select
+      value={tag}
+      onChange={(e) => {
+        const next = new URLSearchParams(params)
+        next.set("tag", e.target.value)
+        router.push(`?${next.toString()}`)
+      }}
+    >
+      <option value="all">All</option>
+      <option value="react">React</option>
+    </select>
+  )
+}
+```
+
+<br />
+
+---
+
+## 5. State Ownership & Data Flow
+
+Not everything should live in React state. **URL state** for shareable filters. **Server/cache state** in TanStack Query (or RSC). Form drafts in TanStack Form. Local UI chrome (`open` / `closed`) in `useState`.
+
+Avoid **dual sources of truth** — don't mirror URL params into `useState` and sync both ways. Pick one owner.
+
+<br />
+
+```tsx
+"use client"
+
+import { useRouter, useSearchParams } from "next/navigation"
+import { useForm } from "@tanstack/react-form"
+import { z } from "zod"
+
+const draftSchema = z.object({
+  title: z.string().min(1),
+  body: z.string().min(1),
+})
+
+export function FilterAndDraft() {
+  const router = useRouter()
+  const params = useSearchParams()
+  // URL owns filters — no parallel useState copy
+  const tag = params.get("tag") ?? "all"
+
+  const form = useForm({
+    defaultValues: { title: "", body: "" },
+    onSubmit: async ({ value }) => {
+      const parsed = draftSchema.parse(value)
+      await fetch("/api/articles", {
+        method: "POST",
+        body: JSON.stringify(parsed),
+      })
+    },
+  })
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => router.push(`?tag=${tag === "all" ? "react" : "all"}`)}
+      >
+        Tag: {tag}
+      </button>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault()
+          void form.handleSubmit()
+        }}
+      >
+        <form.Field
+          name="title"
+          children={(field) => (
+            <input
+              value={field.state.value}
+              onChange={(e) => field.handleChange(e.target.value)}
+            />
+          )}
+        />
+      </form>
+    </>
+  )
+}
+```
+
+<br />
+
+---
+
+## 6. Data Fetching, Caching & Consistency
+
+**Waterfalls** (`await a` then `await b`) add latency for no reason — parallelize independent fetches. TanStack Query gives **stale-while-revalidate**: show cache now, refetch in the background. **Cache keys** must include every input that changes the response. Mutations should invalidate or update the cache **optimistically**.
+
+On ISR sites, prefetch on the server and hydrate so the client doesn't flash empty.
+
+<br />
+
+```tsx
+import {
+  QueryClient,
+  dehydrate,
+  HydrationBoundary,
+  useMutation,
+  useQueryClient,
+} from "@tanstack/react-query"
+import { z } from "zod"
+
+const articleSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  published: z.boolean(),
+})
+
+type Article = z.infer<typeof articleSchema>
+
+export async function ArticlesShell() {
+  const queryClient = new QueryClient()
+  await queryClient.prefetchQuery({
+    queryKey: ["articles", { tag: "react" }],
+    queryFn: async () => {
+      const res = await fetch("https://cms.example/api/articles?tag=react")
+      return z.array(articleSchema).parse(await res.json())
+    },
+  })
+
+  return (
+    <HydrationBoundary state={dehydrate(queryClient)}>
+      <ArticlesClient />
+    </HydrationBoundary>
+  )
+}
+
+function ArticlesClient() {
+  // Client component — hooks + mutations
+  const queryClient = useQueryClient()
+
+  const publish = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await fetch(`/api/articles/${id}/publish`, { method: "POST" })
+      return articleSchema.parse(await res.json())
+    },
+    onMutate: async (id) => {
+      await queryClient.cancelQueries({ queryKey: ["articles"] })
+      const prev = queryClient.getQueryData<Article[]>(["articles", { tag: "react" }])
+      queryClient.setQueryData<Article[]>(["articles", { tag: "react" }], (old) =>
+        old?.map((a) => (a.id === id ? { ...a, published: true } : a)),
+      )
+      return { prev }
+    },
+    onError: (_err, _id, ctx) => {
+      if (ctx?.prev) {
+        queryClient.setQueryData(["articles", { tag: "react" }], ctx.prev)
+      }
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ["articles"] })
+    },
+  })
+
+  return (
+    <button type="button" onClick={() => publish.mutate("article_1")}>
+      Publish
+    </button>
+  )
+}
+```
+
+<br />
+
+---
+
+## 7. TypeScript as a Design Tool
+
+Use TypeScript to encode **invariants** — success vs error, branded IDs, finite UI states. **Zod** at the boundary for runtime checks; `z.infer` for the types. **Discriminated unions** plus an exhaustiveness check catch new variants at build time.
+
+<br />
+
+```ts
+import { z } from "zod"
+
+export const createArticleInput = z.object({
+  title: z.string().min(1),
+  slug: z.string().regex(/^[a-z0-9-]+$/),
+})
+export type CreateArticleInput = z.infer<typeof createArticleInput>
+
+// Branded ID — prevents passing a post id where a user id is required
+declare const userIdBrand: unique symbol
+export type UserId = string & { readonly [userIdBrand]: typeof userIdBrand }
+export const UserId = (id: string) => id as UserId
+
+// AI SDK-style tool invocation UI states
+type ToolPart =
+  | { type: "tool-call"; toolName: "searchDocs"; args: { query: string } }
+  | { type: "tool-result"; toolName: "searchDocs"; result: { hits: string[] } }
+  | { type: "tool-error"; toolName: "searchDocs"; error: string }
+
+export function renderToolPart(part: ToolPart): string {
+  switch (part.type) {
+    case "tool-call":
+      return `Calling ${part.toolName}(${part.args.query})`
+    case "tool-result":
+      return `Found ${part.result.hits.length} hits`
+    case "tool-error":
+      return `Tool failed: ${part.error}`
+    default: {
+      const _exhaustive: never = part
+      return _exhaustive
+    }
+  }
+}
+```
+
+<br />
+
+```ts
+// Hono / tRPC-shaped procedure: validate at the boundary
+import { Hono } from "hono"
+import { zValidator } from "@hono/zod-validator"
+
+const app = new Hono()
+
+app.post("/articles", zValidator("json", createArticleInput), (c) => {
+  const body = c.req.valid("json") // CreateArticleInput
+  return c.json({ ok: true as const, title: body.title })
+})
+```
+
+<br />
+
+---
+
+## 8. CSS Cascade, Layout Systems & Modern Features
+
+The **cascade** resolves conflicts by origin, importance, layers, specificity, and source order. `@layer` is useful in a design system (resets → utilities → components). **Flex** for one axis; **Grid** for two. **Container queries** style from the parent size, not the viewport — useful for reusable cards.
+
+For product UI I usually stick to Tailwind + `cn()` + Radix instead of CSS-in-JS.
+
+<br />
+
+```tsx
+"use client"
+
+import { cn } from "@repo/ds"
+import * as Dialog from "@radix-ui/react-dialog"
+
+type CardProps = {
+  title: string
+  className?: string
+}
+
+export function ResponsiveCard({ title, className }: CardProps) {
+  return (
+    <article
+      className={cn(
+        // Container query: widen typography when the card itself is wide
+        "@container rounded-lg border border-border p-4",
+        className,
+      )}
+    >
+      <h2 className="text-base @md:text-lg font-semibold">{title}</h2>
+    </article>
+  )
+}
+
+export function ConfirmDialog({
+  open,
+  onOpenChange,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}) {
+  return (
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="fixed inset-0 bg-black/40" />
+        <Dialog.Content
+          className={cn(
+            "fixed left-1/2 top-1/2 w-[min(100%,24rem)] -translate-x-1/2 -translate-y-1/2",
+            "rounded-lg bg-background p-6 shadow-lg focus:outline-none",
+          )}
+        >
+          <Dialog.Title className="text-lg font-semibold">Confirm</Dialog.Title>
+          <Dialog.Description className="mt-2 text-sm text-muted-foreground">
+            This action cannot be undone.
+          </Dialog.Description>
+          <Dialog.Close className="mt-4 underline">Cancel</Dialog.Close>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  )
+}
+```
+
+<br />
+
+---
+
+## 9. Performance Engineering & Core Web Vitals
+
+**LCP** — largest content paint. **INP** — interaction delay over the page lifetime. **CLS** — unexpected layout shift. Lighthouse is for diagnosis; **RUM** is what users actually hit.
+
+Keep heavy UI (D3 + Framer charts) out of the initial bundle with `next/dynamic`. Don't let a chart fight **LCP**.
+
+<br />
+
+```tsx
+"use client"
+
+import dynamic from "next/dynamic"
+
+const AnalyticsChart = dynamic(
+  () =>
+    import("@/features/charts/analytics-chart").then((m) => m.AnalyticsChart),
+  {
+    ssr: false,
+    loading: () => <div className="h-64 animate-pulse rounded-md bg-muted" />,
+  },
+)
+
+export function DashboardCharts() {
+  return <AnalyticsChart />
+}
+
+type MetricName = "LCP" | "INP" | "CLS"
+
+export function reportWebVital(
+  name: MetricName,
+  value: number,
+  route: string,
+) {
+  void fetch("/api/rum", {
+    method: "POST",
+    keepalive: true,
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name, value, route, ts: Date.now() }),
+  })
+}
+```
+
+<br />
+
+---
+
+## 10. Web Security Model
+
+Browsers enforce the **same-origin policy** (scheme + host + port). **XSS** is untrusted string → HTML/JS — CMS rich text and agent output are common sources. Sanitize at the boundary; avoid raw `dangerouslySetInnerHTML` / `innerHTML`. Session cookies need `HttpOnly`, `Secure`, and a sensible `SameSite`. Mutations should use same-site cookies or explicit **CSRF** protection — never secrets in the JS bundle.
+
+<br />
+
+```tsx
+import DOMPurify from "isomorphic-dompurify"
+
+// CMS HTML from Strapi/Sanity — sanitize at the boundary
+export function CmsHtml({ html }: { html: string }) {
+  const clean = DOMPurify.sanitize(html, {
+    USE_PROFILES: { html: true },
+  })
+  return <div dangerouslySetInnerHTML={{ __html: clean }} />
+}
+
+// Prefer never doing this with CMS or agent output:
+export function unsafe(html: string, el: HTMLElement) {
+  el.innerHTML = html // XSS sink
+}
+
+export async function updateProfile(name: string) {
+  // Same-origin fetch sends Better Auth session cookie automatically.
+  // SameSite=Lax/Strict mitigates CSRF from foreign sites.
+  const res = await fetch("/api/profile", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name }),
+  })
+  if (!res.ok) throw new Error("profile update failed")
+  return res.json()
+}
+```
+
+<br />
+
+---
+
+## 11. Accessibility as a Runtime Contract
+
+The **accessibility tree** is what assistive tech reads. Start with **semantic HTML** (`button`, `nav`, `main`, headings). **ARIA** fills gaps — it doesn't replace semantics. **Focus management** matters for dialogs: trap focus, restore on close, handle Escape. Radix Dialog does this if you don't break it.
+
+<br />
+
+```tsx
+// app/[locale]/layout.tsx — landmarks matter
+export default function SiteLayout({
+  children,
+}: {
+  children: React.ReactNode
+}) {
+  return (
+    <>
+      <a href="#main" className="sr-only focus:not-sr-only">
+        Skip to content
+      </a>
+      <header>
+        <nav aria-label="Primary">{/* … */}</nav>
+      </header>
+      <main id="main">{children}</main>
+      <footer>{/* … */}</footer>
+    </>
+  )
+}
+```
+
+<br />
+
+```tsx
+"use client"
+
+import * as Dialog from "@radix-ui/react-dialog"
+import { useEffect, useRef } from "react"
+
+export function AccessibleSearchDialog({
+  open,
+  onOpenChange,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}) {
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (open) inputRef.current?.focus()
+  }, [open])
+
+  return (
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="fixed inset-0 bg-black/40" />
+        <Dialog.Content
+          aria-describedby={undefined}
+          className="fixed left-1/2 top-1/2 w-full max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-lg bg-background p-4"
+          onOpenAutoFocus={(e) => {
+            e.preventDefault()
+            inputRef.current?.focus()
+          }}
+        >
+          <Dialog.Title className="sr-only">Search</Dialog.Title>
+          <input
+            ref={inputRef}
+            type="search"
+            aria-label="Search articles"
+            className="w-full border px-3 py-2"
+          />
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  )
+}
+```
+
+<br />
+
+---
+
+## 12. Networking & Resource Loading
+
+**HTTP caching**, CDNs, and priority hints matter as much as React memoization. For App Router content sites, Strapi webhooks + `revalidateTag` beat a full rebuild. Client fetches to Hono / tRPC need **cancellation** (`AbortController`) so a stale response doesn't win after navigation.
+
+<br />
+
+```ts
+import { z } from "zod"
+
+const articleSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+})
+
+export async function fetchArticle(
+  id: string,
+  signal?: AbortSignal,
+) {
+  const res = await fetch(`https://api.example.com/articles/${id}`, {
+    signal,
+    headers: { accept: "application/json" },
+    // Browser HTTP cache; pair with CDN/Cache-Control on the API
+    cache: "no-cache",
+  })
+  if (!res.ok) throw new Error(`article ${id} failed: ${res.status}`)
+  return articleSchema.parse(await res.json())
+}
+
+export function loadArticle(id: string) {
+  const controller = new AbortController()
+  const promise = fetchArticle(id, controller.signal)
+  return {
+    promise,
+    cancel: () => controller.abort(),
+  }
+}
+```
+
+<br />
+
+```ts
+// app/api/revalidate/route.ts — Strapi publish webhook
+import { revalidateTag } from "next/cache"
+import { NextRequest, NextResponse } from "next/server"
+
+export async function POST(req: NextRequest) {
+  const secret = req.headers.get("x-webhook-secret")
+  if (secret !== process.env.REVALIDATE_SECRET) {
+    return NextResponse.json({ ok: false }, { status: 401 })
+  }
+
+  const body = (await req.json()) as { tag?: string }
+  if (!body.tag) {
+    return NextResponse.json({ ok: false }, { status: 400 })
+  }
+
+  revalidateTag(body.tag)
+  return NextResponse.json({ revalidated: true, tag: body.tag })
+}
+```
+
+<br />
+
+---
+
+## 13. Testing Strategy for UI Systems
+
+**Unit tests** for pure logic. **Component tests** (Vitest + Testing Library) for what the user can see — roles, labels, text — not implementation details. **Cypress E2E** for a few critical paths (auth, publish, checkout). Too many E2Es get flaky; too few miss integration bugs. Aim for many type/static checks, solid component tests, few E2Es.
+
+<br />
+
+```tsx
+// subscribe-form.test.tsx
+import { render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { describe, expect, it, vi } from "vitest"
+import { SubscribeForm } from "./subscribe-form"
+
+describe("SubscribeForm", () => {
+  it("submits a valid email", async () => {
+    const user = userEvent.setup()
+    const onSubmit = vi.fn()
+    render(<SubscribeForm onSubmit={onSubmit} />)
+
+    await user.type(screen.getByLabelText(/email/i), "dev@example.com")
+    await user.click(screen.getByRole("button", { name: /subscribe/i }))
+
+    expect(onSubmit).toHaveBeenCalledWith({ email: "dev@example.com" })
+  })
+})
+```
+
+<br />
+
+```ts
+// cypress/e2e/auth.cy.ts
+describe("auth", () => {
+  it("signs in and reaches the dashboard", () => {
+    cy.visit("/login")
+    cy.findByLabelText(/email/i).type("dev@example.com")
+    cy.findByLabelText(/password/i).type("correct-horse-battery")
+    cy.findByRole("button", { name: /sign in/i }).click()
+    cy.location("pathname").should("eq", "/dashboard")
+    cy.findByRole("heading", { name: /dashboard/i }).should("be.visible")
+  })
+})
+```
+
+<br />
+
+---
+
+## 14. Module Systems, Bundling & Boundaries
+
+**ESM** is static-analyzable. **Tree-shaking** breaks on fat barrels and overly dynamic imports. Turborepo packages (`@repo/ds`) should expose leaf `exports`. Next.js `"use client"` is a **module boundary** — anything it imports becomes client-side too. Pull TipTap / charts in as **dynamic islands**, not in every layout.
+
+<br />
+
+```tsx
+// features/editor/prompt-editor.tsx
+"use client"
+
+import dynamic from "next/dynamic"
+import { Button } from "@repo/ds/components/ui/button"
+
+// TipTap stays out of the initial bundle for routes that only show a CTA
+const PromptEditor = dynamic(
+  () => import("./tiptap-prompt-editor").then((m) => m.TiptapPromptEditor),
+  { ssr: false, loading: () => <p>Loading editor…</p> },
+)
+
+export function AgentPrompt({
+  enabled,
+}: {
+  enabled: boolean
+}) {
+  if (!enabled) {
+    return <Button type="button">Open prompt</Button>
+  }
+  return <PromptEditor />
+}
+```
+
+<br />
+
+```ts
+// packages/ds/package.json (shape)
+export const dsPackageExports = {
+  ".": "./src/index.ts",
+  "./components/ui/*": "./src/components/ui/*.tsx",
+} as const
+
+// Prefer deep imports in apps:
+// import { Button } from "@repo/ds/components/ui/button"
+// Avoid grabbing a mega-barrel that pulls unused client components.
+```
+
+<br />
+
+---
+
+## 15. Observability & Production Debugging
+
+**Source maps** make production stacks readable. **Error boundaries** stop one broken widget from blanking the page. For streaming AI UIs, `performance.mark` around tool calls helps separate model vs network vs UI latency. **RUM** helps with production-only bugs — don't log **PII**.
+
+<br />
+
+```tsx
+"use client"
+
+import { Component, type ErrorInfo, type ReactNode } from "react"
+
+type Props = { children: ReactNode; route: string }
+type State = { error: Error | null }
+
+export class AgentStreamBoundary extends Component<Props, State> {
+  state: State = { error: null }
+
+  static getDerivedStateFromError(error: Error): State {
+    return { error }
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    void reportClientError({
+      message: error.message,
+      stack: error.stack,
+      componentStack: info.componentStack,
+      route: this.props.route,
+    })
+  }
+
+  render() {
+    if (this.state.error) {
+      return <p role="alert">The agent stream failed. Try again.</p>
+    }
+    return this.props.children
+  }
+}
+
+export async function withToolTiming<T>(
+  toolName: string,
+  run: () => Promise<T>,
+): Promise<T> {
+  const start = `tool:${toolName}:start`
+  const end = `tool:${toolName}:end`
+  performance.mark(start)
+  try {
+    return await run()
+  } finally {
+    performance.mark(end)
+    performance.measure(`tool:${toolName}`, start, end)
+  }
+}
+
+export function reportClientError(payload: {
+  message: string
+  stack?: string
+  componentStack?: string | null
+  route: string
+}) {
+  return fetch("/api/client-errors", {
+    method: "POST",
+    keepalive: true,
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ ...payload, ts: Date.now() }),
+  })
+}
+```
