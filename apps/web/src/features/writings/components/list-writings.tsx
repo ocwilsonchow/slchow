@@ -5,6 +5,7 @@ import { getCategoryPages } from "@/lib/source"
 type ListWritingsProps = {
   locale: string
   limit?: number
+  showHeading?: boolean
 }
 
 const getPageDate = (date?: string | Date) => {
@@ -15,6 +16,7 @@ const getPageDate = (date?: string | Date) => {
 export const ListWritings = async ({
   locale,
   limit = 4,
+  showHeading = true,
 }: ListWritingsProps) => {
   const t = await getTranslations("navigation")
   const allWritings = getCategoryPages("writings", locale).sort(
@@ -25,12 +27,14 @@ export const ListWritings = async ({
 
   return (
     <div className="flex flex-col gap-2">
-      <h2>
-        <Link href="/writings">
-          {t("writings")}{" "}
-          <sup className="text-content-subdued">{allWritings.length}</sup>
-        </Link>
-      </h2>
+      {showHeading && (
+        <h2>
+          <Link href="/writings">
+            {t("writings")}{" "}
+            <sup className="text-content-subdued">{allWritings.length}</sup>
+          </Link>
+        </h2>
+      )}
       <ul className="grid list-disc list-inside">
         {writings.map((page) => {
           const slug = page.slugs.slice(1).join("/")

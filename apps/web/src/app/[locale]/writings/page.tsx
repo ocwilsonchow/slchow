@@ -20,10 +20,14 @@ const Page = async ({ params }: Props) => {
         <Header.Column>
           <BackLink href="/" />
         </Header.Column>
-        <Header.Column></Header.Column>
+        <Header.Column className="mt-10 lg:mt-0 grid gap-5">
+          <h1 className="font-semibold tracking-tight text-content-ink">
+            Writings
+          </h1>
+        </Header.Column>
       </Header.Root>
       <div className="p-5">
-        <ListWritings locale={locale} limit={Infinity} />
+        <ListWritings locale={locale} limit={Infinity} showHeading={false} />
       </div>
     </PageLayout>
   )

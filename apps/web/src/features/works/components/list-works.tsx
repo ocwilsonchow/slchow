@@ -6,6 +6,7 @@ import { AsteriskIcon } from "lucide-react"
 type ListWorksProps = {
   locale: string
   limit?: number
+  showHeading?: boolean
 }
 
 const getPageDate = (date?: string | Date) => {
@@ -13,7 +14,11 @@ const getPageDate = (date?: string | Date) => {
   return new Date(date).getTime()
 }
 
-export const ListWorks = async ({ locale, limit = 5 }: ListWorksProps) => {
+export const ListWorks = async ({
+  locale,
+  limit = 5,
+  showHeading = true,
+}: ListWorksProps) => {
   const t = await getTranslations("navigation")
   const allWorks = getCategoryPages("works", locale).sort(
     (a, b) => getPageDate(b.data.date) - getPageDate(a.data.date)
@@ -23,12 +28,14 @@ export const ListWorks = async ({ locale, limit = 5 }: ListWorksProps) => {
 
   return (
     <div className="flex flex-col gap-2">
-      <h2>
-        <Link href="/works">
-          {t("works")}{" "}
-          <sup className="text-content-subdued">{allWorks.length}</sup>
-        </Link>
-      </h2>
+      {showHeading && (
+        <h2>
+          <Link href="/works">
+            {t("works")}{" "}
+            <sup className="text-content-subdued">{allWorks.length}</sup>
+          </Link>
+        </h2>
+      )}
       <ul className="flex flex-col list-disc list-inside">
         {works.map((page) => {
           const slug = page.slugs.slice(1).join("/")
