@@ -203,7 +203,7 @@ const Trigger = (props: ComponentProps<"button">) => {
   return (
     <div className="w-full pointer-events-auto">
       <button
-        className={cn("p-5 text-left w-full overflow-hidden")}
+        className={cn("p-5 text-left w-full overflow-hidden focus-visible:outline-none focus-visible:ring-0")}
         {...props}
         onClick={() => setIsOpen(!isOpen)}
       >

@@ -109,3 +109,60 @@ export function code({ className, ...props }: ComponentProps<"code">) {
     />
   )
 }
+
+export function table({ className, ...props }: ComponentProps<"table">) {
+  return (
+    <div className="w-full overflow-x-auto">
+      <table
+        className={cn("w-full border-collapse text-left text-sm", className)}
+        {...props}
+      />
+    </div>
+  )
+}
+
+export function thead({ className, ...props }: ComponentProps<"thead">) {
+  return <thead className={cn("border-b border-stroke-soft", className)} {...props} />
+}
+
+export function tbody({ className, ...props }: ComponentProps<"tbody">) {
+  return (
+    <tbody
+      className={cn("[&_tr:last-child]:border-0", className)}
+      {...props}
+    />
+  )
+}
+
+export function tr({ className, ...props }: ComponentProps<"tr">) {
+  return (
+    <tr
+      className={cn("border-b border-stroke-soft", className)}
+      {...props}
+    />
+  )
+}
+
+export function th({ className, ...props }: ComponentProps<"th">) {
+  return (
+    <th
+      className={cn(
+        "px-0 py-2 pr-4 font-semibold tracking-tight text-content-ink first:pl-0 last:pr-0",
+        className
+      )}
+      {...props}
+    />
+  )
+}
+
+export function td({ className, ...props }: ComponentProps<"td">) {
+  return (
+    <td
+      className={cn(
+        "px-0 py-2 pr-4 text-content-body align-top first:pl-0 last:pr-0",
+        className
+      )}
+      {...props}
+    />
+  )
+}

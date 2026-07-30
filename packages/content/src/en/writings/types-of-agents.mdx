@@ -3,13 +3,23 @@ title: Types of AI Agents
 description: A note on the different types of AI agents
 ---
 
-When choosing an **agent architecture**, it's important to understand the standard taxonomy.
+An AI agent **calls tools in a loop to achieve a goal**. That loop — and the autonomy it implies — is what separates agents from static automations and single-turn LLM calls.
+
+Every agent shares three capabilities:
+
+- **Perception** — ingest data from APIs, databases, or user input
+- **Reasoning** — use an LLM to evaluate that data against instructions
+- **Acting** — call tools or return structured output that triggers downstream effects
+
+Agency is a spectrum: binary decision trees at the low end; memory, tool use, and retries in the middle; planning, parallel sub-agents, and self-correction at the high end.
+
+When choosing an **agent architecture**, start from the standard taxonomy below.
 
 ---
 
 ## Types of AI Agents
 
-The following AI agent types map roughly to increasing complexity and autonomy:
+These types map roughly to increasing complexity and autonomy. Most production use cases need at least goal-based reasoning; multi-agent systems help when one agent's context window becomes unwieldy.
 
 <Accordion type="single" collapsible>
   <AccordionItem value="simple-reflex">
@@ -96,6 +106,41 @@ Multiple specialized AI agents coordinate to solve tasks no individual agent cou
 
   </AccordionItem>
 </Accordion>
+
+---
+
+## Match type to complexity
+
+| Complexity | Agent type | Example |
+| --- | --- | --- |
+| Fixed rules, full observability | Simple reflex | Email routing, spam filtering |
+| Clear goal, multiple paths | Goal-based | Route optimization, lead scoring |
+| Competing objectives | Utility-based | Dynamic pricing, resource allocation |
+| Multi-domain coordination | Multi-agent | Customer lifecycle, research pipelines |
+
+Start simple. Split when one agent becomes unwieldy. Add routing only when you have multiple agents.
+
+---
+
+## Production patterns worth noting
+
+A few named systems that make the taxonomy concrete:
+
+- **Uber Finch** — supervisor routes Slack questions to SQL sub-agents (multi-agent)
+- **Dropbox Dash** — two-stage plan then execute for knowledge work (goal-based)
+- **Ramp** — LLM + embeddings + multimodal RAG for merchant classification
+- **Intercom Fin Voice** — transcription, RAG, telephony; escalate when confidence is low
+- **Airtable Field Agents** — event-driven state machine for database enrichment
+
+In production, agents need **tracing** (what tools ran?), **evals** (did quality hold?), and **guardrails** (prompt injection, output safety). Traditional test suites don't cover non-deterministic loops.
+
+High-stakes flows keep humans in the loop: mid-execution context, draft approval, or deferred tool execution.
+
+---
+
+## Takeaway
+
+Agents are not chatbots with extra steps. Match architecture to task complexity, keep context manageable, and ship one well-scoped use case before expanding.
 
 ---
 
