@@ -4,14 +4,17 @@ import { create } from "zustand"
 import { ComponentProps, Fragment, useEffect, useState } from "react"
 import { type HTMLMotionProps, motion, Variants } from "motion/react"
 import { Portal as ReactPortal } from "@repo/ds/components/ui/portal"
-import { cn, useTheme } from "@repo/ds"
+import { cn } from "@repo/ds"
 import { useClickAway } from "@uidotdev/usehooks"
 import { fontPresets } from "./styles"
-import { Link, usePathname, useRouter } from "@/i18n/navigation"
+import { Link } from "@/i18n/navigation"
 import { useLenis } from "lenis/react"
-import { Locale, useLocale, useTranslations } from "next-intl"
-import { localeOptions } from "@/i18n/routing"
+import { useLocale, useTranslations } from "next-intl"
 import { MusicPlayer } from "./music-player"
+import {
+  LanguageSettings,
+  ThemeSettings,
+} from "./navbar-settings"
 
 export type NavbarState = {
   isOpen: boolean
@@ -316,114 +319,6 @@ const LinkItem = (props: ComponentProps<typeof Link>) => {
   )
 }
 
-const themeOptions = [
-  {
-    id: "system",
-    labelKey: "themeSystem",
-    color: ["#ffffff", "#3f3d39"],
-  },
-  {
-    id: "light",
-    labelKey: "themeLight",
-    color: ["#ffffff"],
-  },
-  {
-    id: "dark",
-    labelKey: "themeDark",
-    color: ["#3f3d39"],
-  },
-] as const
-
-const ThemeSettings = (props: HTMLMotionProps<"div">) => {
-  const { theme, setTheme } = useTheme()
-  const t = useTranslations("navigation")
-
-  return (
-    <motion.div className="flex flex-col justify-between space-y-5 pb-5">
-      <div className="">{t("theme")}</div>
-      <div className="flex items-center gap-2">
-        {themeOptions.map((option, index) => (
-          <Fragment key={option.id}>
-            <button
-              onClick={() => setTheme(option.id)}
-              className={cn("flex-wrap flex items-center gap-2")}
-            >
-              <div
-                onClick={() => setTheme(option.id)}
-                className={cn(
-                  "aspect-square border-2 rounded-full overflow-hidden w-4 flex"
-                  // theme === option.id ? "outline-blue-500" : "outline-transparent"
-                )}
-              >
-                {option.color.map((c) => (
-                  <div
-                    key={c}
-                    className="flex-1 h-full w-full"
-                    style={{ backgroundColor: c }}
-                  />
-                ))}
-              </div>
-              <div
-                className={cn(
-                  theme === option.id
-                    ? "opacity-100 underline underline-offset-4"
-                    : "opacity-50"
-                )}
-              >
-                {t(option.labelKey)}
-              </div>
-            </button>
-            {index < themeOptions.length - 1 && (
-              <div className="opacity-50">/</div>
-            )}
-          </Fragment>
-        ))}
-      </div>
-    </motion.div>
-  )
-}
-
-const LanguageSettings = (props: HTMLMotionProps<"div">) => {
-  const currentLocale = useLocale()
-  const pathname = usePathname()
-  const router = useRouter()
-  const t = useTranslations("navigation")
-  const { setIsOpen } = useNavbar()
-
-  const handleLocaleChange = (newLocale: Locale) => {
-    setIsOpen(false)
-
-    setTimeout(() => {
-      router.replace(pathname, { locale: newLocale })
-    }, 550)
-  }
-
-  return (
-    <motion.div className="flex flex-col justify-between space-y-5 pb-5">
-      <div className="">{t("language")}</div>
-      <div className="flex items-center gap-2">
-        {localeOptions.map((option, index) => (
-          <Fragment key={option.id}>
-            <button
-              className={cn(
-                currentLocale === option.id
-                  ? "opacity-100 underline underline-offset-4"
-                  : "opacity-50"
-              )}
-              onClick={() => handleLocaleChange(option.id)}
-            >
-              {option.title}
-            </button>
-            {index < localeOptions.length - 1 && (
-              <div className="opacity-50">/</div>
-            )}
-          </Fragment>
-        ))}
-      </div>
-    </motion.div>
-  )
-}
-
 export const Navbar = {
   Root,
   Header,
@@ -449,6 +344,7 @@ const LinkBox = (props: HTMLMotionProps<"div">) => {
 
 export const RenderNavbar = () => {
   const t = useTranslations("navigation")
+  const { setIsOpen } = useNavbar()
 
   return (
     <Fragment>
@@ -484,7 +380,10 @@ export const RenderNavbar = () => {
               className="grid lg:grid-cols-4 content-start gap-5"
             >
               <LinkBox>
-                <Navbar.LanguageSettings />
+                <Navbar.LanguageSettings
+                  onBeforeChange={() => setIsOpen(false)}
+                  delayMs={550}
+                />
               </LinkBox>
               <LinkBox>
                 <Navbar.ThemeSettings />

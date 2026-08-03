@@ -9,6 +9,8 @@
 :root {
   --accent-surface-canvas: #f0fb29;
   --surface-canvas: #ffffff;
+  --surface-backdrop: #202020;
+  --surface-popover: #202020;
   --surface-canvas-inverse: #0f0f10;
   --surface-alpha: #3f3d3910;
   --content-accent: #f0fb29;
@@ -17,6 +19,8 @@
   --content-subdued: #796969;
   --content-ink-inverse: #ffffff;
   --content-ink-on-accent: #0f0f10;
+  --content-ink-on-popover: #ffffff;
+  --content-body-on-popover: #c1c1c1;
   --stroke-soft: #3f3d3920;
   --stroke-hard-on-accent: #0f0f10;
 }
@@ -24,6 +28,8 @@
 .dark {
   --accent-surface-canvas: #f0fb29;
   --surface-canvas: #121212;
+  --surface-backdrop: #121212;
+  --surface-popover: #202020;
   --surface-canvas-inverse: #ffffff;
   --surface-alpha: #fafafa10;
   --content-accent: #f0fb29;
@@ -32,6 +38,8 @@
   --content-subdued: #8a8a8a;
   --content-ink-inverse: #3f3d39;
   --content-ink-on-accent: #0f0f10;
+  --content-ink-on-popover: #ffffff;
+  --content-body-on-popover: #c1c1c1;
   --stroke-soft: #fafafa20;
   --stroke-hard-on-accent: #0f0f10;
 }
@@ -39,6 +47,8 @@
 @theme inline {
   --color-accent-surface-canvas: var(--accent-surface-canvas);
   --color-surface-canvas: var(--surface-canvas);
+  --color-surface-backdrop: var(--surface-backdrop);
+  --color-surface-popover: var(--surface-popover);
   --color-surface-canvas-inverse: var(--surface-canvas-inverse);
   --color-surface-alpha: var(--surface-alpha);
   --color-content-accent: var(--content-accent);
@@ -47,6 +57,8 @@
   --color-content-subdued: var(--content-subdued);
   --color-content-ink-inverse: var(--content-ink-inverse);
   --color-content-ink-on-accent: var(--content-ink-on-accent);
+  --color-content-ink-on-popover: var(--content-ink-on-popover);
+  --color-content-body-on-popover: var(--content-body-on-popover);
   --color-stroke-soft: var(--stroke-soft);
   --color-stroke-hard-on-accent: var(--stroke-hard-on-accent);
 

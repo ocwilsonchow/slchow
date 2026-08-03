@@ -1,11 +1,7 @@
 import { DesignSystemProvider } from "@repo/ds"
 import { Lenis } from "lenis/react"
 import "lenis/dist/lenis.css"
-import {
-  hasLocale,
-  type Locale,
-  NextIntlClientProvider,
-} from "next-intl"
+import { hasLocale, type Locale, NextIntlClientProvider } from "next-intl"
 import { getMessages, setRequestLocale } from "next-intl/server"
 import type { Metadata } from "next"
 import { notFound } from "next/navigation"
@@ -14,6 +10,7 @@ import { RootLayout } from "@/features/layout/components/root"
 import { StylesProvider } from "@/features/layout/components/styles"
 import { routing } from "@/i18n/routing"
 import { TanstackProviders } from "@/lib/tanstack-providers"
+import { RenderNewNavbar } from "@/features/layout/components/new-navbar"
 
 type Props = {
   children: React.ReactNode
@@ -43,8 +40,7 @@ export async function generateMetadata({
       default: "wilsonchow",
       template: "%s · wilsonchow",
     },
-    description:
-      "Software developer — product, design systems, and AI agents.",
+    description: "Software developer — product, design systems, and AI agents.",
     openGraph: {
       type: "website",
       locale,
@@ -81,7 +77,9 @@ export default async function LocaleLayout({ children, params }: Props) {
             <Lenis root>
               <TanstackProviders>
                 <NextIntlClientProvider locale={locale} messages={messages}>
-                  <RenderNavbar />
+                  {/* <RenderNavbar /> */}
+                  <RenderNewNavbar />
+                  {/* <div className="fixed bottom-0 left-0 right-0 h-24 bg-linear-to-t pointer-events-none from-surface-canvas to-surface-canvas/0" /> */}
                   <RootLayout>{children}</RootLayout>
                 </NextIntlClientProvider>
               </TanstackProviders>
