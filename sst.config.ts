@@ -16,7 +16,7 @@ export default $config({
     }
   },
   async run() {
-    const domain = "dev.slchow.com"
+    const domain = "slchow.com"
 
     // ----- Website -----
     new sst.aws.Nextjs("WEB", {
