@@ -3,6 +3,7 @@
     "menu": "菜单",
     "close": "关闭",
     "home": "首页",
+    "homePage": "Index",
     "resume": "简历",
     "back": "返回",
     "works": "支线任务",
@@ -22,5 +23,30 @@
     "next": "下一首",
     "previous": "上一首",
     "nowPlaying": "正在播放"
+  },
+  "metadata": {
+    "siteName": "Wilson Chow",
+    "siteTitle": "Wilson Chow",
+    "siteDescription": "软件开发者 — 产品、设计系统与 AI agents。",
+    "home": {
+      "title": "Wilson Chow",
+      "description": "软件开发者，重心在 frontend（React、TypeScript、Figma），同时具备后端、云端与生产级 AI agents 经验。"
+    },
+    "resume": {
+      "title": "简历",
+      "description": "Wilson Chow 的工作经验、技能与背景 — 软件开发者。"
+    },
+    "writings": {
+      "title": "文章",
+      "description": "关于 frontend、AI agents 与软件开发的笔记与文章。"
+    },
+    "works": {
+      "title": "支线任务",
+      "description": "Wilson Chow 的支线项目与实验。"
+    },
+    "contact": {
+      "title": "联系",
+      "description": "联系 Wilson Chow。"
+    }
   }
 }

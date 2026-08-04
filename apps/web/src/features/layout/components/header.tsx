@@ -17,36 +17,66 @@ export const Root = ({ ...props }: ComponentProps<"div">) => {
 
 export const Info = ({ ...props }: ComponentProps<"div">) => {
   return (
-    <div {...props} className={cn("text-content-ink font-semibold", props.className)}>
+    <div
+      {...props}
+      className={cn("text-content-ink font-semibold", props.className)}
+    >
       <Link href="/">Wilson Chow</Link>
     </div>
   )
 }
 
-export const Links = async ({ ...props }: ComponentProps<"div">) => {
+const HeaderLink = ({
+  className,
+  ...props
+}: ComponentProps<typeof Link>) => {
+  return (
+    <li>
+      <Link
+        {...props}
+        className={cn(
+          "transition-colors hover:text-content-ink",
+          className
+        )}
+      />
+    </li>
+  )
+}
+
+export const Links = async ({ ...props }: ComponentProps<"ul">) => {
   const t = await getTranslations("navigation")
 
   return (
-    <div {...props} className={cn("hidden md:block", props.className)}>
-      <div>
-        <Link href="/resume">{t("resume")}</Link>
-      </div>
-      <div>
-        <Link href="/works">{t("works")}</Link>
-      </div>
-      <div>
-        <Link href="/writings">{t("writings")}</Link>
-      </div>
-      <div>
-        <Link
-          href="https://github.com/ocwilsonchow"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          GitHub
-        </Link>
-      </div>
-    </div>
+    <ul
+      {...props}
+      className={cn("hidden md:flex flex-col gap-px", props.className)}
+    >
+      <HeaderLink href="/resume">{t("resume")}</HeaderLink>
+      <HeaderLink href="/works">{t("works")}</HeaderLink>
+      <HeaderLink href="/writings">{t("writings")}</HeaderLink>
+      <div className="my-3" />
+      <HeaderLink
+        href="https://github.com/ocwilsonchow"
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        GitHub
+      </HeaderLink>
+      <HeaderLink
+        href="https://www.linkedin.com/in/wilsonslchow/"
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        LinkedIn
+      </HeaderLink>
+      <HeaderLink
+        href="https://www.instagram.com/duoengineers/"
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        Instagram
+      </HeaderLink>
+    </ul>
   )
 }
 

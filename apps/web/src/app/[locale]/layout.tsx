@@ -2,15 +2,15 @@ import { DesignSystemProvider } from "@repo/ds"
 import { Lenis } from "lenis/react"
 import "lenis/dist/lenis.css"
 import { hasLocale, type Locale, NextIntlClientProvider } from "next-intl"
-import { getMessages, setRequestLocale } from "next-intl/server"
+import { getMessages, getTranslations, setRequestLocale } from "next-intl/server"
 import type { Metadata } from "next"
 import { notFound } from "next/navigation"
-import { RenderNavbar } from "@/features/layout/components/navbar"
 import { RootLayout } from "@/features/layout/components/root"
 import { StylesProvider } from "@/features/layout/components/styles"
 import { routing } from "@/i18n/routing"
 import { TanstackProviders } from "@/lib/tanstack-providers"
 import { RenderNewNavbar } from "@/features/layout/components/new-navbar"
+import { getOpenGraphLocale } from "@/lib/metadata"
 
 type Props = {
   children: React.ReactNode
@@ -30,30 +30,29 @@ function getMetadataBase() {
 export async function generateMetadata({
   params,
 }: {
-  params: Promise<{ locale: string }>
+  params: Promise<{ locale: Locale }>
 }): Promise<Metadata> {
   const { locale } = await params
+  const t = await getTranslations({ locale, namespace: "metadata" })
 
   return {
     metadataBase: getMetadataBase(),
     title: {
-      default: "wilsonchow",
-      template: "%s · wilsonchow",
+      default: t("siteTitle"),
+      template: `%s · ${t("siteName")}`,
     },
-    description: "Software developer — product, design systems, and AI agents.",
+    description: t("siteDescription"),
     openGraph: {
       type: "website",
-      locale,
-      siteName: "Wilson Chow",
-      title: "Wilson Chow",
-      description:
-        "Software developer — product, design systems, and AI agents.",
+      locale: getOpenGraphLocale(locale),
+      siteName: t("siteName"),
+      title: t("siteTitle"),
+      description: t("siteDescription"),
     },
     twitter: {
       card: "summary_large_image",
-      title: "Wilson Chow",
-      description:
-        "Software developer — product, design systems, and AI agents.",
+      title: t("siteTitle"),
+      description: t("siteDescription"),
     },
   }
 }

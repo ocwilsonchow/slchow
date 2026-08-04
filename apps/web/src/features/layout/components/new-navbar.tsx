@@ -22,13 +22,13 @@ import profilePicture from "@/assets/profile-pic.webp"
 const listVariants: Variants = {
   hidden: {
     transition: {
-      staggerChildren: 0.06,
+      staggerChildren: 0.02,
       staggerDirection: -1,
     },
   },
   visible: {
     transition: {
-      staggerChildren: 0.06,
+      staggerChildren: 0.05,
       delayChildren: 0.15,
     },
   },
@@ -204,7 +204,7 @@ const Trigger = (props: HTMLMotionProps<"button">) => {
     <motion.button
       {...props}
       className={cn(
-        "p-3 w-full h-12 font-semibold leading-none rounded-full flex items-center justify-between text-content-ink-on-popover focus-visible:outline-none",
+        "p-3 w-full h-12 font-medium leading-none rounded-full flex items-center justify-between text-content-ink-on-popover focus-visible:outline-none",
         props.className
       )}
     ></motion.button>
@@ -254,7 +254,7 @@ const NavbarLink = ({
         onClick?.(event)
       }}
       className={cn(
-        "block transition-colors hover:text-content-ink-on-popover py-0.5 font-medium text-base tracking-tight",
+        "block transition-colors hover:text-content-ink-on-popover py-0.5 font-medium text-base",
         isActive
           ? "text-content-ink-on-popover"
           : "text-content-body-on-popover",
@@ -280,9 +280,29 @@ export const NewNavbar = {
   },
 }
 
+const pathTitleKeys = {
+  "/": "homePage",
+  "/resume": "resume",
+  "/works": "works",
+  "/writings": "writings",
+  "/contact": "contact",
+} as const
+
 export const RenderNewNavbar = () => {
   const { isOpen, setIsOpen } = useNavbar()
+  const pathname = usePathname()
   const t = useTranslations("navigation")
+
+  const pathTitleKey =
+    pathTitleKeys[pathname as keyof typeof pathTitleKeys] ??
+    (pathname.startsWith("/writings/")
+      ? "writings"
+      : pathname.startsWith("/works/")
+        ? "works"
+        : null)
+  const pathLabel = pathTitleKey
+    ? t(pathTitleKey)
+    : pathname.replace(/^\//, "")
 
   return (
     <Fragment>
@@ -339,7 +359,11 @@ export const RenderNewNavbar = () => {
               height={28}
               className="rounded-full"
             />
-            {/* <div>{isOpen ? t("close") : t("menu")}</div> */}
+            <div className="flex items-center gap-1.5">
+              <div>Wilson</div>
+              <div className="text-content-body-on-popover/50 text-xs">/</div>
+              <div className="text-content-body-on-popover/50 capitalize">{pathLabel}</div>
+            </div>
           </div>
           <div>
             <motion.div

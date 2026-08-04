@@ -7,6 +7,7 @@ import { BackLink } from "@/features/layout/components/back-link"
 import { RenderMdxBlockByPath } from "@/features/mdx/components/render-mdx-block"
 import { getMdxContent, getWritingsStaticParams } from "@/lib/source"
 import { Toc } from "@/features/mdx/components/toc"
+import { buildPageMetadata } from "@/lib/metadata"
 
 type Props = {
   params: Promise<{ locale: Locale; slug: string }>
@@ -15,24 +16,13 @@ type Props = {
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { locale, slug } = await params
   const page = getMdxContent("writings", slug, locale)
-  const title = page?.data.title ?? slug
-  const description = page?.data.description
 
-  return {
-    title,
-    description,
-    openGraph: {
-      type: "article",
-      title,
-      description,
-      locale,
-    },
-    twitter: {
-      card: "summary_large_image",
-      title,
-      description,
-    },
-  }
+  return buildPageMetadata({
+    title: page?.data.title ?? slug,
+    description: page?.data.description,
+    locale,
+    type: "article",
+  })
 }
 
 const Page = async ({ params }: Props) => {

@@ -1,10 +1,21 @@
 import type { MetadataRoute } from "next"
 
+function getSiteUrl() {
+  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL
+  if (siteUrl) return new URL(siteUrl)
+
+  const vercelUrl = process.env.VERCEL_PROJECT_PRODUCTION_URL
+  if (vercelUrl) return new URL(`https://${vercelUrl}`)
+
+  return new URL("http://localhost:3003")
+}
+
 export default function robots(): MetadataRoute.Robots {
   return {
     rules: {
       userAgent: "*",
-      disallow: "/",
+      allow: "/",
     },
+    sitemap: `${getSiteUrl().origin}/sitemap.xml`,
   }
 }
