@@ -16,6 +16,8 @@ import { useTranslations } from "next-intl"
 import { ComponentProps, Fragment, useEffect } from "react"
 import { LanguageSettings, ThemeSettings } from "./navbar-settings"
 import { useLenis } from "lenis/react"
+import Image from "next/image"
+import profilePicture from "@/assets/profile-pic.webp"
 
 const listVariants: Variants = {
   hidden: {
@@ -26,6 +28,7 @@ const listVariants: Variants = {
   },
   visible: {
     transition: {
+      staggerChildren: 0.06,
       delayChildren: 0.15,
     },
   },
@@ -201,7 +204,7 @@ const Trigger = (props: HTMLMotionProps<"button">) => {
     <motion.button
       {...props}
       className={cn(
-        "px-5 w-full h-12 font-semibold leading-none py-3.5 rounded-full pr-3.5 flex items-center justify-between text-content-ink-on-popover focus-visible:outline-none",
+        "p-3 w-full h-12 font-semibold leading-none rounded-full flex items-center justify-between text-content-ink-on-popover focus-visible:outline-none",
         props.className
       )}
     ></motion.button>
@@ -251,7 +254,7 @@ const NavbarLink = ({
         onClick?.(event)
       }}
       className={cn(
-        "block transition-colors hover:text-content-ink-on-popover py-0.5 font-semibold text-lg tracking-tight",
+        "block transition-colors hover:text-content-ink-on-popover py-0.5 font-medium text-base tracking-tight",
         isActive
           ? "text-content-ink-on-popover"
           : "text-content-body-on-popover",
@@ -314,7 +317,7 @@ export const RenderNewNavbar = () => {
                 </NewNavbar.NavbarLink>
               </NewNavbar.StaggerItem>
             </NewNavbar.StaggerList>
-            <NewNavbar.StaggerList className="p-5">
+            <NewNavbar.StaggerList className="p-5 space-y-3">
               <NewNavbar.StaggerItem>
                 <NewNavbar.ThemeSettings />
               </NewNavbar.StaggerItem>
@@ -323,12 +326,21 @@ export const RenderNewNavbar = () => {
                   onBeforeChange={() => setIsOpen(false)}
                 />
               </NewNavbar.StaggerItem>
-              <div className="h-5" />
+              <div className="h-3" />
             </NewNavbar.StaggerList>
           </NewNavbar.Content>
         </AnimatePresence>
         <NewNavbar.Trigger onClick={() => setIsOpen(!isOpen)}>
-          <div>{isOpen ? t("close") : t("menu")}</div>
+          <div className="flex items-center justify-center gap-4">
+            <Image
+              src={profilePicture}
+              alt="Wilson Chow"
+              width={28}
+              height={28}
+              className="rounded-full"
+            />
+            {/* <div>{isOpen ? t("close") : t("menu")}</div> */}
+          </div>
           <div>
             <motion.div
               variants={{
