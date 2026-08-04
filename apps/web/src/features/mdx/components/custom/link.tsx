@@ -5,9 +5,7 @@ import { ArrowUpRight } from "lucide-react"
 
 /** Binary/document routes must use a hard navigation — Next soft nav cannot render them. */
 const isDocumentHref = (href: string) =>
-  href === "/resume/dark" ||
-  href === "/resume/light" ||
-  href.endsWith(".pdf")
+  href === "/resume/pdf" || href.endsWith(".pdf")
 
 export function MDXLink({ href, className, ...props }: ComponentProps<"a">) {
   const classes = cn("inline-flex font-semibold text-content-ink underline underline-offset-4 decoration-content-ink/25 hover:decoration-content-ink/50", className)

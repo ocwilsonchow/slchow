@@ -24,6 +24,10 @@
     "previous": "Previous track",
     "nowPlaying": "Now playing"
   },
+  "notFound": {
+    "title": "Oops!",
+    "description": "This page does not exist!"
+  },
   "metadata": {
     "siteName": "Wilson Chow",
     "siteTitle": "Wilson Chow",

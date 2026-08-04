@@ -26,18 +26,12 @@ export const Info = ({ ...props }: ComponentProps<"div">) => {
   )
 }
 
-const HeaderLink = ({
-  className,
-  ...props
-}: ComponentProps<typeof Link>) => {
+const HeaderLink = ({ className, ...props }: ComponentProps<typeof Link>) => {
   return (
     <li>
       <Link
         {...props}
-        className={cn(
-          "transition-colors hover:text-content-ink",
-          className
-        )}
+        className={cn("transition-colors hover:text-content-ink", className)}
       />
     </li>
   )
@@ -52,8 +46,8 @@ export const Links = async ({ ...props }: ComponentProps<"ul">) => {
       className={cn("hidden md:flex flex-col gap-px", props.className)}
     >
       <HeaderLink href="/resume">{t("resume")}</HeaderLink>
-      <HeaderLink href="/works">{t("works")}</HeaderLink>
       <HeaderLink href="/writings">{t("writings")}</HeaderLink>
+      <HeaderLink href="/works">{t("works")}</HeaderLink>
       <div className="my-3" />
       <HeaderLink
         href="https://github.com/ocwilsonchow"

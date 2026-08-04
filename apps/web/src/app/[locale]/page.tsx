@@ -48,8 +48,8 @@ const Page = async ({ params }: Props) => {
           </section>
           <Divider />
           <section id="works-and-writings" className="flex flex-col">
-            <ListWorks locale={locale} />
-            <Divider />
+            {/* <ListWorks locale={locale} />
+            <Divider /> */}
             <ListWritings locale={locale} />
             <Divider />
           </section>

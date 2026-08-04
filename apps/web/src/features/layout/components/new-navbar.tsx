@@ -359,7 +359,7 @@ export const RenderNewNavbar = () => {
               height={28}
               className="rounded-full"
             />
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1.5 font-semibold">
               <div>Wilson</div>
               <div className="text-content-body-on-popover/50 text-xs">/</div>
               <div className="text-content-body-on-popover/50 capitalize">{pathLabel}</div>

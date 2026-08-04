@@ -11,6 +11,7 @@ export default function proxy(request: NextRequest) {
 export const config = {
   // Match all pathnames except for
   // - … if they start with `/api`, `/trpc`, `/_next` or `/_vercel`
+  // - … resume PDF route (served outside the locale tree)
   // - … the ones containing a dot (e.g. `favicon.ico`)
-  matcher: "/((?!api|trpc|_next|_vercel|.*\\..*).*)",
+  matcher: "/((?!api|trpc|_next|_vercel|resume/pdf|.*\\..*).*)",
 }

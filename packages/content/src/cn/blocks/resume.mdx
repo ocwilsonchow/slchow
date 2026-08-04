@@ -54,13 +54,15 @@ title: 简历
 
 ---
 
-### _React Native Skia App，2024 年 4 月_
+### _React Native Restaurant App，2024 年 4 月_
 
-- 打造活动 photobooth 应用（拍摄 → 编辑 → 打印／邮件发送）。
-- 端到端负责 **Figma** UI/UX，并以 **Expo React Native** 落地，另提供 **Next.js** 管理后台处理 SVG 素材。
-- **React Native Skia** canvas 在 100+ 活跃图层下维持 50+ FPS（笔刷、橡皮擦、画笔、取色），搭配 **Reanimated** 与 **Unistyles**。
-- 将后台上传的 SVG 转换为可拖拽、缩放、旋转的 Skia 对象置于 canvas 上。
-- 通过 **Lambda** 预签名 URL 将导出结果持久化至 **S3**。
+- 主导餐饮品牌会员应用的 **Figma** 设计与 **React Native** 前端（电子会员卡、积分、优惠）。
+- 与后端整合来自 **OpenAPI**／Swagger 的 typed REST clients；并上架 iOS 与 Android 至 App Store 与 Play Store。
+- 实现推送与 deep-linked 营销活动，用于促销与会员里程碑。
+- 上线后维持 **>99.5%** crash-free sessions，并以 **Sentry** 监控。
+- 以 **FlashList**（recycling、调校 batch／window）取代 ScrollView 映射行，改善菜单／历史列表卡顿。
+- 通过 **react-native-screens** freeze 与延迟挂载页面，降低非活动标签页成本；以 **Reanimated** 处理原生线程转场。
+- 缓存远程图片，并避免在长列表中使用全分辨率素材。
 
 <br />
 
@@ -113,3 +115,7 @@ title: 简历
 - AWS Cloud Practitioner，2025
 
 <br />
+
+---
+
+你也可以在[这里](/resume/pdf)下载我的简历。

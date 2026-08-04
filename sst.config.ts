@@ -23,10 +23,16 @@ export default $config({
       path: "apps/web",
       domain: {
         name: domain,
+        redirects: [`www.${domain}`],
       },
+      // Keep N server Lambda instances warm via a scheduled warmer
+      // (EventBridge cron pinging the OpenNext server function).
+      // Use 0 on non-prod to avoid paying for idle warmers.
+      warm: $app.stage === "production" ? 1 : 0,
       environment: {
         NEXT_PUBLIC_SITE_URL: `https://${domain}`,
       },
+      openNextVersion: "4.0.3",
       dev: {
         command: "bun run dev",
         directory: "apps/web",
