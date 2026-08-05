@@ -1,0 +1,13 @@
+node_modules
+.next
+.open-next
+.source
+dist
+build
+coverage
+*.min.js
+next-env.d.ts
+sst-env.d.ts
+**/sst-env.d.ts
+bun.lock
+package-lock.json

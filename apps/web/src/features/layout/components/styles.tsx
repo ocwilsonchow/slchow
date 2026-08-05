@@ -1,5 +1,5 @@
 import { cn } from "@repo/ds"
-import { FontAero, FontInter, FontMono } from "@repo/ds/lib/fonts"
+import { FontAero, FontMono } from "@repo/ds/lib/fonts"
 
 export const fontPresets = {
   mono: cn(

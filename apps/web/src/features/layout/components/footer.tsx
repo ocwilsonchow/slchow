@@ -1,7 +1,7 @@
 "use client"
 
 import { cn } from "@repo/ds"
-import { HTMLMotionProps, motion } from "motion/react"
+import { type HTMLMotionProps, motion } from "motion/react"
 
 export const Root = (props: HTMLMotionProps<"footer">) => {
   return (

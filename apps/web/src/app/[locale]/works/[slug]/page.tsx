@@ -1,37 +1,37 @@
-import type { Metadata } from "next";
-import type { Locale } from "next-intl";
-import { setRequestLocale } from "next-intl/server";
-import { BackLink } from "@/features/layout/components/back-link";
-import { Header } from "@/features/layout/components/header";
-import { PageLayout } from "@/features/layout/components/page";
-import { RenderMdxBlockByPath } from "@/features/mdx/components/render-mdx-block";
-import { CollapsibleToc } from "@/features/mdx/components/toc";
-import { buildPageMetadata } from "@/lib/metadata";
-import { getCategoryStaticParams, getMdxContent } from "@/lib/source";
+import type { Metadata } from "next"
+import type { Locale } from "next-intl"
+import { setRequestLocale } from "next-intl/server"
+import { BackLink } from "@/features/layout/components/back-link"
+import { Header } from "@/features/layout/components/header"
+import { PageLayout } from "@/features/layout/components/page"
+import { RenderMdxBlockByPath } from "@/features/mdx/components/render-mdx-block"
+import { CollapsibleToc } from "@/features/mdx/components/toc"
+import { buildPageMetadata } from "@/lib/metadata"
+import { getCategoryStaticParams, getMdxContent } from "@/lib/source"
 
 type Props = {
-  params: Promise<{ locale: Locale; slug: string }>;
-};
+  params: Promise<{ locale: Locale; slug: string }>
+}
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
-  const { locale, slug } = await params;
-  const page = getMdxContent("works", slug, locale);
+  const { locale, slug } = await params
+  const page = getMdxContent("works", slug, locale)
 
   return buildPageMetadata({
     title: page?.data.title ?? slug,
     description: page?.data.description,
     locale,
     type: "article",
-  });
+  })
 }
 
 const Page = async ({ params }: Props) => {
-  const { locale, slug } = await params;
+  const { locale, slug } = await params
 
-  setRequestLocale(locale);
+  setRequestLocale(locale)
 
-  const page = getMdxContent("works", slug, locale);
-  const toc = page?.data.toc ?? [];
+  const page = getMdxContent("works", slug, locale)
+  const toc = page?.data.toc ?? []
 
   return (
     <PageLayout className="grid lg:grid-cols-2 content-start items-start">
@@ -55,14 +55,14 @@ const Page = async ({ params }: Props) => {
         <RenderMdxBlockByPath category="works" slug={slug} locale={locale} />
       </article>
     </PageLayout>
-  );
-};
-
-export default Page;
-
-export function generateStaticParams() {
-  return getCategoryStaticParams("works");
+  )
 }
 
-export const dynamic = "force-static";
-export const dynamicParams = false;
+export default Page
+
+export function generateStaticParams() {
+  return getCategoryStaticParams("works")
+}
+
+export const dynamic = "force-static"
+export const dynamicParams = false

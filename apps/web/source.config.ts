@@ -1,6 +1,6 @@
-import { pageSchema } from "fumadocs-core/source/schema";
-import { defineCollections, defineConfig } from "fumadocs-mdx/config";
-import { z } from "zod";
+import { pageSchema } from "fumadocs-core/source/schema"
+import { defineCollections, defineConfig } from "fumadocs-mdx/config"
+import { z } from "zod"
 
 export const docs = defineCollections({
   type: "doc",
@@ -11,7 +11,7 @@ export const docs = defineCollections({
     date: z.iso.date().or(z.date()).optional(),
     pinned: z.boolean().optional(),
   }),
-});
+})
 
 export default defineConfig({
   mdxOptions: {
@@ -22,4 +22,4 @@ export default defineConfig({
       },
     },
   },
-});
+})

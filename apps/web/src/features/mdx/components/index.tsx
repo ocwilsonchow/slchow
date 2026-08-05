@@ -1,4 +1,11 @@
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@repo/ds/components/ui/accordion"
 import type { MDXComponents } from "mdx/types"
+import { MotionCollections } from "@/features/motion/components/collections"
 import { MDXImage, MDXLink, Pre } from "./custom"
 import {
   blockquote,
@@ -23,13 +30,6 @@ import {
   tr,
   ul,
 } from "./custom/typography"
-import { MotionCollections } from "@/features/motion/components/collections"
-import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger,
-} from "@repo/ds/components/ui/accordion"
 
 export function getMDXComponents(components?: MDXComponents): MDXComponents {
   return {

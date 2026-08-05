@@ -1,25 +1,25 @@
-"use client";
+"use client"
 
-import { cn } from "@repo/ds";
-import { Portal } from "@repo/ds/components/ui/portal";
-import { PlusIcon } from "lucide-react";
-import { type HTMLMotionProps, motion, useReducedMotion } from "motion/react";
-import { useTranslations } from "next-intl";
-import { type ComponentProps, type ReactNode, useRef, useState } from "react";
-import { Link as I18nLink, usePathname } from "@/i18n/navigation";
-import { fontPresets } from "../styles";
+import { cn } from "@repo/ds"
+import { Portal } from "@repo/ds/components/ui/portal"
+import { PlusIcon } from "lucide-react"
+import { type HTMLMotionProps, motion, useReducedMotion } from "motion/react"
+import { useTranslations } from "next-intl"
+import { type ComponentProps, type ReactNode, useRef, useState } from "react"
+import { Link as I18nLink, usePathname } from "@/i18n/navigation"
+import { fontPresets } from "../styles"
 import {
   NavbarContext,
   SITE_NAV_PANEL_ID,
   SITE_NAV_TRIGGER_ID,
   useNavbarContext,
-} from "./context";
+} from "./context"
 import {
   useMediaQuery,
   useNavbarFocusLock,
   useNavbarScrollHide,
   useOpenOnModK,
-} from "./hooks";
+} from "./hooks"
 import {
   backdropVariants,
   contentVariants,
@@ -31,19 +31,19 @@ import {
   reducedListVariants,
   reducedTriggerIconVariants,
   triggerIconVariants,
-} from "./variants";
+} from "./variants"
 
 function Root({ children }: { children: ReactNode }) {
-  const [open, setOpen] = useState(false);
-  const navRef = useRef<HTMLElement | null>(null);
-  const panelRef = useRef<HTMLDivElement | null>(null);
-  const backdropRef = useRef<HTMLButtonElement | null>(null);
-  const triggerRef = useRef<HTMLButtonElement | null>(null);
-  const shouldReduceMotion = useReducedMotion() ?? false;
+  const [open, setOpen] = useState(false)
+  const navRef = useRef<HTMLElement | null>(null)
+  const panelRef = useRef<HTMLDivElement | null>(null)
+  const backdropRef = useRef<HTMLButtonElement | null>(null)
+  const triggerRef = useRef<HTMLButtonElement | null>(null)
+  const shouldReduceMotion = useReducedMotion() ?? false
 
-  const toggle = () => setOpen((current) => !current);
+  const toggle = () => setOpen((current) => !current)
 
-  useOpenOnModK(setOpen);
+  useOpenOnModK(setOpen)
   useNavbarFocusLock({
     open,
     navRef,
@@ -51,7 +51,7 @@ function Root({ children }: { children: ReactNode }) {
     triggerRef,
     panelRef,
     setOpen,
-  });
+  })
 
   return (
     <NavbarContext
@@ -68,12 +68,12 @@ function Root({ children }: { children: ReactNode }) {
     >
       {children}
     </NavbarContext>
-  );
+  )
 }
 
 function Backdrop({ className, ...props }: HTMLMotionProps<"button">) {
-  const { open, setOpen, backdropRef, shouldReduceMotion } = useNavbarContext();
-  const t = useTranslations("navigation");
+  const { open, setOpen, backdropRef, shouldReduceMotion } = useNavbarContext()
+  const t = useTranslations("navigation")
 
   return (
     <Portal>
@@ -94,11 +94,11 @@ function Backdrop({ className, ...props }: HTMLMotionProps<"button">) {
         className={cn(
           "fixed inset-0 z-40 bg-surface-backdrop/65 backdrop-blur-sm",
           open ? "pointer-events-auto" : "pointer-events-none",
-          className,
+          className
         )}
       />
     </Portal>
-  );
+  )
 }
 
 function Frame({
@@ -106,17 +106,17 @@ function Frame({
   className,
   ...props
 }: ComponentProps<typeof Portal>) {
-  const { open, navRef, shouldReduceMotion } = useNavbarContext();
-  const t = useTranslations("navigation");
-  const isMobile = useMediaQuery("(max-width: 767px)");
-  const isScrollingDown = useNavbarScrollHide(isMobile, open);
+  const { open, navRef, shouldReduceMotion } = useNavbarContext()
+  const t = useTranslations("navigation")
+  const isMobile = useMediaQuery("(max-width: 767px)")
+  const isScrollingDown = useNavbarScrollHide(isMobile, open)
 
   return (
     <Portal
       className={cn(
         "fixed bottom-4 left-4 right-4 z-50 grid content-end",
         fontPresets.aero,
-        className,
+        className
       )}
       {...props}
     >
@@ -139,11 +139,11 @@ function Frame({
         </nav>
       </motion.div>
     </Portal>
-  );
+  )
 }
 
 function Content({ className, children, ...props }: HTMLMotionProps<"div">) {
-  const { open, panelRef, shouldReduceMotion } = useNavbarContext();
+  const { open, panelRef, shouldReduceMotion } = useNavbarContext()
 
   return (
     <motion.div
@@ -159,7 +159,7 @@ function Content({ className, children, ...props }: HTMLMotionProps<"div">) {
     >
       {children}
     </motion.div>
-  );
+  )
 }
 
 function Trigger({
@@ -168,7 +168,7 @@ function Trigger({
   onClick,
   ...props
 }: Omit<HTMLMotionProps<"button">, "children"> & { children?: ReactNode }) {
-  const { open, toggle, triggerRef, shouldReduceMotion } = useNavbarContext();
+  const { open, toggle, triggerRef, shouldReduceMotion } = useNavbarContext()
 
   return (
     <motion.button
@@ -179,12 +179,12 @@ function Trigger({
       aria-controls={SITE_NAV_PANEL_ID}
       {...props}
       onClick={(event) => {
-        toggle();
-        onClick?.(event);
+        toggle()
+        onClick?.(event)
       }}
       className={cn(
         "p-3 w-full h-12 font-medium leading-none rounded-full flex items-center justify-between text-content-ink-on-popover",
-        className,
+        className
       )}
     >
       {children}
@@ -198,7 +198,7 @@ function Trigger({
         <PlusIcon size={16} strokeWidth={3} aria-hidden />
       </motion.div>
     </motion.button>
-  );
+  )
 }
 
 function StaggerList({
@@ -206,7 +206,7 @@ function StaggerList({
   children,
   ...props
 }: HTMLMotionProps<"div">) {
-  const { shouldReduceMotion } = useNavbarContext();
+  const { shouldReduceMotion } = useNavbarContext()
 
   return (
     <motion.div
@@ -216,7 +216,7 @@ function StaggerList({
     >
       {children}
     </motion.div>
-  );
+  )
 }
 
 function StaggerItem({
@@ -224,7 +224,7 @@ function StaggerItem({
   children,
   ...props
 }: HTMLMotionProps<"div">) {
-  const { shouldReduceMotion } = useNavbarContext();
+  const { shouldReduceMotion } = useNavbarContext()
 
   return (
     <motion.div
@@ -234,7 +234,7 @@ function StaggerItem({
     >
       {children}
     </motion.div>
-  );
+  )
 }
 
 function NavLink({
@@ -243,31 +243,31 @@ function NavLink({
   onClick,
   ...props
 }: ComponentProps<typeof I18nLink>) {
-  const pathname = usePathname();
-  const { setOpen } = useNavbarContext();
-  const hrefPath = typeof href === "string" ? href : href.pathname;
+  const pathname = usePathname()
+  const { setOpen } = useNavbarContext()
+  const hrefPath = typeof href === "string" ? href : href.pathname
   const isActive =
     hrefPath === "/"
       ? pathname === "/"
-      : pathname === hrefPath || pathname.startsWith(`${hrefPath}/`);
+      : pathname === hrefPath || pathname.startsWith(`${hrefPath}/`)
 
   return (
     <I18nLink
       href={href}
       {...props}
       onClick={(event) => {
-        setOpen(false);
-        onClick?.(event);
+        setOpen(false)
+        onClick?.(event)
       }}
       className={cn(
         "block transition-colors hover:text-content-ink-on-popover py-0.5 font-semibold text-base",
         isActive
           ? "text-content-ink-on-popover"
           : "text-content-body-on-popover",
-        className,
+        className
       )}
     />
-  );
+  )
 }
 
 export const Navbar = {
@@ -279,4 +279,4 @@ export const Navbar = {
   StaggerList,
   StaggerItem,
   Link: NavLink,
-};
+}

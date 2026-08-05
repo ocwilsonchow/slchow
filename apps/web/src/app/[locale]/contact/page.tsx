@@ -1,8 +1,8 @@
-import type { Locale } from "next-intl"
 import type { Metadata } from "next"
+import type { Locale } from "next-intl"
 import { getTranslations, setRequestLocale } from "next-intl/server"
-import { PageLayout } from "@/features/layout/components/page"
 import { Header } from "@/features/layout/components/header"
+import { PageLayout } from "@/features/layout/components/page"
 import { buildPageMetadata } from "@/lib/metadata"
 
 type Props = {

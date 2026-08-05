@@ -28,7 +28,7 @@ export function Pre({ className, children, ...props }: ComponentProps<"pre">) {
 
     setIsCollapsible(lineCount > COLLAPSED_LINE_COUNT)
     setExpanded(false)
-  }, [children])
+  }, [])
 
   const handleCopy = () => {
     const text = preRef.current?.textContent

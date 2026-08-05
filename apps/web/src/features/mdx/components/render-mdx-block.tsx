@@ -1,8 +1,8 @@
+import { cn } from "@repo/ds"
+import type { ComponentProps } from "react"
 import Markdown, { type Components } from "react-markdown"
 import { getMdxContent } from "@/lib/source"
 import { getMDXComponents } from "."
-import { ComponentProps } from "react"
-import { cn } from "@repo/ds"
 
 type RenderMdxBlockProps = {
   category: string

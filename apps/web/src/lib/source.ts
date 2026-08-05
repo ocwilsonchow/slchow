@@ -100,9 +100,7 @@ export function getNotesPage(slug: string[], locale: string) {
 export function getCategoryStaticParams(category: string) {
   return content
     .generateParams("slug", "locale")
-    .filter(
-      (param) => param.slug[0] === category && param.slug.length > 1
-    )
+    .filter((param) => param.slug[0] === category && param.slug.length > 1)
     .map((param) => ({
       locale: param.locale,
       // `[slug]` is a single segment; nested paths use `/` in the segment

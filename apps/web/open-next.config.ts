@@ -6,8 +6,7 @@ const config = {
       tagCache: "dynamodb-lite",
       incrementalCache: "s3-lite",
       queue: "sqs-lite",
-      wrapper: "aws-lambda-streaming"
-
+      wrapper: "aws-lambda-streaming",
     },
   },
 } satisfies OpenNextConfig
