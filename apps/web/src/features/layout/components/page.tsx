@@ -1,22 +1,25 @@
 "use client"
 
 import { cn } from "@repo/ds"
-import { motion, type HTMLMotionProps } from "motion/react"
+import { type HTMLMotionProps, motion, useReducedMotion } from "motion/react"
 
-export const PageLayout = (props: HTMLMotionProps<"div">) => {
+export const PageLayout = (props: HTMLMotionProps<"main">) => {
+  const shouldReduceMotion = useReducedMotion()
+
   return (
-    <motion.div
+    <motion.main
       {...props}
+      id="main-content"
       variants={{
-        initial: { opacity: 0 },
+        initial: { opacity: shouldReduceMotion ? 1 : 0 },
         animate: { opacity: 1 },
-        exit: { opacity: 0 },
+        exit: { opacity: shouldReduceMotion ? 1 : 0 },
       }}
       initial="initial"
       animate="animate"
       exit="exit"
       transition={{
-        duration: 0.3,
+        duration: shouldReduceMotion ? 0 : 0.3,
         ease: "easeInOut",
       }}
       className={cn("", props.className)}

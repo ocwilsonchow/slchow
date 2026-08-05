@@ -3,6 +3,7 @@
 import { cn } from "@repo/ds"
 import { useLenis } from "lenis/react"
 import Image, { type ImageProps } from "next/image"
+import { useTranslations } from "next-intl"
 import { useEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 
@@ -14,6 +15,7 @@ export function MDXImage({ className, alt = "", ...props }: MDXImageProps) {
   const dialogRef = useRef<HTMLDialogElement>(null)
   const [isOpen, setIsOpen] = useState(false)
   const lenis = useLenis()
+  const t = useTranslations("a11y")
 
   useEffect(() => {
     if (!isOpen) return
@@ -36,18 +38,23 @@ export function MDXImage({ className, alt = "", ...props }: MDXImageProps) {
     }
   }, [isOpen])
 
+  const viewLabel = alt ? t("viewImageNamed", { alt }) : t("viewImage")
+
   return (
     <>
       <button
         type="button"
-        aria-label={alt ? `View ${alt} full screen` : "View image full screen"}
-        className="block w-full cursor-zoom-in outline-none focus-visible:outline-none"
+        aria-label={viewLabel}
+        className="block w-full cursor-zoom-in"
         onClick={() => setIsOpen(true)}
       >
         <Image
           alt={alt}
           sizes="(max-width: 768px) 100vw, 720px"
-          className={cn("h-auto w-full rounded-xl border bg-surface-alpha", className)}
+          className={cn(
+            "h-auto w-full rounded-xl border bg-surface-alpha",
+            className
+          )}
           {...props}
         />
       </button>
@@ -56,17 +63,20 @@ export function MDXImage({ className, alt = "", ...props }: MDXImageProps) {
         ? createPortal(
             <dialog
               ref={dialogRef}
-              aria-label={alt || "Full-screen image"}
+              aria-label={alt || t("fullScreenImage")}
               className="fixed inset-0 m-0 h-dvh max-h-none w-screen max-w-none bg-black/40 p-4 backdrop:bg-black/50 backdrop-blur-sm"
               onClose={() => setIsOpen(false)}
               onClick={(event) => {
                 if (event.target === event.currentTarget) setIsOpen(false)
               }}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") setIsOpen(false)
+              }}
             >
               <button
                 type="button"
-                aria-label="Close full-screen image"
-                className="absolute top-4 right-4 z-10 flex size-10 items-center justify-center rounded-full bg-black/60 text-2xl text-white hover:bg-black/80 outline-none focus-visible:outline-none"
+                aria-label={t("closeFullScreenImage")}
+                className="absolute top-4 right-4 z-10 flex size-10 items-center justify-center rounded-full bg-black/60 text-2xl text-white hover:bg-black/80"
                 onClick={() => setIsOpen(false)}
               >
                 <span aria-hidden="true">&times;</span>

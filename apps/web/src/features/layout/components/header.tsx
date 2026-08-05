@@ -1,7 +1,7 @@
-import { Link } from "@/i18n/navigation"
 import { cn } from "@repo/ds"
 import { getTranslations } from "next-intl/server"
 import type { ComponentProps } from "react"
+import { Link } from "@/i18n/navigation"
 
 export const Root = ({ ...props }: ComponentProps<"div">) => {
   return (
@@ -21,7 +21,9 @@ export const Info = ({ ...props }: ComponentProps<"div">) => {
       {...props}
       className={cn("text-content-ink font-semibold", props.className)}
     >
-      <Link href="/">Wilson Chow</Link>
+      <h1>
+        <Link href="/">Wilson Chow</Link>
+      </h1>
     </div>
   )
 }
@@ -37,43 +39,45 @@ const HeaderLink = ({ className, ...props }: ComponentProps<typeof Link>) => {
   )
 }
 
-export const Links = async ({ ...props }: ComponentProps<"ul">) => {
+export const Links = async ({ className, ...props }: ComponentProps<"div">) => {
   const t = await getTranslations("navigation")
 
   return (
-    <ul
-      {...props}
-      className={cn("hidden md:flex flex-col gap-px", props.className)}
-    >
-      <HeaderLink href="/resume">{t("resume")}</HeaderLink>
-      <HeaderLink href="/notes">{t("notes")}</HeaderLink>
-      <HeaderLink href="/works">{t("works")}</HeaderLink>
-      <HeaderLink href="/">
-        {t("designs")} ({t("comingSoon")})
-      </HeaderLink>
-      <div className="my-3" />
-      <HeaderLink
-        href="https://github.com/ocwilsonchow"
-        target="_blank"
-        rel="noopener noreferrer"
-      >
-        GitHub
-      </HeaderLink>
-      <HeaderLink
-        href="https://www.linkedin.com/in/wilsonslchow/"
-        target="_blank"
-        rel="noopener noreferrer"
-      >
-        LinkedIn
-      </HeaderLink>
-      <HeaderLink
-        href="https://www.instagram.com/duoengineers/"
-        target="_blank"
-        rel="noopener noreferrer"
-      >
-        Instagram
-      </HeaderLink>
-    </ul>
+    <div {...props} className={cn("hidden md:flex flex-col gap-3", className)}>
+      <ul className="flex flex-col gap-px">
+        <HeaderLink href="/resume">{t("resume")}</HeaderLink>
+        <HeaderLink href="/notes">{t("notes")}</HeaderLink>
+        <HeaderLink href="/works">{t("works")}</HeaderLink>
+        <li>
+          <span className="text-content-subdued">
+            {t("designs")} ({t("comingSoon")})
+          </span>
+        </li>
+      </ul>
+      <ul className="flex flex-col gap-px">
+        <HeaderLink
+          href="https://github.com/ocwilsonchow"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          GitHub
+        </HeaderLink>
+        <HeaderLink
+          href="https://www.linkedin.com/in/wilsonslchow/"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          LinkedIn
+        </HeaderLink>
+        <HeaderLink
+          href="https://www.instagram.com/duoengineers/"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          Instagram
+        </HeaderLink>
+      </ul>
+    </div>
   )
 }
 

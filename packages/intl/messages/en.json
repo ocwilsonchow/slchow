@@ -2,6 +2,7 @@
   "navigation": {
     "menu": "Menu",
     "close": "Close",
+    "skipToContent": "Skip to content",
     "home": "Home",
     "homePage": "Index",
     "resume": "Resume",
@@ -23,7 +24,16 @@
     "pause": "Pause",
     "next": "Next track",
     "previous": "Previous track",
-    "nowPlaying": "Now playing"
+    "nowPlaying": "Now playing",
+    "socials": "Socials",
+    "tableOfContents": "Table of contents"
+  },
+  "a11y": {
+    "viewImage": "View image full screen",
+    "viewImageNamed": "View {alt} full screen",
+    "fullScreenImage": "Full-screen image",
+    "closeFullScreenImage": "Close full-screen image",
+    "profileAlt": "Wilson Chow"
   },
   "notFound": {
     "title": "Oops!",
@@ -62,6 +72,8 @@
   },
   "code": {
     "showMore": "Show more",
-    "showLess": "Show less"
+    "showLess": "Show less",
+    "copy": "Copy code",
+    "copied": "Copied"
   }
 }

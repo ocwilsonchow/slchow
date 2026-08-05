@@ -42,7 +42,7 @@ export const ListNotes = async ({
             <li key={page.url} className="">
               <Link
                 href={`/notes/${slug}`}
-                className="inline-flex text-content-ink py-px font-semibold"
+                className="inline-flex text-content-ink py-0.5 font-semibold"
               >
                 {page.data.title}
               </Link>
@@ -53,7 +53,7 @@ export const ListNotes = async ({
           <li>
             <Link
               href="/notes"
-              className="inline-block py-px text-content-subdued hover:text-content-ink/75"
+              className="inline-block py-0.5 text-content-subdued hover:text-content-ink/75"
             >
               {t("listAll")}{" "}
             </Link>

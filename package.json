@@ -11,9 +11,11 @@
     "deploy": "bunx sst deploy --stage production",
     "deploy:dev": "bunx sst deploy --stage dev",
     "deploy:production": "bun run deploy && bun run verify:production",
-    "verify:production": "node node_modules/playwright/cli.js install chromium && node --experimental-strip-types scripts/verify-production.mts"
+    "verify:production": "node node_modules/playwright/cli.js install chromium && node --experimental-strip-types scripts/verify-production.mts",
+    "a11y:smoke": "node node_modules/playwright/cli.js install chromium && node --experimental-strip-types scripts/a11y-smoke.mts"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.11.1",
     "@types/aws-lambda": "8.10.162",
     "@types/node": "^26.1.2",
     "playwright": "^1.62.1",

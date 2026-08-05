@@ -7,8 +7,19 @@ const openGraphLocales = {
   cn: "zh_CN",
 } as const satisfies Record<Locale, string>
 
+/** BCP 47 language tags for the document `lang` attribute. */
+const htmlLangs = {
+  en: "en",
+  hk: "zh-HK",
+  cn: "zh-CN",
+} as const satisfies Record<Locale, string>
+
 export function getOpenGraphLocale(locale: string) {
   return openGraphLocales[locale as Locale] ?? locale
+}
+
+export function getHtmlLang(locale: string) {
+  return htmlLangs[locale as Locale] ?? locale
 }
 
 type BuildPageMetadataOptions = {

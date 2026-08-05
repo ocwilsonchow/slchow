@@ -4,7 +4,7 @@ import { cn } from "@repo/ds"
 import { useCopyToClipboard } from "@uidotdev/usehooks"
 import { CheckIcon, ClipboardIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
-import { ComponentProps, useEffect, useRef, useState } from "react"
+import { type ComponentProps, useEffect, useRef, useState } from "react"
 
 const COLLAPSED_LINE_COUNT = 20
 
@@ -43,12 +43,16 @@ export function Pre({ className, children, ...props }: ComponentProps<"pre">) {
     <div className="relative grid rounded-xl overflow-hidden mb-5">
       <button
         type="button"
-        className="absolute top-3 right-2.5 z-10 outline-none opacity-50 hover:opacity-100 transition-opacity"
+        className="absolute top-3 right-2.5 z-10 text-content-subdued hover:text-content-ink transition-colors"
         onClick={handleCopy}
-        aria-label={copied ? "Copied" : "Copy code"}
+        aria-label={copied ? t("copied") : t("copy")}
       >
         <div>
-          {copied ? <CheckIcon size={14} className="text-content-accent" /> : <ClipboardIcon size={14} />}
+          {copied ? (
+            <CheckIcon size={14} className="text-content-accent" />
+          ) : (
+            <ClipboardIcon size={14} />
+          )}
         </div>
       </button>
       <div className="relative grid rounded-xl overflow-hidden">
@@ -79,7 +83,7 @@ export function Pre({ className, children, ...props }: ComponentProps<"pre">) {
       {isCollapsible ? (
         <button
           type="button"
-          className="mt-2 justify-self-center text-xs text-content-subdued transition-colors hover:text-content-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-stroke-soft"
+          className="mt-2 justify-self-center text-xs text-content-subdued transition-colors hover:text-content-ink"
           onClick={() => setExpanded((value) => !value)}
           aria-expanded={expanded}
         >

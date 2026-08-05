@@ -2,6 +2,7 @@
   "navigation": {
     "menu": "菜单",
     "close": "关闭",
+    "skipToContent": "跳到主要内容",
     "home": "首页",
     "homePage": "首页",
     "resume": "简历",
@@ -23,7 +24,16 @@
     "pause": "暂停",
     "next": "下一首",
     "previous": "上一首",
-    "nowPlaying": "正在播放"
+    "nowPlaying": "正在播放",
+    "socials": "社交链接",
+    "tableOfContents": "目录"
+  },
+  "a11y": {
+    "viewImage": "全屏查看图片",
+    "viewImageNamed": "全屏查看 {alt}",
+    "fullScreenImage": "全屏图片",
+    "closeFullScreenImage": "关闭全屏图片",
+    "profileAlt": "Wilson Chow"
   },
   "notFound": {
     "title": "Oops!",
@@ -62,6 +72,8 @@
   },
   "code": {
     "showMore": "显示更多",
-    "showLess": "显示较少"
+    "showLess": "显示较少",
+    "copy": "复制代码",
+    "copied": "已复制"
   }
 }
