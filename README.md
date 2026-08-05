@@ -1,159 +1,72 @@
-# Turborepo starter
+# oc2
 
-This Turborepo starter is maintained by the Turborepo core team.
+Personal site for [Wilson Chow](https://slchow.com) — notes, works, resume, and contact — built as a Bun + Turborepo monorepo and deployed to AWS with SST / OpenNext.
 
-## Using this example
+**Live:** [slchow.com](https://slchow.com) · **Dev:** [dev.slchow.com](https://dev.slchow.com)
 
-Run the following command:
+## Stack
 
-```sh
-npx create-turbo@latest
+- [Next.js](https://nextjs.org/) (App Router) + React 19 + Tailwind CSS 4
+- [next-intl](https://next-intl.dev/) for `en` / `hk` / `cn`
+- [Fumadocs MDX](https://www.fumadocs.dev/) for notes, works, and content blocks
+- [SST](https://sst.dev/) + [OpenNext](https://open-next.js.org/) on AWS (`ap-east-1`)
+- [Turborepo](https://turborepo.dev/) for workspace tasks
+- [Biome](https://biomejs.dev/) for lint/format in `apps/web`
+- [Playwright](https://playwright.dev/) + axe for production and a11y smoke checks
+
+## Structure
+
+```text
+apps/
+  web/          Next.js site (localhost:3003)
+  api/          Reserved (empty for now)
+packages/
+  content/      MDX source (en / hk / cn: notes, works, blocks)
+  ds/           Shared design system (@repo/ds)
+  intl/         next-intl message catalogs (@repo/intl)
+scripts/        Production verify + a11y smoke
+sst.config.ts   AWS / domain / OpenNext config
 ```
 
-## What's inside?
+## Requirements
 
-This Turborepo includes the following packages/apps:
+- Node.js 22+
+- [Bun](https://bun.sh/)
+- AWS SSO profile `sinlongchow` (for deploy / `sst dev` cloud resources)
 
-### Apps and Packages
-
-- `docs`: a [Next.js](https://nextjs.org/) app
-- `web`: another [Next.js](https://nextjs.org/) app
-- `@repo/ui`: a stub React component library shared by both `web` and `docs` applications
-- `@repo/eslint-config`: `eslint` configurations (includes `eslint-config-next` and `eslint-config-prettier`)
-- `@repo/typescript-config`: `tsconfig.json`s used throughout the monorepo
-
-Each package/app is 100% [TypeScript](https://www.typescriptlang.org/).
-
-### Utilities
-
-This Turborepo has some additional tools already setup for you:
-
-- [TypeScript](https://www.typescriptlang.org/) for static type checking
-- [ESLint](https://eslint.org/) for code linting
-- [Prettier](https://prettier.io) for code formatting
-
-### Build
-
-To build all apps and packages, run the following command:
-
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed (recommended):
+## Setup
 
 ```sh
-cd my-turborepo
-turbo build
+bun install
+bun run sso          # aws sso login --sso-session=sinlongchow
+bun dev              # sst dev --stage local → http://localhost:3003
 ```
 
-Without global `turbo`, use your package manager:
+## Scripts
 
-```sh
-cd my-turborepo
-npx turbo build
-bun dlx turbo build
-bun exec turbo build
-```
+| Command | Description |
+| --- | --- |
+| `bun dev` | SST local stage; runs the Next.js app on port 3003 |
+| `bun run build` | Turbo build across workspaces |
+| `bun run lint` | Turbo lint |
+| `bun run check-types` | Turbo typecheck |
+| `bun run format` | Prettier across `ts` / `tsx` / `md` |
+| `bun run deploy:dev` | Deploy to `dev` stage (`dev.slchow.com`) |
+| `bun run deploy` | Deploy to `production` (`slchow.com`) |
+| `bun run deploy:production` | Production deploy + Playwright verify |
+| `bun run verify:production` | Crawl production sitemap and check pages |
+| `bun run a11y:smoke` | axe-core smoke against key routes |
+| `bun run sso` | Refresh AWS SSO session |
 
-You can build a specific package by using a [filter](https://turborepo.dev/docs/crafting-your-repository/running-tasks#using-filters):
+## Content & locales
 
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed:
+MDX lives in `packages/content/src/{en,hk,cn}/` under `notes/`, `works/`, and `blocks/`. UI copy is in `packages/intl/messages/{en,hk,cn}.json`. The web app loads content through Fumadocs (`apps/web/source.config.ts`).
 
-```sh
-turbo build --filter=docs
-```
+## Deploy
 
-Without global `turbo`:
+Infrastructure is defined in `sst.config.ts`:
 
-```sh
-npx turbo build --filter=docs
-bun exec turbo build --filter=docs
-bun exec turbo build --filter=docs
-```
-
-### Develop
-
-To develop all apps and packages, run the following command:
-
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed (recommended):
-
-```sh
-cd my-turborepo
-turbo dev
-```
-
-Without global `turbo`, use your package manager:
-
-```sh
-cd my-turborepo
-npx turbo dev
-bun exec turbo dev
-bun exec turbo dev
-```
-
-You can develop a specific package by using a [filter](https://turborepo.dev/docs/crafting-your-repository/running-tasks#using-filters):
-
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed:
-
-```sh
-turbo dev --filter=web
-```
-
-Without global `turbo`:
-
-```sh
-npx turbo dev --filter=web
-bun exec turbo dev --filter=web
-bun exec turbo dev --filter=web
-```
-
-### Remote Caching
-
-> [!TIP]
-> Vercel Remote Cache is free for all plans. Get started today at [vercel.com](https://vercel.com/signup?utm_source=remote-cache-sdk&utm_campaign=free_remote_cache).
-
-Turborepo can use a technique known as [Remote Caching](https://turborepo.dev/docs/core-concepts/remote-caching) to share cache artifacts across machines, enabling you to share build caches with your team and CI/CD pipelines.
-
-By default, Turborepo will cache locally. To enable Remote Caching you will need an account with Vercel. If you don't have an account you can [create one](https://vercel.com/signup?utm_source=turborepo-examples), then enter the following commands:
-
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed (recommended):
-
-```sh
-cd my-turborepo
-turbo login
-```
-
-Without global `turbo`, use your package manager:
-
-```sh
-cd my-turborepo
-npx turbo login
-bun exec turbo login
-bun exec turbo login
-```
-
-This will authenticate the Turborepo CLI with your [Vercel account](https://vercel.com/docs/concepts/personal-accounts/overview).
-
-Next, you can link your Turborepo to your Remote Cache by running the following command from the root of your Turborepo:
-
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed:
-
-```sh
-turbo link
-```
-
-Without global `turbo`:
-
-```sh
-npx turbo link
-bun exec turbo link
-bun exec turbo link
-```
-
-## Useful Links
-
-Learn more about the power of Turborepo:
-
-- [Tasks](https://turborepo.dev/docs/crafting-your-repository/running-tasks)
-- [Caching](https://turborepo.dev/docs/crafting-your-repository/caching)
-- [Remote Caching](https://turborepo.dev/docs/core-concepts/remote-caching)
-- [Filtering](https://turborepo.dev/docs/crafting-your-repository/running-tasks#using-filters)
-- [Configuration Options](https://turborepo.dev/docs/reference/configuration)
-- [CLI Usage](https://turborepo.dev/docs/reference/command-line-reference)
+- App name: `oc2`
+- Production domain: `slchow.com` (www → apex)
+- Non-production domain: `dev.slchow.com`
+- Production keeps one warm OpenNext server instance; other stages use `warm: 0`
