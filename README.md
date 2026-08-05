@@ -1,4 +1,4 @@
-# oc2
+# slchow.com
 
 Personal site for [Wilson Chow](https://slchow.com) — notes, works, resume, and contact — built as a Bun + Turborepo monorepo and deployed to AWS with SST / OpenNext.
 
@@ -12,6 +12,7 @@ Personal site for [Wilson Chow](https://slchow.com) — notes, works, resume, an
 - [SST](https://sst.dev/) + [OpenNext](https://open-next.js.org/) on AWS (`ap-east-1`)
 - [Turborepo](https://turborepo.dev/) for workspace tasks
 - [Biome](https://biomejs.dev/) for lint/format in `apps/web`
+- [Husky](https://typicode.github.io/husky/) + [lint-staged](https://github.com/lint-staged/lint-staged) for pre-commit checks
 - [Playwright](https://playwright.dev/) + axe for production and a11y smoke checks
 
 ## Structure
@@ -37,26 +38,28 @@ sst.config.ts   AWS / domain / OpenNext config
 ## Setup
 
 ```sh
-bun install
+bun install          # also installs Husky git hooks via prepare
 bun run sso          # aws sso login --sso-session=sinlongchow
 bun dev              # sst dev --stage local → http://localhost:3003
 ```
 
+Pre-commit runs lint-staged: Biome on staged `apps/web` files, Prettier on other staged `ts` / `tsx` / `md` / `json`.
+
 ## Scripts
 
-| Command | Description |
-| --- | --- |
-| `bun dev` | SST local stage; runs the Next.js app on port 3003 |
-| `bun run build` | Turbo build across workspaces |
-| `bun run lint` | Turbo lint |
-| `bun run check-types` | Turbo typecheck |
-| `bun run format` | Prettier across `ts` / `tsx` / `md` |
-| `bun run deploy:dev` | Deploy to `dev` stage (`dev.slchow.com`) |
-| `bun run deploy` | Deploy to `production` (`slchow.com`) |
-| `bun run deploy:production` | Production deploy + Playwright verify |
-| `bun run verify:production` | Crawl production sitemap and check pages |
-| `bun run a11y:smoke` | axe-core smoke against key routes |
-| `bun run sso` | Refresh AWS SSO session |
+| Command                     | Description                                        |
+| --------------------------- | -------------------------------------------------- |
+| `bun dev`                   | SST local stage; runs the Next.js app on port 3003 |
+| `bun run build`             | Turbo build across workspaces                      |
+| `bun run lint`              | Turbo lint                                         |
+| `bun run check-types`       | Turbo typecheck                                    |
+| `bun run format`            | Prettier across `ts` / `tsx` / `md`                |
+| `bun run deploy:dev`        | Deploy to `dev` stage (`dev.slchow.com`)           |
+| `bun run deploy`            | Deploy to `production` (`slchow.com`)              |
+| `bun run deploy:production` | Production deploy + Playwright verify              |
+| `bun run verify:production` | Crawl production sitemap and check pages           |
+| `bun run a11y:smoke`        | axe-core smoke against key routes                  |
+| `bun run sso`               | Refresh AWS SSO session                            |
 
 ## Content & locales
 
