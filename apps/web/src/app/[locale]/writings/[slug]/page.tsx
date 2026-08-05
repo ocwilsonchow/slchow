@@ -40,8 +40,8 @@ const Page = async ({ params }: Props) => {
           <BackLink href="/writings" />
         </Header.Column>
         <Header.Column className="grid gap-5">
-          <div className="mt-5 lg:mt-0 space-y-1">
-            <h1 className="font-semibold tracking-tight text-content-ink">
+          <div className="mt-8 lg:mt-0 space-y-1">
+            <h1 className="text-lg lg:text-sm font-semibold tracking-tight text-content-ink">
               {page?.data.title}
             </h1>
             {page?.data.description && (

@@ -48,6 +48,9 @@ export const Links = async ({ ...props }: ComponentProps<"ul">) => {
       <HeaderLink href="/resume">{t("resume")}</HeaderLink>
       <HeaderLink href="/writings">{t("writings")}</HeaderLink>
       <HeaderLink href="/works">{t("works")}</HeaderLink>
+      <HeaderLink href="/">
+        {t("designs")} ({t("comingSoon")})
+      </HeaderLink>
       <div className="my-3" />
       <HeaderLink
         href="https://github.com/ocwilsonchow"

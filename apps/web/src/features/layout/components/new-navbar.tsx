@@ -330,6 +330,11 @@ export const RenderNewNavbar = () => {
                 </NewNavbar.NavbarLink>
               </NewNavbar.StaggerItem>
               <NewNavbar.StaggerItem>
+                <NewNavbar.NavbarLink href="/">
+                  {t("designs")} ({t("comingSoon")})
+                </NewNavbar.NavbarLink>
+              </NewNavbar.StaggerItem>
+              <NewNavbar.StaggerItem>
                 <NewNavbar.NavbarLink href="/contact">
                   {t("contact")}
                 </NewNavbar.NavbarLink>
