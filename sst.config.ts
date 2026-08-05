@@ -22,8 +22,8 @@ export default $config({
     new sst.aws.Nextjs("WEB", {
       path: "apps/web",
       domain: {
-        name: domain,
-        redirects: [`www.${domain}`],
+        name: $app.stage === "production" ? domain : `dev.${domain}`,
+        redirects: $app.stage === "production" ? [`www.${domain}`] : [],
       },
       // Keep N server Lambda instances warm via a scheduled warmer
       // (EventBridge cron pinging the OpenNext server function).
@@ -31,6 +31,7 @@ export default $config({
       warm: $app.stage === "production" ? 1 : 0,
       environment: {
         NEXT_PUBLIC_SITE_URL: `https://${domain}`,
+        SST_STAGE: $app.stage,
       },
       openNextVersion: "4.0.3",
       dev: {

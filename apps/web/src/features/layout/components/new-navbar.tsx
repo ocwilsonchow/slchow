@@ -8,12 +8,13 @@ import {
   HTMLMotionProps,
   motion,
   type Variants,
+  useReducedMotion,
 } from "motion/react"
 import { create } from "zustand"
 import { fontPresets } from "./styles"
 import { Link, usePathname } from "@/i18n/navigation"
 import { useTranslations } from "next-intl"
-import { ComponentProps, Fragment, useEffect } from "react"
+import { ComponentProps, Fragment, useEffect, useState } from "react"
 import { LanguageSettings, ThemeSettings } from "./navbar-settings"
 import { useLenis } from "lenis/react"
 import Image from "next/image"
@@ -101,8 +102,36 @@ const Backdrop = (props: HTMLMotionProps<"button">) => {
 
 const Root = (props: React.ComponentProps<typeof Portal>) => {
   const { isOpen, setIsOpen } = useNavbar()
+  const [isMobile, setIsMobile] = useState(false)
+  const [isScrollingDown, setIsScrollingDown] = useState(false)
+  const shouldReduceMotion = useReducedMotion()
 
-  const lenis = useLenis()
+  const lenis = useLenis(
+    ({ scroll, velocity }) => {
+      if (!isMobile || scroll <= 0) {
+        setIsScrollingDown(false)
+        return
+      }
+
+      if (velocity !== 0) {
+        setIsScrollingDown(velocity > 0)
+      }
+    },
+    [isMobile]
+  )
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(max-width: 767px)")
+    const updateIsMobile = () => {
+      setIsMobile(mediaQuery.matches)
+      if (!mediaQuery.matches) setIsScrollingDown(false)
+    }
+
+    updateIsMobile()
+    mediaQuery.addEventListener("change", updateIsMobile)
+
+    return () => mediaQuery.removeEventListener("change", updateIsMobile)
+  }, [])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -153,12 +182,24 @@ const Root = (props: React.ComponentProps<typeof Portal>) => {
         fontPresets.aero
       )}
     >
-      <div className="grid md:grid-cols-2 xl:grid-cols-4">
+      <motion.div
+        animate={{
+          y:
+            isMobile && isScrollingDown && !isOpen
+              ? "calc(100% + 1rem)"
+              : "0%",
+        }}
+        transition={{
+          duration: shouldReduceMotion ? 0 : 0.3,
+          ease: "easeInOut",
+        }}
+        className="grid md:grid-cols-2 xl:grid-cols-4"
+      >
         <motion.div className="bg-surface-popover text-content-body-on-popover rounded-3xl">
           {props.children}
         </motion.div>
         <div className="cursor-pointer" onClick={() => setIsOpen(false)} />
-      </div>
+      </motion.div>
     </Portal>
   )
 }

@@ -4,11 +4,12 @@
   "scripts": {
     "build": "turbo run build",
     "check-types": "turbo run check-types",
-    "deploy": "bunx sst deploy --stage production",
     "dev": "bunx sst dev --stage local",
     "format": "prettier --write \"**/*.{ts,tsx,md}\"",
     "lint": "turbo run lint",
-    "sso": "aws sso login --sso-session=sinlongchow"
+    "sso": "aws sso login --sso-session=sinlongchow",
+    "deploy": "bunx sst deploy --stage production",
+    "deploy:dev": "bunx sst deploy --stage dev"
   },
   "devDependencies": {
     "@types/aws-lambda": "8.10.162",
