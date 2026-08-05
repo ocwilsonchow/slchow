@@ -1,0 +1,508 @@
+---
+title: What's New in React 19
+description: My notes on the React 19 features that change how I build forms, handle async work, and structure components
+---
+
+React 19 feels less like a collection of isolated APIs and more like React filling in several gaps that application code used to handle manually. Forms can now run asynchronous Actions, optimistic updates have a dedicated Hook, components can read promises with `use`, and common patterns around refs, context, and document metadata need less ceremony.
+
+React 19.2 builds on that foundation with `Activity`, `useEffectEvent`, and better performance tooling. These are the features I find most useful, along with the caveats I want to remember when deciding where to use them.
+
+<br />
+
+---
+
+## 1. Actions
+
+An **Action** is a function that runs inside a **Transition**. It can perform asynchronous work while React manages the **pending state**, errors, and the final state update around it.
+
+The most visible use of Actions is the new `action` prop on `<form>`. Instead of intercepting `onSubmit`, reading the form, tracking a loading flag, and resetting the form manually, I can pass a function directly to it.
+
+<br />
+
+```tsx
+function UpdateName() {
+  async function updateName(formData: FormData) {
+    const name = String(formData.get("name") ?? "")
+
+    await saveName(name)
+  }
+
+  return (
+    <form action={updateName}>
+      <label>
+        Name
+        <input name="name" />
+      </label>
+      <SubmitButton />
+    </form>
+  )
+}
+```
+
+When the Action succeeds, React automatically resets uncontrolled fields in the form. The same function can also be assigned to a button's `formAction` prop when different submit buttons need different behavior.
+
+Actions are not limited to forms, but the form integration is where they remove the most routine state management.
+
+<br />
+
+---
+
+## 2. `useActionState` and `useFormStatus`
+
+`useActionState` connects an Action to state that is produced by its previous result. It returns the **current state**, a wrapped Action, and an `isPending` value.
+
+The Action receives the previous state before its usual arguments. For a form Action, that means the second argument is the submitted `FormData`.
+
+<br />
+
+```tsx
+import { useActionState } from "react"
+import { useFormStatus } from "react-dom"
+
+type FormState = {
+  message: string
+  ok: boolean
+}
+
+const initialState: FormState = {
+  message: "",
+  ok: false,
+}
+
+async function saveEmail(
+  previousState: FormState,
+  formData: FormData
+): Promise<FormState> {
+  const email = String(formData.get("email") ?? "")
+
+  if (!email.includes("@")) {
+    return { message: "Enter a valid email address.", ok: false }
+  }
+
+  await subscribe(email)
+  return { message: "You are subscribed.", ok: true }
+}
+
+function SubmitButton() {
+  const { pending } = useFormStatus()
+
+  return (
+    <button type="submit" disabled={pending}>
+      {pending ? "Subscribing..." : "Subscribe"}
+    </button>
+  )
+}
+
+function NewsletterForm() {
+  const [state, formAction] = useActionState(saveEmail, initialState)
+
+  return (
+    <form action={formAction}>
+      <input name="email" type="email" />
+      <SubmitButton />
+      <p aria-live="polite">{state.message}</p>
+    </form>
+  )
+}
+```
+
+`useFormStatus` reads the status of its parent form, so it must be called from a component rendered **inside** that form. Calling it in the same component that creates the form will not observe that form's submission.
+
+I use `useActionState` when the server result should become UI state, and `useFormStatus` for controls that only need to know whether the surrounding form is pending.
+
+<br />
+
+---
+
+## 3. `useOptimistic`
+
+Waiting for a network round trip before updating the interface can make a fast application feel slow. `useOptimistic` lets the UI show the **expected result immediately** while an Action is running, then reconcile with the real state when it completes.
+
+<br />
+
+```tsx
+import { useOptimistic, useState } from "react"
+
+type Message = {
+  id: string
+  text: string
+  sending?: boolean
+}
+
+function MessageThread({ initialMessages }: { initialMessages: Message[] }) {
+  const [messages, setMessages] = useState(initialMessages)
+  const [optimisticMessages, addOptimisticMessage] = useOptimistic(
+    messages,
+    (current, text: string) => [
+      ...current,
+      { id: crypto.randomUUID(), text, sending: true },
+    ]
+  )
+
+  async function sendMessage(formData: FormData) {
+    const text = String(formData.get("message") ?? "")
+    addOptimisticMessage(text)
+
+    const savedMessage = await saveMessage(text)
+    setMessages((current) => [...current, savedMessage])
+  }
+
+  return (
+    <>
+      <ul>
+        {optimisticMessages.map((message) => (
+          <li key={message.id}>
+            {message.text}
+            {message.sending ? " (sending...)" : ""}
+          </li>
+        ))}
+      </ul>
+
+      <form action={sendMessage}>
+        <input name="message" />
+        <button type="submit">Send</button>
+      </form>
+    </>
+  )
+}
+```
+
+The optimistic value is temporary. When the Action finishes, React returns to the value supplied by the component's real state or props. That means the **source of truth** still needs to be updated outside the optimistic reducer.
+
+Optimistic updates work best when the expected result is obvious and failure can be explained or reversed. I would be more cautious with destructive operations or anything where pretending success could mislead the user.
+
+<br />
+
+---
+
+## 4. Reading Resources with `use`
+
+The new `use` API reads a **resource during rendering**. Today, that resource is usually a **Promise** or a **Context**.
+
+When `use` receives a pending Promise, the component suspends and React shows the nearest `<Suspense>` fallback. If the Promise rejects, the nearest **Error Boundary** handles the error.
+
+<br />
+
+```tsx
+import { Suspense, use } from "react"
+
+type Profile = {
+  name: string
+  role: string
+}
+
+function ProfileCard({ profilePromise }: { profilePromise: Promise<Profile> }) {
+  const profile = use(profilePromise)
+
+  return (
+    <article>
+      <h2>{profile.name}</h2>
+      <p>{profile.role}</p>
+    </article>
+  )
+}
+
+function ProfilePage({ profilePromise }: { profilePromise: Promise<Profile> }) {
+  return (
+    <Suspense fallback={<p>Loading profile...</p>}>
+      <ProfileCard profilePromise={profilePromise} />
+    </Suspense>
+  )
+}
+```
+
+Unlike Hooks, `use` can be called inside conditions and loops. It still has to be called while React is rendering a component or custom Hook.
+
+The important Promise caveat is identity. Creating a new Promise during every Client Component render can cause repeated suspension. The Promise should come from a framework, a cache, or a Server Component so the same resource can be reused.
+
+`use` can also read Context conditionally:
+
+<br />
+
+```tsx
+function Heading({ muted }: { muted: boolean }) {
+  if (muted) {
+    return <h2 className="muted">Archived</h2>
+  }
+
+  const theme = use(ThemeContext)
+  return <h2 className={theme}>Active</h2>
+}
+```
+
+I think of `use` as a bridge between rendering and a resource that may not be ready yet, rather than as a replacement for every data-fetching library.
+
+<br />
+
+---
+
+## 5. Less Ceremony for Refs and Context
+
+Function components can receive **`ref` as a normal prop** in React 19. New components no longer need `forwardRef` just to expose an element.
+
+<br />
+
+```tsx
+import type { ComponentPropsWithRef } from "react"
+
+function SearchInput(props: ComponentPropsWithRef<"input">) {
+  return <input type="search" {...props} />
+}
+
+function Search() {
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  return <SearchInput ref={inputRef} placeholder="Search" />
+}
+```
+
+Existing `forwardRef` components still work, so this does not require an immediate rewrite. React plans to deprecate `forwardRef` in a future release after migrations have had time to happen.
+
+Ref callbacks may now return cleanup functions as well:
+
+<br />
+
+```tsx
+function Canvas() {
+  return (
+    <canvas
+      ref={(node) => {
+        if (!node) return
+
+        const observer = new ResizeObserver(() => draw(node))
+        observer.observe(node)
+
+        return () => observer.disconnect()
+      }}
+    />
+  )
+}
+```
+
+**Context providers** are shorter too. A Context object can be rendered directly instead of using `.Provider`.
+
+<br />
+
+```tsx
+// Before
+<ThemeContext.Provider value="dark">
+  <App />
+</ThemeContext.Provider>
+
+// React 19
+<ThemeContext value="dark">
+  <App />
+</ThemeContext>
+```
+
+These changes are small, but they remove wrappers that were common in almost every React codebase.
+
+<br />
+
+---
+
+## 6. Document Metadata and Resources
+
+React 19 understands `<title>`, `<meta>`, and `<link>` tags rendered inside components. React moves them to the document's `<head>`, which means **metadata can live near the route or content that owns it**.
+
+<br />
+
+```tsx
+function ProductPage({ product }: { product: Product }) {
+  return (
+    <>
+      <title>{product.name} – Acme Store</title>
+      <meta name="description" content={product.summary} />
+      <link
+        rel="canonical"
+        href={`https://example.com/products/${product.slug}`}
+      />
+
+      <h1>{product.name}</h1>
+      <p>{product.summary}</p>
+    </>
+  )
+}
+```
+
+React 19 also coordinates stylesheets and scripts. Stylesheets can declare a `precedence`, and React waits for the relevant CSS before revealing Suspense content. Async scripts are deduplicated even if several components render the same script.
+
+React DOM exposes resource hints such as `preconnect`, `preload`, `preinit`, `preloadModule`, and `preinitModule` for cases where an application knows about a resource before React renders the element that needs it.
+
+<br />
+
+```tsx
+import { preconnect, preload } from "react-dom"
+
+function ProductImage({ src, alt }: { src: string; alt: string }) {
+  preconnect("https://images.example.com")
+  preload(src, { as: "image" })
+
+  return <img src={src} alt={alt} />
+}
+```
+
+Frameworks already handle much of this work, so I would check the framework's conventions before calling these APIs directly.
+
+<br />
+
+---
+
+## 7. Better Custom Elements and Hydration Errors
+
+React 19 has full support for **custom elements**. During server rendering, primitive props such as strings and numbers become attributes. In the browser, React assigns values as properties when the custom element exposes matching properties.
+
+<br />
+
+```tsx
+function Checkout() {
+  return (
+    <payment-card
+      customer-id="customer_123"
+      options={{ appearance: "compact" }}
+    />
+  )
+}
+```
+
+This makes web components easier to consume without writing React-specific wrappers for every non-string value.
+
+Hydration diagnostics are also more useful. Instead of several overlapping warnings, React 19 reports a consolidated error with a diff showing how the server-rendered HTML differs from the client output.
+
+The improved message does not make hydration mismatches harmless. It makes the actual cause—such as different dates, browser-only branches, changing external data, or invalid HTML nesting—much faster to find.
+
+<br />
+
+---
+
+## 8. `Activity` in React 19.2
+
+`Activity` lets React keep a section of the interface mounted while controlling whether it is visible and how urgently its updates should be processed.
+
+<br />
+
+```tsx
+import { Activity } from "react"
+
+function Workspace({ activeTab }: { activeTab: "editor" | "preview" }) {
+  return (
+    <>
+      <Activity mode={activeTab === "editor" ? "visible" : "hidden"}>
+        <Editor />
+      </Activity>
+
+      <Activity mode={activeTab === "preview" ? "visible" : "hidden"}>
+        <Preview />
+      </Activity>
+    </>
+  )
+}
+```
+
+React 19.2 supports two modes:
+
+- `visible` shows the children, mounts their effects, and processes updates normally.
+- `hidden` hides the children, unmounts their effects, and defers their updates until React has no visible work left.
+
+The useful difference from conditional rendering is **preserved state**. A hidden editor can keep its draft, selection, and component state, while React can also prepare a likely next screen in the background.
+
+This is not the same as leaving a component visible with CSS. Hidden Activities clean up effects, so subscriptions and other external synchronization must be able to stop and restart correctly.
+
+<br />
+
+---
+
+## 9. `useEffectEvent` in React 19.2
+
+Effects often combine two different ideas: synchronization that should react to a dependency, and event-like logic that should read the latest props without restarting that synchronization.
+
+`useEffectEvent` separates the event-like part.
+
+<br />
+
+```tsx
+import { useEffect, useEffectEvent } from "react"
+
+function ChatRoom({
+  roomId,
+  theme,
+}: {
+  roomId: string
+  theme: "light" | "dark"
+}) {
+  const onConnected = useEffectEvent(() => {
+    showNotification("Connected", theme)
+  })
+
+  useEffect(() => {
+    const connection = createConnection(roomId)
+
+    connection.on("connected", () => onConnected())
+    connection.connect()
+
+    return () => connection.disconnect()
+  }, [roomId])
+
+  return <p>Room: {roomId}</p>
+}
+```
+
+Changing `theme` no longer reconnects the chat room, but `onConnected` still reads the latest theme when the connection event fires.
+
+**Effect Events are not a way to hide missing dependencies.** They should represent logic that is conceptually triggered by an Effect, and they can only be called from Effects in the same component or custom Hook. They should not be included in dependency arrays.
+
+Using this API also requires a recent `eslint-plugin-react-hooks`, because the linter understands and enforces those restrictions.
+
+<br />
+
+---
+
+## 10. Performance and Server Improvements in React 19.2
+
+React 19.2 adds **React Performance Tracks** to Chrome DevTools performance profiles. The Scheduler tracks show update priorities and when work was scheduled, blocked, rendered, or painted. The Components tracks show when components render and when their effects mount.
+
+This provides a lower-level view than the React DevTools Profiler. I would use it when a slow interaction involves scheduling, browser work, and React rendering rather than one obviously expensive component.
+
+There are also two additions that most application developers will encounter through a framework:
+
+- `cacheSignal` gives React Server Component work an `AbortSignal` tied to the lifetime of a `cache()` entry, allowing unused requests or other work to be cancelled.
+- Partial pre-rendering APIs let a framework pre-render a static shell, store postponed work, and resume the remaining server render later.
+
+React 19.2 also improves streaming SSR by batching nearby Suspense boundary reveals and adds Web Streams support for Node.js. The React team still recommends Node Streams APIs in Node environments because they are faster and work naturally with compression.
+
+<br />
+
+---
+
+## 11. Upgrading to React 19
+
+I would upgrade React, React DOM, and their TypeScript definitions together, using the latest patched React 19 release supported by the framework.
+
+<br />
+
+```bash
+npm install react@^19 react-dom@^19
+npm install --save-dev @types/react@^19 @types/react-dom@^19
+```
+
+The official upgrade guide includes codemods for common migrations. The breaking changes worth checking first are removed legacy APIs:
+
+- `ReactDOM.render` and `ReactDOM.hydrate` are replaced by `createRoot` and `hydrateRoot`.
+- `unmountComponentAtNode` is replaced by `root.unmount()`.
+- `findDOMNode`, string refs, and `this.refs` are removed.
+- Legacy Context APIs and function component `propTypes` are removed.
+- Ref callback TypeScript rules are stricter because callbacks can now return cleanup functions.
+
+I would treat the **upgrade and feature adoption as separate steps**. First make the existing application work on React 19, then introduce Actions, `use`, or `Activity` where they simplify a real pattern. A major upgrade is easier to debug when it is not mixed with a large rewrite.
+
+<br />
+
+---
+
+## Takeaway
+
+The theme I see in React 19 is coordination. Actions coordinate async mutations with pending and optimistic UI. `use` coordinates rendering with resources. Document APIs coordinate metadata, styles, and scripts. `Activity` coordinates visible and background work, while `useEffectEvent` separates synchronization from event-like behavior.
+
+The features I expect to use most often are form Actions, `useActionState`, `useOptimistic`, ref as a prop, and `useEffectEvent`. `use`, `Activity`, and the server rendering APIs are more dependent on framework support and application architecture, but they point toward a React model where loading, mutations, and rendering are designed to work together.
+
+For the complete details, I refer back to the official [React 19 release notes](https://react.dev/blog/2024/12/05/react-19), [React 19.2 release notes](https://react.dev/blog/2025/10/01/react-19-2), and [React 19 upgrade guide](https://react.dev/blog/2024/04/25/react-19-upgrade-guide).

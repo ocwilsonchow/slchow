@@ -3,7 +3,7 @@
     "menu": "選單",
     "close": "關閉",
     "home": "首頁",
-    "homePage": "Index",
+    "homePage": "首頁",
     "resume": "履歷",
     "back": "返回",
     "works": "支線任務",
@@ -31,10 +31,10 @@
   "metadata": {
     "siteName": "Wilson Chow",
     "siteTitle": "Wilson Chow",
-    "siteDescription": "軟件開發者 — 產品、設計系統與 AI agents。",
+    "siteDescription": "軟件工程師 — 產品、設計系統與 AI agents。",
     "home": {
       "title": "Wilson Chow",
-      "description": "軟件開發者，重心在 frontend（React、TypeScript、Figma），同時具備後端、雲端與生產級 AI agents 經驗。"
+      "description": "軟件工程師，重心在 frontend（React、TypeScript），同時具備後端、雲端與 AI agents 經驗。"
     },
     "resume": {
       "title": "履歷",
@@ -50,7 +50,10 @@
     },
     "contact": {
       "title": "聯絡",
-      "description": "聯絡 Wilson Chow。"
+      "description": "歡迎聯絡 Wilson Chow。"
     }
+  },
+  "contact": {
+    "body": "歡迎來信：<email>sinlongchow@gmail.com</email>"
   }
 }

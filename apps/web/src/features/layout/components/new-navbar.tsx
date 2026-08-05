@@ -300,9 +300,7 @@ export const RenderNewNavbar = () => {
       : pathname.startsWith("/works/")
         ? "works"
         : null)
-  const pathLabel = pathTitleKey
-    ? t(pathTitleKey)
-    : pathname.replace(/^\//, "")
+  const pathLabel = pathTitleKey ? t(pathTitleKey) : pathname.replace(/^\//, "")
 
   return (
     <Fragment>
@@ -346,6 +344,39 @@ export const RenderNewNavbar = () => {
                   onBeforeChange={() => setIsOpen(false)}
                 />
               </NewNavbar.StaggerItem>
+              <NewNavbar.StaggerItem className="space-y-1">
+                <div className="text-xs text-content-body-on-popover/75 mt-1.5">
+                  Socials
+                </div>
+                <div className="flex items-center flex-wrap gap-x-2">
+                  <Link
+                    href="https://github.com/ocwilsonchow"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="hover:text-content-ink-on-popover"
+                  >
+                    GitHub
+                  </Link>
+                  <div className="opacity-50">/</div>
+                  <Link
+                    href="https://www.linkedin.com/in/wilsonslchow/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="hover:text-content-ink-on-popover"
+                  >
+                    LinkedIn
+                  </Link>
+                  <div className="opacity-50">/</div>
+                  <Link
+                    href="https://www.instagram.com/duoengineers/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="hover:text-content-ink-on-popover"
+                  >
+                    Instagram
+                  </Link>
+                </div>
+              </NewNavbar.StaggerItem>
               <div className="h-3" />
             </NewNavbar.StaggerList>
           </NewNavbar.Content>
@@ -362,7 +393,9 @@ export const RenderNewNavbar = () => {
             <div className="flex items-center gap-1.5 font-semibold">
               <div>Wilson</div>
               <div className="text-content-body-on-popover/50 text-xs">/</div>
-              <div className="text-content-body-on-popover/50 capitalize">{pathLabel}</div>
+              <div className="text-content-body-on-popover/50 capitalize">
+                {pathLabel}
+              </div>
             </div>
           </div>
           <div>

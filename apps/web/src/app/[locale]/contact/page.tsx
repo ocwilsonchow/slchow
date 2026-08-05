@@ -26,6 +26,7 @@ const Page = async ({ params }: Props) => {
   setRequestLocale(locale)
 
   const t = await getTranslations({ locale, namespace: "metadata" })
+  const tContact = await getTranslations({ locale, namespace: "contact" })
 
   return (
     <PageLayout className="grid lg:grid-cols-2 items-start">
@@ -37,7 +38,20 @@ const Page = async ({ params }: Props) => {
           </h1>
         </Header.Column>
       </Header.Root>
-      <div className="p-5"></div>
+      <div className="p-5">
+        <p>
+          {tContact.rich("body", {
+            email: (chunks) => (
+              <a
+                href="mailto:sinlongchow@gmail.com"
+                className="text-content-ink underline underline-offset-4 font-semibold"
+              >
+                {chunks}
+              </a>
+            ),
+          })}
+        </p>
+      </div>
     </PageLayout>
   )
 }

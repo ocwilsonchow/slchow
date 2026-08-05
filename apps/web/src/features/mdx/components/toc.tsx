@@ -110,7 +110,7 @@ export const Toc = ({ toc }: { toc: TOCItemType[] }) => {
   }, [toc])
 
   return (
-    <ul className="hidden lg:grid gap-0.75 text-xs">
+    <ul className="hidden lg:grid gap-0.75 text-xs mt-5">
       {items.map((item) => {
         const id = getHeadingId(item.url)
         const active = id === activeId

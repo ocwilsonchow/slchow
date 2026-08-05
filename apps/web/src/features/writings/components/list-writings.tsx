@@ -35,14 +35,14 @@ export const ListWritings = async ({
           </Link>
         </h2>
       )}
-      <ul className="grid list-disc list-inside">
+      <ul className="grid list-disc list-outside ml-4">
         {writings.map((page) => {
           const slug = page.slugs.slice(1).join("/")
           return (
             <li key={page.url} className="">
               <Link
                 href={`/writings/${slug}`}
-                className="inline-block text-content-ink py-px font-semibold"
+                className="inline-flex text-content-ink py-px font-semibold"
               >
                 {page.data.title}
               </Link>

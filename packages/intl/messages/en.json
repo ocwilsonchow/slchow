@@ -31,10 +31,10 @@
   "metadata": {
     "siteName": "Wilson Chow",
     "siteTitle": "Wilson Chow",
-    "siteDescription": "Software developer — product, design systems, and AI agents.",
+    "siteDescription": "Software engineer — product, design systems, and AI agents.",
     "home": {
       "title": "Wilson Chow",
-      "description": "Software developer with frontend focus (React, TypeScript, Figma), backend and cloud depth, and production AI agents."
+      "description": "Software engineer with frontend focus (React, TypeScript), backend and cloud depth, and AI agents."
     },
     "resume": {
       "title": "Resume",
@@ -52,5 +52,8 @@
       "title": "Contact",
       "description": "Get in touch with Wilson Chow."
     }
+  },
+  "contact": {
+    "body": "Please contact me at <email>sinlongchow@gmail.com</email>"
   }
 }
