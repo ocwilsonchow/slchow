@@ -54,12 +54,15 @@ Pre-commit runs lint-staged: Biome on staged `apps/web` files, Prettier on other
 | `bun run lint`              | Turbo lint                                         |
 | `bun run check-types`       | Turbo typecheck                                    |
 | `bun run format`            | Prettier across `ts` / `tsx` / `md`                |
+| `bun run format:check`      | Prettier check (used in CI)                        |
 | `bun run deploy:dev`        | Deploy to `dev` stage (`dev.slchow.com`)           |
 | `bun run deploy`            | Deploy to `production` (`slchow.com`)              |
 | `bun run deploy:production` | Production deploy + Playwright verify              |
 | `bun run verify:production` | Crawl production sitemap and check pages           |
 | `bun run a11y:smoke`        | axe-core smoke against key routes                  |
 | `bun run sso`               | Refresh AWS SSO session                            |
+
+**CI:** GitHub Actions (`.github/workflows/ci.yml`) runs on PRs and pushes to `main`. It verifies quality by running `bun install`, `lint`, `format:check`, `check-types`, and `build`.
 
 ## Content & locales
 
