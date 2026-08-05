@@ -62,7 +62,7 @@ Pre-commit runs lint-staged: Biome on staged `apps/web` files, Prettier on other
 | `bun run a11y:smoke`        | axe-core smoke against key routes                  |
 | `bun run sso`               | Refresh AWS SSO session                            |
 
-**CI:** GitHub Actions (`.github/workflows/ci.yml`) runs on PRs and pushes to `main` / `develop`. It verifies quality by running `bun install`, `lint`, `format:check`, `check-types`, and `build`.
+**CI:** GitHub Actions (`.github/workflows/ci.yml`) runs on PRs and pushes to `main` / `develop`. It verifies quality by running `bun install`, `lint`, `format:check`, `check-types`, and `build`. On completion it posts success/failure status to Discord via the `DISCORD_WEBHOOK` repository secret (Channel Settings → Integrations → Webhooks → copy URL into GitHub → Settings → Secrets and variables → Actions).
 
 ## Content & locales
 
