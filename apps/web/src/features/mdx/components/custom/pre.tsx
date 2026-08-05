@@ -40,7 +40,7 @@ export function Pre({ className, children, ...props }: ComponentProps<"pre">) {
   const isCollapsed = isCollapsible && !expanded
 
   return (
-    <div className="relative grid rounded-xl overflow-hidden">
+    <div className="relative grid rounded-xl overflow-hidden mb-5">
       <button
         type="button"
         className="absolute top-3 right-2.5 z-10 outline-none"

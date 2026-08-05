@@ -1,0 +1,740 @@
+---
+title: Understanding React in Depth
+description: How elements, Fibers, update queues, lanes, reconciliation, commits, Hooks, Suspense, and hydration fit into React's rendering model
+---
+
+React became easier for me to reason about when I stopped treating a render as "React calling my component and updating the DOM." That description skips the machinery that explains most surprising behavior: stale state in an event handler, state moving between list items, an Effect running twice in development, or a transition being abandoned halfway through.
+
+The more useful model is that React maintains its own representation of the interface. An update is **scheduled**, React computes a possible next tree during the **render phase**, and only then does it publish the result during the **commit phase**.
+
+<br />
+
+```text
+event, promise, or external store
+  → enqueue an update
+  → assign a priority
+  → render a possible next tree
+  → reconcile it with the current tree
+  → commit the finished changes
+  → let the browser paint
+```
+
+<br />
+
+This article follows that path from JSX to pixels. Some concepts—render purity, state snapshots, identity by type and key, and the render/commit split—are part of React's public mental model. Names such as **Fiber**, **lanes**, `beginWork`, and effect flags describe the React 19.2 implementation. They are useful for understanding React, but application code should not depend on them.
+
+<br />
+
+---
+
+## 1. JSX Produces Descriptions, Not DOM Nodes
+
+JSX is syntax for describing UI. A modern JSX transform turns this:
+
+<br />
+
+```tsx
+function Greeting({ name }: { name: string }) {
+  return <h1 className="greeting">Hello, {name}</h1>
+}
+```
+
+<br />
+
+into a call to the JSX runtime that creates a **React element**. Conceptually, the result resembles:
+
+<br />
+
+```ts
+{
+  type: "h1",
+  key: null,
+  props: {
+    className: "greeting",
+    children: ["Hello, ", name],
+  },
+}
+```
+
+<br />
+
+This object is a description, not an `<h1>` element and not a Fiber. It says what should exist if React chooses to commit this render.
+
+A component element has a function or class as its `type`:
+
+<br />
+
+```tsx
+const element = <Greeting name="Ada" />
+```
+
+<br />
+
+React later calls `Greeting` while rendering and uses its returned elements to continue building the description. Calling a component directly—`Greeting({ name: "Ada" })`—bypasses React's component identity and Hook bookkeeping, which is why components should appear in JSX instead.
+
+React elements are cheap, immutable snapshots. Creating one does not mount anything, run an Effect, or touch the DOM. React may create and inspect many elements for a render that never commits.
+
+There are therefore three different trees worth keeping separate:
+
+<br />
+
+```text
+React elements   declarative descriptions returned by components
+Fiber tree       React's persistent bookkeeping and unit-of-work tree
+Host tree        DOM nodes, native views, or another renderer's output
+```
+
+<br />
+
+Confusing these layers leads to incorrect assumptions. A new element object does not necessarily mean a new DOM node, and a component render does not necessarily mean a visible browser update.
+
+<br />
+
+---
+
+## 2. Fiber Is React's Unit of Work
+
+React cannot store state or scheduling information on element objects because elements are temporary descriptions. It needs a persistent structure that survives from one render to the next. In the current renderer, that structure is the **Fiber tree**.
+
+A Fiber corresponds to one component, host element, text node, Suspense boundary, or other unit in the React tree. Among other fields, a Fiber records:
+
+- its component or host `type` and `key`
+- `pendingProps` for the render in progress
+- `memoizedProps` and `memoizedState` from completed work
+- links to its parent, first child, and next sibling
+- an update queue and context dependencies
+- lanes representing pending priorities
+- flags describing work needed during commit
+- a `stateNode`, such as the matching DOM node for a host Fiber
+
+Fibers use `child`, `sibling`, and `return` links instead of a nested JavaScript array:
+
+<br />
+
+```text
+App
+  child → Header
+            sibling → Main
+                        child → Article
+
+Article.return → Main
+Main.return    → App
+```
+
+<br />
+
+This shape lets React walk the tree one unit at a time, pause between units, and resume later.
+
+For an update, React normally works with two related versions of a Fiber. The **current** Fiber belongs to the tree visible on screen. Its `alternate` points to a **work-in-progress** Fiber where React computes the candidate next state. The work-in-progress Fiber points back to the current one.
+
+<br />
+
+```text
+current tree                         work-in-progress tree
+
+App ───────────── alternate ───────────── App
+ └─ List ──────── alternate ──────────── List
+     └─ Item ──── alternate ──────────── Item
+```
+
+<br />
+
+React can mutate its private work-in-progress objects while keeping the current tree and DOM stable. If higher-priority work arrives or rendering fails, it can abandon that attempt. If the render completes, the finished work-in-progress tree becomes current during the commit.
+
+This is often called **double buffering**, similar to drawing a frame offscreen before presenting it. It does not mean React always clones the entire application from scratch. Fibers and subtrees can be reused, and React can bail out when their inputs and pending work allow it.
+
+<br />
+
+---
+
+## 3. A State Setter Schedules Work
+
+Calling a state setter does not mutate the state variable captured by the running function. It creates an update and asks React to render again.
+
+<br />
+
+```tsx
+function Counter() {
+  const [count, setCount] = useState(0)
+
+  function increment() {
+    setCount(count + 1)
+    console.log(count) // Still 0 in this event handler
+  }
+
+  return <button onClick={increment}>{count}</button>
+}
+```
+
+<br />
+
+The `count` binding belongs to one invocation of `Counter`. Its event handler closes over that render's value. React cannot rewrite a JavaScript binding that is already executing. Instead, `setCount` queues a value for a future render.
+
+Internally, a state update contains information such as the action and its lane. React appends it to the Hook's update queue, marks work from that Fiber to the root, and ensures the root is scheduled. The exact structures are implementation details, but the observable model is stable:
+
+<br />
+
+```text
+current state snapshot + queued updates → next state snapshot
+```
+
+<br />
+
+This explains why updater functions matter when several updates depend on the previous result:
+
+<br />
+
+```tsx
+function addThree() {
+  setCount((value) => value + 1)
+  setCount((value) => value + 1)
+  setCount((value) => value + 1)
+}
+```
+
+<br />
+
+During the next render, React processes those functions in queue order, passing each result to the next. If `count` was `0`, the next state is `3`.
+
+By contrast, three calls to `setCount(count + 1)` all capture the same `count` and all request the replacement value `1`. They do not form a sequence of `+1` operations.
+
+React also **batches** updates so it can render once after a group of related setters instead of exposing half-finished states. Batching is not the same as merging every update into one value: each queued update still participates in calculating the next state. It means React delays processing until an appropriate boundary.
+
+In some cases, React can calculate a Hook update eagerly and skip scheduling if the next value is equal to the current value according to `Object.is`. That is an optimization, not a guarantee to build application logic around. Components and updater functions must remain pure even if React appears to bail out.
+
+<br />
+
+---
+
+## 4. Lanes Represent Priority
+
+Not every update is equally urgent. Typing into an input should feel immediate; refreshing a large search result can wait; hidden work can wait longer.
+
+React 19.2 represents these priorities with **lanes**. A lane is a bit in a bitmask, and a set of lanes can describe several pending classes of work at once. The scheduler can select the highest-priority pending lanes without deleting lower-priority updates.
+
+<br />
+
+```text
+urgent input update       ─┐
+default data update        ├─ pending lanes on the root
+transition update          ┤
+retry for Suspense        ─┘
+```
+
+<br />
+
+An update receives a lane based on its source and context. React propagates that lane through the Fiber tree to the root, chooses which lanes to render, and leaves skipped updates queued for a later pass.
+
+This is why priority is more than "which callback runs first." React may begin rendering a transition, receive an urgent input update, pause or discard the transition attempt, commit the urgent result, and then restart the transition against the latest tree.
+
+`startTransition` marks state updates as non-urgent:
+
+<br />
+
+```tsx
+const [query, setQuery] = useState("")
+const [filter, setFilter] = useState("")
+const [isPending, startTransition] = useTransition()
+
+function handleChange(value: string) {
+  setQuery(value)
+
+  startTransition(() => {
+    setFilter(value)
+  })
+}
+```
+
+<br />
+
+The input state can update urgently while expensive results based on `filter` render in the background. A transition does not move JavaScript to another thread, make expensive computation free, or delay the function passed to `startTransition`. It marks the React updates scheduled synchronously inside that function with transition priority.
+
+The names and number of lanes can change between React versions. The durable lesson is that React tracks **which work is pending** separately from **which work should be attempted now**.
+
+<br />
+
+---
+
+## 5. The Render Phase Computes a Candidate Tree
+
+Once a root has work at selected lanes, React enters the **render phase**. Rendering answers: "If these updates are applied, what should the tree look like?"
+
+At a high level, the Fiber work loop performs a depth-first traversal:
+
+<br />
+
+```text
+beginWork(parent)
+  → beginWork(first child)
+    → beginWork(grandchild)
+    → completeWork(grandchild)
+  → completeWork(first child)
+→ completeWork(parent)
+```
+
+<br />
+
+`beginWork` processes a Fiber's inputs and decides what its children should be. For a function component, this is where React invokes the component and runs its Hooks. It then reconciles the returned children against the current children.
+
+`completeWork` runs after the descendants are complete. For host components, React can create or prepare DOM instances. It also bubbles subtree flags and other information toward the root so the commit phase can skip branches with no effects.
+
+The render phase must be **pure** because it is speculative. In concurrent rendering, React may yield to the browser, restart with newer inputs, render a component more than once, or throw away the result without committing it.
+
+This is unsafe:
+
+<br />
+
+```tsx
+let nextId = 0
+
+function Row() {
+  nextId += 1
+  return <li>Row {nextId}</li>
+}
+```
+
+<br />
+
+The visible IDs now depend on how often React happened to call `Row`, including development checks and abandoned renders.
+
+Rendering may read props, state, context, and immutable external snapshots. It may calculate and return elements. It must not send analytics, mutate shared objects, subscribe to services, or directly edit the DOM. Those operations describe something that happened, while render only describes a possible future.
+
+<br />
+
+---
+
+## 6. Reconciliation Decides Identity
+
+During rendering, React must match new child elements with existing child Fibers. A general tree-diff algorithm is expensive, so React uses practical rules based primarily on **type**, **position**, and **key**.
+
+For a child at the same position:
+
+- Same type and compatible key: reuse the Fiber and preserve its state.
+- Different type: remove the old subtree and mount a new one.
+- Different key: treat it as a different identity, even if the type matches.
+
+Consider:
+
+<br />
+
+```tsx
+function Profile({ editing }: { editing: boolean }) {
+  return editing ? <Editor /> : <Preview />
+}
+```
+
+<br />
+
+`Editor` and `Preview` occupy the same position but have different types, so switching modes resets the subtree's state.
+
+A key can intentionally reset state:
+
+<br />
+
+```tsx
+<Editor key={documentId} documentId={documentId} />
+```
+
+<br />
+
+When `documentId` changes, React sees a new identity and recreates the `Editor` subtree. This is often cleaner than an Effect that manually clears every piece of local state.
+
+For arrays, keys let React match siblings across insertions, removals, and moves:
+
+<br />
+
+```tsx
+{
+  todos.map((todo) => <TodoRow key={todo.id} todo={todo} />)
+}
+```
+
+<br />
+
+Keys only need to be unique among siblings, and they are not passed through as a normal prop. An array index is safe only when item identity really follows position. If a reorder changes which item owns index `0`, React can preserve the component state at index `0` and attach it to the wrong data.
+
+One subtle point is that state does not live "inside the component function." React associates state with a Fiber's identity at a particular place in the parent tree. Component functions are called again; React preserves or resets their state by deciding whether the corresponding Fiber is the same conceptual component.
+
+<br />
+
+---
+
+## 7. The Commit Phase Publishes the Result
+
+When React completes a render, it has a finished Fiber tree and a set of flags describing necessary changes. It then enters the **commit phase**.
+
+Unlike concurrent rendering, committing is synchronous for a root. Once React starts publishing a finished tree, it does not show half of one commit and half of another.
+
+A simplified commit sequence is:
+
+<br />
+
+```text
+before-mutation work
+  → DOM mutations and deletions
+  → current tree switches to the finished tree
+  → refs and layout effects
+  → browser gets an opportunity to paint
+  → passive effects
+```
+
+<br />
+
+The exact internal functions are more detailed, but this ordering explains the public APIs:
+
+- `getSnapshotBeforeUpdate` reads host information immediately before mutations.
+- React inserts, updates, and removes host nodes during mutation work.
+- Ref callbacks and `useLayoutEffect` observe the committed DOM before the browser normally paints.
+- `useEffect` is passive and normally runs after paint, although React may flush it earlier for some interaction-driven updates.
+
+Layout work blocks paint, so it should be reserved for measurements or visual corrections that must happen before the user sees the frame:
+
+<br />
+
+```tsx
+useLayoutEffect(() => {
+  const rectangle = tooltipRef.current?.getBoundingClientRect()
+  setTooltipHeight(rectangle?.height ?? 0)
+}, [])
+```
+
+<br />
+
+Most synchronization belongs in `useEffect` so the browser can paint first.
+
+Effect cleanup is also part of committing. Before React runs an Effect again with changed dependencies, it runs the previous cleanup. On unmount, it runs the final cleanup. This makes each Effect an independent synchronization process:
+
+<br />
+
+```tsx
+useEffect(() => {
+  const connection = connect(roomId)
+  connection.open()
+
+  return () => connection.close()
+}, [roomId])
+```
+
+<br />
+
+The DOM changing and pixels appearing are not the same event. React mutates DOM while JavaScript owns the main thread. The browser can style, lay out, and paint after that work yields. A long layout Effect can therefore delay a visually ready commit.
+
+<br />
+
+---
+
+## 8. Hooks Are Positional State on a Fiber
+
+Hooks look like ordinary function calls, but their state is stored by React, not in local JavaScript variables. In React 19.2, a function component Fiber keeps its Hooks as a linked list on `memoizedState`.
+
+Conceptually:
+
+<br />
+
+```text
+Profile fiber
+  memoizedState
+    → useState hook
+    → useReducer hook
+    → useEffect hook
+    → null
+```
+
+<br />
+
+During the next render, the Hook dispatcher walks the old and work-in-progress Hook lists in call order. The first `useState` call receives the first state cell, the second Hook receives the second cell, and so on.
+
+This is the mechanical reason Hooks cannot be called conditionally:
+
+<br />
+
+```tsx
+function Profile({ editable }: { editable: boolean }) {
+  const [name, setName] = useState("")
+
+  if (editable) {
+    useEffect(() => subscribeToDraft(name), [name]) // Incorrect
+  }
+
+  const [saved, setSaved] = useState(false)
+  // ...
+}
+```
+
+<br />
+
+If `editable` changes, every Hook after the condition shifts position. React can no longer match calls with the correct state cells. "Only call Hooks at the top level" preserves the sequence.
+
+Each state Hook also owns an update queue. During rendering, React combines its base state with updates whose lanes are included in the current render. Lower-priority updates can remain in a base queue and be replayed later. This lets an urgent render move ahead without losing transition updates.
+
+Closures complete the model. Every render creates new event handlers and Effect setup functions that capture that render's props and state. A "stale closure" is not React returning an old variable; it is code from an older render running later.
+
+Dependencies tell React when an Effect's synchronization inputs changed. Omitting a reactive dependency does not freeze it at the newest value—it keeps the older closure:
+
+<br />
+
+```tsx
+useEffect(() => {
+  const id = setInterval(() => {
+    console.log(count)
+  }, 1000)
+
+  return () => clearInterval(id)
+}, []) // This closure keeps the initial count.
+```
+
+<br />
+
+The right fix depends on the intent: include `count`, use a functional state updater, move interaction logic into an event handler, or use an Effect Event for non-reactive logic called by an Effect. Disabling the dependency rule hides the mismatch rather than changing closure semantics.
+
+<br />
+
+---
+
+## 9. Bailouts and Memoization Skip Work, Not Meaning
+
+React does not need to call every component for every update. A Fiber can bail out when its relevant props, state, context, and lanes show that neither it nor its descendants need work at the current priority.
+
+`memo` adds a props comparison at a component boundary. `useMemo` caches a calculation between committed renders while dependencies remain equal. `useCallback` does the same for a function reference.
+
+These APIs are performance tools, not semantic guarantees:
+
+<br />
+
+```tsx
+const visibleTodos = useMemo(
+  () => expensiveFilter(todos, filter),
+  [todos, filter]
+)
+```
+
+<br />
+
+The calculation must still be correct if React recomputes it. A component must still be correct if it renders again. Memoization cannot make an impure render safe.
+
+It is also possible for a parent to render while a child does not, or for a component to render without its DOM changing. Rendering means React asked for a description. Committing a host mutation happens only if reconciliation finds a difference that must reach the host tree.
+
+When investigating performance, I separate three questions:
+
+1. Was an update scheduled?
+2. Which components performed render work?
+3. Which host changes and Effects were committed?
+
+Treating all three as "a re-render" makes profiles and logs much harder to interpret.
+
+<br />
+
+---
+
+## 10. Suspense Turns Waiting into Render Control Flow
+
+Suspense lets a render say that part of the tree is not ready. In React 19, `use` can read a Promise:
+
+<br />
+
+```tsx
+function UserProfile({
+  userPromise,
+}: {
+  userPromise: Promise<{ name: string }>
+}) {
+  const user = use(userPromise)
+  return <h2>{user.name}</h2>
+}
+
+function Page({ userPromise }: { userPromise: Promise<{ name: string }> }) {
+  return (
+    <Suspense fallback={<p>Loading profile...</p>}>
+      <UserProfile userPromise={userPromise} />
+    </Suspense>
+  )
+}
+```
+
+<br />
+
+If the Promise is pending, React suspends that rendering path, finds the nearest Suspense boundary, and can render its fallback. React tracks the pending resource so settling it can schedule a retry.
+
+<br />
+
+```text
+render UserProfile
+  → resource is pending
+  → mark nearest Suspense boundary
+  → render or preserve fallback/content
+  → Promise settles
+  → schedule retry
+  → render UserProfile again
+```
+
+<br />
+
+Suspense does not fetch by itself. A framework or cache must provide a stable Promise and coordinate its lifetime. Creating a fresh Promise during every client render can repeatedly suspend because every render sees a new resource.
+
+Transitions affect what Suspense reveals. For a non-urgent navigation, React can keep already visible content on screen while preparing the next state instead of immediately replacing it with a fallback. If the transition is interrupted, the current committed tree remains usable.
+
+This follows directly from Fiber's current/work-in-progress split: waiting belongs to the candidate tree; the committed tree does not need to disappear merely because another render is incomplete.
+
+<br />
+
+---
+
+## 11. Hydration Reuses Server HTML
+
+Server rendering produces HTML, but HTML alone does not contain React state, event handling, or a client Fiber tree. **Hydration** builds the client representation while matching it to the existing host nodes.
+
+<br />
+
+```text
+server
+  React tree → HTML stream → browser displays content
+
+client
+  load JavaScript
+    → create root work
+    → match Fibers to existing DOM
+    → attach event behavior
+    → continue as an interactive React tree
+```
+
+<br />
+
+Hydration is not simply "adding event listeners." React must walk component output, reconstruct state and context, associate Fibers with host nodes, and verify that the client expects compatible markup.
+
+A mismatch means the server and client produced different descriptions for the same initial tree:
+
+<br />
+
+```tsx
+function Clock() {
+  return <time>{new Date().toLocaleTimeString()}</time>
+}
+```
+
+<br />
+
+The server time and hydration time can differ. Browser-only branches, random values, changing external data, locale differences, and invalid HTML nesting cause similar problems.
+
+The fix is to make the initial render deterministic, pass the server snapshot to the client, or intentionally render client-only information after hydration. `suppressHydrationWarning` is an escape hatch for a known one-level text or attribute mismatch, not a general repair mechanism.
+
+Suspense boundaries also let React coordinate streaming and hydration in sections. The server can send a shell before all content is ready, and the client can prioritize hydration around user interactions. Frameworks expose most of this behavior at a higher level, but the underlying goal is the same: avoid making the entire page wait for one all-or-nothing render.
+
+<br />
+
+---
+
+## 12. Strict Mode Tests Restartable Code
+
+In development, Strict Mode intentionally performs extra work. It may call render functions twice, run an additional setup-and-cleanup cycle for Effects, and re-run ref callbacks. These checks do not happen the same way in production.
+
+This behavior is often described as React "rendering twice," but the purpose is more specific: find code that breaks when rendering is restarted or synchronization is remounted.
+
+An impure render exposes itself:
+
+<br />
+
+```tsx
+function StoryTray({ stories }: { stories: string[] }) {
+  stories.push("Create Story") // Mutates the prop during render.
+  return stories.map((story) => <div key={story}>{story}</div>)
+}
+```
+
+<br />
+
+The extra render adds the item twice and reveals the mutation. The correct component creates a new array:
+
+<br />
+
+```tsx
+const items = [...stories, "Create Story"]
+```
+
+<br />
+
+An Effect without cleanup similarly exposes duplicate subscriptions. The solution is not a ref that suppresses the second setup. The solution is a cleanup that makes setup → cleanup → setup equivalent to one real setup.
+
+Strict Mode is therefore a preview of assumptions that concurrent rendering, navigation, state preservation, and future React features may exercise. Code that is pure during render and symmetrical during Effect cleanup does not need to care how many speculative attempts React performs.
+
+<br />
+
+---
+
+## 13. Following One Update End to End
+
+Suppose a user types into a search field and the application updates the input urgently while filtering a large list in a transition.
+
+The complete path is:
+
+1. The browser dispatches an input event through React's event system.
+2. The handler calls `setQuery`, creating an urgent Hook update.
+3. The handler calls `startTransition`, and `setFilter` creates a transition update.
+4. Both updates are queued, their lanes are propagated to the root, and React schedules the root.
+5. React selects urgent work first and creates or reuses work-in-progress Fibers.
+6. During `beginWork`, it calls components whose inputs or lanes require work and processes the relevant Hook queues.
+7. Reconciliation matches returned elements to current child Fibers by type, key, and position.
+8. `completeWork` prepares host changes and bubbles effect flags.
+9. React commits the urgent result synchronously, updating the input DOM and layout work.
+10. The browser can paint the latest input value.
+11. React attempts the transition lanes. The render can yield between Fiber units.
+12. If another keystroke arrives, React can abandon or pause this attempt and commit the newer urgent input.
+13. When one transition render completes without being superseded, React commits the filtered list.
+14. Passive Effects associated with committed work run according to their scheduling.
+
+At no point does React mutate the `query` binding inside an older handler. It creates new renders with new snapshots. At no point does a partially rendered transition leak into the DOM. Only a completed commit changes the visible host tree.
+
+This one lifecycle connects state snapshots, queues, lanes, Fiber traversal, reconciliation, atomic commits, and concurrent rendering.
+
+<br />
+
+---
+
+## 14. The Debugging Questions I Use
+
+When React behavior surprises me, I work through these questions in order:
+
+1. **Which render created this callback?** Its closure contains that render's props and state.
+2. **Was the setter given a replacement or an updater?** Repeated replacements may all use one snapshot.
+3. **What is this component's identity?** Check its parent position, type, and key.
+4. **Is this code running during render or commit?** Render must be pure; external synchronization belongs in an Effect or event.
+5. **Did React render, commit, or both?** Console logs in a component do not prove that the DOM changed.
+6. **Could the work have been restarted?** Strict Mode and concurrent rendering make restartability visible.
+7. **Is an Effect synchronizing with an external system?** If not, the value may belong in render or an event handler.
+8. **Are all reactive Effect dependencies declared?** If not, an older closure is probably being reused.
+9. **Is this update urgent or transitional?** Priority affects when work is attempted, not the correctness of the result.
+10. **Is the server's first output identical to the client's first output?** If not, hydration cannot safely match them.
+
+These questions are more reliable than adding `memo`, changing a key, suppressing a lint rule, or moving code into an Effect until a symptom disappears.
+
+<br />
+
+---
+
+## Final Mental Model
+
+The shortest accurate model I use is:
+
+<br />
+
+```text
+Elements describe.
+Fibers remember.
+Queues collect.
+Lanes prioritize.
+Rendering computes.
+Reconciliation matches.
+Committing publishes.
+Effects synchronize.
+```
+
+<br />
+
+Components do not update themselves. They return descriptions for one state snapshot. React stores persistent state outside those functions, queues updates, and may compute several possible futures. Reconciliation determines which component identities survive. The commit phase makes one finished future current.
+
+Concurrent React is not a separate rendering model layered on top. It is what becomes possible when render is pure and separate from commit: React can pause, restart, prioritize, suspend, and discard work without corrupting the visible interface.
+
+The public rules follow from that architecture. Keep rendering pure because it is speculative. Use stable keys because identity controls state. Use updater functions when work depends on queued state. Treat Effects as synchronization because they run after a commit. Do not rely on render counts because attempts can be abandoned.
+
+For the newer APIs built on this model, see [What's New in React 19](./react-19-new-features). For primary references, I return to React's documentation on [render and commit](https://react.dev/learn/render-and-commit), [state snapshots](https://react.dev/learn/state-as-a-snapshot), [state update queues](https://react.dev/learn/queueing-a-series-of-state-updates), [preserving state](https://react.dev/learn/preserving-and-resetting-state), [Effects](https://react.dev/learn/synchronizing-with-effects), [transitions](https://react.dev/reference/react/useTransition), [Suspense](https://react.dev/reference/react/Suspense), and [hydration](https://react.dev/reference/react-dom/client/hydrateRoot).
+
+The implementation details in this article correspond to React 19.2.7. The relevant source lives in [`ReactFiber.js`](https://github.com/facebook/react/blob/v19.2.7/packages/react-reconciler/src/ReactFiber.js), [`ReactFiberWorkLoop.js`](https://github.com/facebook/react/blob/v19.2.7/packages/react-reconciler/src/ReactFiberWorkLoop.js), [`ReactFiberBeginWork.js`](https://github.com/facebook/react/blob/v19.2.7/packages/react-reconciler/src/ReactFiberBeginWork.js), [`ReactFiberCompleteWork.js`](https://github.com/facebook/react/blob/v19.2.7/packages/react-reconciler/src/ReactFiberCompleteWork.js), [`ReactChildFiber.js`](https://github.com/facebook/react/blob/v19.2.7/packages/react-reconciler/src/ReactChildFiber.js), [`ReactFiberHooks.js`](https://github.com/facebook/react/blob/v19.2.7/packages/react-reconciler/src/ReactFiberHooks.js), and [`ReactFiberLane.js`](https://github.com/facebook/react/blob/v19.2.7/packages/react-reconciler/src/ReactFiberLane.js). Those files explain today's mechanism, not an API contract.

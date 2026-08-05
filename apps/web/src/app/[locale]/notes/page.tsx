@@ -28,6 +28,7 @@ const Page = async ({ params }: Props) => {
   setRequestLocale(locale)
 
   const t = await getTranslations({ locale, namespace: "metadata" })
+  const tNotes = await getTranslations({ locale, namespace: "notes" })
 
   return (
     <PageLayout className="grid lg:grid-cols-2 content-start items-start">
@@ -35,10 +36,11 @@ const Page = async ({ params }: Props) => {
         <Header.Column>
           <BackLink href="/" />
         </Header.Column>
-        <Header.Column className="mt-10 lg:mt-0 grid gap-5">
+        <Header.Column className="mt-10 lg:mt-0 grid gap-2">
           <h1 className="font-semibold tracking-tight text-content-ink">
             {t("notes.title")}
           </h1>
+          <p className="leading-snug">{tNotes("intro")}</p>
         </Header.Column>
       </Header.Root>
       <div className="p-5">

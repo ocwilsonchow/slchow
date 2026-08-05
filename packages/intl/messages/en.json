@@ -57,6 +57,9 @@
   "contact": {
     "body": "Please contact me at <email>sinlongchow@gmail.com</email>"
   },
+  "notes": {
+    "intro": "Notes are articles that are written by myself, or topics that I find interesting and want to save it here for future reference."
+  },
   "code": {
     "showMore": "Show more",
     "showLess": "Show less"

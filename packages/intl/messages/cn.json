@@ -57,6 +57,9 @@
   "contact": {
     "body": "欢迎来信：<email>sinlongchow@gmail.com</email>"
   },
+  "notes": {
+    "intro": "笔记是我自己撰写的文章，或是我感兴趣、想留在这里供日后参考的主题。"
+  },
   "code": {
     "showMore": "显示更多",
     "showLess": "显示较少"
