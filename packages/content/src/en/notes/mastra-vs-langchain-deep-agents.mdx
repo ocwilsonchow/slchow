@@ -1,0 +1,406 @@
+---
+title: Mastra vs LangChain
+description: A practical comparison of Mastra and LangChain Deep Agents for TypeScript workflows, durable sessions, RAG, and production deployment
+---
+
+**Mastra** and **LangChain Deep Agents** both support agents, tools, memory, and streaming. The real difference is where each framework draws its boundary.
+
+Mastra is an integrated TypeScript framework for AI applications. Agents, workflows, memory, RAG, evaluation, observability, a local Studio, a server, and deployment adapters share one programming model.
+
+Deep Agents is an opinionated autonomous-agent harness built on **LangChain** and **LangGraph**. It provides files, context offloading, subagents, memory, and middleware, then relies on LangChain for retrieval, LangGraph for explicit workflows and persistence, and LangSmith for operations.
+
+My short conclusion:
+
+- Choose **Mastra** when agents are part of a wider application with deterministic workflows.
+- Choose **Deep Agents** for autonomous research, coding, or operations agents built around files, subagents, and context management.
+- Validate the **durability and deployment model** before committing to either.
+
+<br />
+
+---
+
+## 1. The Core Difference
+
+Deep Agents is not a replacement for LangChain. The `deepagents` package assembles LangChain and LangGraph into a prebuilt agent harness with:
+
+- a virtual filesystem
+- automatic context summarization
+- subagent delegation
+- file-based skills and memory
+- middleware for retries, approvals, and guardrails
+
+Mastra starts at a wider application boundary. Its `Agent` is one primitive alongside tools, workflows, storage, vector stores, scorers, API routes, and deployment configuration.
+
+| Area                    | Mastra                                    | Deep Agents                        |
+| ----------------------- | ----------------------------------------- | ---------------------------------- |
+| Primary abstraction     | AI application framework                  | Autonomous agent harness           |
+| Deterministic workflows | First-class                               | Built with LangGraph               |
+| Multi-agent model       | Agents and workflows exposed as tools     | Supervisor delegates to subagents  |
+| RAG                     | Mastra packages and integrations          | LangChain retrieval ecosystem      |
+| Persistence             | Mastra memory and durable execution       | LangGraph checkpointers and stores |
+| File context            | Workspaces, skills, and file-based agents | Foundational virtual filesystem    |
+| Managed runtime         | Mastra Platform                           | Managed Deep Agents or LangSmith   |
+
+Mastra is broader at the package level. Deep Agents becomes broader when the surrounding LangChain ecosystem is included.
+
+<br />
+
+---
+
+## 2. Building an Agent
+
+Both frameworks support TypeScript, Zod-validated tools, and model streaming.
+
+### Mastra
+
+```ts
+import { Agent } from "@mastra/core/agent"
+import { createTool } from "@mastra/core/tools"
+import { z } from "zod"
+
+const searchDocs = createTool({
+  id: "search-docs",
+  description: "Search product documentation",
+  inputSchema: z.object({ query: z.string() }),
+  execute: async ({ query }) => searchProductDocs(query),
+})
+
+export const supportAgent = new Agent({
+  id: "support-agent",
+  name: "Support Agent",
+  instructions: "Answer from the documentation and cite the evidence.",
+  model: process.env.AGENT_MODEL!,
+  tools: { searchDocs },
+})
+```
+
+### Deep Agents
+
+```ts
+import { createDeepAgent } from "deepagents"
+import { tool } from "langchain"
+import { z } from "zod"
+
+const searchDocs = tool(({ query }) => searchProductDocs(query), {
+  name: "search_docs",
+  description: "Search product documentation",
+  schema: z.object({ query: z.string() }),
+})
+
+export const supportAgent = createDeepAgent({
+  model: process.env.AGENT_MODEL!,
+  systemPrompt: "Answer from the documentation and cite the evidence.",
+  tools: [searchDocs],
+})
+```
+
+The difference is not type safety. Mastra's registries and shared resource model feel like an application framework; Deep Agents feels like configuring a graph-backed runtime.
+
+Mastra's local server and Studio expose agents, workflows, traces, datasets, and scorers. A complete Deep Agents application usually spans several layers:
+
+```text
+Deep Agents → LangChain → LangGraph → LangSmith
+agent harness   tools       state       operations
+```
+
+Mastra reduces conceptual jumps on its intended path. Deep Agents offers direct escape hatches into LangGraph when more control is needed.
+
+<br />
+
+---
+
+## 3. Deterministic Workflows
+
+An agent lets a model choose what happens next. A workflow makes important transitions explicit in code.
+
+Use a workflow when the sequence is a business rule: validate input, collect data, request approval, publish, and record the result.
+
+### Mastra workflows
+
+Mastra workflows are first-class, typed primitives. Steps declare input and output schemas and can be composed sequentially, in parallel, through branches, or in loops.
+
+```ts
+const articleWorkflow = createWorkflow({
+  id: "article-workflow",
+  inputSchema: z.object({ topic: z.string() }),
+  outputSchema: z.object({ article: z.string() }),
+})
+  .then(research)
+  .then(write)
+  .then(approve)
+  .commit()
+```
+
+Steps can suspend for human approval and resume with a typed payload. The model remains flexible inside a step without controlling the entire process.
+
+### Deep Agents with LangGraph
+
+Subagent delegation is model-directed, not a deterministic workflow. For explicit state and transitions, compose Deep Agents with LangGraph:
+
+```ts
+const graph = new StateGraph(WorkflowState)
+  .addNode("research", runResearchAgent)
+  .addNode("review", reviewDraft)
+  .addEdge(START, "research")
+  .addEdge("research", "review")
+  .addConditionalEdges("review", ({ approved }) =>
+    approved ? END : "research"
+  )
+  .compile()
+```
+
+LangGraph supports checkpoints, interrupts, streaming, subgraphs, and durable execution. The cost is managing graph state, reducers, nodes, and transitions.
+
+For workflow-heavy products, Mastra is usually the shorter path. For teams already using LangGraph, a Deep Agent can be one capable node inside a custom state machine.
+
+<br />
+
+---
+
+## 4. Durability and Memory
+
+“Memory” often hides several separate requirements:
+
+1. **Message history** keeps a conversation coherent.
+2. **Working memory** stores preferences, goals, or task state.
+3. **Long-term memory** shares knowledge across conversations.
+4. **Durable execution** resumes interrupted work.
+5. **Resumable streaming** reconnects a client to a running task.
+
+Persisted messages do not make arbitrary code durable.
+
+### Mastra
+
+Mastra's `Memory` associates a conversation **thread** with a user or tenant **resource**:
+
+```ts
+const memory = new Memory({
+  storage: new PostgresStore({
+    id: "support-memory",
+    connectionString: process.env.DATABASE_URL!,
+  }),
+  options: {
+    lastMessages: 20,
+    workingMemory: { enabled: true },
+  },
+})
+
+await agent.stream("Continue the migration plan", {
+  memory: {
+    thread: "conversation-42",
+    resource: "user-123",
+  },
+})
+```
+
+Mastra can combine recent messages, semantic recall, structured working memory, and observational memory. Its durable-agent APIs also let clients reconnect to long streams by run ID. Work that must survive a process crash belongs in durable or workflow-backed execution.
+
+### Deep Agents and LangGraph
+
+A LangGraph **checkpointer** persists thread-scoped graph state:
+
+```ts
+const checkpointer = PostgresSaver.fromConnString(process.env.DATABASE_URL!)
+
+const agent = createDeepAgent({
+  model: process.env.AGENT_MODEL!,
+  checkpointer,
+})
+
+await agent.invoke(
+  { messages: [{ role: "user", content: "Continue the analysis." }] },
+  { configurable: { thread_id: "conversation-42" } }
+)
+```
+
+A checkpointer stores conversation state, interrupts, and resume points. A LangGraph **store** holds data shared across threads.
+
+Deep Agents represents long-term memory as files. `StateBackend` keeps scratch files in thread state, while `StoreBackend` can persist paths such as `/memories/` and `/skills/` across threads.
+
+Mastra provides more built-in memory strategies. Deep Agents provides an inspectable, editable filesystem model. In both systems, identifiers and namespaces must come from authenticated context, and durable memory needs retention, correction, and deletion policies.
+
+<br />
+
+---
+
+## 5. RAG
+
+A production RAG system has separate ingestion and query paths:
+
+```text
+ingestion → load → chunk → embed → index
+query     → retrieve → filter/rerank → answer with citations
+```
+
+Ingestion should not run during every agent request, and a successful vector lookup does not prove that an answer is grounded.
+
+### Mastra RAG
+
+Mastra provides document chunking, embedding support through the AI SDK model interface, vector-store integrations, and a vector query tool that can be attached directly to an agent.
+
+This is a cohesive path for conventional RAG inside a TypeScript application. Dynamic vector-store resolution is especially useful for selecting a tenant's index from authenticated request context.
+
+### Deep Agents with LangChain
+
+Deep Agents uses LangChain loaders, text splitters, embeddings, retrievers, and vector stores. Its ecosystem breadth matters when the application needs specialized document formats or retrieval strategies.
+
+Deep Agents also has a context-management advantage for large results: a tool can write retrieved content to the backend and return file paths. The agent can inspect only the relevant sections instead of placing every token in the main conversation.
+
+Whichever framework you use, evaluate:
+
+- retrieval recall and precision
+- answer groundedness
+- citation correctness
+- end-to-end answer quality
+
+<br />
+
+---
+
+## 6. Files, Subagents, and Sandboxes
+
+Deep Agents makes files and delegation central. A supervisor can send work to subagents with isolated context, allowing each specialist to make many tool calls and return a compact result.
+
+Its backend provides a virtual filesystem. A sandbox backend extends it with command execution:
+
+- `StateBackend` stores thread-scoped virtual files.
+- `FilesystemBackend` exposes a host directory.
+- `LocalShellBackend` adds host shell access.
+- provider-backed sandboxes isolate files and processes remotely.
+
+Mastra can expose agents and workflows to a routing agent and attach a `Workspace` containing a filesystem and optional sandbox. This fits applications where file access is one capability among many.
+
+A workspace path is not a security boundary. Local shell execution in either framework is suitable only for trusted development. Production execution needs:
+
+- a fresh or correctly namespaced sandbox
+- CPU, memory, disk, and time limits
+- controlled network egress
+- explicit file-transfer rules
+- narrowly scoped credentials
+
+Isolation protects the host, but it does not prevent prompt injection, secret exfiltration, runaway cost, or cross-user leakage by itself.
+
+Deep Agents has the stronger center of gravity for file-heavy autonomous work. Mastra integrates files and execution more naturally into a broader application.
+
+<br />
+
+---
+
+## 7. Observability, Evaluation, and Safety
+
+Operating an agent requires the path behind the final answer: model calls, tools, retrieval, subagents, workflow transitions, retries, latency, token usage, cost, and errors.
+
+Mastra instruments its primitives and exports traces to Studio, Mastra Platform, or OpenTelemetry backends. It also includes scorers, datasets, and experiments in the same framework model.
+
+Deep Agents inherits LangChain and LangGraph tracing. LangSmith adds dashboards, alerts, datasets, offline and online evaluators, annotation queues, and deployment monitoring.
+
+Mastra's observability feels like a framework primitive. LangSmith is a broader operations product. Both can participate in an existing OpenTelemetry pipeline.
+
+For either stack, test at five levels:
+
+1. tool contracts without model calls
+2. workflows or graphs with controlled responses
+3. dataset evaluations for quality and groundedness
+4. traces for performance and failure paths
+5. deployed behavior for streaming, persistence, authentication, and limits
+
+Human approval is available in both systems through suspended workflow steps, tool approval, or LangGraph interrupts. Approval does not replace runtime isolation.
+
+Agent traces can contain user messages, retrieved documents, tool arguments, and generated code. Apply the same access controls, redaction, retention, and deletion rules used for application data.
+
+<br />
+
+---
+
+## 8. Deployment
+
+The first agent demo is easy. Production requires durable state, background execution, authentication, secrets, observability, and streaming that survives real infrastructure.
+
+### Mastra
+
+The most integrated path is Mastra Platform:
+
+```bash
+mastra deploy
+```
+
+Mastra can also build a Node server or target platforms such as Cloudflare. Portability still depends on state: local SQLite files, vectors, memory, and workflow data must be replaced with stores compatible with the runtime.
+
+### Deep Agents
+
+Deep Agents has three main paths:
+
+1. **Managed Deep Agents**, an opinionated hosted runtime whose availability should be verified.
+2. **LangSmith Deployment**, with persistent state, background execution, authentication hooks, webhooks, cron jobs, tracing, and Agent Protocol APIs.
+3. **Application-hosted deployment** in frameworks such as Next.js or on Cloudflare using the Agent Streaming Protocol.
+
+Application hosting transfers more responsibility to the team:
+
+- configure a durable checkpointer and store
+- authenticate and authorize every thread
+- isolate tenant namespaces
+- handle host timeouts and background work
+- sandbox code execution away from the web server
+
+| Requirement                 | Mastra                   | Deep Agents                                       |
+| --------------------------- | ------------------------ | ------------------------------------------------- |
+| Simplest hosted path        | Mastra Platform          | Managed Deep Agents                               |
+| Established managed runtime | Mastra Platform          | LangSmith Deployment                              |
+| Custom hosting              | Built server or adapter  | Agent Protocol routes or Agent Server             |
+| Self-hosted durability      | Mastra storage providers | LangGraph checkpointer, store, and infrastructure |
+| Enterprise topology         | Platform-dependent       | Cloud, hybrid, or self-hosted LangSmith           |
+
+Mastra has the cleaner integrated path for a greenfield TypeScript team. LangSmith offers more runtime topologies for teams already invested in LangChain or requiring hybrid infrastructure.
+
+<br />
+
+---
+
+## How I Would Choose
+
+<Accordion type="multiple">
+  <AccordionItem value="mastra">
+    <AccordionTrigger>Choose Mastra when</AccordionTrigger>
+    <AccordionContent>
+      - agents are part of deterministic business workflows - the team wants one
+      TypeScript model for tools, memory, RAG, evaluation, and deployment -
+      local inspection through Studio matters - the fastest path to a hosted
+      application is important
+    </AccordionContent>
+  </AccordionItem>
+  <AccordionItem value="deep-agents">
+    <AccordionTrigger>Choose Deep Agents when</AccordionTrigger>
+    <AccordionContent>
+      - the main task is open-ended research, coding, analysis, or operations -
+      subagent delegation and context isolation are central - the agent needs
+      files, skills, memory files, or sandboxed execution - the team already
+      uses LangChain, LangGraph, or LangSmith - graph state, middleware,
+      persistence, or runtime topology need deep customization
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>
+
+<br />
+
+---
+
+My practical defaults:
+
+| Need                            | Default                                         |
+| ------------------------------- | ----------------------------------------------- |
+| Deterministic workflows         | Mastra, unless the team already knows LangGraph |
+| Conventional application memory | Mastra                                          |
+| Filesystem-native memory        | Deep Agents                                     |
+| Straightforward RAG             | Mastra                                          |
+| Specialized retrieval           | Deep Agents with LangChain                      |
+| Coding or research agent        | Deep Agents                                     |
+| Managed operations              | Deep Agents with LangSmith                      |
+| Existing OpenTelemetry pipeline | Either                                          |
+
+There is no universal winner. Mastra optimizes the **AI application**. Deep Agents optimizes the **autonomous agent harness** and connects it to the wider LangChain stack.
+
+Prototype the hardest production requirement before choosing. Test suspend and resume for approval workflows, reconnect to long-running research, measure RAG on realistic documents, and verify sandbox and credential boundaries for code execution.
+
+The framework that passes that test with the fewest hidden assumptions is the better choice.
+
+For current details, see the official [Mastra agents](https://mastra.ai/docs/agents/overview), [workflows](https://mastra.ai/docs/workflows/overview), [memory](https://mastra.ai/docs/memory/overview), [RAG](https://mastra.ai/docs/rag/overview), [workspaces](https://mastra.ai/docs/workspace/overview), [observability](https://mastra.ai/docs/observability/tracing/overview), and [deployment](https://mastra.ai/docs/mastra-platform/deploy) documentation. For LangChain, see [Deep Agents](https://docs.langchain.com/oss/javascript/deepagents/overview), [memory](https://docs.langchain.com/oss/javascript/deepagents/memory), [RAG](https://docs.langchain.com/oss/javascript/deepagents/rag), [sandboxes](https://docs.langchain.com/oss/javascript/deepagents/sandboxes), [LangGraph persistence](https://docs.langchain.com/oss/javascript/langgraph/persistence), [LangSmith observability](https://docs.langchain.com/langsmith/observability), and [production deployment](https://docs.langchain.com/oss/javascript/deepagents/going-to-production).

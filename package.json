@@ -9,10 +9,14 @@
     "lint": "turbo run lint",
     "sso": "aws sso login --sso-session=sinlongchow",
     "deploy": "bunx sst deploy --stage production",
-    "deploy:dev": "bunx sst deploy --stage dev"
+    "deploy:dev": "bunx sst deploy --stage dev",
+    "deploy:production": "bun run deploy && bun run verify:production",
+    "verify:production": "node node_modules/playwright/cli.js install chromium && node --experimental-strip-types scripts/verify-production.mts"
   },
   "devDependencies": {
     "@types/aws-lambda": "8.10.162",
+    "@types/node": "^26.1.2",
+    "playwright": "^1.62.1",
     "prettier": "^3.7.4",
     "turbo": "^2.10.5",
     "typescript": "5.9.2"

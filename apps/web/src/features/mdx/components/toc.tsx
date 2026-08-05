@@ -110,7 +110,7 @@ export const Toc = ({ toc }: { toc: TOCItemType[] }) => {
   }, [toc])
 
   return (
-    <ul className="hidden lg:grid gap-0.75 text-xs mt-5">
+    <ul className="hidden lg:grid gap-0.5 text-xs mt-5">
       {items.map((item) => {
         const id = getHeadingId(item.url)
         const active = id === activeId
@@ -124,7 +124,7 @@ export const Toc = ({ toc }: { toc: TOCItemType[] }) => {
             <a
               href={item.url}
               className={cn(
-                "block text-content-subdued/75 line-clamp-1 py-px",
+                "block text-content-subdued/75 hover:text-content-ink/75 line-clamp-1 py-px",
                 active && "text-content-ink"
               )}
               aria-current={active ? "location" : undefined}

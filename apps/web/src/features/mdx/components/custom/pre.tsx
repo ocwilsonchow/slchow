@@ -43,12 +43,12 @@ export function Pre({ className, children, ...props }: ComponentProps<"pre">) {
     <div className="relative grid rounded-xl overflow-hidden mb-5">
       <button
         type="button"
-        className="absolute top-3 right-2.5 z-10 outline-none"
+        className="absolute top-3 right-2.5 z-10 outline-none opacity-50 hover:opacity-100 transition-opacity"
         onClick={handleCopy}
         aria-label={copied ? "Copied" : "Copy code"}
       >
         <div>
-          {copied ? <CheckIcon size={14} /> : <ClipboardIcon size={14} />}
+          {copied ? <CheckIcon size={14} className="text-content-accent" /> : <ClipboardIcon size={14} />}
         </div>
       </button>
       <div className="relative grid rounded-xl overflow-hidden">
