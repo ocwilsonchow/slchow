@@ -254,7 +254,7 @@ const NavbarLink = ({
         onClick?.(event)
       }}
       className={cn(
-        "block transition-colors hover:text-content-ink-on-popover py-0.5 font-medium text-base",
+        "block transition-colors hover:text-content-ink-on-popover py-0.5 font-semibold text-base",
         isActive
           ? "text-content-ink-on-popover"
           : "text-content-body-on-popover",

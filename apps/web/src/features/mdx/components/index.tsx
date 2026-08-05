@@ -1,5 +1,5 @@
 import type { MDXComponents } from "mdx/types"
-import { MDXLink, Pre } from "./custom"
+import { MDXImage, MDXLink, Pre } from "./custom"
 import {
   blockquote,
   code,
@@ -57,6 +57,7 @@ export function getMDXComponents(components?: MDXComponents): MDXComponents {
     td,
     ul,
     pre: Pre,
+    img: MDXImage,
     MotionCollections,
     Accordion,
     AccordionItem,
