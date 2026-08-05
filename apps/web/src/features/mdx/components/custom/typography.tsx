@@ -127,24 +127,23 @@ export function table({ className, ...props }: ComponentProps<"table">) {
 }
 
 export function thead({ className, ...props }: ComponentProps<"thead">) {
-  return <thead className={cn("border-b border-stroke-soft", className)} {...props} />
-}
-
-export function tbody({ className, ...props }: ComponentProps<"tbody">) {
   return (
-    <tbody
-      className={cn("[&_tr:last-child]:border-0", className)}
+    <thead
+      className={cn("border-b border-stroke-soft", className)}
       {...props}
     />
   )
 }
 
+export function tbody({ className, ...props }: ComponentProps<"tbody">) {
+  return (
+    <tbody className={cn("[&_tr:last-child]:border-0", className)} {...props} />
+  )
+}
+
 export function tr({ className, ...props }: ComponentProps<"tr">) {
   return (
-    <tr
-      className={cn("border-b border-stroke-soft", className)}
-      {...props}
-    />
+    <tr className={cn("border-b border-stroke-soft", className)} {...props} />
   )
 }
 

@@ -1,8 +1,7 @@
 "use client"
 
-import { Pause, Play, SkipBack, SkipForward } from "lucide-react"
-import { useTranslations } from "next-intl"
 import { cn } from "@repo/ds"
+import { useTranslations } from "next-intl"
 import { getCurrentTrack, useMusicPlayer } from "../hooks/use-music-player"
 
 export const MusicPlayer = ({ className }: { className?: string }) => {

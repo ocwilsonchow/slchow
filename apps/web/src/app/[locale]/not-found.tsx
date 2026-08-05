@@ -10,7 +10,5 @@ export async function generateMetadata(): Promise<Metadata> {
 export default async function NotFoundPage() {
   const t = await getTranslations("notFound")
 
-  return (
-    <NotFoundView title={t("title")} description={t("description")} />
-  )
+  return <NotFoundView title={t("title")} description={t("description")} />
 }

@@ -1,4 +1,4 @@
-import { en, hk, cn } from "@repo/intl"
+import { cn, en, hk } from "@repo/intl"
 import { type Formats, hasLocale } from "next-intl"
 import { getRequestConfig } from "next-intl/server"
 

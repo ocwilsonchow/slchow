@@ -1,4 +1,4 @@
-import type { Variants } from "motion/react";
+import type { Variants } from "motion/react"
 
 export const listVariants: Variants = {
   hidden: {
@@ -13,7 +13,7 @@ export const listVariants: Variants = {
       delayChildren: 0.2,
     },
   },
-};
+}
 
 export const itemVariants: Variants = {
   hidden: {
@@ -30,17 +30,17 @@ export const itemVariants: Variants = {
       duration: 0.4,
     },
   },
-};
+}
 
 export const reducedListVariants: Variants = {
   hidden: { transition: { duration: 0 } },
   visible: { transition: { duration: 0 } },
-};
+}
 
 export const reducedItemVariants: Variants = {
   hidden: { opacity: 1, transition: { duration: 0 } },
   visible: { opacity: 1, transition: { duration: 0 } },
-};
+}
 
 export const contentVariants: Variants = {
   hidden: {
@@ -63,12 +63,12 @@ export const contentVariants: Variants = {
       damping: 32,
     },
   },
-};
+}
 
 export const reducedContentVariants: Variants = {
   hidden: { height: 0, transition: { duration: 0 } },
   visible: { height: "auto", transition: { duration: 0 } },
-};
+}
 
 export const backdropVariants: Variants = {
   hidden: {
@@ -84,7 +84,7 @@ export const backdropVariants: Variants = {
       duration: 0.25,
     },
   },
-};
+}
 
 export const reducedBackdropVariants: Variants = {
   hidden: {
@@ -95,7 +95,7 @@ export const reducedBackdropVariants: Variants = {
     opacity: 1,
     transition: { duration: 0 },
   },
-};
+}
 
 export const triggerIconVariants: Variants = {
   hidden: {
@@ -111,7 +111,7 @@ export const triggerIconVariants: Variants = {
       ease: "easeOut",
     },
   },
-};
+}
 
 export const reducedTriggerIconVariants: Variants = {
   hidden: {
@@ -122,4 +122,4 @@ export const reducedTriggerIconVariants: Variants = {
     rotate: 135,
     transition: { duration: 0 },
   },
-};
+}

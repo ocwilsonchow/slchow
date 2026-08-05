@@ -1,44 +1,44 @@
-import { DesignSystemProvider } from "@repo/ds";
-import "lenis/dist/lenis.css";
-import type { Metadata } from "next";
-import { notFound } from "next/navigation";
-import { hasLocale, type Locale, NextIntlClientProvider } from "next-intl";
+import { DesignSystemProvider } from "@repo/ds"
+import "lenis/dist/lenis.css"
+import type { Metadata } from "next"
+import { notFound } from "next/navigation"
+import { hasLocale, type Locale, NextIntlClientProvider } from "next-intl"
 import {
   getMessages,
   getTranslations,
   setRequestLocale,
-} from "next-intl/server";
-import { RenderNewNavbar } from "@/features/layout/components/navbar";
-import { RootLayout } from "@/features/layout/components/root";
-import { SkipLink } from "@/features/layout/components/skip-link";
-import { SmoothScroll } from "@/features/layout/components/smooth-scroll";
-import { StylesProvider } from "@/features/layout/components/styles";
-import { routing } from "@/i18n/routing";
-import { getHtmlLang, getOpenGraphLocale } from "@/lib/metadata";
-import { TanstackProviders } from "@/lib/tanstack-providers";
+} from "next-intl/server"
+import { RenderNewNavbar } from "@/features/layout/components/navbar"
+import { RootLayout } from "@/features/layout/components/root"
+import { SkipLink } from "@/features/layout/components/skip-link"
+import { SmoothScroll } from "@/features/layout/components/smooth-scroll"
+import { StylesProvider } from "@/features/layout/components/styles"
+import { routing } from "@/i18n/routing"
+import { getHtmlLang, getOpenGraphLocale } from "@/lib/metadata"
+import { TanstackProviders } from "@/lib/tanstack-providers"
 
 type Props = {
-  children: React.ReactNode;
-  params: Promise<{ locale: string }>;
-};
+  children: React.ReactNode
+  params: Promise<{ locale: string }>
+}
 
 function getMetadataBase() {
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL;
-  if (siteUrl) return new URL(siteUrl);
+  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL
+  if (siteUrl) return new URL(siteUrl)
 
-  const vercelUrl = process.env.VERCEL_PROJECT_PRODUCTION_URL;
-  if (vercelUrl) return new URL(`https://${vercelUrl}`);
+  const vercelUrl = process.env.VERCEL_PROJECT_PRODUCTION_URL
+  if (vercelUrl) return new URL(`https://${vercelUrl}`)
 
-  return new URL("http://localhost:3003");
+  return new URL("http://localhost:3003")
 }
 
 export async function generateMetadata({
   params,
 }: {
-  params: Promise<{ locale: Locale }>;
+  params: Promise<{ locale: Locale }>
 }): Promise<Metadata> {
-  const { locale } = await params;
-  const t = await getTranslations({ locale, namespace: "metadata" });
+  const { locale } = await params
+  const t = await getTranslations({ locale, namespace: "metadata" })
 
   return {
     metadataBase: getMetadataBase(),
@@ -59,19 +59,19 @@ export async function generateMetadata({
       title: t("siteTitle"),
       description: t("siteDescription"),
     },
-  };
+  }
 }
 
 export default async function LocaleLayout({ children, params }: Props) {
-  const { locale } = await params;
+  const { locale } = await params
 
   if (!hasLocale(routing.locales, locale)) {
-    notFound();
+    notFound()
   }
 
-  setRequestLocale(locale as Locale);
+  setRequestLocale(locale as Locale)
 
-  const messages = await getMessages();
+  const messages = await getMessages()
 
   return (
     <html lang={getHtmlLang(locale)} suppressHydrationWarning>
@@ -93,11 +93,11 @@ export default async function LocaleLayout({ children, params }: Props) {
         </DesignSystemProvider>
       </body>
     </html>
-  );
+  )
 }
 
 export function generateStaticParams() {
-  return routing.locales.map((locale) => ({ locale }));
+  return routing.locales.map((locale) => ({ locale }))
 }
 
-export const dynamic = "force-static";
+export const dynamic = "force-static"

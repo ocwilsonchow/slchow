@@ -1,12 +1,11 @@
-import type { Locale } from "next-intl"
+import { Divider } from "@repo/ds/components/ui/divider"
 import type { Metadata } from "next"
+import type { Locale } from "next-intl"
 import { getTranslations, setRequestLocale } from "next-intl/server"
+import { Header } from "@/features/layout/components/header"
 import { PageLayout } from "@/features/layout/components/page"
 import { RenderMdxBlockByPath } from "@/features/mdx/components/render-mdx-block"
-import { Header } from "@/features/layout/components/header"
-import { ListWorks } from "@/features/works/components/list-works"
 import { ListNotes } from "@/features/notes/components/list-notes"
-import { Divider } from "@repo/ds/components/ui/divider"
 import { buildPageMetadata } from "@/lib/metadata"
 
 type Props = {

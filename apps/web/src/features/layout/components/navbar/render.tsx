@@ -1,13 +1,13 @@
-"use client";
+"use client"
 
-import Image from "next/image";
-import { useTranslations } from "next-intl";
-import { Fragment } from "react";
-import profilePicture from "@/assets/profile-pic.webp";
-import { Link, usePathname } from "@/i18n/navigation";
-import { LanguageSettings, ThemeSettings } from "../navbar-settings";
-import { useNavbarContext } from "./context";
-import { Navbar } from "./parts";
+import Image from "next/image"
+import { useTranslations } from "next-intl"
+import { Fragment } from "react"
+import profilePicture from "@/assets/profile-pic.webp"
+import { Link, usePathname } from "@/i18n/navigation"
+import { LanguageSettings, ThemeSettings } from "../navbar-settings"
+import { useNavbarContext } from "./context"
+import { Navbar } from "./parts"
 
 const PATH_TITLE_KEYS = {
   "/": "homePage",
@@ -15,15 +15,15 @@ const PATH_TITLE_KEYS = {
   "/works": "works",
   "/notes": "notes",
   "/contact": "contact",
-} as const;
+} as const
 
 type NavItem =
   | {
-      type: "link";
-      href: "/" | "/resume" | "/notes" | "/works" | "/contact";
-      labelKey: "home" | "resume" | "notes" | "works" | "contact";
+      type: "link"
+      href: "/" | "/resume" | "/notes" | "/works" | "/contact"
+      labelKey: "home" | "resume" | "notes" | "works" | "contact"
     }
-  | { type: "soon"; labelKey: "designs" };
+  | { type: "soon"; labelKey: "designs" }
 
 const NAV_ITEMS: NavItem[] = [
   { type: "link", href: "/", labelKey: "home" },
@@ -32,37 +32,35 @@ const NAV_ITEMS: NavItem[] = [
   { type: "link", href: "/works", labelKey: "works" },
   { type: "soon", labelKey: "designs" },
   { type: "link", href: "/contact", labelKey: "contact" },
-];
+]
 
 const SOCIAL_LINKS = [
   { href: "https://github.com/ocwilsonchow", label: "GitHub" },
   { href: "https://www.linkedin.com/in/wilsonslchow/", label: "LinkedIn" },
   { href: "https://www.instagram.com/duoengineers/", label: "Instagram" },
-] as const;
+] as const
 
 function getPathTitleKey(pathname: string) {
   if (pathname in PATH_TITLE_KEYS) {
-    return PATH_TITLE_KEYS[pathname as keyof typeof PATH_TITLE_KEYS];
+    return PATH_TITLE_KEYS[pathname as keyof typeof PATH_TITLE_KEYS]
   }
-  if (pathname.startsWith("/notes/")) return "notes";
-  if (pathname.startsWith("/works/")) return "works";
-  return null;
+  if (pathname.startsWith("/notes/")) return "notes"
+  if (pathname.startsWith("/works/")) return "works"
+  return null
 }
 
 function LanguageSettingsClose() {
-  const { setOpen } = useNavbarContext();
-  return <LanguageSettings onBeforeChange={() => setOpen(false)} />;
+  const { setOpen } = useNavbarContext()
+  return <LanguageSettings onBeforeChange={() => setOpen(false)} />
 }
 
 export function RenderNewNavbar() {
-  const pathname = usePathname();
-  const t = useTranslations("navigation");
-  const tA11y = useTranslations("a11y");
+  const pathname = usePathname()
+  const t = useTranslations("navigation")
+  const tA11y = useTranslations("a11y")
 
-  const pathTitleKey = getPathTitleKey(pathname);
-  const pathLabel = pathTitleKey
-    ? t(pathTitleKey)
-    : pathname.replace(/^\//, "");
+  const pathTitleKey = getPathTitleKey(pathname)
+  const pathLabel = pathTitleKey ? t(pathTitleKey) : pathname.replace(/^\//, "")
 
   return (
     <Navbar.Root>
@@ -140,5 +138,5 @@ export function RenderNewNavbar() {
         </Navbar.Trigger>
       </Navbar.Frame>
     </Navbar.Root>
-  );
+  )
 }

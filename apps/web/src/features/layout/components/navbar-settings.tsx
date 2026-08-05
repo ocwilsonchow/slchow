@@ -1,10 +1,10 @@
-"use client";
+"use client"
 
-import { cn, useTheme } from "@repo/ds";
-import { type Locale, useLocale, useTranslations } from "next-intl";
-import { type ComponentProps, Fragment } from "react";
-import { usePathname, useRouter } from "@/i18n/navigation";
-import { localeOptions } from "@/i18n/routing";
+import { cn, useTheme } from "@repo/ds"
+import { type Locale, useLocale, useTranslations } from "next-intl"
+import { type ComponentProps, Fragment } from "react"
+import { usePathname, useRouter } from "@/i18n/navigation"
+import { localeOptions } from "@/i18n/routing"
 
 const themeOptions = [
   {
@@ -22,10 +22,10 @@ const themeOptions = [
     labelKey: "themeDark",
     color: ["#3f3d39"],
   },
-] as const;
+] as const
 
 function Root({ className, ...props }: ComponentProps<"div">) {
-  return <div className={cn("flex flex-col", className)} {...props} />;
+  return <div className={cn("flex flex-col", className)} {...props} />
 }
 
 function Label({ className, ...props }: ComponentProps<"div">) {
@@ -34,7 +34,7 @@ function Label({ className, ...props }: ComponentProps<"div">) {
       className={cn("text-xs text-content-body-on-popover my-1.5", className)}
       {...props}
     />
-  );
+  )
 }
 
 function List({ className, ...props }: ComponentProps<"fieldset">) {
@@ -42,11 +42,11 @@ function List({ className, ...props }: ComponentProps<"fieldset">) {
     <fieldset
       className={cn(
         "m-0 flex min-w-0 items-center gap-2 border-0 p-0",
-        className,
+        className
       )}
       {...props}
     />
-  );
+  )
 }
 
 function Option({
@@ -63,11 +63,11 @@ function Option({
         selected
           ? "text-content-ink-on-popover"
           : "text-content-body-on-popover",
-        className,
+        className
       )}
       {...props}
     />
-  );
+  )
 }
 
 function Separator({ className, ...props }: ComponentProps<"div">) {
@@ -75,7 +75,7 @@ function Separator({ className, ...props }: ComponentProps<"div">) {
     <div aria-hidden className={cn("opacity-50", className)} {...props}>
       /
     </div>
-  );
+  )
 }
 
 function Swatch({
@@ -88,7 +88,7 @@ function Swatch({
       aria-hidden
       className={cn(
         "aspect-square w-4 flex overflow-hidden rounded-full border-2",
-        className,
+        className
       )}
       {...props}
     >
@@ -100,7 +100,7 @@ function Swatch({
         />
       ))}
     </span>
-  );
+  )
 }
 
 export const Settings = {
@@ -110,13 +110,13 @@ export const Settings = {
   Option,
   Separator,
   Swatch,
-};
+}
 
-type ThemeSettingsProps = ComponentProps<typeof Root>;
+type ThemeSettingsProps = ComponentProps<typeof Root>
 
 export function ThemeSettings({ className, ...props }: ThemeSettingsProps) {
-  const { theme, setTheme } = useTheme();
-  const t = useTranslations("navigation");
+  const { theme, setTheme } = useTheme()
+  const t = useTranslations("navigation")
 
   return (
     <Settings.Root className={className} {...props}>
@@ -136,15 +136,15 @@ export function ThemeSettings({ className, ...props }: ThemeSettingsProps) {
         ))}
       </Settings.List>
     </Settings.Root>
-  );
+  )
 }
 
 type LanguageSettingsProps = ComponentProps<typeof Root> & {
   /** Runs before the locale switch (e.g. close the navbar). */
-  onBeforeChange?: () => void;
+  onBeforeChange?: () => void
   /** Delay navigation so exit animations can finish. */
-  delayMs?: number;
-};
+  delayMs?: number
+}
 
 export function LanguageSettings({
   className,
@@ -152,27 +152,27 @@ export function LanguageSettings({
   delayMs = 0,
   ...props
 }: LanguageSettingsProps) {
-  const currentLocale = useLocale();
-  const pathname = usePathname();
-  const router = useRouter();
-  const t = useTranslations("navigation");
+  const currentLocale = useLocale()
+  const pathname = usePathname()
+  const router = useRouter()
+  const t = useTranslations("navigation")
 
   const selectLocale = (nextLocale: Locale) => {
-    if (nextLocale === currentLocale) return;
+    if (nextLocale === currentLocale) return
 
-    onBeforeChange?.();
+    onBeforeChange?.()
 
     const navigate = () => {
-      router.replace(pathname, { locale: nextLocale });
-    };
-
-    if (delayMs > 0) {
-      window.setTimeout(navigate, delayMs);
-      return;
+      router.replace(pathname, { locale: nextLocale })
     }
 
-    navigate();
-  };
+    if (delayMs > 0) {
+      window.setTimeout(navigate, delayMs)
+      return
+    }
+
+    navigate()
+  }
 
   return (
     <Settings.Root className={className} {...props}>
@@ -191,5 +191,5 @@ export function LanguageSettings({
         ))}
       </Settings.List>
     </Settings.Root>
-  );
+  )
 }
