@@ -85,9 +85,9 @@
 }
 
 @layer base {
-  *::-webkit-scrollbar {
+  /* *::-webkit-scrollbar {
     display: none;
-  }
+  } */
 
   button,
   a {

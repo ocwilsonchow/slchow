@@ -1,0 +1,171 @@
+---
+title: Local Storage, Session Storage, and Cookies
+description: A practical guide to browser storage, its trade-offs, and the security boundaries that matter in production
+---
+
+Browser storage looks simple until it becomes part of an authentication flow, a multi-tab experience, or an application that must survive schema changes. The API is rarely the difficult part. The real decision is **who needs the data, how long it should live, and which security boundary it crosses**.
+
+<br />
+
+One terminology note: browsers do not expose a standard API named `cookieStorage`. There are traditional cookies through `document.cookie` and the newer asynchronous **Cookie Store API** through `cookieStore`. They manage the same underlying cookies, but neither behaves like Web Storage.
+
+<br />
+
+## Overview
+
+| Property | `localStorage` | `sessionStorage` | Cookies |
+| --- | --- | --- | --- |
+| Typical lifetime | Until explicitly cleared or evicted | Current tab's page session | Session-based or until their expiry date |
+| Sent to server | No | No | Yes, on matching requests |
+| JavaScript access | Yes, synchronously | Yes, synchronously | Yes, unless marked `HttpOnly` |
+| Best suited for | Persistent, non-sensitive preferences | Temporary state that should survive reloads | Server-managed sessions and small server-readable values |
+
+<br />
+
+The practical distinction is that Web Storage belongs to the client, while cookies participate in the HTTP request lifecycle. None should be treated as a trusted database.
+
+<br />
+
+---
+
+## localStorage
+
+`localStorage` persists data for an origin across page reloads and browser restarts. It is useful for small, non-sensitive preferences such as a theme, a dismissed notice, or an unfinished local draft.
+
+<br />
+
+```ts
+const preferences = {
+  theme: "dark",
+  density: "compact",
+}
+
+localStorage.setItem("preferences:v1", JSON.stringify(preferences))
+
+const stored = localStorage.getItem("preferences:v1")
+const parsed = stored ? JSON.parse(stored) : null
+```
+
+<br />
+
+The convenience comes with limits. Values are strings, access is synchronous, and every read or write blocks the main thread. Capacity and eviction behavior also vary by browser. I treat it as a small persistence mechanism, not a database.
+
+<br />
+
+Any JavaScript running on the origin can read it. That includes malicious code introduced through an XSS vulnerability, so I do not store session tokens, passwords, or sensitive personal data in `localStorage`. Long-lived bearer tokens are especially risky because stealing the value is enough to reuse it elsewhere.
+
+<br />
+
+I also version stored keys and validate parsed data. Deployed applications change while old browser data remains:
+
+<br />
+
+```ts
+type Preferences = {
+  theme: "light" | "dark"
+}
+
+function readPreferences(): Preferences | null {
+  try {
+    const value = JSON.parse(localStorage.getItem("preferences:v1") ?? "null")
+
+    if (value?.theme === "light" || value?.theme === "dark") {
+      return value
+    }
+  } catch {
+    // Corrupt or manually edited storage should not break the application.
+  }
+
+  return null
+}
+```
+
+<br />
+
+---
+
+## sessionStorage
+
+`sessionStorage` has a similar string-based API, but its lifetime is tied to a page session. It survives reloads in the same tab and is normally cleared when that tab or window closes. Separate tabs get separate storage.
+
+<br />
+
+That makes it a good fit for temporary UI state: a multi-step form, a return URL, or filters that should survive an accidental refresh without becoming a permanent preference.
+
+<br />
+
+```ts
+sessionStorage.setItem(
+  "checkout:draft",
+  JSON.stringify({ step: 2, deliveryMethod: "pickup" })
+)
+```
+
+<br />
+
+It is not a security boundary. Scripts on the page can still read it, and users can duplicate or restore tabs in ways that make lifecycle assumptions less obvious. I use `sessionStorage` because its **product lifetime** matches the data, not because it is safer than `localStorage`.
+
+<br />
+
+---
+
+## Cookies and the Cookie Store API
+
+Cookies are different because the browser can attach them to HTTP requests. That makes them appropriate when the server needs the value, especially for server-managed sessions.
+
+<br />
+
+Security-sensitive cookies should usually be created by the server:
+
+<br />
+
+```http
+Set-Cookie: session=opaque-value; Path=/; HttpOnly; Secure; SameSite=Lax
+```
+
+<br />
+
+`HttpOnly` prevents JavaScript from reading the cookie, `Secure` restricts it to HTTPS, and `SameSite` helps limit cross-site request forgery. These attributes reduce risk, but they do not replace output escaping, a Content Security Policy, CSRF analysis, or proper session expiration and rotation.
+
+<br />
+
+Traditional `document.cookie` is synchronous and awkward to parse. The **Cookie Store API** provides an asynchronous interface where supported:
+
+<br />
+
+```ts
+const preference = await cookieStore.get("theme")
+
+await cookieStore.set({
+  name: "theme",
+  value: "dark",
+  path: "/",
+  sameSite: "lax",
+})
+```
+
+<br />
+
+Client-side code still cannot read an `HttpOnly` cookie through `cookieStore`. That restriction is the point. I also avoid putting general application state in cookies: they are small, domain and path rules are subtle, and cookies included with requests add network overhead every time.
+
+<br />
+
+---
+
+## The Decision I Use
+
+My default choices are:
+
+- Use **in-memory state** when the data only needs to live while the current page is open.
+- Use **sessionStorage** when temporary state should survive reloads in one tab.
+- Use **localStorage** for small, non-sensitive preferences that should persist across visits.
+- Use **cookies** when the server must receive the value, particularly for an opaque session identifier in a secure, HTTP-only cookie.
+- Use **IndexedDB** instead when the application needs significant data, structured records, transactions, or offline behavior.
+
+<br />
+
+The key principle is to store the least data for the shortest useful lifetime. Browser storage is controlled by the user, can be cleared or modified, and should never be treated as an authoritative source of truth. Validate values when reading them, handle storage failures, and keep server-side authorization independent of anything the client can edit.
+
+<br />
+
+Choosing storage is ultimately an architecture decision, not an API preference. Start with the data's lifetime and trust level; the correct browser primitive usually follows.

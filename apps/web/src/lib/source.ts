@@ -5,7 +5,7 @@ import { toFumadocsSource } from "fumadocs-mdx/runtime/server"
 import type { DocData, DocMethods } from "fumadocs-mdx/runtime/types"
 import { fumadocsI18n } from "@/lib/fumadocs-i18n"
 
-const WRITINGS_CATEGORY = "writings"
+const NOTES_CATEGORY = "notes"
 
 /** Generated `.source/server` is `@ts-nocheck`, so assert the doc entry shape for loader inference. */
 type DocsEntry = DocData &
@@ -22,32 +22,32 @@ export const content = loader({
   i18n: fumadocsI18n,
 })
 
-export type WritingsPage = InferPageType<typeof content>
+export type NotesPage = InferPageType<typeof content>
 
-export type WritingsPostNode = {
+export type NotesPostNode = {
   type: "post"
-  page: WritingsPage
+  page: NotesPage
 }
 
-export type WritingsFolderNode = {
+export type NotesFolderNode = {
   type: "folder"
   name: string
   slugs: string[]
-  children: WritingsNode[]
+  children: NotesNode[]
 }
 
-export type WritingsNode = WritingsPostNode | WritingsFolderNode
+export type NotesNode = NotesPostNode | NotesFolderNode
 
-function isWritingsFolder(node: Node): node is Folder {
-  return node.type === "folder" && node.$ref?.folder === WRITINGS_CATEGORY
+function isNotesFolder(node: Node): node is Folder {
+  return node.type === "folder" && node.$ref?.folder === NOTES_CATEGORY
 }
 
-function mapWritingsNodes(
+function mapNotesNodes(
   nodes: Node[],
   parentSlugs: string[],
   locale: string
-): WritingsNode[] {
-  const result: WritingsNode[] = []
+): NotesNode[] {
+  const result: NotesNode[] = []
 
   for (const node of nodes) {
     if (node.type === "page") {
@@ -72,19 +72,19 @@ function mapWritingsNodes(
       type: "folder",
       name: folderName,
       slugs,
-      children: mapWritingsNodes(node.children, slugs, locale),
+      children: mapNotesNodes(node.children, slugs, locale),
     })
   }
 
   return result
 }
 
-/** Nested writings tree for a locale, mirroring `content/[locale]/writings/**`. */
-export function getWritings(locale: string): WritingsNode[] {
+/** Nested notes tree for a locale, mirroring `content/[locale]/notes/**`. */
+export function getNotes(locale: string): NotesNode[] {
   const tree = content.getPageTree(locale)
-  const writingsFolder = tree.children.find(isWritingsFolder)
-  if (!writingsFolder) return []
-  return mapWritingsNodes(writingsFolder.children, [], locale)
+  const notesFolder = tree.children.find(isNotesFolder)
+  if (!notesFolder) return []
+  return mapNotesNodes(notesFolder.children, [], locale)
 }
 
 export function getCategoryPages(category: string, locale: string) {
@@ -93,8 +93,8 @@ export function getCategoryPages(category: string, locale: string) {
     .filter((page) => page.slugs[0] === category && page.slugs.length > 1)
 }
 
-export function getWritingsPage(slug: string[], locale: string) {
-  return content.getPage([WRITINGS_CATEGORY, ...slug], locale)
+export function getNotesPage(slug: string[], locale: string) {
+  return content.getPage([NOTES_CATEGORY, ...slug], locale)
 }
 
 export function getCategoryStaticParams(category: string) {
@@ -110,8 +110,8 @@ export function getCategoryStaticParams(category: string) {
     }))
 }
 
-export function getWritingsStaticParams() {
-  return getCategoryStaticParams(WRITINGS_CATEGORY)
+export function getNotesStaticParams() {
+  return getCategoryStaticParams(NOTES_CATEGORY)
 }
 
 export function getMdxContent(category: string, slug: string, locale: string) {

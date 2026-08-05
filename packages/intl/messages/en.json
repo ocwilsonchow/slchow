@@ -9,7 +9,7 @@
     "works": "Side Quests",
     "designs": "Designs",
     "comingSoon": "coming soon",
-    "writings": "Writings",
+    "notes": "Notes",
     "listAll": "List all",
     "listMore": "List more",
     "contact": "Contact",
@@ -41,8 +41,8 @@
       "title": "Resume",
       "description": "Experience, skills, and background for Wilson Chow — software developer."
     },
-    "writings": {
-      "title": "Writings",
+    "notes": {
+      "title": "Notes",
       "description": "Notes and essays on frontend, AI agents, and building software."
     },
     "works": {
@@ -56,5 +56,9 @@
   },
   "contact": {
     "body": "Please contact me at <email>sinlongchow@gmail.com</email>"
+  },
+  "code": {
+    "showMore": "Show more",
+    "showLess": "Show less"
   }
 }

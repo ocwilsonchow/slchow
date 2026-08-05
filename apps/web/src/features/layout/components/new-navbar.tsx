@@ -325,7 +325,7 @@ const pathTitleKeys = {
   "/": "homePage",
   "/resume": "resume",
   "/works": "works",
-  "/writings": "writings",
+  "/notes": "notes",
   "/contact": "contact",
 } as const
 
@@ -336,8 +336,8 @@ export const RenderNewNavbar = () => {
 
   const pathTitleKey =
     pathTitleKeys[pathname as keyof typeof pathTitleKeys] ??
-    (pathname.startsWith("/writings/")
-      ? "writings"
+    (pathname.startsWith("/notes/")
+      ? "notes"
       : pathname.startsWith("/works/")
         ? "works"
         : null)
@@ -361,8 +361,8 @@ export const RenderNewNavbar = () => {
                 </NewNavbar.NavbarLink>
               </NewNavbar.StaggerItem>
               <NewNavbar.StaggerItem>
-                <NewNavbar.NavbarLink href="/writings">
-                  {t("writings")}
+                <NewNavbar.NavbarLink href="/notes">
+                  {t("notes")}
                 </NewNavbar.NavbarLink>
               </NewNavbar.StaggerItem>
               <NewNavbar.StaggerItem>

@@ -1,8 +1,8 @@
 import type { Locale } from "next-intl"
 import { createOgImage, ogContentType, ogSize } from "@/features/og/og-image"
-import { getMdxContent, getWritingsStaticParams } from "@/lib/source"
+import { getMdxContent, getNotesStaticParams } from "@/lib/source"
 
-export const alt = "Writing"
+export const alt = "Note"
 export const size = ogSize
 export const contentType = ogContentType
 
@@ -12,7 +12,7 @@ type Props = {
 
 export default async function Image({ params }: Props) {
   const { locale, slug } = await params
-  const page = getMdxContent("writings", slug, locale)
+  const page = getMdxContent("notes", slug, locale)
 
   return createOgImage({
     title: page?.data.title ?? slug,
@@ -21,5 +21,5 @@ export default async function Image({ params }: Props) {
 }
 
 export function generateStaticParams() {
-  return getWritingsStaticParams()
+  return getNotesStaticParams()
 }

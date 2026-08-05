@@ -370,8 +370,8 @@ export const RenderNavbar = () => {
                 <Navbar.LinkItem href="/works">{t("works")}</Navbar.LinkItem>
               </LinkBox>
               <LinkBox>
-                <Navbar.LinkItem href="/writings">
-                  {t("writings")}
+                <Navbar.LinkItem href="/notes">
+                  {t("notes")}
                 </Navbar.LinkItem>
               </LinkBox>
             </motion.ul>

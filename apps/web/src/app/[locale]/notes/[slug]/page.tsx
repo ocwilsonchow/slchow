@@ -5,7 +5,7 @@ import { PageLayout } from "@/features/layout/components/page"
 import { Header } from "@/features/layout/components/header"
 import { BackLink } from "@/features/layout/components/back-link"
 import { RenderMdxBlockByPath } from "@/features/mdx/components/render-mdx-block"
-import { getMdxContent, getWritingsStaticParams } from "@/lib/source"
+import { getMdxContent, getNotesStaticParams } from "@/lib/source"
 import { Toc } from "@/features/mdx/components/toc"
 import { buildPageMetadata } from "@/lib/metadata"
 
@@ -15,7 +15,7 @@ type Props = {
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { locale, slug } = await params
-  const page = getMdxContent("writings", slug, locale)
+  const page = getMdxContent("notes", slug, locale)
 
   return buildPageMetadata({
     title: page?.data.title ?? slug,
@@ -30,14 +30,14 @@ const Page = async ({ params }: Props) => {
 
   setRequestLocale(locale)
 
-  const page = getMdxContent("writings", slug, locale)
+  const page = getMdxContent("notes", slug, locale)
   const toc = page?.data.toc ?? []
 
   return (
     <PageLayout className="grid lg:grid-cols-2 content-start items-start">
       <Header.Root>
         <Header.Column>
-          <BackLink href="/writings" />
+          <BackLink href="/notes" />
         </Header.Column>
         <Header.Column className="grid gap-5">
           <div className="mt-8 lg:mt-0 space-y-1">
@@ -52,7 +52,7 @@ const Page = async ({ params }: Props) => {
         </Header.Column>
       </Header.Root>
       <div className="p-5 pb-24">
-        <RenderMdxBlockByPath category="writings" slug={slug} locale={locale} />
+        <RenderMdxBlockByPath category="notes" slug={slug} locale={locale} />
       </div>
     </PageLayout>
   )
@@ -61,7 +61,7 @@ const Page = async ({ params }: Props) => {
 export default Page
 
 export function generateStaticParams() {
-  return getWritingsStaticParams()
+  return getNotesStaticParams()
 }
 
 export const dynamic = "force-static"

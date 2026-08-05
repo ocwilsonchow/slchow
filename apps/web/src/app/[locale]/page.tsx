@@ -5,7 +5,7 @@ import { PageLayout } from "@/features/layout/components/page"
 import { RenderMdxBlockByPath } from "@/features/mdx/components/render-mdx-block"
 import { Header } from "@/features/layout/components/header"
 import { ListWorks } from "@/features/works/components/list-works"
-import { ListWritings } from "@/features/writings/components/list-writings"
+import { ListNotes } from "@/features/notes/components/list-notes"
 import { Divider } from "@repo/ds/components/ui/divider"
 import { buildPageMetadata } from "@/lib/metadata"
 
@@ -47,10 +47,10 @@ const Page = async ({ params }: Props) => {
             />
           </section>
           <Divider />
-          <section id="works-and-writings" className="flex flex-col">
+          <section id="works-and-notes" className="flex flex-col">
             {/* <ListWorks locale={locale} />
             <Divider /> */}
-            <ListWritings locale={locale} />
+            <ListNotes locale={locale} />
             <Divider />
           </section>
         </div>

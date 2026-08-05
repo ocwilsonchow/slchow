@@ -2,7 +2,7 @@ import { getTranslations } from "next-intl/server"
 import { Link } from "@/i18n/navigation"
 import { getCategoryPages } from "@/lib/source"
 
-type ListWritingsProps = {
+type ListNotesProps = {
   locale: string
   limit?: number
   showHeading?: boolean
@@ -13,35 +13,35 @@ const getPageDate = (date?: string | Date) => {
   return new Date(date).getTime()
 }
 
-export const ListWritings = async ({
+export const ListNotes = async ({
   locale,
-  limit = 4,
+  limit = 5,
   showHeading = true,
-}: ListWritingsProps) => {
+}: ListNotesProps) => {
   const t = await getTranslations("navigation")
-  const allWritings = getCategoryPages("writings", locale).sort(
+  const allNotes = getCategoryPages("notes", locale).sort(
     (a, b) => getPageDate(b.data.date) - getPageDate(a.data.date)
   )
-  const hasMore = allWritings.length > limit
-  const writings = allWritings.slice(0, limit)
+  const hasMore = allNotes.length > limit
+  const notes = allNotes.slice(0, limit)
 
   return (
     <div className="flex flex-col gap-2">
       {showHeading && (
         <h2>
-          <Link href="/writings" className="font-semibold">
-            {t("writings")}{" "}
-            <sup className="text-content-subdued">{allWritings.length}</sup>
+          <Link href="/notes" className="font-semibold">
+            {t("notes")}{" "}
+            <sup className="text-content-subdued">{allNotes.length}</sup>
           </Link>
         </h2>
       )}
       <ul className="grid list-disc list-outside ml-4">
-        {writings.map((page) => {
+        {notes.map((page) => {
           const slug = page.slugs.slice(1).join("/")
           return (
             <li key={page.url} className="">
               <Link
-                href={`/writings/${slug}`}
+                href={`/notes/${slug}`}
                 className="inline-flex text-content-ink py-px font-semibold"
               >
                 {page.data.title}
@@ -52,7 +52,7 @@ export const ListWritings = async ({
         {hasMore ? (
           <li>
             <Link
-              href="/writings"
+              href="/notes"
               className="inline-block py-px text-content-subdued hover:text-content-ink/75"
             >
               {t("listAll")}{" "}

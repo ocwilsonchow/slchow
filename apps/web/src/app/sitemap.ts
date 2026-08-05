@@ -12,7 +12,7 @@ function getSiteUrl() {
   return new URL("http://localhost:3003")
 }
 
-const staticPaths = ["", "/resume", "/writings", "/works", "/contact"] as const
+const staticPaths = ["", "/resume", "/notes", "/works", "/contact"] as const
 
 export default function sitemap(): MetadataRoute.Sitemap {
   const origin = getSiteUrl().origin
@@ -27,7 +27,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
       })
     }
 
-    for (const category of ["writings", "works"] as const) {
+    for (const category of ["notes", "works"] as const) {
       for (const page of getCategoryPages(category, locale)) {
         const slug = page.slugs.slice(1).join("/")
         entries.push({

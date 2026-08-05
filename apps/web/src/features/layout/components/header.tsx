@@ -46,7 +46,7 @@ export const Links = async ({ ...props }: ComponentProps<"ul">) => {
       className={cn("hidden md:flex flex-col gap-px", props.className)}
     >
       <HeaderLink href="/resume">{t("resume")}</HeaderLink>
-      <HeaderLink href="/writings">{t("writings")}</HeaderLink>
+      <HeaderLink href="/notes">{t("notes")}</HeaderLink>
       <HeaderLink href="/works">{t("works")}</HeaderLink>
       <HeaderLink href="/">
         {t("designs")} ({t("comingSoon")})

@@ -103,6 +103,11 @@ export function code({ className, ...props }: ComponentProps<"code">) {
     <code
       className={cn(
         "text-[13px]",
+        "[&:not(pre_code)]:rounded-md",
+        "[&:not(pre_code)]:bg-surface-alpha",
+        "[&:not(pre_code)]:px-1",
+        "[&:not(pre_code)]:py-0.5",
+        "[&:not(pre_code)]:text-content-ink",
         className
       )}
       {...props}
@@ -147,7 +152,7 @@ export function th({ className, ...props }: ComponentProps<"th">) {
   return (
     <th
       className={cn(
-        "px-0 py-2 pr-4 font-semibold tracking-tight text-content-ink first:pl-0 last:pr-0",
+        "px-0 py-2 pr-4 font-semibold leading-snug tracking-tight text-content-ink first:pl-0 last:pr-0",
         className
       )}
       {...props}
@@ -159,7 +164,7 @@ export function td({ className, ...props }: ComponentProps<"td">) {
   return (
     <td
       className={cn(
-        "px-0 py-2 pr-4 text-content-body align-top first:pl-0 last:pr-0",
+        "px-0 py-2 pr-4 leading-snug text-content-body align-top first:pl-0 last:pr-0",
         className
       )}
       {...props}

@@ -9,7 +9,7 @@
     "works": "支線任務",
     "designs": "設計",
     "comingSoon": "即將推出",
-    "writings": "文章",
+    "notes": "筆記",
     "listAll": "顯示全部",
     "listMore": "顯示更多",
     "contact": "聯絡",
@@ -41,8 +41,8 @@
       "title": "履歷",
       "description": "Wilson Chow 的工作經驗、技能與背景 — 軟件開發者。"
     },
-    "writings": {
-      "title": "文章",
+    "notes": {
+      "title": "筆記",
       "description": "關於 frontend、AI agents 與軟件開發的筆記與文章。"
     },
     "works": {
@@ -56,5 +56,9 @@
   },
   "contact": {
     "body": "歡迎來信：<email>sinlongchow@gmail.com</email>"
+  },
+  "code": {
+    "showMore": "顯示更多",
+    "showLess": "顯示較少"
   }
 }
