@@ -1,0 +1,349 @@
+---
+title: Frontend Regression Tests
+description: A practical playbook for catching frontend regressions with Vitest, React Testing Library, and Cypress
+date: 2026-08-05
+---
+
+**Regression tests** on the frontend are not about chasing a coverage percentage. They are about protecting behavior that users already rely on: a form that still submits, a draft that still survives a failed request, a login flow that still lands in the right place after a refactor.
+
+<br />
+
+This note is a practical playbook. It covers what counts as a frontend regression, what is worth protecting, which layer should catch it, and how to fold that into pull requests with **Vitest**, **React Testing Library**, and **Cypress**.
+
+<br />
+
+---
+
+## 1. What to Test and Where
+
+Prioritize by **blast radius**, not by how easy the test is to write. Focus on money, auth, data-loss paths, high-traffic entry flows, and bugs that already shipped once. Usually skip one-off chrome and purely visual polish.
+
+<br />
+
+Catch regressions at the **cheapest layer that still proves the behavior**:
+
+<br />
+
+| Layer | Tool | Use when |
+| --- | --- | --- |
+| Unit | Vitest | Pure logic, reducers, parsers, URL/state helpers |
+| Component | Vitest + React Testing Library | Interaction contracts: click → state → text/role |
+| Integration-ish | Vitest + RTL + MSW | Page sections with mocked network |
+| E2E | Cypress | Full critical journeys across routes and auth |
+
+<br />
+
+Rule of thumb: if a **real browser** and **real navigation** are required to trust the result, use Cypress. Otherwise stay in Vitest. Avoid proving the same fact at every layer.
+
+<br />
+
+---
+
+## 2. Unit and Component Regressions with Vitest and RTL
+
+For component regressions, test **user-observable outcomes**. Query by role and accessible name, drive the UI with `userEvent`, and assert what the user can see or do next. Avoid asserting internal state, CSS class lists, or private function calls.
+
+<br />
+
+Name the test after the regression it protects. `keeps draft when network fails` tells a future reader more than `handles error`.
+
+<br />
+
+```tsx
+import { render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { describe, expect, it, vi } from "vitest"
+
+import { DraftForm } from "./draft-form"
+
+describe("DraftForm", () => {
+  it("keeps draft when network fails", async () => {
+    const user = userEvent.setup()
+    const onSubmit = vi.fn().mockRejectedValue(new Error("network"))
+
+    render(<DraftForm initialValue="hello" onSubmit={onSubmit} />)
+
+    await user.clear(screen.getByRole("textbox", { name: /draft/i }))
+    await user.type(screen.getByRole("textbox", { name: /draft/i }), "updated")
+    await user.click(screen.getByRole("button", { name: /save/i }))
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/could not save/i)
+    expect(screen.getByRole("textbox", { name: /draft/i })).toHaveValue("updated")
+    expect(screen.getByRole("button", { name: /save/i })).toBeEnabled()
+  })
+
+  it("disables save while a submit is in flight", async () => {
+    const user = userEvent.setup()
+    let resolveSubmit!: () => void
+    const onSubmit = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveSubmit = resolve
+        })
+    )
+
+    render(<DraftForm initialValue="hello" onSubmit={onSubmit} />)
+
+    await user.click(screen.getByRole("button", { name: /save/i }))
+
+    expect(screen.getByRole("button", { name: /save/i })).toBeDisabled()
+
+    resolveSubmit()
+    expect(await screen.findByRole("button", { name: /save/i })).toBeEnabled()
+  })
+})
+```
+
+<br />
+
+When a component becomes hard to test, extract pure logic instead of fighting the render tree. Formatting, validation, and URL building belong in small functions with unit tests. The component test can then stay focused on wiring and interaction.
+
+<br />
+
+```ts
+import { describe, expect, it } from "vitest"
+
+import { getNextDraftStatus } from "./draft-status"
+
+describe("getNextDraftStatus", () => {
+  it("returns error without clearing the draft value", () => {
+    expect(
+      getNextDraftStatus({
+        value: "updated",
+        result: { ok: false, reason: "network" },
+      })
+    ).toEqual({
+      value: "updated",
+      status: "error",
+      message: "Could not save",
+    })
+  })
+})
+```
+
+<br />
+
+### Testing Custom Hooks
+
+When complex state logic does not need a UI, test the hook directly using `renderHook` and `act`. This avoids mounting unnecessary DOM elements while still proving the state transitions work.
+
+<br />
+
+```tsx
+import { renderHook, act } from "@testing-library/react"
+import { describe, expect, it } from "vitest"
+
+import { usePagination } from "./use-pagination"
+
+describe("usePagination", () => {
+  it("advances to the next page", () => {
+    const { result } = renderHook(() => usePagination({ total: 50, perPage: 10 }))
+
+    expect(result.current.page).toBe(1)
+
+    act(() => {
+      result.current.next()
+    })
+
+    expect(result.current.page).toBe(2)
+  })
+})
+```
+
+<br />
+
+### Type-Safe Test Data
+
+For behavior, prefer **deterministic fixtures** over broad snapshots. Snapshots are useful for some serialization cases, but they are a weak regression signal when the important contract is “user can still recover from a failed save.”
+
+<br />
+
+To keep fixtures deterministic without repeating large objects in every test, use TypeScript's `Partial<T>` to build type-safe data factories.
+
+<br />
+
+```ts
+type Note = { id: string; title: string; status: "draft" | "published" }
+
+export function buildNote(overrides?: Partial<Note>): Note {
+  return {
+    id: "test-id",
+    title: "Default Title",
+    status: "draft",
+    ...overrides,
+  }
+}
+
+// Usage in a test:
+// const publishedNote = buildNote({ status: "published" })
+```
+
+<br />
+
+### Test Async States Explicitly
+
+Most data-driven components have more than a success state:
+
+1. Initial or empty
+2. Loading
+3. Success
+4. Error
+5. Retry or recovery
+
+<br />
+
+The regression often lives in the transition between those states. **MSW** can keep the test at the HTTP boundary while making each response deterministic.
+
+<br />
+
+```tsx
+import { HttpResponse, http } from "msw"
+import { server } from "../test/server"
+import type { Note } from "@/types"
+
+it("retries after the first request fails", async () => {
+  const user = userEvent.setup()
+  let attempts = 0
+
+  server.use(
+    http.get("/api/notes", () => {
+      attempts += 1
+
+      if (attempts === 1) {
+        return HttpResponse.json(
+          { message: "Temporary failure" },
+          { status: 503 }
+        )
+      }
+
+      // TypeScript enforces that this matches the Note[] type
+      return HttpResponse.json<Note[]>([
+        { id: "1", title: "Regression playbook", status: "published" }
+      ])
+    })
+  )
+
+  render(<NotesList />)
+
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    /could not load notes/i
+  )
+
+  await user.click(screen.getByRole("button", { name: /retry/i }))
+
+  expect(
+    await screen.findByRole("link", { name: /regression playbook/i })
+  ).toBeVisible()
+})
+```
+
+<br />
+
+This test protects more than error copy. It proves that the failure is visible, retry remains possible, and a later success replaces the error state. It does not need to know whether the component uses `fetch`, a query library, or a custom hook internally.
+
+<br />
+
+---
+
+## 3. Critical-Path E2E with Cypress
+
+Cypress is where journeys that only exist with routing, auth, and the real page shell get protected. Keep that suite small: usually **three to seven** journeys, not a mirror of every component test.
+
+<br />
+
+A typical protected set looks like:
+
+1. Sign in
+2. Complete the core task for the product
+3. Sign out, or reach a durable success state
+
+<br />
+
+Seed fixtures so the test does not depend on production content. Assert outcomes users care about—URL, heading, success message—not every CSS class along the way. If a test flakes, quarantine it, then fix or delete it. Normalizing flake teaches the suite to lie.
+
+<br />
+
+Stable E2E tests need control over more than data:
+
+- **Authentication:** create a session through an API or task instead of repeating the sign-in UI in every test
+- **Time:** freeze the clock when expiry, relative dates, or scheduled behavior matters
+- **Network:** wait on a named request or visible outcome, never an arbitrary timeout
+- **Isolation:** create records unique to the test and clean them up
+- **Selectors:** prefer roles and labels; use a test ID only when no user-facing selector exists
+
+<br />
+
+To make custom commands like `cy.loginAs()` type-safe and discoverable, declare them in the global `Cypress` namespace.
+
+<br />
+
+```ts
+// cypress/support/index.d.ts
+declare global {
+  namespace Cypress {
+    interface Chainable {
+      loginAs(email: string): Chainable<void>
+    }
+  }
+}
+
+// cypress/support/commands.ts
+Cypress.Commands.add("loginAs", (email) => {
+  cy.request("POST", "/api/test/login", { email })
+})
+```
+
+<br />
+
+```ts
+describe("create note", () => {
+  beforeEach(() => {
+    cy.loginAs("writer@example.com")
+    cy.seedNotes([])
+  })
+
+  it("creates a note and lands on the detail page", () => {
+    cy.visit("/notes/new")
+
+    cy.findByRole("textbox", { name: /title/i }).type("Regression playbook")
+    cy.findByRole("textbox", { name: /body/i }).type(
+      "Protect high-value behavior at the cheapest reliable layer."
+    )
+    cy.findByRole("button", { name: /publish/i }).click()
+
+    cy.location("pathname").should("match", /\/notes\/.+/)
+    cy.findByRole("heading", { name: /regression playbook/i }).should(
+      "be.visible"
+    )
+  })
+})
+```
+
+<br />
+
+Not every edge case belongs here. Edge cases belong in Vitest when the UI contract can be proven without a full browser. Cypress earns its keep on the paths where a false green build would ship a broken product.
+
+<br />
+
+An E2E test should fail for one understandable reason. A single test that signs in, changes profile settings, creates a note, searches for it, deletes it, and signs out may resemble a real session, but a failure near the end gives poor diagnostic information. Split journeys at durable boundaries while reusing setup through API commands.
+
+<br />
+
+---
+
+## Takeaway
+
+Frontend regression testing works best as a **triage system**. Protect high-value behavior at the cheapest reliable layer, grow coverage from real failures, and keep Cypress thin enough that a red build still means something.
+
+<br />
+
+The habit that matters more than any tool choice: when something breaks once, make sure the suite will catch it the second time—preferably with a test name that still reads like a product promise months later.
+
+<br />
+
+**A few process rules to keep the suite healthy:**
+
+- **Write the failing test first** when fixing a bug, and make sure it fails for the right reason before applying the fix.
+- **Run tests where they matter:** run focused tests locally, the unit/component suite on PRs, and critical E2E journeys before merge.
+- **Don't normalize flake:** if a test fails randomly, quarantine it. A test that passes on its third attempt is still a flaky test.
+- **Don't automate everything:** skip pixel-perfect visual diffs, exhaustive E2E edge cases, and assertions on framework internals. Manual exploratory testing still matters.
