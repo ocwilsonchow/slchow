@@ -12,16 +12,22 @@
     "deploy:dev": "bunx sst deploy --stage dev",
     "deploy:production": "bun run deploy && bun run verify:production",
     "verify:production": "node node_modules/playwright/cli.js install chromium && node --experimental-strip-types scripts/verify-production.mts",
-    "a11y:smoke": "node node_modules/playwright/cli.js install chromium && node --experimental-strip-types scripts/a11y-smoke.mts"
+    "a11y:smoke": "node node_modules/playwright/cli.js install chromium && node --experimental-strip-types scripts/a11y-smoke.mts",
+    "prepare": "husky"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.11.1",
     "@types/aws-lambda": "8.10.162",
     "@types/node": "^26.1.2",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.3.0",
     "playwright": "^1.62.1",
     "prettier": "^3.7.4",
     "turbo": "^2.10.5",
     "typescript": "5.9.2"
+  },
+  "lint-staged": {
+    "*.{ts,tsx,md,mts,json}": "prettier --write"
   },
   "engines": {
     "node": ">=22"
