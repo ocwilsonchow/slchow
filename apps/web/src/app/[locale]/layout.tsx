@@ -8,7 +8,7 @@ import {
   getTranslations,
   setRequestLocale,
 } from "next-intl/server";
-import { RenderNewNavbar } from "@/features/layout/components/new-navbar";
+import { RenderNewNavbar } from "@/features/layout/components/navbar";
 import { RootLayout } from "@/features/layout/components/root";
 import { SkipLink } from "@/features/layout/components/skip-link";
 import { SmoothScroll } from "@/features/layout/components/smooth-scroll";
