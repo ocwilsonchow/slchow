@@ -19,7 +19,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const description = t("home.description")
 
   return {
-    ...buildPageMetadata({ title, description, locale }),
+    ...buildPageMetadata({ title, description, locale, pathname: "" }),
     // Skip the "%s · siteName" template on the homepage
     title: { absolute: title },
   }
