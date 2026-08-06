@@ -21,6 +21,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     title: page?.data.title ?? slug,
     description: page?.data.description,
     locale,
+    pathname: `/notes/${slug}`,
     type: "article",
   })
 }
@@ -39,7 +40,10 @@ const Page = async ({ params }: Props) => {
         <Header.Column>
           <BackLink href="/notes" />
         </Header.Column>
-        <Header.Column className="grid gap-5">
+        <Header.Column
+          className="grid gap-5 max-h-screen overflow-y-auto pb-20"
+          data-lenis-prevent
+        >
           <div className="mt-8 lg:mt-0 space-y-1">
             <h1 className="text-lg lg:text-sm font-semibold tracking-tight text-content-ink">
               {page?.data.title}

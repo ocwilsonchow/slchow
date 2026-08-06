@@ -1,5 +1,6 @@
 import type { MetadataRoute } from "next"
 import { routing } from "@/i18n/routing"
+import { buildAbsoluteLanguageAlternates } from "@/lib/metadata"
 import { getCategoryPages } from "@/lib/source"
 
 function getSiteUrl() {
@@ -24,15 +25,22 @@ export default function sitemap(): MetadataRoute.Sitemap {
       entries.push({
         url: `${origin}/${locale}${path}`,
         lastModified,
+        alternates: {
+          languages: buildAbsoluteLanguageAlternates(origin, path),
+        },
       })
     }
 
     for (const category of ["notes", "works"] as const) {
       for (const page of getCategoryPages(category, locale)) {
         const slug = page.slugs.slice(1).join("/")
+        const pathname = `/${category}/${slug}`
         entries.push({
-          url: `${origin}/${locale}/${category}/${slug}`,
+          url: `${origin}/${locale}${pathname}`,
           lastModified,
+          alternates: {
+            languages: buildAbsoluteLanguageAlternates(origin, pathname),
+          },
         })
       }
     }
