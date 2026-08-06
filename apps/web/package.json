@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev --port 3003",
-    "build": "next build",
+    "build": "fumadocs-mdx && next build",
     "start": "next start",
     "lint": "biome check",
     "format": "biome format --write",
