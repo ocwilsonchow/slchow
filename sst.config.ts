@@ -17,13 +17,13 @@ export default $config({
   },
   async run() {
     const domain = "slchow.com"
+    const username = new sst.Secret("USERNAME", "username")
+    const password = new sst.Secret("PASSWORD", "password")
 
     // Password-protect non-prod only via CloudFront Basic Auth
     const isProd = $app.stage === "production"
     const edge = !isProd
       ? (() => {
-          const username = new sst.Secret("USERNAME")
-          const password = new sst.Secret("PASSWORD")
           const basicAuth = $resolve([username.value, password.value]).apply(
             ([username, password]) =>
               Buffer.from(`${username}:${password}`).toString("base64")
