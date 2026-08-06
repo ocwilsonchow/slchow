@@ -10,3 +10,15 @@
   color: var(--shiki-dark);
   font-style: var(--shiki-dark-font-style);
 }
+
+/* Pre overflow scroller only — transparent track */
+.shiki {
+  scrollbar-color: var(--content-subdued) transparent;
+}
+
+.shiki::-webkit-scrollbar,
+.shiki::-webkit-scrollbar-track,
+.shiki::-webkit-scrollbar-track-piece,
+.shiki::-webkit-scrollbar-corner {
+  background-color: transparent;
+}
