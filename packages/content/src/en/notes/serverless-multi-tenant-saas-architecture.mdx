@@ -1,0 +1,309 @@
+---
+title: Designing a Serverless Multi-Tenant SaaS Architecture on AWS
+description: How to choose tenant boundaries across identity, data, compute, and operations using AWS silo, pool, and bridge patterns
+date: 2026-08-06
+---
+
+Serverless removes server management. It does **not** solve tenant isolation.
+
+A sound multi-tenant SaaS architecture establishes a verified **SaaS identity**, propagates tenant context through every layer, and enforces that boundary with the mechanism appropriate to each resource: **IAM** for services such as **DynamoDB** and **S3**, **row-level security** or separate databases for relational data, and dedicated execution environments only where compute isolation is required.
+
+This note covers the AWS architecture layer. Application-level pooled Postgres isolation is covered in [Building a Multi-Tenant Backend with Hono, Better Auth, Drizzle, and Postgres RLS](/notes/multi-tenant-backend-drizzle-hono-better-auth), and the base stack in [Building Backend APIs with Hono, Drizzle and Zod OpenAPI](/notes/how-i-build-backend-apis). The question here is different:
+
+> Where should a serverless SaaS system enforce tenant boundaries, and when should each boundary be pooled, bridged, or siloed?
+
+<br />
+
+---
+
+## 1. Serverless Is Not the Tenancy Model
+
+A **tenant** is a paying customer or workspace with its own business data, members, and commercial terms. In many SaaS products that maps to an **organization**.
+
+**SaaS identity** binds a user to a tenant. After authentication, every protected request must carry a verified answer to: who is the user, which tenant are they acting in, and are they allowed to act there?
+
+The **control plane** handles onboarding, identity, billing, metering, and tenant lifecycle. The **application plane** runs the product features for those tenants. Shared control plane plus dedicated application stacks can still be SaaS. Separate unmanaged installs usually are not.
+
+Serverless and multi-tenancy are independent decisions. A product can run a pooled SaaS on Lambda, a siloed SaaS on Lambda, or a bridge of both. Choosing **API Gateway**, **Lambda**, and **managed data stores** does not choose the isolation model.
+
+Four boundaries structure the rest of this note:
+
+```text
+Verified SaaS identity
+  → Data boundary
+  → Compute boundary
+  → Tenant-aware operations
+```
+
+The core invariant is simple: tenant context comes from a verified identity or membership decision. It never comes from an unverified client header such as `X-Tenant-Id` alone.
+
+Non-goals here: a full **SST** or **CDK** deploy walkthrough, **EKS** deep dives, Marketplace listing process, and **Bedrock** or AI governance. Those are separate topics.
+
+<br />
+
+---
+
+## 2. Choose Isolation Per Resource: Pool, Silo, or Bridge
+
+The [AWS Well-Architected SaaS Lens](https://docs.aws.amazon.com/wellarchitected/latest/saas-lens/silo-pool-and-bridge-models.html) provides the vocabulary for reviewing an architecture.
+
+| Model | Meaning | Tradeoff |
+| --- | --- | --- |
+| **Pool** | Tenants share a resource; runtime policies, partition keys, or RLS enforce logical isolation | Lowest cost and ops load; highest reliance on consistent enforcement |
+| **Silo** | A tenant receives dedicated resources, while onboarding, deployment, metering, and operations remain shared SaaS capabilities | Strongest isolation; highest cost and operational complexity |
+| **Bridge** | A deliberate mix of pool and silo at the service or resource level | Matches real products; requires clear per-resource decisions |
+
+Schema-per-tenant is one bridge example. It is not the definition of bridge. Bridge means some resources are isolated more strongly than others on purpose.
+
+Pricing tier can influence isolation, but "enterprise always equals silo" is not a rule. The drivers are compliance, noisy-neighbor risk, performance, cost, and contractual requirements. The product should keep one application codebase and vary provisioning modules, not fork business logic per tier.
+
+Three concrete shapes:
+
+```text
+Pooled API + pooled RLS database
+  Shared Lambda and shared Postgres schema
+  Isolation enforced by verified org context + RLS
+
+Pooled compute + database-per-tenant
+  Shared API and Lambda
+  Dedicated database or schema for one tenant or tier
+
+Dedicated account or stack + shared control plane
+  Strong isolation for compute and data
+  Still onboarded, metered, and operated as SaaS
+```
+
+The useful design question is not "is the system multi-tenant?" It is "for this resource, is the choice pool, silo, or bridge—and what enforces that choice if application code is wrong?"
+
+Silo should not be treated as "not SaaS." The SaaS Lens is explicit that dedicated resources can still be SaaS when identity, onboarding, deployment, metering, metrics, and operations remain shared. The failure mode is the opposite: separate unmanaged installs that look dedicated but have no shared control plane. That is a managed service model, not multi-tenant SaaS.
+
+<br />
+
+---
+
+## 3. Make Tenant Context a First-Class Identity Attribute
+
+AWS's current guidance treats tenant context as more than a database column. The [four building blocks of multi-tenant SaaS](https://aws.amazon.com/isv/resources/building-blocks-of-multi-tenant/) start with identity for a reason: every later isolation and operations decision depends on it.
+
+The AWS-native example uses **Amazon Cognito** JWT custom claims such as `tenant_id`, tier, region, and entitlements. After login, those claims travel with the request so services do not need a separate tenant lookup on every hop.
+
+An equivalent verified source works the same way, even when the stack does not use Cognito JWT claims:
+
+1. The client presents a **Better Auth** session.
+2. An **API Gateway** Lambda authorizer validates the session.
+3. The authorizer and route layer resolve `userId`, `organizationId`, and membership.
+4. The Hono service receives trusted tenant context, not a client-asserted tenant header.
+
+```text
+Client session
+  → API Gateway
+  → Lambda authorizer verifies user + organization membership
+  → Trusted tenant context
+  → Hono service
+      → Postgres transaction under RLS
+      → or STS-scoped DynamoDB / S3 access
+```
+
+For AWS resources that support useful policy conditions, **STS AssumeRole** with session tags and **IAM ABAC** is worth considering. That pattern lets temporary credentials carry `tenant_id` so DynamoDB or S3 policies can deny cross-tenant access even when application code is imperfect. The [SaaS Factory serverless reference](https://github.com/aws-samples/aws-saas-factory-ref-solution-serverless-saas) shows one version of this with a Lambda authorizer and scoped credentials.
+
+The boundary matters:
+
+- **IAM** can scope DynamoDB and S3 effectively when keys, prefixes, and conditions match the access pattern.
+- **Postgres** still needs RLS or physical separation. IAM does not evaluate SQL row filters.
+- Tenant isolation in identity is necessary, but not sufficient, for data isolation.
+
+A useful deal-readiness question: if a junior engineer ships a wide-open query tomorrow, which layer still prevents a cross-tenant read?
+
+<br />
+
+---
+
+## 4. Enforce the Data Boundary
+
+Data isolation is the boundary customers and auditors test most directly. Compute or logging mistakes may fail quietly. Data leakage is a reportable event.
+
+### DynamoDB
+
+In a pooled table, put tenant identity into the partition-key design. A common pattern is `TENANT#<tenantId>` as the leading key, then enforce access with IAM conditions such as `dynamodb:LeadingKeys` when the access pattern supports it. That combination turns tenant identity into both a data model choice and an authorization condition.
+
+### Postgres / Aurora
+
+For relational data, three options are common:
+
+| Approach | Isolation | Ops cost | Typical fit |
+| --- | --- | --- | --- |
+| Shared schema + **RLS** | Logical | Lowest | Default pooled SaaS |
+| Schema-per-tenant | Stronger logical separation | Medium | Mid-market or regulatory pressure without full silo |
+| Database-per-tenant | Strong physical separation | Highest | Enterprise or compliance-driven silos |
+
+A practical default for many products is shared schema plus Postgres RLS. Implementation details live in the [multi-tenant backend note](/notes/multi-tenant-backend-drizzle-hono-better-auth). The architecture point here is that RLS is pooled data isolation with a hard enforcement layer outside ordinary query code.
+
+### S3
+
+For object storage, prefix-per-tenant plus IAM policy conditions is usually enough for pooled tiers. Dedicated buckets or customer-managed **KMS** keys are justified when a contract, residency requirement, or BYOK expectation needs a stronger boundary.
+
+Encryption at rest is not tenant authorization. A shared CMK encrypted bucket can still leak data across tenants if object keys and IAM conditions are wrong.
+
+Failure test for every data path:
+
+```text
+If application code omits the tenant filter,
+which lower layer still denies the request?
+
+DynamoDB → IAM LeadingKeys / resource policy
+Postgres  → RLS policy
+S3        → prefix + IAM condition
+Silo DB   → missing resource / separate credentials
+```
+
+If the answer is "nothing," the architecture is still soft isolation.
+
+<br />
+
+---
+
+## 5. Understand What Lambda Tenant Isolation Mode Does
+
+Normal **Lambda** execution environments are isolated per function version, not per tenant. Lambda may reuse a warm environment across invocations of the same function version. That reuse is good for latency. It is dangerous if the function caches tenant config, secrets, files in `/tmp`, or any other tenant-specific state.
+
+Before AWS shipped tenant isolation mode, teams either scrubbed state carefully in application code or created function-per-tenant deployments. The first is easy to get wrong. The second scales poorly operationally.
+
+[Lambda tenant isolation](https://docs.aws.amazon.com/lambda/latest/dg/tenant-isolation.html) adds `TenancyConfig.TenantIsolationMode: PER_TENANT` at function creation time. Each invoke must include a tenant identifier. Lambda then routes that request to an execution environment associated with that tenant. Environments may warm for the same tenant, but they are not reused across tenants.
+
+What it provides:
+
+- Execution-environment isolation per tenant for one function
+- Safer in-memory and `/tmp` reuse for tenant-specific state
+- Useful protection when processing sensitive tenant data or tenant-supplied code
+
+What it does **not** provide:
+
+- Authentication
+- Tenant-ID validation
+- Per-tenant IAM roles
+- Per-tenant concurrency quotas
+- Data isolation
+
+Documented tradeoffs to treat as design constraints:
+
+- The setting is immutable after function creation.
+- There is an additional charge when Lambda creates a new tenant-isolated execution environment.
+- Cold starts increase because environments are tenant-specific.
+- It is unsupported with Provisioned Concurrency, SnapStart, and Function URLs.
+- All tenants still share the function execution role.
+- Function-level concurrency and scaling behavior do not become per-tenant quotas.
+- Lambda limits tenant-isolated environments to 2,500 active or idle environments for every 1,000 configured concurrent executions.
+
+API Gateway support is easy to get wrong. [Invoking tenant-isolated functions](https://docs.aws.amazon.com/lambda/latest/dg/tenant-isolation-invoke.html) requires the tenant identifier. **REST APIs** can map a trusted value to the `X-Amz-Tenant-Id` header. **HTTP APIs cannot** directly invoke tenant-isolated functions because they cannot override that header.
+
+That matters for stacks whose default CRUD path uses an HTTP API. When Lambda tenant isolation is required, that workload should move to a REST API or a direct SDK invoke from a trusted worker.
+
+Tenant isolation mode fits sensitive tenant-specific state or tenant-supplied code. It is a poor default for ordinary stateless CRUD.
+
+<br />
+
+---
+
+## 6. Apply It to an SST / Hono Architecture
+
+A practical starting architecture is intentionally a bridge.
+
+```text
+Ordinary CRUD
+  API Gateway HTTP API
+    → Better Auth Lambda authorizer
+    → pooled Hono Lambda
+    → pooled Postgres with RLS
+
+Sensitive or tenant-supplied workloads
+  API Gateway REST API
+    → authorizer-derived tenant context
+    → tenant-isolated Lambda worker
+    → tenant-scoped data credentials
+```
+
+This split is intentional.
+
+The HTTP API path stays simple and cheap for the common case. Verified Better Auth membership plus Postgres RLS already gives a strong pooled data boundary for CRUD. The Hono Lambda stays pooled because those handlers should remain effectively stateless with respect to tenant memory.
+
+The REST API path exists only for workloads that need compute-environment separation: caching tenant secrets, executing tenant-supplied logic, or holding tenant-specific files on disk during processing. That path can use Lambda tenant isolation and, where useful, STS-scoped credentials for DynamoDB or S3.
+
+Noisy-neighbor controls stay precise:
+
+- **Reserved concurrency** protects downstream systems at the function level. It is not per-tenant throttling.
+- **API Gateway usage plans** or application-level quotas can rate-limit by tenant or tier. Usage plans are commercial and capacity controls, not an authorization boundary.
+- **Lambda tenant isolation** reduces cross-tenant compute-state risk. It does not replace data authorization.
+
+A common progression under commercial pressure:
+
+1. Start with pool plus strong identity plus database-enforced isolation.
+2. Add compute tenant isolation when in-memory or `/tmp` reuse becomes a real risk.
+3. Offer bridge or silo provisioning modules for enterprise tiers without forking the product.
+
+This maps cleanly onto the companion notes. The [backend API note](/notes/how-i-build-backend-apis) covers the pooled HTTP API and authorizer path. The [RLS note](/notes/multi-tenant-backend-drizzle-hono-better-auth) covers the pooled relational data boundary. This note decides when those defaults stop being enough, and which AWS control to add next without redesigning the product.
+
+<br />
+
+---
+
+## 7. Make Operations and Cost Tenant-Aware
+
+Isolation that cannot be observed will fail quietly.
+
+Put tenant context into structured logs and traces for every request path. For tenant-isolated Lambda functions with JSON logging enabled, Lambda includes `tenantId` automatically. For pooled functions, the application must emit it from verified request context.
+
+Be careful with CloudWatch custom metrics. Uncontrolled per-tenant metric dimensions create high cardinality and cost. Aggregate by tier for most dashboards, and emit selected per-tenant metrics only where operational triage justifies them.
+
+Cost attribution needs two mechanisms:
+
+| Resource shape | Useful mechanism |
+| --- | --- |
+| Dedicated tenant resources | Cost allocation tags such as `tenant_id`, `tier`, and `feature` |
+| Pooled shared resources | Application usage metering joined with AWS billing data |
+
+Tagging one shared Lambda cannot produce accurate per-tenant Lambda cost. The [SaaS Lens expenditure guidance](https://docs.aws.amazon.com/wellarchitected/latest/saas-lens/expenditure-awareness.html) is blunt about this: pooled cost-to-serve requires consumption data from the application, then correlation with the AWS bill. Tags help for siloed or dedicated resources. They do not invent tenant splits inside a shared function.
+
+The current [enterprise readiness practices](https://aws.amazon.com/isv/resources/5-multi-tenant-saas-architecture/) also push continuous compliance evidence: CloudTrail retention, queryable audit paths, and controls that do not depend on screenshot archaeology during procurement.
+
+Three operational questions work well as a readiness check:
+
+1. Can one tenant's errors be isolated without reading the whole platform as one outage?
+2. Can that tenant's cost-to-serve be estimated well enough to defend pricing?
+3. Can that tenant's blast radius be limited with concurrency, quotas, or a stronger isolation tier?
+
+If the answer to any of those is no, the architecture is incomplete even if the happy-path CRUD API works.
+
+<br />
+
+---
+
+## 8. Architecture Checklist
+
+Use this as a short review before claiming the architecture is enterprise-ready:
+
+- Is tenant context derived from verified identity and membership?
+- Does every tenant-owned data path have an enforcement layer outside normal query code?
+- Is each resource intentionally pool, bridge, or silo?
+- Are compute isolation and data authorization treated as separate controls?
+- Does any Lambda cache tenant state in memory or `/tmp`?
+- If using Lambda Tenant Isolation Mode, is the entry point a REST API or direct SDK invocation rather than an HTTP API?
+- Are noisy-neighbor controls function-level, tenant-level, or both—and is that distinction documented?
+- Can logs and cost models answer tenant-specific questions?
+- Can stronger isolation be provisioned without forking business logic?
+
+If those answers are clear, the architecture can grow from a pooled serverless MVP into tiered isolation without a six-month retrofit. If they are not, the next enterprise security review will surface the gaps.
+
+<br />
+
+---
+
+## Sources
+
+- [AWS Well-Architected SaaS Lens](https://docs.aws.amazon.com/wellarchitected/latest/saas-lens/welcome.html)
+- [Silo, pool, and bridge models](https://docs.aws.amazon.com/wellarchitected/latest/saas-lens/silo-pool-and-bridge-models.html)
+- [Lambda tenant isolation](https://docs.aws.amazon.com/lambda/latest/dg/tenant-isolation.html)
+- [Invoking Lambda functions with tenant isolation](https://docs.aws.amazon.com/lambda/latest/dg/tenant-isolation-invoke.html)
+- [Building multi-tenant SaaS applications with AWS Lambda’s new tenant isolation mode](https://aws.amazon.com/blogs/compute/building-multi-tenant-saas-applications-with-aws-lambdas-new-tenant-isolation-mode/)
+- [The building blocks of multi-tenant SaaS architecture](https://aws.amazon.com/isv/resources/building-blocks-of-multi-tenant/)
+- [5 multi-tenant SaaS architecture best practices](https://aws.amazon.com/isv/resources/5-multi-tenant-saas-architecture/)
+- [Serverless SaaS reference solution](https://github.com/aws-samples/aws-saas-factory-ref-solution-serverless-saas)
