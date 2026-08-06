@@ -6,6 +6,10 @@
 
 declare module "sst" {
   export interface Resource {
+    "API": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
     "PASSWORD": {
       "type": "sst.sst.Secret"
       "value": string

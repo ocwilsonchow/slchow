@@ -17,35 +17,15 @@ export default $config({
   },
   async run() {
     const domain = "slchow.com"
-    const username = new sst.Secret("USERNAME", "username")
-    const password = new sst.Secret("PASSWORD", "password")
+    const { edge, isProd } = await import("./infra/edge")
 
-    // Password-protect non-prod only via CloudFront Basic Auth
-    const isProd = $app.stage === "production"
-    const edge = !isProd
-      ? (() => {
-          const basicAuth = $resolve([username.value, password.value]).apply(
-            ([username, password]) =>
-              Buffer.from(`${username}:${password}`).toString("base64")
-          )
-          return {
-            viewerRequest: {
-              injection: $interpolate`
-                if (
-                  !event.request.headers.authorization
-                  || event.request.headers.authorization.value !== "Basic ${basicAuth}"
-                ) {
-                  return {
-                    statusCode: 401,
-                    headers: {
-                      "www-authenticate": { value: "Basic" }
-                    }
-                  };
-                }`,
-            },
-          }
-        })()
-      : undefined
+    // ----- API -----
+    new sst.aws.Function("API", {
+      handler: "./apps/api/src/lambda.handler",
+      versioning: true,
+    })
+
+    // ----- Mastra -----
 
     // ----- Website -----
     new sst.aws.Nextjs("WEB", {
