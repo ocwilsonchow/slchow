@@ -6,9 +6,18 @@
 
 declare module "sst" {
   export interface Resource {
+    "AI_GATEWAY_API_KEY": {
+      "type": "sst.sst.Secret"
+      "value": string
+    }
     "API": {
       "name": string
       "type": "sst.aws.Function"
+    }
+    "MASTRA": {
+      "service": string
+      "type": "sst.aws.Service"
+      "url": string
     }
     "PASSWORD": {
       "type": "sst.sst.Secret"
@@ -17,6 +26,9 @@ declare module "sst" {
     "USERNAME": {
       "type": "sst.sst.Secret"
       "value": string
+    }
+    "Vpc": {
+      "type": "sst.aws.Vpc"
     }
     "WEB": {
       "type": "sst.aws.Nextjs"

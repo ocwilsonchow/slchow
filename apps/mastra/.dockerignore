@@ -1,0 +1,8 @@
+node_modules
+.mastra
+.env*
+*.db*
+.netlify
+.vercel
+*.duckdb
+*.duckdb.wal

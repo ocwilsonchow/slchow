@@ -16,7 +16,7 @@ This starter provides you with a general-purpose Mastra agent that can research 
 
 ## Get started
 
-Set your `OPENAI_API_KEY` in `.env` or in your environment, then run:
+Set your `AI_GATEWAY_API_KEY` (Vercel AI Gateway) in `.env` or in your environment, then run:
 
 ```shell
 bun run dev

@@ -8,12 +8,10 @@ import {
   Observability,
   SensitiveDataFilter,
 } from "@mastra/observability"
-import { agent } from "./agents/agent"
-import { startScheduleTool, stopScheduleTool } from "./tools/schedule-tools"
+import { durableResearcher } from "./agents/researcher"
 
 export const mastra = new Mastra({
-  agents: { agent },
-  tools: { startScheduleTool, stopScheduleTool },
+  agents: { durableResearcher },
   storage: new MastraCompositeStore({
     id: "composite-storage",
     default: new LibSQLStore({

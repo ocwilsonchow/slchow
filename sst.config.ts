@@ -26,6 +26,34 @@ export default $config({
     })
 
     // ----- Mastra -----
+    const aiGatewayApiKey = new sst.Secret("AI_GATEWAY_API_KEY")
+
+    const vpc = new sst.aws.Vpc("Vpc")
+    const cluster = new sst.aws.Cluster("Cluster", { vpc })
+
+    new sst.aws.Service("MASTRA", {
+      cluster,
+      image: {
+        context: "apps/mastra",
+        dockerfile: "Dockerfile",
+      },
+      loadBalancer: {
+        domain: isProd ? `mastra.${domain}` : `dev.mastra.${domain}`,
+        ports: [
+          { listen: "80/http", redirect: "443/https" },
+          { listen: "443/https", forward: "8080/http" },
+        ],
+        health: { "8080/http": { path: "/api" } },
+      },
+      dev: {
+        command: "bun run dev",
+        directory: "apps/mastra",
+        url: "http://localhost:4111",
+      },
+      environment: {
+        AI_GATEWAY_API_KEY: aiGatewayApiKey.value,
+      },
+    })
 
     // ----- Website -----
     new sst.aws.Nextjs("WEB", {
