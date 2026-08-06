@@ -6,14 +6,6 @@
 
 declare module "sst" {
   export interface Resource {
-    "PASSWORD": {
-      "type": "sst.sst.Secret"
-      "value": string
-    }
-    "USERNAME": {
-      "type": "sst.sst.Secret"
-      "value": string
-    }
     "WEB": {
       "type": "sst.aws.Nextjs"
       "url": string
