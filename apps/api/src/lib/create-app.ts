@@ -12,6 +12,7 @@ export async function createApp() {
   app.use(
     cors({
       origin: [
+        "http://localhost:3000", // Mastra Studio
         "http://localhost:3003",
         `https://${Resource.App.stage}.${domain}`,
         `https://${domain}`,

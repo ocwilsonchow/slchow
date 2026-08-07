@@ -1,2 +1,6 @@
 # deps
 node_modules/
+
+# local Mastra DuckDB observability store
+mastra.duckdb
+mastra.duckdb.wal

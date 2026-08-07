@@ -1,19 +1,34 @@
 {
   "name": "api",
+  "type": "module",
   "scripts": {
-    "dev": "bun run --hot src/index.ts",
-    "start": "bun run src/index.ts"
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "studio": "mastra studio --server-host localhost --server-port 4111 --server-protocol http --server-api-prefix /api/mastra"
   },
   "dependencies": {
+    "@hono/node-server": "^2.1.0",
     "@hono/zod-openapi": "^1.5.1",
-    "@repo/mastra": "workspace:*",
+    "@mastra/auth-better-auth": "^1.1.2",
+    "@mastra/core": "^1.57.0",
+    "@mastra/duckdb": "^1.6.0",
+    "@mastra/hono": "^1.5.14",
+    "@mastra/libsql": "^1.19.0",
+    "@mastra/loggers": "^1.2.0",
+    "@mastra/memory": "^1.26.0",
+    "@mastra/observability": "^1.16.5",
+    "@mastra/pg": "^1.19.0",
     "@repo/auth": "workspace:*",
     "@repo/db": "workspace:*",
     "@repo/infra": "workspace:*",
     "@scalar/hono-api-reference": "^0.11.12",
-    "hono": "^4.13.0"
+    "ai": "^7.0.56",
+    "hono": "^4.13.0",
+    "mastra": "^1.23.0",
+    "zod": "^4"
   },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/node": "^22.15.30",
+    "tsx": "^4.23.10"
   }
 }

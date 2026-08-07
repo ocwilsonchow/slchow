@@ -11,12 +11,12 @@ COPY --from=prepare /app/out/json/ .
 RUN bun install --frozen-lockfile
 COPY --from=prepare /app/out/full/ .
 
-FROM base AS runner
+FROM node:22-bookworm-slim AS runner
 WORKDIR /app
 ENV NODE_ENV=production
-ENV PORT=3004
+ENV PORT=4111
 COPY --from=installer /app /app
 WORKDIR /app/apps/api
-EXPOSE 3004
-USER bun
-CMD ["bun", "run", "src/index.ts"]
+EXPOSE 4111
+USER node
+CMD ["npx", "tsx", "src/index.ts"]

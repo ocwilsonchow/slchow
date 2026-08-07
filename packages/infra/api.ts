@@ -12,20 +12,20 @@ export const api = new sst.aws.Service("API", {
   },
   link: [databaseUrl, betterAuthSecret, aiGatewayApiKey],
   environment: {
-    PORT: "3004",
+    PORT: "4111",
   },
   loadBalancer: {
-    rules: [{ listen: "80/http", forward: "3004/http" }],
+    rules: [{ listen: "80/http", forward: "4111/http" }],
     health: {
-      "3004/http": {
+      "4111/http": {
         path: "/api/health",
       },
     },
   },
   dev: {
-    command: "bun run --hot src/index.ts",
+    command: "bun run dev",
     directory: "apps/api",
-    url: "http://localhost:3004",
+    url: "http://localhost:4111",
   },
 })
 

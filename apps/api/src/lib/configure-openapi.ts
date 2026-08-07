@@ -40,6 +40,10 @@ export function configureOpenAPI(app: AppOpenAPI) {
           url: "/api/auth/open-api/generate-schema",
           title: "Auth",
         },
+        {
+          url: "/api/mastra/openapi.json",
+          title: "Mastra",
+        },
       ],
     })
   )

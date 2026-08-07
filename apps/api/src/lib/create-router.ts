@@ -1,5 +1,6 @@
 import { OpenAPIHono, z } from "@hono/zod-openapi"
 import { AppBindings } from "@/lib/types"
+import { HonoBindings, HonoVariables } from "@mastra/hono"
 
 export function createRouter() {
   return new OpenAPIHono<AppBindings>({

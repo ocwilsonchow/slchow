@@ -1,10 +1,14 @@
+import { serve } from "@hono/node-server"
 import { app } from "@/app"
 
-const port = Number(process.env.PORT) || 3004
+const port = Number(process.env.PORT) || 4111
 
-Bun.serve({
-  fetch: app.fetch,
-  port,
-})
-
-console.log(`API Server is running on port ${port}`)
+serve(
+  {
+    fetch: app.fetch,
+    port,
+  },
+  (info) => {
+    console.log(`API Server is running on http://localhost:${info.port}`)
+  }
+)
