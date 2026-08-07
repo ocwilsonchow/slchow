@@ -16,10 +16,8 @@ export default $config({
     }
   },
   async run() {
-    const domain = "slchow.com"
-
     // ----- Core -----
-    const { edge, isProd } = await import("./infra/edge")
+    const { domain, edge, isProd } = await import("@repo/infra")
 
     // ----- CloudFront -----
     const router = new sst.aws.Router("Router", {

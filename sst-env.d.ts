@@ -15,6 +15,10 @@ declare module "sst" {
       "type": "sst.aws.Function"
       "url": string
     }
+    "BETTER_AUTH_SECRET": {
+      "type": "sst.sst.Secret"
+      "value": string
+    }
     "DATABASE_URL": {
       "type": "sst.sst.Secret"
       "value": string
