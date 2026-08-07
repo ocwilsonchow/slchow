@@ -13,7 +13,7 @@ import {
   twoFactor,
 } from "better-auth/plugins"
 import { Resource } from "sst"
-import { domain } from "@repo/infra"
+import { domain } from "@repo/infra/domain"
 
 export type AuthType = {
   user: typeof auth.$Infer.Session.user | null

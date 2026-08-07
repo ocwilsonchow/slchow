@@ -1,10 +1,14 @@
 {
   "name": "@repo/infra",
-  "module": "index.ts",
   "type": "module",
   "private": true,
   "exports": {
-    ".": "./index.ts"
+    "./domain": "./domain.ts",
+    "./edge": "./edge.ts",
+    "./secrets": "./secrets.ts",
+    "./router": "./router.ts",
+    "./api": "./api.ts",
+    "./nextjs": "./nextjs.ts"
   },
   "devDependencies": {
     "@types/bun": "latest"
