@@ -1,6 +1,10 @@
 {
   "name": "@repo/auth",
-  "module": "index.ts",
+  "exports": {
+    "./server": "./src/server.ts",
+    "./client": "./src/client.ts",
+    "./cookie": "./src/cookie.ts"
+  },
   "type": "module",
   "private": true,
   "dependencies": {

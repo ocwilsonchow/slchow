@@ -4,7 +4,11 @@
     "dev": "bun run --hot src/index.ts"
   },
   "dependencies": {
+    "@repo/infra": "workspace:*",
+    "@repo/db": "workspace:*",
+    "@repo/auth": "workspace:*",
     "@hono/node-server": "^2.1.0",
+    "@hono/zod-openapi": "^1.5.1",
     "hono": "^4.13.0"
   },
   "devDependencies": {

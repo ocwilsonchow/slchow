@@ -1,10 +1,13 @@
-import { Hono } from "hono"
+import { createApp } from "@/lib/create-app"
+import { createRouter } from "@/lib/create-router"
 
-const app = new Hono()
+import health from "@/modules/health"
 
-app.get("/", (c) => {
-  return c.json({ message: "Hello, World!" })
-})
+const baseApp = await createApp()
+
+const routes = createRouter().route("/health", health)
+
+const app = baseApp.route("/api", routes)
 
 type AppType = typeof app
 
