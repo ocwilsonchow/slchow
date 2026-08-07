@@ -39,6 +39,7 @@
     "packages/*"
   ],
   "dependencies": {
+    "@repo/infra": "workspace:*",
     "sst": "4.17.1"
   }
 }

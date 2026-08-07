@@ -1,0 +1,19 @@
+{
+  "name": "@repo/infra",
+  "type": "module",
+  "private": true,
+  "exports": {
+    "./domain": "./domain.ts",
+    "./edge": "./edge.ts",
+    "./secrets": "./secrets.ts",
+    "./router": "./router.ts",
+    "./api": "./api.ts",
+    "./nextjs": "./nextjs.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}
