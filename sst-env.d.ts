@@ -11,8 +11,8 @@ declare module "sst" {
       "value": string
     }
     "API": {
-      "name": string
-      "type": "sst.aws.Function"
+      "service": string
+      "type": "sst.aws.Service"
       "url": string
     }
     "BETTER_AUTH_SECRET": {
@@ -34,6 +34,9 @@ declare module "sst" {
     "USERNAME": {
       "type": "sst.sst.Secret"
       "value": string
+    }
+    "Vpc": {
+      "type": "sst.aws.Vpc"
     }
     "WEB": {
       "type": "sst.aws.Nextjs"
