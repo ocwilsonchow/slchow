@@ -21,7 +21,7 @@ export default $config({
 
     // ----- CloudFront -----
     const router = new sst.aws.Router("Router", {
-      domain: isProd ? `api.${domain}` : `dev.api.${domain}`,
+      domain: isProd ? `api.${domain}` : `${$app.stage}.api.${domain}`,
     })
 
     // ----- API -----
@@ -39,7 +39,7 @@ export default $config({
     new sst.aws.Nextjs("WEB", {
       path: "apps/web",
       domain: {
-        name: isProd ? domain : `dev.${domain}`,
+        name: isProd ? domain : `${$app.stage}.${domain}`,
         redirects: isProd ? [`www.${domain}`] : [],
       },
       warm: isProd ? 1 : 0,

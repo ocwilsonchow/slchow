@@ -1,3 +1,5 @@
+/// <reference path="../../.sst/platform/config.d.ts" />
+
 import { password, username } from "./secrets"
 
 export const isProd = $app.stage === "production"
