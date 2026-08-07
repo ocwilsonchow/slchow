@@ -1,11 +1,11 @@
 import { createApp } from "@/lib/create-app"
 import { createRouter } from "@/lib/create-router"
 
-import health from "@/modules/health"
+import info from "@/modules/info"
 
 const baseApp = await createApp()
 
-const routes = createRouter().route("/health", health)
+const routes = createRouter().route("/", info)
 
 const app = baseApp.route("/api", routes)
 
