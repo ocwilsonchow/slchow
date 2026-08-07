@@ -13,22 +13,23 @@ declare module "sst" {
     "API": {
       "name": string
       "type": "sst.aws.Function"
-    }
-    "MASTRA": {
-      "service": string
-      "type": "sst.aws.Service"
       "url": string
+    }
+    "DATABASE_URL": {
+      "type": "sst.sst.Secret"
+      "value": string
     }
     "PASSWORD": {
       "type": "sst.sst.Secret"
       "value": string
     }
+    "Router": {
+      "type": "sst.aws.Router"
+      "url": string
+    }
     "USERNAME": {
       "type": "sst.sst.Secret"
       "value": string
-    }
-    "Vpc": {
-      "type": "sst.aws.Vpc"
     }
     "WEB": {
       "type": "sst.aws.Nextjs"
