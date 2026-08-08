@@ -15,6 +15,7 @@ import { weatherWorkflow } from "./workflows/weather-workflow"
 import { weatherAgent } from "./agents/weather-agent"
 import { withLibpqSslCompat } from "@/utils/with-libpq-ssl-compat"
 import { Resource } from "sst"
+import { chatRoute } from "@mastra/ai-sdk"
 
 export const mastra = new Mastra({
   server: {
@@ -22,6 +23,12 @@ export const mastra = new Mastra({
       // Better Auth's configured Auth<Options> is not assignable to bare Auth
       auth: auth as unknown as Auth,
     }),
+    apiRoutes: [
+      chatRoute({
+        path: "/chat",
+        agent: weatherAgent.id,
+      }),
+    ],
   },
   workflows: { weatherWorkflow },
   agents: { weatherAgent },

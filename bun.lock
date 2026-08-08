@@ -25,6 +25,7 @@
       "dependencies": {
         "@hono/node-server": "^2.1.0",
         "@hono/zod-openapi": "^1.5.1",
+        "@mastra/ai-sdk": "^1.7.2",
         "@mastra/auth-better-auth": "^1.1.2",
         "@mastra/core": "^1.57.0",
         "@mastra/duckdb": "^1.6.0",
