@@ -74,6 +74,7 @@
         "@better-auth/drizzle-adapter": "^1.6.26",
         "@better-auth/oauth-provider": "^1.6.26",
         "@repo/db": "workspace:*",
+        "@repo/infra": "workspace:*",
         "better-auth": "^1.6.26",
         "pg": "^8.22.0",
         "postgres": "^3.4.9",

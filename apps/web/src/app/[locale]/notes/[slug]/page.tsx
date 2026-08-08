@@ -41,7 +41,7 @@ const Page = async ({ params }: Props) => {
           <BackLink href="/notes" />
         </Header.Column>
         <Header.Column
-          className="grid gap-5 max-h-screen overflow-y-auto pb-20"
+          className="grid gap-5 max-h-screen overflow-y-auto lg:pb-20"
           data-lenis-prevent
         >
           <div className="mt-8 lg:mt-0 space-y-1">
