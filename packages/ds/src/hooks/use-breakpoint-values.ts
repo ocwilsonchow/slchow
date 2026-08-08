@@ -44,7 +44,14 @@ export function useBreakpointValues<T>(values: BreakpointValues<T>): T {
   const xxl = values["2xl"]
 
   useEffect(() => {
-    const nextValues = { base, sm, md, lg, xl, "2xl": xxl } as BreakpointValues<T>
+    const nextValues = {
+      base,
+      sm,
+      md,
+      lg,
+      xl,
+      "2xl": xxl,
+    } as BreakpointValues<T>
 
     const queries = BREAKPOINTS.filter(
       (breakpoint): breakpoint is Exclude<Breakpoint, "base"> =>
