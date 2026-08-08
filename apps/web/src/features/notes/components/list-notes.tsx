@@ -1,6 +1,6 @@
 import { getTranslations } from "next-intl/server"
-import { Link } from "@/i18n/navigation"
 import { getCategoryPages } from "@/lib/source"
+import { ListNotesItems } from "./list-notes-items"
 
 type ListNotesProps = {
   locale: string
@@ -13,53 +13,40 @@ const getPageDate = (date?: string | Date) => {
   return new Date(date).getTime()
 }
 
+const RESPONSIVE_MAX_LIMIT = 5
+
 export const ListNotes = async ({
   locale,
-  limit = 5,
+  limit,
   showHeading = true,
 }: ListNotesProps) => {
   const t = await getTranslations("navigation")
   const allNotes = getCategoryPages("notes", locale).sort(
     (a, b) => getPageDate(b.data.date) - getPageDate(a.data.date)
   )
-  const hasMore = allNotes.length > limit
-  const notes = allNotes.slice(0, limit)
+  const fetchLimit = limit ?? RESPONSIVE_MAX_LIMIT
+  const notes = allNotes.slice(0, fetchLimit).map((page) => ({
+    url: page.url,
+    slug: page.slugs.slice(1).join("/"),
+    title: page.data.title ?? "",
+  }))
+
+  // Infinity is not safe across the RSC → client boundary; use notes.length instead.
+  const clientLimit =
+    limit === undefined
+      ? undefined
+      : Number.isFinite(limit)
+        ? limit
+        : notes.length
 
   return (
-    <div className="flex flex-col gap-2">
-      {showHeading && (
-        <h2>
-          <Link href="/notes" className="font-semibold">
-            {t("notes")}{" "}
-            <sup className="text-content-subdued">{allNotes.length}</sup>
-          </Link>
-        </h2>
-      )}
-      <ul className="grid list-disc list-outside ml-4">
-        {notes.map((page) => {
-          const slug = page.slugs.slice(1).join("/")
-          return (
-            <li key={page.url} className="">
-              <Link
-                href={`/notes/${slug}`}
-                className="inline-flex text-content-ink py-0.5 font-semibold"
-              >
-                {page.data.title}
-              </Link>
-            </li>
-          )
-        })}
-        {hasMore ? (
-          <li>
-            <Link
-              href="/notes"
-              className="inline-block py-0.5 text-content-subdued hover:text-content-ink/75"
-            >
-              {t("listAll")}{" "}
-            </Link>
-          </li>
-        ) : null}
-      </ul>
-    </div>
+    <ListNotesItems
+      notes={notes}
+      totalCount={allNotes.length}
+      limit={clientLimit}
+      showHeading={showHeading}
+      notesLabel={t("notes")}
+      listAllLabel={t("listAll")}
+    />
   )
 }
