@@ -22,6 +22,8 @@ export const mastra = new Mastra({
     auth: new MastraAuthBetterAuth({
       // Better Auth's configured Auth<Options> is not assignable to bare Auth
       auth: auth as unknown as Auth,
+      // OpenAPI spec route registered by MastraServer (prefix + openapiPath)
+      public: ["/api/mastra/openapi.json"],
     }),
     apiRoutes: [
       chatRoute({
