@@ -14,7 +14,7 @@ import { SkipLink } from "@/features/layout/components/skip-link"
 import { SmoothScroll } from "@/features/layout/components/smooth-scroll"
 import { StylesProvider } from "@/features/layout/components/styles"
 import { routing } from "@/i18n/routing"
-import { getHtmlLang, getOpenGraphLocale } from "@/lib/metadata"
+import { getHtmlLang, getOpenGraphLocale, OG_IMAGE } from "@/lib/metadata"
 import { TanstackProviders } from "@/lib/tanstack-providers"
 
 type Props = {
@@ -53,11 +53,13 @@ export async function generateMetadata({
       siteName: t("siteName"),
       title: t("siteTitle"),
       description: t("siteDescription"),
+      images: [{ ...OG_IMAGE, alt: t("siteTitle") }],
     },
     twitter: {
       card: "summary_large_image",
       title: t("siteTitle"),
       description: t("siteDescription"),
+      images: [{ ...OG_IMAGE, alt: t("siteTitle") }],
     },
   }
 }

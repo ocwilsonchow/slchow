@@ -2,6 +2,12 @@ import type { Metadata } from "next"
 import type { Locale } from "next-intl"
 import { routing } from "@/i18n/routing"
 
+export const OG_IMAGE = {
+  url: "/og-image.png",
+  width: 2400,
+  height: 1260,
+} as const
+
 const openGraphLocales = {
   en: "en_US",
   hk: "zh_HK",
@@ -96,11 +102,13 @@ export function buildPageMetadata({
       title,
       description,
       locale: getOpenGraphLocale(locale),
+      images: [{ ...OG_IMAGE, alt: title }],
     },
     twitter: {
       card: "summary_large_image",
       title,
       description,
+      images: [{ ...OG_IMAGE, alt: title }],
     },
   }
 }
