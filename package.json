@@ -9,6 +9,7 @@
     "format": "prettier --write \"**/*.{ts,tsx,md}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,md,mts,json}\"",
     "lint": "turbo run lint",
+    "kill:ports": "bash scripts/kill-ports.sh",
     "sso": "aws sso login --sso-session=sinlongchow",
     "deploy": "bunx sst deploy --stage production",
     "deploy:dev": "bunx sst deploy --stage dev",
