@@ -1,31 +1,32 @@
 "use client"
 
+import Image from "next/image"
+
 type DesignAssetProps = {
   src: string
   alt: string
+  sizes: string
   className?: string
   loading?: "lazy" | "eager"
   fetchPriority?: "high" | "low" | "auto"
 }
 
-/**
- * Serve design assets as static files (no `/_next/image`).
- * Large gallery PNGs overwhelm the OpenNext image Lambda (500/429).
- */
+/** Design media via `next/image` (`fill` + caller-provided `sizes`). */
 export function DesignAsset({
   src,
   alt,
+  sizes,
   className,
   loading,
   fetchPriority,
 }: DesignAssetProps) {
   return (
-    // biome-ignore lint/performance/noImgElement: avoid image optimizer for large design assets
-    <img
+    <Image
       src={src}
       alt={alt}
+      fill
+      sizes={sizes}
       loading={loading}
-      decoding="async"
       fetchPriority={fetchPriority}
       draggable={false}
       className={className}

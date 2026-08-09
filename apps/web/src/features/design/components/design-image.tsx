@@ -10,6 +10,10 @@ type DesignImageProps = {
   viewLabel: string
 }
 
+/** Matches design-gallery grid: 3 / 4 / 5 / 6 columns. */
+const THUMB_SIZES =
+  "(max-width: 768px) 33vw, (max-width: 1024px) 25vw, (max-width: 1280px) 20vw, 17vw"
+
 /** Lazy thumbnail — defers loading until near the viewport. */
 export function DesignImage({ src, alt, onOpen, viewLabel }: DesignImageProps) {
   const ref = useRef<HTMLButtonElement>(null)
@@ -44,9 +48,10 @@ export function DesignImage({ src, alt, onOpen, viewLabel }: DesignImageProps) {
         <DesignAsset
           src={src}
           alt={alt}
+          sizes={THUMB_SIZES}
           loading="lazy"
           fetchPriority="low"
-          className="absolute inset-0 h-full w-full object-contain select-none pointer-events-none"
+          className="object-contain select-none pointer-events-none"
         />
       ) : null}
     </button>
