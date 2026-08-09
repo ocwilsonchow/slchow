@@ -194,8 +194,9 @@ function Trigger({
         }
         initial="hidden"
         animate={open ? "visible" : "hidden"}
+        className="bg-accent-surface-canvas text-content-ink-on-accent p-1 rounded-full"
       >
-        <PlusIcon size={16} strokeWidth={3} aria-hidden />
+        <PlusIcon size={16} strokeWidth={4} aria-hidden />
       </motion.div>
     </motion.button>
   )
