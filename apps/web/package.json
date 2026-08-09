@@ -3,7 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "sync:design-assets": "bun scripts/sync-design-assets.ts",
+    "predev": "bun run sync:design-assets",
     "dev": "next dev --port 3003",
+    "prebuild": "bun run sync:design-assets",
     "build": "fumadocs-mdx && next build",
     "start": "next start",
     "lint": "biome check",

@@ -15,7 +15,7 @@ export const designsDir = join(process.cwd(), "../../packages/content/design")
 
 export type DesignImage = {
   name: string
-  /** Public URL path served by `/design-assets/[...path]`. */
+  /** Public URL path under `public/design-assets` (synced from packages/content/design). */
   src: string
 }
 

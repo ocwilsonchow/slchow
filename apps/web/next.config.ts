@@ -14,10 +14,6 @@ const nextConfig: NextConfig = {
     contentSecurityPolicy: "default-src 'self'; script-src 'none'; sandbox;",
     localPatterns: [
       {
-        pathname: "/design-assets/**",
-        search: "",
-      },
-      {
         // Preserve access to files in `public/` (e.g. OG image).
         pathname: "/**",
         search: "",
@@ -29,9 +25,6 @@ const nextConfig: NextConfig = {
         hostname: "cdn.dribbble.com",
       },
     ],
-  },
-  outputFileTracingIncludes: {
-    "/design-assets/**": ["../../packages/content/design/**/*"],
   },
 }
 

@@ -261,7 +261,7 @@ function NavLink({
         onClick?.(event)
       }}
       className={cn(
-        "block transition-colors hover:text-content-ink-on-popover py-0.5 font-semibold text-base",
+        "block transition-colors hover:text-content-ink-on-popover py-px font-semibold text-lg lg:text-xl",
         isActive
           ? "text-content-ink-on-popover"
           : "text-content-body-on-popover",

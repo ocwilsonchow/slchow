@@ -13,6 +13,9 @@
 # testing
 /coverage
 
+# Generated from packages/content/design (see scripts/sync-design-assets.ts)
+/public/design-assets/
+
 # next.js
 /.next/
 /out/

@@ -1,7 +1,8 @@
 "use client"
 
+import { type Variants, motion, useInView } from "motion/react"
 import { useTranslations } from "next-intl"
-import { useState } from "react"
+import { useRef, useState } from "react"
 import type { Design } from "../get-designs"
 import { DesignImage } from "./design-image"
 import { DesignLightbox } from "./design-lightbox"
@@ -13,6 +14,40 @@ type ActiveImage = {
 
 type DesignGalleryProps = {
   designs: Design[]
+}
+
+type DesignGalleryItemProps = {
+  src: string
+  alt: string
+  viewLabel: string
+  onOpen: () => void
+}
+
+const itemVariants: Variants = {
+  hidden: { opacity: 0 },
+  visible: { opacity: 1, transition: { delay: 0.25, duration: 0.5 } },
+}
+
+function DesignGalleryItem({
+  src,
+  alt,
+  viewLabel,
+  onOpen,
+}: DesignGalleryItemProps) {
+  const ref = useRef<HTMLLIElement>(null)
+  const isInView = useInView(ref)
+
+  return (
+    <motion.li
+      ref={ref}
+      variants={itemVariants}
+      initial="hidden"
+      animate={isInView ? "visible" : "hidden"}
+      className="bg-surface-alpha overflow-hidden rounded aspect-square relative [content-visibility:auto] [contain-intrinsic-size:auto_180px]"
+    >
+      <DesignImage src={src} alt={alt} viewLabel={viewLabel} onOpen={onOpen} />
+    </motion.li>
+  )
 }
 
 export function DesignGallery({ designs }: DesignGalleryProps) {
@@ -31,17 +66,13 @@ export function DesignGallery({ designs }: DesignGalleryProps) {
               {design.images.map((image) => {
                 const alt = `${design.title} — ${image.name}`
                 return (
-                  <li
+                  <DesignGalleryItem
                     key={image.src}
-                    className="bg-surface-alpha overflow-hidden rounded aspect-square relative [content-visibility:auto] [contain-intrinsic-size:auto_180px]"
-                  >
-                    <DesignImage
-                      src={image.src}
-                      alt={alt}
-                      viewLabel={t("viewImageNamed", { alt })}
-                      onOpen={() => setActive({ src: image.src, alt })}
-                    />
-                  </li>
+                    src={image.src}
+                    alt={alt}
+                    viewLabel={t("viewImageNamed", { alt })}
+                    onOpen={() => setActive({ src: image.src, alt })}
+                  />
                 )
               })}
             </ul>

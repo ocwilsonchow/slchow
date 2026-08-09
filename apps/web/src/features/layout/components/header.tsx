@@ -1,7 +1,9 @@
 import { cn } from "@repo/ds"
-import { getTranslations } from "next-intl/server"
+import { getLocale, getTranslations } from "next-intl/server"
 import type { ComponentProps } from "react"
+import { getDesigns } from "@/features/design/get-designs"
 import { Link } from "@/i18n/navigation"
+import { getCategoryPages } from "@/lib/source"
 
 export const Root = ({ ...props }: ComponentProps<"div">) => {
   return (
@@ -41,14 +43,25 @@ const HeaderLink = ({ className, ...props }: ComponentProps<typeof Link>) => {
 
 export const Links = async ({ className, ...props }: ComponentProps<"div">) => {
   const t = await getTranslations("navigation")
+  const locale = await getLocale()
+  const notesCount = getCategoryPages("notes", locale).length
+  const designsCount = getDesigns().reduce(
+    (total, design) => total + design.images.length,
+    0
+  )
 
   return (
     <div {...props} className={cn("hidden md:flex flex-col gap-3", className)}>
       <ul className="flex flex-col gap-px">
         <HeaderLink href="/resume">{t("resume")}</HeaderLink>
-        <HeaderLink href="/notes">{t("notes")}</HeaderLink>
-        {/* <HeaderLink href="/works">{t("works")}</HeaderLink> */}
-        <HeaderLink href="/design">{t("designs")}</HeaderLink>
+        <HeaderLink href="/notes">
+          {t("notes")}{" "}
+          <sup className="text-content-subdued">{notesCount}</sup>
+        </HeaderLink>
+        <HeaderLink href="/design">
+          {t("designs")}{" "}
+          <sup className="text-content-subdued">{designsCount}</sup>
+        </HeaderLink>
       </ul>
       <ul className="flex flex-col gap-px">
         <HeaderLink
