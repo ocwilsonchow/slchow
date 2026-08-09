@@ -10,11 +10,6 @@ declare module "sst" {
       "type": "sst.sst.Secret"
       "value": string
     }
-    "API": {
-      "service": string
-      "type": "sst.aws.Service"
-      "url": string
-    }
     "BETTER_AUTH_SECRET": {
       "type": "sst.sst.Secret"
       "value": string
@@ -27,16 +22,9 @@ declare module "sst" {
       "type": "sst.sst.Secret"
       "value": string
     }
-    "Router": {
-      "type": "sst.aws.Router"
-      "url": string
-    }
     "USERNAME": {
       "type": "sst.sst.Secret"
       "value": string
-    }
-    "Vpc": {
-      "type": "sst.aws.Vpc"
     }
     "WEB": {
       "type": "sst.aws.Nextjs"
