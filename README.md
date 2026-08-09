@@ -1,4 +1,4 @@
-![hey i'm wilson](./banner.jpg)
+![hey i'm wilson](https://slchow.com/og-image-02.png)
 
 # slchow.com
 
