@@ -67,23 +67,23 @@ bun run auth:generate   # regenerate Better Auth tables into @repo/db
 
 ## Scripts
 
-| Command                     | Description                                        |
-| --------------------------- | -------------------------------------------------- |
-| `bun dev`                   | SST local stage; Next.js on port 3003              |
-| `bun run build`             | Turbo build across workspaces                      |
-| `bun run lint`              | Turbo lint                                         |
-| `bun run check-types`       | Turbo typecheck                                    |
-| `bun run format`            | Prettier across `ts` / `tsx` / `md`                |
-| `bun run format:check`      | Prettier check (used in CI)                        |
-| `bun run kill:ports`        | Free common local ports                            |
-| `bun run deploy:dev`        | Deploy to `dev` stage (`dev.slchow.com`)           |
-| `bun run deploy`            | Deploy to `production` (`slchow.com`)              |
-| `bun run deploy:production` | Production deploy + Playwright verify              |
-| `bun run verify:production` | Crawl production sitemap and check pages           |
-| `bun run a11y:smoke`        | axe-core smoke against key routes                  |
-| `bun run sso`               | Refresh AWS SSO session                            |
-| `bun run db:*`              | Drizzle generate / migrate / push / studio         |
-| `bun run auth:generate`     | Generate Better Auth schema into `@repo/db`        |
+| Command                     | Description                                 |
+| --------------------------- | ------------------------------------------- |
+| `bun dev`                   | SST local stage; Next.js on port 3003       |
+| `bun run build`             | Turbo build across workspaces               |
+| `bun run lint`              | Turbo lint                                  |
+| `bun run check-types`       | Turbo typecheck                             |
+| `bun run format`            | Prettier across `ts` / `tsx` / `md`         |
+| `bun run format:check`      | Prettier check (used in CI)                 |
+| `bun run kill:ports`        | Free common local ports                     |
+| `bun run deploy:dev`        | Deploy to `dev` stage (`dev.slchow.com`)    |
+| `bun run deploy`            | Deploy to `production` (`slchow.com`)       |
+| `bun run deploy:production` | Production deploy + Playwright verify       |
+| `bun run verify:production` | Crawl production sitemap and check pages    |
+| `bun run a11y:smoke`        | axe-core smoke against key routes           |
+| `bun run sso`               | Refresh AWS SSO session                     |
+| `bun run db:*`              | Drizzle generate / migrate / push / studio  |
+| `bun run auth:generate`     | Generate Better Auth schema into `@repo/db` |
 
 **CI:** GitHub Actions (`.github/workflows/ci.yml`) runs on PRs and pushes to `main` / `develop`. It runs `bun install --frozen-lockfile`, `lint`, `format:check`, `check-types`, and `build`. On completion it posts status to Discord via the `DISCORD_WEBHOOK` repository secret.
 
