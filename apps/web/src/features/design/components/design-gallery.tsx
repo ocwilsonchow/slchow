@@ -1,6 +1,6 @@
 "use client"
 
-import { motion, useInView, type Variants } from "motion/react"
+import { motion } from "motion/react"
 import { useTranslations } from "next-intl"
 import { useRef, useState } from "react"
 import type { Design } from "../get-designs"
@@ -23,11 +23,6 @@ type DesignGalleryItemProps = {
   onOpen: () => void
 }
 
-const itemVariants: Variants = {
-  hidden: { opacity: 0 },
-  visible: { opacity: 1, transition: { delay: 0.25, duration: 0.5 } },
-}
-
 function DesignGalleryItem({
   src,
   alt,
@@ -35,15 +30,11 @@ function DesignGalleryItem({
   onOpen,
 }: DesignGalleryItemProps) {
   const ref = useRef<HTMLLIElement>(null)
-  const isInView = useInView(ref)
 
   return (
     <motion.li
       ref={ref}
-      variants={itemVariants}
-      initial="hidden"
-      animate={isInView ? "visible" : "hidden"}
-      className="bg-surface-alpha overflow-hidden rounded aspect-square relative [content-visibility:auto] [contain-intrinsic-size:auto_180px]"
+      className="bg-surface-alpha overflow-hidden rounded-lg md:rounded-xl aspect-square relative [content-visibility:auto] [contain-intrinsic-size:auto_180px]"
     >
       <DesignImage src={src} alt={alt} viewLabel={viewLabel} onOpen={onOpen} />
     </motion.li>
@@ -62,7 +53,7 @@ export function DesignGallery({ designs }: DesignGalleryProps) {
             <h2 className="font-semibold tracking-tight text-content-ink">
               {design.title}
             </h2>
-            <ul className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+            <ul className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
               {design.images.map((image) => {
                 const alt = `${design.title} — ${image.name}`
                 return (

@@ -1,9 +1,11 @@
 "use client"
 
 import { useLenis } from "lenis/react"
+import { XIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { useEffect, useRef } from "react"
 import { createPortal } from "react-dom"
+import { DesignAsset } from "./design-asset"
 
 type DesignLightboxProps = {
   src: string
@@ -46,18 +48,14 @@ export function DesignLightbox({ src, alt, onClose }: DesignLightboxProps) {
       <button
         type="button"
         aria-label={t("closeFullScreenImage")}
-        className="absolute top-4 right-4 z-10 flex size-10 items-center justify-center rounded-full bg-black/60 text-2xl text-white hover:bg-black/80"
+        className="absolute top-4 right-4 z-10 flex size-10 items-center justify-center rounded-full outline-none focus:outline-none"
         onClick={onClose}
       >
-        <span aria-hidden="true">&times;</span>
+        <XIcon size={18} strokeWidth={4} />
       </button>
-      {/* SVGs aren't resized by next/image — native img avoids optimizer overhead. */}
-      {/* biome-ignore lint/performance/noImgElement: design assets are mostly SVGs */}
-      <img
+      <DesignAsset
         src={src}
         alt={alt}
-        decoding="async"
-        draggable={false}
         className="m-auto h-full max-h-full w-full max-w-full object-contain select-none pointer-events-none"
       />
     </dialog>,

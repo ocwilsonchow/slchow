@@ -7,7 +7,6 @@ const IMAGE_EXTENSIONS = new Set([
   ".jpeg",
   ".jpg",
   ".png",
-  ".svg",
   ".webp",
 ])
 

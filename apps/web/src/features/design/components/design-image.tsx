@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
+import { DesignAsset } from "./design-asset"
 
 type DesignImageProps = {
   src: string
@@ -40,15 +41,11 @@ export function DesignImage({ src, alt, onOpen, viewLabel }: DesignImageProps) {
       onClick={onOpen}
     >
       {shouldLoad ? (
-        // SVGs aren't resized by next/image — native img avoids optimizer overhead.
-        // biome-ignore lint/performance/noImgElement: design assets are mostly SVGs
-        <img
+        <DesignAsset
           src={src}
           alt={alt}
           loading="lazy"
-          decoding="async"
           fetchPriority="low"
-          draggable={false}
           className="absolute inset-0 h-full w-full object-contain select-none pointer-events-none"
         />
       ) : null}
