@@ -1,13 +1,14 @@
 import { serve } from "@hono/node-server"
 import { app } from "@/app"
 
-// serve the app locally using bun
+const port = Number(process.env.PORT) || 4111
+
 serve(
   {
     fetch: app.fetch,
-    port: 3004,
+    port,
   },
   (info) => {
-    console.log(`API Server is running on port ${info.port}`)
+    console.log(`API Server is running on http://localhost:${info.port}`)
   }
 )

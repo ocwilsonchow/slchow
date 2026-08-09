@@ -9,13 +9,19 @@
     "format": "prettier --write \"**/*.{ts,tsx,md}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,md,mts,json}\"",
     "lint": "turbo run lint",
+    "kill:ports": "bash scripts/kill-ports.sh",
     "sso": "aws sso login --sso-session=sinlongchow",
     "deploy": "bunx sst deploy --stage production",
     "deploy:dev": "bunx sst deploy --stage dev",
     "deploy:production": "bun run deploy && bun run verify:production",
     "verify:production": "node node_modules/playwright/cli.js install chromium && node --experimental-strip-types scripts/verify-production.mts",
     "a11y:smoke": "node node_modules/playwright/cli.js install chromium && node --experimental-strip-types scripts/a11y-smoke.mts",
-    "prepare": "husky"
+    "prepare": "husky",
+    "auth:generate": "bunx sst shell --stage local -- bun run --filter @repo/auth auth:generate",
+    "db:generate": "bunx sst shell --stage local -- bun run --filter @repo/db db:generate",
+    "db:migrate": "bunx sst shell --stage local -- bun run --filter @repo/db db:migrate",
+    "db:push": "bunx sst shell --stage local -- bun run --filter @repo/db db:push",
+    "db:studio": "bunx sst shell --stage local -- bun run --filter @repo/db db:studio"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.11.1",

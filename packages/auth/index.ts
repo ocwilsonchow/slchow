@@ -1,3 +1,3 @@
-export * from "@/server"
-export * from "@/client"
-export * from "@/cookie"
+export * as server from "@/server"
+export * as client from "@/client"
+export * as cookie from "@/cookie"

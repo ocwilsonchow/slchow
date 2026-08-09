@@ -3,7 +3,7 @@ import type { Locale } from "next-intl"
 import { routing } from "@/i18n/routing"
 
 export const OG_IMAGE = {
-  url: "/og-image.png",
+  url: "/og-image-02.png",
   width: 2400,
   height: 1260,
 } as const

@@ -1,8 +1,15 @@
 {
   "name": "@repo/auth",
-  "module": "index.ts",
+  "exports": {
+    "./server": "./src/server.ts",
+    "./client": "./src/client.ts",
+    "./cookie": "./src/cookie.ts"
+  },
   "type": "module",
   "private": true,
+  "scripts": {
+    "auth:generate": "bun x auth@latest generate --config ./src/server.ts --output ../db/schema/auth.ts -y"
+  },
   "dependencies": {
     "@repo/db": "workspace:*",
     "@repo/infra": "workspace:*",

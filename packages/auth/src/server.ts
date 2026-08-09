@@ -1,6 +1,8 @@
 import { db } from "@repo/db"
 import { drizzleAdapter } from "@better-auth/drizzle-adapter"
 import { type Auth, betterAuth } from "better-auth"
+
+export type { Auth }
 import { nextCookies } from "better-auth/next-js"
 import {
   admin,
@@ -20,7 +22,11 @@ export type AuthType = {
   session: typeof auth.$Infer.Session.session | null
 }
 
-const baseURL = `https://${Resource.App.stage}.api.${domain}`
+const isLocal = Resource.App.stage === "local"
+
+const baseURL = isLocal
+  ? "http://localhost:4111"
+  : `https://${Resource.App.stage}.api.${domain}`
 
 export const auth = betterAuth({
   baseURL,
@@ -29,20 +35,30 @@ export const auth = betterAuth({
     deferSessionRefresh: true,
   },
   trustedOrigins: [
+    "http://localhost:3000", // Mastra Studio
     `https://${Resource.App.stage}.api.${domain}`,
     `https://${Resource.App.stage}.app.${domain}`,
     `https://${Resource.App.stage}.mastra.${domain}`,
   ],
   advanced: {
     cookiePrefix: Resource.App.stage,
-    crossSubDomainCookies: {
-      enabled: true,
-      domain: "." + domain,
-    },
-    defaultCookieAttributes: {
-      sameSite: "lax",
-      secure: true,
-    },
+    ...(isLocal
+      ? {
+          defaultCookieAttributes: {
+            sameSite: "lax" as const,
+            secure: false,
+          },
+        }
+      : {
+          crossSubDomainCookies: {
+            enabled: true,
+            domain: "." + domain,
+          },
+          defaultCookieAttributes: {
+            sameSite: "lax" as const,
+            secure: true,
+          },
+        }),
   },
   database: drizzleAdapter(db, {
     provider: "pg",

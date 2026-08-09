@@ -16,7 +16,7 @@ export default $config({
     }
   },
   async run() {
-    await import("@repo/infra/api")
+    // await import("@repo/infra/api")
     await import("@repo/infra/nextjs")
   },
 })

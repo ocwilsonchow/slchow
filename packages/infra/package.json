@@ -6,6 +6,8 @@
     "./domain": "./domain.ts",
     "./edge": "./edge.ts",
     "./secrets": "./secrets.ts",
+    "./vpc": "./vpc.ts",
+    "./cluster": "./cluster.ts",
     "./router": "./router.ts",
     "./api": "./api.ts",
     "./nextjs": "./nextjs.ts"

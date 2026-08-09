@@ -11,11 +11,14 @@
     "check-types": "fumadocs-mdx && tsc --noEmit"
   },
   "dependencies": {
+    "@ai-sdk/react": "^4.0.59",
+    "@mastra/ai-sdk": "^1.7.2",
     "@repo/content": "workspace:*",
     "@repo/ds": "workspace:*",
     "@repo/intl": "workspace:*",
     "@tanstack/react-query": "^5.101.4",
     "@uidotdev/usehooks": "^2.4.1",
+    "ai": "^7.0.56",
     "fumadocs-core": "^16.11.5",
     "fumadocs-mdx": "^15.2.0",
     "fumadocs-ui": "^16.11.5",
