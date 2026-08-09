@@ -1,6 +1,6 @@
 "use client"
 
-import { type Variants, motion, useInView } from "motion/react"
+import { motion, useInView, type Variants } from "motion/react"
 import { useTranslations } from "next-intl"
 import { useRef, useState } from "react"
 import type { Design } from "../get-designs"
