@@ -14,24 +14,22 @@ const PATH_TITLE_KEYS = {
   "/resume": "resume",
   "/works": "works",
   "/notes": "notes",
+  "/design": "designs",
   "/contact": "contact",
 } as const
 
-type NavItem =
-  | {
-      type: "link"
-      href: "/" | "/resume" | "/notes" | "/works" | "/contact"
-      labelKey: "home" | "resume" | "notes" | "works" | "contact"
-    }
-  | { type: "soon"; labelKey: "designs" }
+type NavItem = {
+  href: "/" | "/resume" | "/notes" | "/works" | "/design" | "/contact"
+  labelKey: "home" | "resume" | "notes" | "works" | "designs" | "contact"
+}
 
 const NAV_ITEMS: NavItem[] = [
-  { type: "link", href: "/", labelKey: "home" },
-  { type: "link", href: "/resume", labelKey: "resume" },
-  { type: "link", href: "/notes", labelKey: "notes" },
-  { type: "link", href: "/works", labelKey: "works" },
-  { type: "soon", labelKey: "designs" },
-  { type: "link", href: "/contact", labelKey: "contact" },
+  { href: "/", labelKey: "home" },
+  { href: "/resume", labelKey: "resume" },
+  { href: "/notes", labelKey: "notes" },
+  // { href: "/works", labelKey: "works" },
+  { href: "/design", labelKey: "designs" },
+  // { href: "/contact", labelKey: "contact" },
 ]
 
 const SOCIAL_LINKS = [
@@ -70,13 +68,7 @@ export function RenderNewNavbar() {
           <Navbar.StaggerList className="p-5">
             {NAV_ITEMS.map((item) => (
               <Navbar.StaggerItem key={item.labelKey}>
-                {item.type === "link" ? (
-                  <Navbar.Link href={item.href}>{t(item.labelKey)}</Navbar.Link>
-                ) : (
-                  <span className="block py-0.5 font-semibold text-base text-content-body-on-popover">
-                    {t(item.labelKey)} ({t("comingSoon")})
-                  </span>
-                )}
+                <Navbar.Link href={item.href}>{t(item.labelKey)}</Navbar.Link>
               </Navbar.StaggerItem>
             ))}
           </Navbar.StaggerList>

@@ -13,7 +13,14 @@ function getSiteUrl() {
   return new URL("http://localhost:3003")
 }
 
-const staticPaths = ["", "/resume", "/notes", "/works", "/contact"] as const
+const staticPaths = [
+  "",
+  "/resume",
+  "/notes",
+  "/works",
+  "/design",
+  "/contact",
+] as const
 
 export default function sitemap(): MetadataRoute.Sitemap {
   const origin = getSiteUrl().origin

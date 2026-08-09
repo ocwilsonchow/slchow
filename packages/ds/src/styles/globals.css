@@ -8,11 +8,11 @@
 
 :root {
   --accent-surface-canvas: #f0fb29;
-  --surface-canvas: #ffffff;
+  --surface-canvas: #F5F5F5;
   --surface-backdrop: #202020;
   --surface-popover: #202020;
   --surface-canvas-inverse: #0f0f10;
-  --surface-alpha: #3f3d3910;
+  --surface-alpha: #F5F5F515;
   --content-accent: #f0fb29;
   --content-ink: #3f3d39;
   --content-body: #6e6e6e;
@@ -31,7 +31,7 @@
   --surface-backdrop: #121212;
   --surface-popover: #202020;
   --surface-canvas-inverse: #ffffff;
-  --surface-alpha: #fafafa10;
+  --surface-alpha: #fafafa20;
   --content-accent: #f0fb29;
   --content-ink: #ffffff;
   --content-body: #c1c1c1;

@@ -47,12 +47,8 @@ export const Links = async ({ className, ...props }: ComponentProps<"div">) => {
       <ul className="flex flex-col gap-px">
         <HeaderLink href="/resume">{t("resume")}</HeaderLink>
         <HeaderLink href="/notes">{t("notes")}</HeaderLink>
-        <HeaderLink href="/works">{t("works")}</HeaderLink>
-        <li>
-          <span className="text-content-subdued">
-            {t("designs")} ({t("comingSoon")})
-          </span>
-        </li>
+        {/* <HeaderLink href="/works">{t("works")}</HeaderLink> */}
+        <HeaderLink href="/design">{t("designs")}</HeaderLink>
       </ul>
       <ul className="flex flex-col gap-px">
         <HeaderLink

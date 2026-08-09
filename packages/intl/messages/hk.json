@@ -59,6 +59,10 @@
       "title": "支線任務",
       "description": "Wilson Chow 的支線專案與實驗。"
     },
+    "designs": {
+      "title": "設計",
+      "description": "Wilson Chow 精選的設計作品與視覺探索。"
+    },
     "contact": {
       "title": "聯絡",
       "description": "歡迎聯絡 Wilson Chow。"
@@ -69,6 +73,9 @@
   },
   "notes": {
     "intro": "一些關於我感興趣主題的筆記。與 Grok 4.5、GPT-5.6 Sol 及 Gemini 3.1 Pro 共同撰寫與審核。"
+  },
+  "designs": {
+    "intro": "我喜歡打造用戶介面。以前我花很多時間在 Figma 上。"
   },
   "code": {
     "showMore": "顯示更多",
