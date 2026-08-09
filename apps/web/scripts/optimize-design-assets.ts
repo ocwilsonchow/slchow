@@ -1,4 +1,10 @@
-import { readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs"
+import {
+  readdirSync,
+  renameSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs"
 import { dirname, extname, join, relative } from "node:path"
 import { fileURLToPath } from "node:url"
 import sharp from "sharp"
@@ -56,7 +62,11 @@ async function optimizeFile(inputPath: string) {
   const width = metadata.width ?? 0
   const height = metadata.height ?? 0
   const alreadySmallWebp =
-    ext === ".webp" && width > 0 && height > 0 && width <= MAX_EDGE && height <= MAX_EDGE
+    ext === ".webp" &&
+    width > 0 &&
+    height > 0 &&
+    width <= MAX_EDGE &&
+    height <= MAX_EDGE
 
   const buffer = await image
     .resize({
