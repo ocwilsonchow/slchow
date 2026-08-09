@@ -39,6 +39,9 @@ export function DesignLightbox({ src, alt, onClose }: DesignLightboxProps) {
       onClick={(event) => {
         if (event.target === event.currentTarget) onClose()
       }}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") onClose()
+      }}
     >
       <button
         type="button"
@@ -48,6 +51,8 @@ export function DesignLightbox({ src, alt, onClose }: DesignLightboxProps) {
       >
         <span aria-hidden="true">&times;</span>
       </button>
+      {/* SVGs aren't resized by next/image — native img avoids optimizer overhead. */}
+      {/* biome-ignore lint/performance/noImgElement: design assets are mostly SVGs */}
       <img
         src={src}
         alt={alt}

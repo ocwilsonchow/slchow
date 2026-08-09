@@ -27,7 +27,7 @@ export function DesignGallery({ designs }: DesignGalleryProps) {
             <h2 className="font-semibold tracking-tight text-content-ink">
               {design.title}
             </h2>
-            <ul className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-4 gap-4">
+            <ul className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
               {design.images.map((image) => {
                 const alt = `${design.title} — ${image.name}`
                 return (

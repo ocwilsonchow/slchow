@@ -41,6 +41,7 @@ export function DesignImage({ src, alt, onOpen, viewLabel }: DesignImageProps) {
     >
       {shouldLoad ? (
         // SVGs aren't resized by next/image — native img avoids optimizer overhead.
+        // biome-ignore lint/performance/noImgElement: design assets are mostly SVGs
         <img
           src={src}
           alt={alt}
