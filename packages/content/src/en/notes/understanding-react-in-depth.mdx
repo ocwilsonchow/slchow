@@ -3,6 +3,8 @@ title: Understanding React in Depth
 description: How elements, Fibers, update queues, lanes, reconciliation, commits, Hooks, Suspense, and hydration fit into React's rendering model
 ---
 
+React's public model is often summarized as `UI = f(state)`: you describe what the interface should look like for a given state, and React determines how to update the rendered output when that state changes.
+
 React became easier for me to reason about when I stopped treating a render as "React calling my component and updating the DOM." That description skips the machinery that explains most surprising behavior: stale state in an event handler, state moving between list items, an Effect running twice in development, or a transition being abandoned halfway through.
 
 The more useful model is that React maintains its own representation of the interface. An update is **scheduled**, React computes a possible next tree during the **render phase**, and only then does it publish the result during the **commit phase**.
@@ -13,8 +15,7 @@ The more useful model is that React maintains its own representation of the inte
 event, promise, or external store
   → enqueue an update
   → assign a priority
-  → render a possible next tree
-  → reconcile it with the current tree
+  → render and reconcile a possible next tree
   → commit the finished changes
   → let the browser paint
 ```
@@ -86,6 +87,8 @@ Host tree        DOM nodes, native views, or another renderer's output
 
 <br />
 
+The host tree depends on the renderer: `react-dom` produces DOM nodes, React Native produces native views, and React Three Fiber builds a Three.js scene graph. React itself is renderer-agnostic—the element and Fiber layers work the same way for every target.
+
 Confusing these layers leads to incorrect assumptions. A new element object does not necessarily mean a new DOM node, and a component render does not necessarily mean a visible browser update.
 
 <br />
@@ -102,10 +105,17 @@ A Fiber corresponds to one component, host element, text node, Suspense boundary
 - `pendingProps` for the render in progress
 - `memoizedProps` and `memoizedState` from completed work
 - links to its parent, first child, and next sibling
+- an `alternate` pointing to the matching Fiber in the other tree
 - an update queue and context dependencies
 - lanes representing pending priorities
 - flags describing work needed during commit
 - a `stateNode`, such as the matching DOM node for a host Fiber
+
+React did not always work this way. Before React 16, reconciliation ran as one recursive traversal of the component tree—the "stack reconciler." Once rendering started, it generally could not stop until the traversal was complete.
+
+That design created problems for large updates: a costly render could block input handling and delay paint, React could not pause rendering, it could not cleanly abandon obsolete work, and it had limited ability to prioritize urgent updates over non-urgent ones.
+
+Fiber, introduced in React 16, moved traversal state out of the JavaScript call stack and into explicit heap-allocated objects. Each Fiber acts like a **virtual stack frame** for a component or host element.
 
 Fibers use `child`, `sibling`, and `return` links instead of a nested JavaScript array:
 
@@ -305,7 +315,7 @@ Rendering may read props, state, context, and immutable external snapshots. It m
 
 ## 6. Reconciliation Decides Identity
 
-During rendering, React must match new child elements with existing child Fibers. A general tree-diff algorithm is expensive, so React uses practical rules based primarily on **type**, **position**, and **key**.
+During rendering, React must match new child elements with existing child Fibers. A general tree-diff algorithm is expensive—the best known algorithms for arbitrary trees cost O(n³) for n elements—so React uses practical rules based primarily on **type**, **position**, and **key**, which handle common UI updates in roughly linear time.
 
 For a child at the same position:
 
@@ -417,7 +427,7 @@ useEffect(() => {
 
 <br />
 
-The DOM changing and pixels appearing are not the same event. React mutates DOM while JavaScript owns the main thread. The browser can style, lay out, and paint after that work yields. A long layout Effect can therefore delay a visually ready commit.
+The DOM changing and pixels appearing are not the same event. React mutates DOM while JavaScript owns the main thread. The browser can style, lay out, and paint after that work yields. A long layout Effect can therefore delay the paint of a commit whose DOM is already updated.
 
 <br />
 
@@ -464,6 +474,21 @@ function Profile({ editable }: { editable: boolean }) {
 <br />
 
 If `editable` changes, every Hook after the condition shifts position. React can no longer match calls with the correct state cells. "Only call Hooks at the top level" preserves the sequence.
+
+The condition belongs inside the Hook:
+
+<br />
+
+```tsx
+useEffect(() => {
+  if (!editable) return
+  return subscribeToDraft(name)
+}, [editable, name])
+```
+
+<br />
+
+Now the Hook sequence is identical on every render, and the conditional logic only decides what the Effect does.
 
 Each state Hook also owns an update queue. During rendering, React combines its base state with updates whose lanes are included in the current render. Lower-priority updates can remain in a base queue and be replayed later. This lets an urgent render move ahead without losing transition updates.
 
@@ -647,7 +672,10 @@ The extra render adds the item twice and reveals the mutation. The correct compo
 <br />
 
 ```tsx
-const items = [...stories, "Create Story"]
+function StoryTray({ stories }: { stories: string[] }) {
+  const items = [...stories, "Create Story"]
+  return items.map((story) => <div key={story}>{story}</div>)
+}
 ```
 
 <br />
@@ -710,6 +738,22 @@ These questions are more reliable than adding `memo`, changing a key, suppressin
 
 ---
 
+## 15. Common Misconceptions
+
+A few ideas about Fiber come up often enough to be worth correcting directly.
+
+**"Fiber is the virtual DOM."** Not exactly. As section 1's three trees show, elements are declarative descriptions; Fibers are the reconciler's persistent representation of work and state. "Virtual DOM" is a useful high-level phrase, but React's internals are more specific than one simple tree of virtual nodes.
+
+**"Fiber makes every render faster."** Not necessarily. Fiber adds scheduling and bookkeeping. Its primary benefit is not raw single-render throughput; it is the ability to prioritize work and avoid blocking the browser during large or lower-priority updates.
+
+**"Concurrent means parallel."** In this context, no. React still coordinates JavaScript work on the main thread. As section 4 described, concurrency means React can interleave work, yield control, and discard obsolete renders—not that rendering moves to another thread.
+
+**"Fiber is React Three Fiber."** They are different things. React Fiber is React's internal reconciliation architecture. React Three Fiber is a community renderer that applies the same component model to a Three.js scene graph, and is named after it.
+
+<br />
+
+---
+
 ## Final Mental Model
 
 The shortest accurate model I use is:
@@ -735,6 +779,6 @@ Concurrent React is not a separate rendering model layered on top. It is what be
 
 The public rules follow from that architecture. Keep rendering pure because it is speculative. Use stable keys because identity controls state. Use updater functions when work depends on queued state. Treat Effects as synchronization because they run after a commit. Do not rely on render counts because attempts can be abandoned.
 
-For the newer APIs built on this model, see [What's New in React 19](./react-19-new-features). For primary references, I return to React's documentation on [render and commit](https://react.dev/learn/render-and-commit), [state snapshots](https://react.dev/learn/state-as-a-snapshot), [state update queues](https://react.dev/learn/queueing-a-series-of-state-updates), [preserving state](https://react.dev/learn/preserving-and-resetting-state), [Effects](https://react.dev/learn/synchronizing-with-effects), [transitions](https://react.dev/reference/react/useTransition), [Suspense](https://react.dev/reference/react/Suspense), and [hydration](https://react.dev/reference/react-dom/client/hydrateRoot).
+For the newer APIs built on this model, see [What's New in React 19](./react-19-new-features). For primary references, I return to Andrew Clark's [React Fiber architecture notes](https://github.com/acdlite/react-fiber-architecture) and React's documentation on [render and commit](https://react.dev/learn/render-and-commit), [state snapshots](https://react.dev/learn/state-as-a-snapshot), [state update queues](https://react.dev/learn/queueing-a-series-of-state-updates), [preserving state](https://react.dev/learn/preserving-and-resetting-state), [Effects](https://react.dev/learn/synchronizing-with-effects), [transitions](https://react.dev/reference/react/useTransition), [Suspense](https://react.dev/reference/react/Suspense), and [hydration](https://react.dev/reference/react-dom/client/hydrateRoot).
 
 The implementation details in this article correspond to React 19.2.7. The relevant source lives in [`ReactFiber.js`](https://github.com/facebook/react/blob/v19.2.7/packages/react-reconciler/src/ReactFiber.js), [`ReactFiberWorkLoop.js`](https://github.com/facebook/react/blob/v19.2.7/packages/react-reconciler/src/ReactFiberWorkLoop.js), [`ReactFiberBeginWork.js`](https://github.com/facebook/react/blob/v19.2.7/packages/react-reconciler/src/ReactFiberBeginWork.js), [`ReactFiberCompleteWork.js`](https://github.com/facebook/react/blob/v19.2.7/packages/react-reconciler/src/ReactFiberCompleteWork.js), [`ReactChildFiber.js`](https://github.com/facebook/react/blob/v19.2.7/packages/react-reconciler/src/ReactChildFiber.js), [`ReactFiberHooks.js`](https://github.com/facebook/react/blob/v19.2.7/packages/react-reconciler/src/ReactFiberHooks.js), and [`ReactFiberLane.js`](https://github.com/facebook/react/blob/v19.2.7/packages/react-reconciler/src/ReactFiberLane.js). Those files explain today's mechanism, not an API contract.
