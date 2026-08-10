@@ -14,25 +14,29 @@ const PATH_TITLE_KEYS = {
   "/resume": "resume",
   "/works": "works",
   "/notes": "notes",
+  "/design": "designs",
   "/contact": "contact",
 } as const
 
-type NavItem =
-  | {
-      type: "link"
-      href: "/" | "/resume" | "/notes" | "/works" | "/contact"
-      labelKey: "home" | "resume" | "notes" | "works" | "contact"
-    }
-  | { type: "soon"; labelKey: "designs" }
+type NavItem = {
+  href: "/" | "/resume" | "/notes" | "/works" | "/design" | "/contact"
+  labelKey: "home" | "resume" | "notes" | "works" | "designs" | "contact"
+  countKey?: "notesCount" | "designsCount"
+}
 
 const NAV_ITEMS: NavItem[] = [
-  { type: "link", href: "/", labelKey: "home" },
-  { type: "link", href: "/resume", labelKey: "resume" },
-  { type: "link", href: "/notes", labelKey: "notes" },
-  { type: "link", href: "/works", labelKey: "works" },
-  { type: "soon", labelKey: "designs" },
-  { type: "link", href: "/contact", labelKey: "contact" },
+  { href: "/", labelKey: "home" },
+  { href: "/resume", labelKey: "resume" },
+  { href: "/notes", labelKey: "notes", countKey: "notesCount" },
+  // { href: "/works", labelKey: "works" },
+  { href: "/design", labelKey: "designs", countKey: "designsCount" },
+  // { href: "/contact", labelKey: "contact" },
 ]
+
+type RenderNewNavbarProps = {
+  notesCount: number
+  designsCount: number
+}
 
 const SOCIAL_LINKS = [
   { href: "https://github.com/ocwilsonchow", label: "GitHub" },
@@ -54,10 +58,14 @@ function LanguageSettingsClose() {
   return <LanguageSettings onBeforeChange={() => setOpen(false)} />
 }
 
-export function RenderNewNavbar() {
+export function RenderNewNavbar({
+  notesCount,
+  designsCount,
+}: RenderNewNavbarProps) {
   const pathname = usePathname()
   const t = useTranslations("navigation")
   const tA11y = useTranslations("a11y")
+  const counts = { notesCount, designsCount }
 
   const pathTitleKey = getPathTitleKey(pathname)
   const pathLabel = pathTitleKey ? t(pathTitleKey) : pathname.replace(/^\//, "")
@@ -68,17 +76,22 @@ export function RenderNewNavbar() {
       <Navbar.Frame>
         <Navbar.Content>
           <Navbar.StaggerList className="p-5">
-            {NAV_ITEMS.map((item) => (
-              <Navbar.StaggerItem key={item.labelKey}>
-                {item.type === "link" ? (
-                  <Navbar.Link href={item.href}>{t(item.labelKey)}</Navbar.Link>
-                ) : (
-                  <span className="block py-0.5 font-semibold text-base text-content-body-on-popover">
-                    {t(item.labelKey)} ({t("comingSoon")})
-                  </span>
-                )}
-              </Navbar.StaggerItem>
-            ))}
+            {NAV_ITEMS.map((item) => {
+              const count = item.countKey ? counts[item.countKey] : null
+              return (
+                <Navbar.StaggerItem key={item.labelKey}>
+                  <Navbar.Link href={item.href}>
+                    {t(item.labelKey)}
+                    {count !== null ? (
+                      <>
+                        {" "}
+                        <sup className="text-content-subdued">{count}</sup>
+                      </>
+                    ) : null}
+                  </Navbar.Link>
+                </Navbar.StaggerItem>
+              )
+            })}
           </Navbar.StaggerList>
           <Navbar.StaggerList className="p-5 space-y-3">
             <Navbar.StaggerItem>

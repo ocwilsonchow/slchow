@@ -49,7 +49,9 @@ const Page = async ({ params }: Props) => {
               {page?.data.title}
             </h1>
             {page?.data.description && (
-              <p className="text-content-subdued">{page?.data.description}</p>
+              <p className="text-content-subdued leading-snug">
+                {page?.data.description}
+              </p>
             )}
           </div>
           <CollapsibleToc toc={toc} />

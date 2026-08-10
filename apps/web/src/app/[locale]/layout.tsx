@@ -8,6 +8,7 @@ import {
   getTranslations,
   setRequestLocale,
 } from "next-intl/server"
+import { getDesigns } from "@/features/design/get-designs"
 import { RenderNewNavbar } from "@/features/layout/components/navbar"
 import { RootLayout } from "@/features/layout/components/root"
 import { SkipLink } from "@/features/layout/components/skip-link"
@@ -15,6 +16,7 @@ import { SmoothScroll } from "@/features/layout/components/smooth-scroll"
 import { StylesProvider } from "@/features/layout/components/styles"
 import { routing } from "@/i18n/routing"
 import { getHtmlLang, getOpenGraphLocale, OG_IMAGE } from "@/lib/metadata"
+import { getCategoryPages } from "@/lib/source"
 import { TanstackProviders } from "@/lib/tanstack-providers"
 
 type Props = {
@@ -74,6 +76,11 @@ export default async function LocaleLayout({ children, params }: Props) {
   setRequestLocale(locale as Locale)
 
   const messages = await getMessages()
+  const notesCount = getCategoryPages("notes", locale).length
+  const designsCount = getDesigns().reduce(
+    (total, design) => total + design.images.length,
+    0
+  )
 
   return (
     <html lang={getHtmlLang(locale)} suppressHydrationWarning>
@@ -85,7 +92,10 @@ export default async function LocaleLayout({ children, params }: Props) {
                 <NextIntlClientProvider locale={locale} messages={messages}>
                   <SkipLink />
                   {/* <RenderNavbar /> */}
-                  <RenderNewNavbar />
+                  <RenderNewNavbar
+                    notesCount={notesCount}
+                    designsCount={designsCount}
+                  />
                   {/* <div className="fixed bottom-0 left-0 right-0 h-24 bg-linear-to-t pointer-events-none from-surface-canvas to-surface-canvas/0" /> */}
                   <RootLayout>{children}</RootLayout>
                 </NextIntlClientProvider>

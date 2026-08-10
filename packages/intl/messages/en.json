@@ -59,6 +59,10 @@
       "title": "Side Quests",
       "description": "Side projects and experiments by Wilson Chow."
     },
+    "designs": {
+      "title": "Designs",
+      "description": "Selected design work and visual explorations by Wilson Chow."
+    },
     "contact": {
       "title": "Contact",
       "description": "Get in touch with Wilson Chow."
@@ -69,6 +73,9 @@
   },
   "notes": {
     "intro": "Some notes on the topics that interest me. Co-authored and co-audited with Grok 4.5, GPT-5.6 Sol and Gemini 3.1 Pro."
+  },
+  "designs": {
+    "intro": "I like crafting user interfaces. I used to spend a lot of time on Figma back in the days."
   },
   "code": {
     "showMore": "Show more",

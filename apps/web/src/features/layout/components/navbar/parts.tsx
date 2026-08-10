@@ -194,8 +194,9 @@ function Trigger({
         }
         initial="hidden"
         animate={open ? "visible" : "hidden"}
+        className="bg-surface-alpha p-1.5 rounded-full"
       >
-        <PlusIcon size={16} strokeWidth={3} aria-hidden />
+        <PlusIcon size={16} strokeWidth={4} aria-hidden />
       </motion.div>
     </motion.button>
   )
@@ -260,7 +261,7 @@ function NavLink({
         onClick?.(event)
       }}
       className={cn(
-        "block transition-colors hover:text-content-ink-on-popover py-0.5 font-semibold text-base",
+        "block transition-colors hover:text-content-ink-on-popover py-px font-semibold text-lg lg:text-xl",
         isActive
           ? "text-content-ink-on-popover"
           : "text-content-body-on-popover",
