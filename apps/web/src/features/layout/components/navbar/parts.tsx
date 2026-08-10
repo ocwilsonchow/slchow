@@ -92,7 +92,7 @@ function Backdrop({ className, ...props }: HTMLMotionProps<"button">) {
         animate={open ? "visible" : "hidden"}
         onClick={() => setOpen(false)}
         className={cn(
-          "fixed inset-0 z-40 bg-surface-backdrop/65 backdrop-blur-sm",
+          "fixed inset-0 z-40 bg-surface-backdrop/75 backdrop-blur-md",
           open ? "pointer-events-auto" : "pointer-events-none",
           className
         )}
