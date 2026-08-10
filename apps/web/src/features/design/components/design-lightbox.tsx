@@ -57,7 +57,9 @@ export function DesignLightbox({ src, alt, onClose }: DesignLightboxProps) {
         src={src}
         alt={alt}
         sizes="100vw"
-        className="object-contain select-none pointer-events-none"
+        loading="eager"
+        fetchPriority="high"
+        className="m-auto h-full max-h-full w-full max-w-full object-contain select-none pointer-events-none"
       />
     </dialog>,
     document.body

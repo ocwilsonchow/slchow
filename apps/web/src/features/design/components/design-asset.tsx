@@ -1,7 +1,5 @@
 "use client"
 
-import Image from "next/image"
-
 type DesignAssetProps = {
   src: string
   alt: string
@@ -11,22 +9,27 @@ type DesignAssetProps = {
   fetchPriority?: "high" | "low" | "auto"
 }
 
-/** Design media via `next/image` (`fill` + caller-provided `sizes`). */
+/**
+ * Static design media (already sharp-optimized WebP).
+ * Uses native `img` with `sizes` + lazy/decoding hints — no `/_next/image`.
+ */
 export function DesignAsset({
   src,
   alt,
   sizes,
   className,
-  loading,
+  loading = "lazy",
   fetchPriority,
 }: DesignAssetProps) {
   return (
-    <Image
+    // biome-ignore lint/performance/noImgElement: design assets skip the image optimizer
+    <img
       src={src}
       alt={alt}
-      fill
       sizes={sizes}
+      srcSet={`${src} 2048w`}
       loading={loading}
+      decoding="async"
       fetchPriority={fetchPriority}
       draggable={false}
       className={className}

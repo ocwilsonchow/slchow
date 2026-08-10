@@ -51,7 +51,7 @@ export function DesignImage({ src, alt, onOpen, viewLabel }: DesignImageProps) {
           sizes={THUMB_SIZES}
           loading="lazy"
           fetchPriority="low"
-          className="object-contain select-none pointer-events-none"
+          className="absolute inset-0 h-full w-full object-contain select-none pointer-events-none"
         />
       ) : null}
     </button>
