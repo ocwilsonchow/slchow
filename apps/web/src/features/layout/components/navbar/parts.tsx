@@ -5,7 +5,13 @@ import { Portal } from "@repo/ds/components/ui/portal"
 import { PlusIcon } from "lucide-react"
 import { type HTMLMotionProps, motion, useReducedMotion } from "motion/react"
 import { useTranslations } from "next-intl"
-import { type ComponentProps, type ReactNode, useRef, useState } from "react"
+import {
+  type ComponentProps,
+  type ReactNode,
+  useEffect,
+  useRef,
+  useState,
+} from "react"
 import { Link as I18nLink, usePathname } from "@/i18n/navigation"
 import { fontPresets } from "../styles"
 import {
@@ -20,6 +26,7 @@ import {
   useNavbarScrollHide,
   useOpenOnModK,
 } from "./hooks"
+import { playNavbarToggleSound } from "./sound"
 import {
   backdropVariants,
   contentVariants,
@@ -39,6 +46,7 @@ function Root({ children }: { children: ReactNode }) {
   const panelRef = useRef<HTMLDivElement | null>(null)
   const backdropRef = useRef<HTMLButtonElement | null>(null)
   const triggerRef = useRef<HTMLButtonElement | null>(null)
+  const didMountRef = useRef(false)
   const shouldReduceMotion = useReducedMotion() ?? false
 
   const toggle = () => setOpen((current) => !current)
@@ -52,6 +60,15 @@ function Root({ children }: { children: ReactNode }) {
     panelRef,
     setOpen,
   })
+
+  useEffect(() => {
+    if (!didMountRef.current) {
+      didMountRef.current = true
+      return
+    }
+    if (shouldReduceMotion) return
+    playNavbarToggleSound()
+  }, [open, shouldReduceMotion])
 
   return (
     <NavbarContext
