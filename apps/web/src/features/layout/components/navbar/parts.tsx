@@ -8,6 +8,7 @@ import { useTranslations } from "next-intl"
 import {
   type ComponentProps,
   type ReactNode,
+  type SetStateAction,
   useEffect,
   useRef,
   useState,
@@ -26,7 +27,7 @@ import {
   useNavbarScrollHide,
   useOpenOnModK,
 } from "./hooks"
-import { playNavbarToggleSound } from "./sound"
+import { playNavbarToggleSound, preloadNavbarToggleSound } from "./sound"
 import {
   backdropVariants,
   contentVariants,
@@ -41,15 +42,28 @@ import {
 } from "./variants"
 
 function Root({ children }: { children: ReactNode }) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpenState] = useState(false)
+  const openRef = useRef(false)
   const navRef = useRef<HTMLElement | null>(null)
   const panelRef = useRef<HTMLDivElement | null>(null)
   const backdropRef = useRef<HTMLButtonElement | null>(null)
   const triggerRef = useRef<HTMLButtonElement | null>(null)
-  const didMountRef = useRef(false)
   const shouldReduceMotion = useReducedMotion() ?? false
 
+  const setOpen = (value: SetStateAction<boolean>) => {
+    const current = openRef.current
+    const next = typeof value === "function" ? value(current) : value
+    if (next === current) return
+    openRef.current = next
+    if (!shouldReduceMotion) playNavbarToggleSound()
+    setOpenState(next)
+  }
+
   const toggle = () => setOpen((current) => !current)
+
+  useEffect(() => {
+    preloadNavbarToggleSound()
+  }, [])
 
   useOpenOnModK(setOpen)
   useNavbarFocusLock({
@@ -60,15 +74,6 @@ function Root({ children }: { children: ReactNode }) {
     panelRef,
     setOpen,
   })
-
-  useEffect(() => {
-    if (!didMountRef.current) {
-      didMountRef.current = true
-      return
-    }
-    if (shouldReduceMotion) return
-    playNavbarToggleSound()
-  }, [open, shouldReduceMotion])
 
   return (
     <NavbarContext

@@ -11,6 +11,11 @@ const getAudio = () => {
   return audio
 }
 
+export function preloadNavbarToggleSound() {
+  const el = getAudio()
+  el?.load()
+}
+
 export function playNavbarToggleSound() {
   const el = getAudio()
   if (!el) return
