@@ -38,26 +38,27 @@ Skilled in deploying and managing cloud infrastructure with **SST**, **Terraform
 
 ## Selected Projects
 
-### _Multi-channel Durable Agent, Apr 2026 - Present_
+### _Agentic Platform, Apr 2026 - Present_
 
-- Led a **multi-channel** agent platform (web + Discord) with durable streaming so clients can disconnect and resume mid-run.
-- Built workflow, memory, scheduling, and workspace primitives — pause/resume, retries, file storage, sandboxed tools, and skills — on **Mastra** and **AI SDK**.
-- Shipped RAG end-to-end: ingest/parse, chunking, **Pinecone** retrieval with query/rerank (and graph query where needed).
-- **Hono** + **Better Auth** backend on **ECS**; **Postgres** for core data, **S3** as filesystems.
-- Built agent observability and evals: run/tool traces and cost/latency metrics in **ClickHouse**, plus scored eval suites (golden prompts + LLM-as-judge) for quality regressions.
-- Designed and shipped a custom **@mention** file tagging component for agent prompt input using **TipTap**.
+- Led a **multi-channel** agent platform (web + Discord) with durable streaming — clients can disconnect and resume mid-run without losing progress.
+- Built workflow, memory, scheduling, and workspace primitives on **Mastra** and **AI SDK**: pause/resume, retries, file storage, sandboxed tools, and skills.
+- Shipped end-to-end **RAG**: ingest/parse, chunking, and **Pinecone** retrieval with query/rerank (and graph query where needed).
+- Built **Hono** + **Better Auth** backend on **ECS**, with **Postgres** for core data and **S3** for file storage.
+- Ensured observability with run/tool traces and cost/latency metrics in **ClickHouse**, plus scored eval suites (golden prompts + LLM-as-judge) to catch quality regressions.
+- Designed and shipped a **TipTap** **@mention** file-tagging component for attaching workspace files into agent prompts.
 
 ---
 
-### _Incremental Static Regeneration Next.js Site, Nov 2025_
+### _Full Stack Marketing Site, Nov 2025_
 
 - Built a **Next.js** content site with **Strapi** backend and **Meilisearch**, hitting **LCP < 0.5s**, **CLS < 0.1**, and PageSpeed Insights **>90**.
 - Hybrid **ISR**: main pages and the latest 100 articles pre-rendered at build; remaining pages generated on demand as fallbacks.
-- **Tag-based revalidation** via Strapi content webhooks so publishes update live pages without full rebuilds.
+- **Tag-based revalidation** via Strapi content **webhooks** so publishes update live pages without full rebuilds.
 - Interactive UI with **TanStack Query** server prefetch/hydration; forms via **TanStack Form**, **Zod**, and Query mutations.
 - **Turborepo** deployed to **AWS ECS** with **SST**, routed through **API Gateway**; media on **S3**.
 - **Accessibility**: semantic landmarks/headings, keyboard-accessible nav and forms, visible focus, and meaningful alt text for CMS media; a11y tested with **Lighthouse** and **axe**.
 - **SEO**: metadata/OG tags from Strapi, canonical URLs, sitemap + `robots.txt`, and structured data (Article JSON-LD) for indexable content pages.
+- Built **custom Strapi plugin** to enable generative AI content creation with **AI SDK**.
 
 ---
 
@@ -79,9 +80,11 @@ Skilled in deploying and managing cloud infrastructure with **SST**, **Terraform
 
 I was also responsible for the development of the following projects:
 
-- **Health & wellness RAG agent** (Next.js, Langchain, Shopify product retrieval)
+- **Health & wellness RAG agent** (Next.js, Langchain, Shopify API)
 - **Restaurant loyalty app** (React Native)
+- **Content platform with CMS** (Next.js, Strapi)
 - **Membership portal for a business organization** (React Native)
+- **Photobooth event mobile app** (React Native, Skia, Nextjs)
 - **Event registration site** (Next.js)
 - **Campaign / marketing sites** (Next.js, Sanity / Strapi)
 - **Resource management system with RBAC** (Next.js)

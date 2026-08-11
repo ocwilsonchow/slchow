@@ -25,13 +25,15 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   })
 }
 
+const resumeSlug = "resume-v2"
+
 const Page = async ({ params }: Props) => {
   const { locale } = await params
 
   setRequestLocale(locale)
 
   const t = await getTranslations({ locale, namespace: "metadata" })
-  const page = getMdxContent("blocks", "resume", locale)
+  const page = getMdxContent("blocks", resumeSlug, locale)
   const toc = page?.data.toc ?? []
 
   return (
@@ -51,7 +53,7 @@ const Page = async ({ params }: Props) => {
         <RenderMdxBlockByPath
           className="col-span-2 p-5 pb-24"
           category="blocks"
-          slug="resume"
+          slug={resumeSlug}
           locale={locale}
         />
       </article>

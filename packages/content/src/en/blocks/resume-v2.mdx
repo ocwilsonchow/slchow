@@ -1,0 +1,119 @@
+---
+title: Resume
+---
+
+## Summary
+
+Full-stack product engineer with 5 years of experience owning delivery from Figma design through React / React Native, typed APIs, and AWS deploy. Shipped 15+ production web and mobile apps; cut critical-path load times by up to **80%** and search latency by **90%**. Currently leading a multi-channel agent platform with durable workflows, RAG, MCP servers, and evals. **AWS Solutions Architect Associate**.
+
+Strengths: end-to-end product ownership · React · frontend engineering · production AI agents · design systems.
+
+Stack: Next.js, React Native, Hono, Drizzle, OpenAPI / tRPC / GraphQL, Mastra, AI SDK, Langchain, Postgres, SST, Terraform, AWS, Vercel; headless CMS and search with Strapi, Sanity, Meilisearch.
+
+<br />
+
+---
+
+## Experience
+
+### Full-Stack Engineer, Vioo Company Limited, May 2022 – Present
+
+Primary engineer for concurrent client products — design through cloud deployment, partnering with stakeholders to scope UX and ship production releases.
+
+- Shipped and maintained **15+** production React / React Native apps end-to-end, including high-fidelity Figma design and shared design systems.
+- Replaced legacy WordPress with headless CMS (Strapi / Sanity) and search (Meilisearch / Algolia): cut load time by **80%**, search latency by **90%**, and hit PageSpeed Insights **>90**.
+- Shipped production AI agents (workflows, memory, tool calls, observability) with Mastra, AI SDK, and Langchain, including composable chat and tool-invocation UIs.
+- Established a shared Radix / Tailwind component and hook library with Storybook, Fumadocs, and MDX docs, reused across client apps for consistent UI and faster delivery.
+- Built typed APIs with Hono, Drizzle, OpenAPI, and tRPC on AWS Lambda / API Gateway, backed by Postgres and DynamoDB, with Scalar API docs.
+- Adopted SST for app deployment and infra, cutting build and deploy time by **50%+**.
+- Led frontend code and performance reviews (composable React patterns, lazy-loaded heavy UI) and added Cypress E2E coverage for critical flows.
+- Delivered custom Next.js storefronts on Shopify’s headless GraphQL API; advanced Framer Motion / D3 motion and charting where product UX required it.
+
+<br />
+
+---
+
+## Selected Projects
+
+### Multi-Channel Agentic Platform, Apr 2026 – Present
+
+Client-facing agent platform for durable, multi-channel assistants (web + Discord) with production reliability and quality controls.
+
+- Led durable streaming so clients can disconnect and resume mid-run without losing progress.
+- Built workflow, memory, scheduling, and workspace primitives on Mastra and AI SDK: pause/resume, retries, file storage, sandboxed tools, and skills.
+- Shipped end-to-end RAG: ingest/parse, chunking, and Pinecone retrieval with query/rerank (and graph query where needed).
+- Ran Hono + Better Auth on ECS, with Postgres for core data and S3 for files.
+- Added run/tool traces and cost/latency metrics in ClickHouse, plus scored eval suites (golden prompts + LLM-as-judge) to catch quality regressions before release.
+- Shipped a TipTap @mention file-tagging component for attaching workspace files into agent prompts.
+
+---
+
+### High-Performance Marketing Site, Nov 2025
+
+Lead engineer for a content + search marketing site — performance, CMS, and publish workflow owned end-to-end.
+
+- Next.js + Strapi + Meilisearch content site with **LCP &lt; 0.5s**, **CLS &lt; 0.1**, and PageSpeed Insights **>90**.
+- Hybrid ISR: main pages and the latest 100 articles pre-rendered at build; remaining pages on demand; tag-based revalidation via Strapi webhooks so publishes go live without full rebuilds.
+- Built a custom Strapi plugin for generative AI content creation with AI SDK.
+- Accessibility and SEO as ship criteria: semantic structure, keyboard-safe nav/forms, Lighthouse + axe checks; metadata/OG, canonicals, sitemap, robots.txt, and Article JSON-LD from CMS.
+- Turborepo on AWS ECS with SST, API Gateway, and S3 media; interactive UI with TanStack Query prefetch/hydration and TanStack Form + Zod mutations.
+
+---
+
+### React Native Membership Platform, Apr 2024
+
+- Led Figma design and frontend app development for a catering-brand membership app (digital card, points, offers); shipped iOS and Android to the App Store and Play Store.
+- Also responsible for backend maintenance: Express API and a Next.js admin panel.
+- Integrated typed REST clients from OpenAPI/Swagger; Firebase Cloud Messaging for push notifications and deep-linked campaigns (promos and milestones).
+- Maintained **>99.5%** crash-free sessions post-launch (Sentry).
+- Cut list jank with FlashList; kept inactive tabs cheap via react-native-screens freeze and deferred mounts; reserved Reanimated for native-thread transitions.
+- Shortened image loading in feeds by caching remote images and avoiding full-resolution assets in long lists.
+
+<br />
+
+---
+
+## Other Work
+
+Also shipped a health & wellness RAG agent (Next.js, Langchain, Shopify API), restaurant loyalty and membership apps (React Native), a photobooth event app (React Native, Skia, Next.js), a content platform with CMS (Next.js, Strapi), campaign/event and e-commerce sites (Next.js, Sanity / Strapi, Shopify GraphQL), an RBAC resource system (Next.js), a homebound elderly care app (Flutter), and a book ordering system (Laravel + React).
+
+<br />
+
+---
+
+## Skills
+
+- **Languages**: TypeScript, Python
+- **Frontend**: React, Next.js, React Native, Expo, TanStack Query, Framer Motion, Tailwind CSS, shadcn/ui, Storybook, Figma, MDX
+- **Backend**: Hono, Drizzle, OpenAPI, tRPC, GraphQL, Scalar, Strapi, Sanity, Meilisearch, Algolia, Pinecone
+- **AI**: Mastra, AI SDK, Langchain, Strands
+- **Data**: Postgres, DynamoDB
+- **Testing**: Cypress, Vitest, React Testing Library, Lighthouse, axe
+- **DevOps**: Docker, SST, Terraform, AWS, Vercel, Turborepo
+
+<br />
+
+---
+
+## Qualifications
+
+- AWS Solutions Architect Associate, 2026
+- AWS Cloud Practitioner, 2025
+
+<br />
+
+---
+
+## Education
+
+### University College London
+
+- MPharm Pharmacy, 2016 – 2020 — First Class Honours
+- Registered Pharmacist, GPhC, 2021 - Present
+- Career switch into software; comfortable in rigorous, detail-heavy problem spaces
+
+<br />
+
+---
+
+You can also download my resume [here](/resume.pdf).
