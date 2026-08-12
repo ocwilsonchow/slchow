@@ -1,5 +1,27 @@
 @import "../../../../packages/ds/src/styles/globals.css";
+@import "fumadocs-ui/css/lib/base.css";
+@import "fumadocs-ui/css/generated/shared.css";
 @source "../**/*.{ts,tsx}";
+
+@theme inline {
+  --color-fd-background: var(--surface-canvas);
+  --color-fd-foreground: var(--content-ink);
+  --color-fd-primary: var(--content-accent);
+  --color-fd-primary-foreground: var(--content-ink-on-accent);
+  --color-fd-muted: var(--surface-alpha);
+  --color-fd-muted-foreground: var(--content-body-on-popover);
+  --color-fd-popover: var(--surface-popover);
+  --color-fd-popover-foreground: var(--content-ink-on-popover);
+  --color-fd-card: var(--surface-popover);
+  --color-fd-card-foreground: var(--content-ink-on-popover);
+  --color-fd-accent: var(--surface-alpha);
+  --color-fd-accent-foreground: var(--content-ink-on-popover);
+  --color-fd-secondary: var(--surface-alpha);
+  --color-fd-secondary-foreground: var(--content-body-on-popover);
+  --color-fd-border: var(--stroke-soft);
+  --color-fd-ring: var(--content-ink-on-popover);
+  --color-fd-overlay: var(--surface-backdrop);
+}
 
 .shiki code span {
   color: var(--shiki-light);

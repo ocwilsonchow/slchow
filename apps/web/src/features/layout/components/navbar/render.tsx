@@ -127,28 +127,33 @@ export function RenderNewNavbar({
             <div className="h-3" />
           </Navbar.StaggerList>
         </Navbar.Content>
-        <Navbar.Trigger>
-          <div className="flex items-center justify-center gap-4">
-            <Image
-              src={profilePicture}
-              alt={tA11y("profileAlt")}
-              width={28}
-              height={28}
-              sizes="28px"
-              priority
-              className="rounded-full"
-            />
-            <div className="flex items-center gap-1.5 font-semibold">
-              <div>wilson</div>
-              <div aria-hidden className="text-content-body-on-popover text-xs">
-                /
-              </div>
-              <div className="text-content-body-on-popover lowercase">
-                {pathLabel}
+        <div className="flex items-center gap-1 p-1">
+          <Navbar.Trigger>
+            <div className="flex items-center justify-center gap-4">
+              <Image
+                src={profilePicture}
+                alt={tA11y("profileAlt")}
+                width={28}
+                height={28}
+                sizes="28px"
+                priority
+                className="rounded-full"
+              />
+              <div className="flex items-center gap-1.5 font-semibold">
+                <div>wilson</div>
+                <div
+                  aria-hidden
+                  className="text-content-body-on-popover text-xs"
+                >
+                  /
+                </div>
+                <div className="text-content-body-on-popover lowercase">
+                  {pathLabel}
+                </div>
               </div>
             </div>
-          </div>
-        </Navbar.Trigger>
+          </Navbar.Trigger>
+        </div>
       </Navbar.Frame>
     </Navbar.Root>
   )

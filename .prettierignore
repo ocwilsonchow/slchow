@@ -11,3 +11,4 @@ sst-env.d.ts
 **/sst-env.d.ts
 bun.lock
 package-lock.json
+apps/web/public/search-index/

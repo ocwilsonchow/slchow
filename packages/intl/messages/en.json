@@ -28,6 +28,26 @@
     "socials": "Socials",
     "tableOfContents": "Table of contents"
   },
+  "search": {
+    "title": "Search",
+    "trigger": "Search",
+    "inputLabel": "Search site content",
+    "resultsLabel": "Search results",
+    "placeholder": "Search notes, side quests, and resume…",
+    "close": "Close search",
+    "closeShort": "ESC",
+    "prompt": "Start typing to search the full text of this site.",
+    "noResults": "No results found.",
+    "error": "Search could not be loaded. Please try again.",
+    "navigateHint": "Use <up>Up arrow</up> <down>Down arrow</down> to navigate and <enter>Enter</enter> to open",
+    "shortcutHint": "<modifier>⌘/Ctrl</modifier> <key>K</key>",
+    "headerHint": "<modifier>⌘</modifier> + <key>K</key> to search",
+    "categories": {
+      "notes": "Notes",
+      "works": "Side Quests",
+      "resume": "Resume"
+    }
+  },
   "a11y": {
     "viewImage": "View image full screen",
     "viewImageNamed": "View {alt} full screen",

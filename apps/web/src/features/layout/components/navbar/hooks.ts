@@ -72,29 +72,6 @@ export function useNavbarScrollHide(isMobile: boolean, open: boolean) {
   return isScrollingDown
 }
 
-export function useOpenOnModK(setOpen: Dispatch<SetStateAction<boolean>>) {
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key?.toLowerCase() !== "k") return
-      if (!(event.metaKey || event.ctrlKey)) return
-
-      const target = event.target
-      if (
-        target instanceof HTMLElement &&
-        target.closest('input, textarea, select, [contenteditable="true"]')
-      ) {
-        return
-      }
-
-      event.preventDefault()
-      setOpen(true)
-    }
-
-    document.addEventListener("keydown", onKeyDown)
-    return () => document.removeEventListener("keydown", onKeyDown)
-  }, [setOpen])
-}
-
 type FocusLockOptions = {
   open: boolean
   navRef: RefObject<HTMLElement | null>

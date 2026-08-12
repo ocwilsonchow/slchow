@@ -1,7 +1,7 @@
 /// <reference path="../../.sst/platform/config.d.ts" />
 
 import { cluster } from "./cluster"
-import { router } from "./router"
+import { apiDomain, router } from "./router"
 import { aiGatewayApiKey, betterAuthSecret, databaseUrl } from "./secrets"
 
 export const api = new sst.aws.Service("API", {
@@ -29,4 +29,5 @@ export const api = new sst.aws.Service("API", {
   },
 })
 
-router.route("/", api.url)
+// Route API traffic on the shared Router subdomain (api.slchow.com / api.{stage}.slchow.com).
+router.route(`${apiDomain}/`, api.url)

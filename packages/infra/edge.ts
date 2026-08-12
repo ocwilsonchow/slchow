@@ -4,8 +4,8 @@ import { password, username } from "./secrets"
 
 export const isProd = $app.stage === "production"
 
-// Password-protect non-prod only via CloudFront Basic Auth
-export const edge = !isProd
+/** Non-prod CloudFront Basic Auth for the shared Router. */
+export const basicAuthEdge = !isProd
   ? (() => {
       const basicAuth = $resolve([username.value, password.value]).apply(
         ([username, password]) =>

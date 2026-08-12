@@ -16,6 +16,9 @@
 # Generated from packages/content/design (see scripts/sync-design-assets.ts)
 /public/design-assets/
 
+# Generated Orama search indexes (see scripts/build-search-index.ts)
+/public/search-index/
+
 # next.js
 /.next/
 /out/

@@ -14,6 +14,7 @@ import { RootLayout } from "@/features/layout/components/root"
 import { SkipLink } from "@/features/layout/components/skip-link"
 import { SmoothScroll } from "@/features/layout/components/smooth-scroll"
 import { StylesProvider } from "@/features/layout/components/styles"
+import { SiteSearchProvider } from "@/features/search/components/search-provider"
 import { routing } from "@/i18n/routing"
 import { getHtmlLang, getOpenGraphLocale, OG_IMAGE } from "@/lib/metadata"
 import { getCategoryPages } from "@/lib/source"
@@ -90,14 +91,16 @@ export default async function LocaleLayout({ children, params }: Props) {
             <SmoothScroll>
               <TanstackProviders>
                 <NextIntlClientProvider locale={locale} messages={messages}>
-                  <SkipLink />
-                  {/* <RenderNavbar /> */}
-                  <RenderNewNavbar
-                    notesCount={notesCount}
-                    designsCount={designsCount}
-                  />
-                  {/* <div className="fixed bottom-0 left-0 right-0 h-24 bg-linear-to-t pointer-events-none from-surface-canvas to-surface-canvas/0" /> */}
-                  <RootLayout>{children}</RootLayout>
+                  <SiteSearchProvider>
+                    <SkipLink />
+                    {/* <RenderNavbar /> */}
+                    <RenderNewNavbar
+                      notesCount={notesCount}
+                      designsCount={designsCount}
+                    />
+                    {/* <div className="fixed bottom-0 left-0 right-0 h-24 bg-linear-to-t pointer-events-none from-surface-canvas to-surface-canvas/0" /> */}
+                    <RootLayout>{children}</RootLayout>
+                  </SiteSearchProvider>
                 </NextIntlClientProvider>
               </TanstackProviders>
             </SmoothScroll>
