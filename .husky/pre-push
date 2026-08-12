@@ -1,2 +1,10 @@
+#!/usr/bin/env sh
+set -e
+
+echo "→ pre-push: lint"
 bun run lint
+
+echo "→ pre-push: format check"
 bun run format:check
+
+echo "→ pre-push: ok"

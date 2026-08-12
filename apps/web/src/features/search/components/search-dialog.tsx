@@ -10,16 +10,20 @@ import {
   SearchDialogFooter,
   SearchDialogHeader,
   SearchDialogIcon,
-  SearchDialogInput,
   SearchDialogList,
   SearchDialogListItem,
   SearchDialogOverlay,
   type SearchItemType,
   type SharedProps,
+  useSearch,
 } from "fumadocs-ui/components/dialog/search"
 import { ArrowDownIcon, ArrowUpIcon, CornerDownLeftIcon } from "lucide-react"
 import { useLocale, useTranslations } from "next-intl"
-import { type ReactNode, useMemo } from "react"
+import {
+  type ComponentPropsWithoutRef,
+  type ReactNode,
+  useMemo,
+} from "react"
 import { createSearchDatabase } from "@/lib/search-tokenizer"
 
 const SEARCH_OPTIONS = {
@@ -33,6 +37,27 @@ function Kbd({ children }: { children: ReactNode }) {
     <kbd className="inline-flex h-5 min-w-5 items-center justify-center rounded border border-stroke-soft/75 bg-surface-alpha px-1 font-mono text-[10px] leading-none text-content-ink-on-popover">
       {children}
     </kbd>
+  )
+}
+
+function LocalizedSearchInput({
+  className,
+  ...props
+}: ComponentPropsWithoutRef<"input">) {
+  const t = useTranslations("search")
+  const { search, onSearchChange } = useSearch()
+
+  return (
+    <input
+      {...props}
+      value={search}
+      onChange={(e) => onSearchChange(e.target.value)}
+      placeholder={t("placeholder")}
+      className={cn(
+        "w-0 flex-1 bg-transparent text-lg focus-visible:outline-none",
+        className
+      )}
+    />
   )
 }
 
@@ -177,12 +202,11 @@ export function SiteSearchDialog(props: SharedProps) {
             className="text-content-body-on-popover size-4"
             aria-hidden
           />
-          <SearchDialogInput
+          <LocalizedSearchInput
             aria-label={t("inputLabel")}
             autoComplete="off"
             autoFocus
             className="text-content-ink-on-popover placeholder:text-content-body-on-popover"
-            placeholder={t("placeholder")}
           />
           <SearchDialogClose className="border-stroke-soft/75 bg-surface-alpha text-content-body-on-popover hover:text-content-ink-on-popover text-xs px-1 py-0.5">
             {t("closeShort")}
