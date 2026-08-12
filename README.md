@@ -1,8 +1,8 @@
-![hey i'm wilson](https://slchow.com/og-image-02.png)
+![slchow.com](https://slchow.com/og-image-02.png)
 
 # slchow.com
 
-Personal site for [Wilson Chow](https://slchow.com) — notes, works, designs, resume, and contact — plus a Hono / Mastra API for agents and auth. Bun + Turborepo monorepo, deployed to AWS with SST / OpenNext.
+Personal site — notes, works, designs, resume, and contact — plus a Hono / Mastra API for agents and auth. Bun + Turborepo monorepo, deployed to AWS with SST / OpenNext.
 
 **Live:** [slchow.com](https://slchow.com) · **Dev:** [dev.slchow.com](https://dev.slchow.com) (Basic Auth)
 
@@ -54,7 +54,7 @@ sst.config.ts   App entry — currently wires @repo/infra/nextjs
 
 - Node.js 22+
 - [Bun](https://bun.sh/) (`1.3.14`)
-- AWS SSO profile `sinlongchow` (for deploy / `sst dev` cloud resources)
+- AWS SSO profile matching `sst.config.ts` (for deploy / `sst dev` cloud resources)
 - SST secrets for API/auth/db when running those stacks: `DATABASE_URL`, `BETTER_AUTH_SECRET`, `AI_GATEWAY_API_KEY`
 - Non-prod CloudFront Basic Auth secrets: `USERNAME`, `PASSWORD` (via `@repo/infra/secrets`)
 
@@ -62,7 +62,7 @@ sst.config.ts   App entry — currently wires @repo/infra/nextjs
 
 ```sh
 bun install          # also installs Husky git hooks via prepare
-bun run sso          # aws sso login --sso-session=sinlongchow
+bun run sso          # refresh AWS SSO session
 bun dev              # sst dev --stage local → http://localhost:3003
 ```
 
@@ -144,7 +144,7 @@ Infrastructure modules live under `packages/infra/`; `sst.config.ts` currently l
 - Non-production domain: `{stage}.slchow.com` (e.g. `dev.slchow.com`)
 - Non-production stages: CloudFront Basic Auth via edge viewer-request
 - Production keeps one warm OpenNext server instance; other stages use `warm: 0`
-- Region: `ap-east-1`, AWS profile `sinlongchow`
+- Region: `ap-east-1` (AWS profile from `sst.config.ts`)
 - SST `buildCommand` syncs design assets, then OpenNext runs `bun run build` (MDX + search indexes + `next build`)
 
 ```sh
