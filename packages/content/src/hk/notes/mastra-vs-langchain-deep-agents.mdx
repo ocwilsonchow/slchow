@@ -1,0 +1,406 @@
+---
+title: Mastra vs LangChain
+description: 一份實用比較，對照 Mastra 與 LangChain Deep Agents 在 TypeScript workflows、durable sessions、RAG 與 production deployment 上的取捨
+---
+
+**Mastra** 與 **LangChain Deep Agents** 都支援 agents、tools、memory 與 streaming。真正的差異，在於各自把邊界劃在哪裡。
+
+Mastra 是一套整合式 TypeScript framework，面向 AI applications。Agents、workflows、memory、RAG、evaluation、observability、local Studio、server，以及 deployment adapters，共用同一套 programming model。
+
+Deep Agents 是建立在 **LangChain** 與 **LangGraph** 之上、帶有明確意見的 autonomous-agent harness。它提供 files、context offloading、subagents、memory 與 middleware，然後依賴 LangChain 做 retrieval、LangGraph 做 explicit workflows 與 persistence，以及 LangSmith 做 operations。
+
+我的簡短結論：
+
+- 當 agents 是更廣泛應用裡、deterministic workflows 的一部分時，選 **Mastra**。
+- 當你做的是圍繞 files、subagents 與 context management 的 autonomous research、coding 或 operations agents 時，選 **Deep Agents**。
+- 在投入任何一邊之前，先驗證 **durability 與 deployment model**。
+
+<br />
+
+---
+
+## 1. The Core Difference
+
+Deep Agents 不是用來取代 LangChain。`deepagents` package 把 LangChain 與 LangGraph 組裝成預建的 agent harness，包含：
+
+- virtual filesystem
+- automatic context summarization
+- subagent delegation
+- file-based skills 與 memory
+- 用於 retries、approvals 與 guardrails 的 middleware
+
+Mastra 則從更寬的 application boundary 起步。它的 `Agent` 只是眾多 primitives 之一，與 tools、workflows、storage、vector stores、scorers、API routes 與 deployment configuration 並列。
+
+| Area                    | Mastra                                    | Deep Agents                        |
+| ----------------------- | ----------------------------------------- | ---------------------------------- |
+| Primary abstraction     | AI application framework                  | Autonomous agent harness           |
+| Deterministic workflows | First-class                               | Built with LangGraph               |
+| Multi-agent model       | Agents and workflows exposed as tools     | Supervisor delegates to subagents  |
+| RAG                     | Mastra packages and integrations          | LangChain retrieval ecosystem      |
+| Persistence             | Mastra memory and durable execution       | LangGraph checkpointers and stores |
+| File context            | Workspaces, skills, and file-based agents | Foundational virtual filesystem    |
+| Managed runtime         | Mastra Platform                           | Managed Deep Agents or LangSmith   |
+
+Mastra 在 package 層面更廣。若把周邊 LangChain ecosystem 算進去，Deep Agents 的覆蓋面就會變得更廣。
+
+<br />
+
+---
+
+## 2. Building an Agent
+
+兩邊都支援 TypeScript、Zod-validated tools，以及 model streaming。
+
+### Mastra
+
+```ts
+import { Agent } from "@mastra/core/agent"
+import { createTool } from "@mastra/core/tools"
+import { z } from "zod"
+
+const searchDocs = createTool({
+  id: "search-docs",
+  description: "Search product documentation",
+  inputSchema: z.object({ query: z.string() }),
+  execute: async ({ query }) => searchProductDocs(query),
+})
+
+export const supportAgent = new Agent({
+  id: "support-agent",
+  name: "Support Agent",
+  instructions: "Answer from the documentation and cite the evidence.",
+  model: process.env.AGENT_MODEL!,
+  tools: { searchDocs },
+})
+```
+
+### Deep Agents
+
+```ts
+import { createDeepAgent } from "deepagents"
+import { tool } from "langchain"
+import { z } from "zod"
+
+const searchDocs = tool(({ query }) => searchProductDocs(query), {
+  name: "search_docs",
+  description: "Search product documentation",
+  schema: z.object({ query: z.string() }),
+})
+
+export const supportAgent = createDeepAgent({
+  model: process.env.AGENT_MODEL!,
+  systemPrompt: "Answer from the documentation and cite the evidence.",
+  tools: [searchDocs],
+})
+```
+
+差異不在 type safety。Mastra 的 registries 與 shared resource model 感覺像 application framework；Deep Agents 則像在配置一套 graph-backed runtime。
+
+Mastra 的 local server 與 Studio 會暴露 agents、workflows、traces、datasets 與 scorers。一個完整的 Deep Agents application 通常橫跨好幾層：
+
+```text
+Deep Agents → LangChain → LangGraph → LangSmith
+agent harness   tools       state       operations
+```
+
+Mastra 在它設定的路徑上減少概念跳躍。Deep Agents 則在需要更多控制時，提供直接進入 LangGraph 的 escape hatches。
+
+<br />
+
+---
+
+## 3. Deterministic Workflows
+
+Agent 讓 model 決定下一步。Workflow 則把重要 transitions 明確寫在程式碼裡。
+
+當順序本身就是 business rule 時，用 workflow：validate input、collect data、request approval、publish，並記錄結果。
+
+### Mastra workflows
+
+Mastra workflows 是 first-class、typed primitives。Steps 宣告 input 與 output schemas，並可依序、平行、分支或迴圈組合。
+
+```ts
+const articleWorkflow = createWorkflow({
+  id: "article-workflow",
+  inputSchema: z.object({ topic: z.string() }),
+  outputSchema: z.object({ article: z.string() }),
+})
+  .then(research)
+  .then(write)
+  .then(approve)
+  .commit()
+```
+
+Steps 可以 suspend 以等待 human approval，再用 typed payload resume。Model 仍可在 step 內保持彈性，但不會控制整個 process。
+
+### Deep Agents with LangGraph
+
+Subagent delegation 是由 model 導向，不是 deterministic workflow。若要明確的 state 與 transitions，把 Deep Agents 與 LangGraph 組合起來：
+
+```ts
+const graph = new StateGraph(WorkflowState)
+  .addNode("research", runResearchAgent)
+  .addNode("review", reviewDraft)
+  .addEdge(START, "research")
+  .addEdge("research", "review")
+  .addConditionalEdges("review", ({ approved }) =>
+    approved ? END : "research"
+  )
+  .compile()
+```
+
+LangGraph 支援 checkpoints、interrupts、streaming、subgraphs 與 durable execution。代價是要管理 graph state、reducers、nodes 與 transitions。
+
+對 workflow-heavy products 來說，Mastra 通常是更短的路。若團隊已經在用 LangGraph，Deep Agent 也可以成為自訂 state machine 裡一個能力很強的 node。
+
+<br />
+
+---
+
+## 4. Durability and Memory
+
+「Memory」常常把幾個不同需求混在一起：
+
+1. **Message history** 讓對話保持連貫。
+2. **Working memory** 存放 preferences、goals 或 task state。
+3. **Long-term memory** 跨 conversations 共享知識。
+4. **Durable execution** 讓中斷的工作可以恢復。
+5. **Resumable streaming** 讓 client 重新連上仍在執行的 task。
+
+Persisted messages 並不會讓任意程式碼變 durable。
+
+### Mastra
+
+Mastra 的 `Memory` 會把 conversation **thread** 與 user 或 tenant **resource** 關聯起來：
+
+```ts
+const memory = new Memory({
+  storage: new PostgresStore({
+    id: "support-memory",
+    connectionString: process.env.DATABASE_URL!,
+  }),
+  options: {
+    lastMessages: 20,
+    workingMemory: { enabled: true },
+  },
+})
+
+await agent.stream("Continue the migration plan", {
+  memory: {
+    thread: "conversation-42",
+    resource: "user-123",
+  },
+})
+```
+
+Mastra 可以結合 recent messages、semantic recall、structured working memory，以及 observational memory。它的 durable-agent APIs 也能讓 clients 依 run ID 重新連上 long streams。必須撐過 process crash 的工作，應放進 durable 或 workflow-backed execution。
+
+### Deep Agents and LangGraph
+
+LangGraph **checkpointer** 會持久化 thread-scoped graph state：
+
+```ts
+const checkpointer = PostgresSaver.fromConnString(process.env.DATABASE_URL!)
+
+const agent = createDeepAgent({
+  model: process.env.AGENT_MODEL!,
+  checkpointer,
+})
+
+await agent.invoke(
+  { messages: [{ role: "user", content: "Continue the analysis." }] },
+  { configurable: { thread_id: "conversation-42" } }
+)
+```
+
+Checkpointer 存放 conversation state、interrupts 與 resume points。LangGraph **store** 則保存跨 threads 共享的資料。
+
+Deep Agents 把 long-term memory 表示成 files。`StateBackend` 把 scratch files 留在 thread state，而 `StoreBackend` 可以把如 `/memories/` 與 `/skills/` 這類 paths 跨 threads 持久化。
+
+Mastra 提供更多內建 memory strategies。Deep Agents 提供可檢查、可編輯的 filesystem model。在兩套系統裡，identifiers 與 namespaces 都必須來自 authenticated context，而 durable memory 也需要 retention、correction 與 deletion policies。
+
+<br />
+
+---
+
+## 5. RAG
+
+Production RAG system 有分開的 ingestion 與 query paths：
+
+```text
+ingestion → load → chunk → embed → index
+query     → retrieve → filter/rerank → answer with citations
+```
+
+Ingestion 不應在每次 agent request 時執行；一次成功的 vector lookup，也不代表答案已經 grounded。
+
+### Mastra RAG
+
+Mastra 提供 document chunking、透過 AI SDK model interface 的 embedding support、vector-store integrations，以及可直接掛到 agent 上的 vector query tool。
+
+對 TypeScript application 裡的 conventional RAG 來說，這是一條連貫的路徑。Dynamic vector-store resolution 特別有用，可從 authenticated request context 選出 tenant 的 index。
+
+### Deep Agents with LangChain
+
+Deep Agents 使用 LangChain loaders、text splitters、embeddings、retrievers 與 vector stores。當應用需要 specialized document formats 或 retrieval strategies 時，這個 ecosystem 的廣度就很重要。
+
+Deep Agents 對大型結果也有 context-management 優勢：tool 可以把 retrieved content 寫進 backend，並回傳 file paths。Agent 只需檢查相關段落，而不必把每個 token 都放進主 conversation。
+
+無論選哪個 framework，都要評估：
+
+- retrieval recall 與 precision
+- answer groundedness
+- citation correctness
+- end-to-end answer quality
+
+<br />
+
+---
+
+## 6. Files、Subagents 與 Sandboxes
+
+Deep Agents 把 files 與 delegation 放在核心。Supervisor 可以把工作交給 context 隔離的 subagents，讓每位 specialist 執行多次 tool calls，再回傳精簡結果。
+
+它的 backend 提供 virtual filesystem。Sandbox backend 再延伸出 command execution：
+
+- `StateBackend` 存放 thread-scoped virtual files。
+- `FilesystemBackend` 暴露 host directory。
+- `LocalShellBackend` 加入 host shell access。
+- provider-backed sandboxes 在遠端隔離 files 與 processes。
+
+Mastra 可以把 agents 與 workflows 暴露給 routing agent，並掛上包含 filesystem 與可選 sandbox 的 `Workspace`。這適合檔案存取只是眾多能力之一的應用。
+
+Workspace path 不是 security boundary。兩個 framework 的 local shell execution，都只適合 trusted development。Production execution 需要：
+
+- 全新或正確 namespaced 的 sandbox
+- CPU、memory、disk 與 time limits
+- 受控的 network egress
+- 明確的 file-transfer rules
+- 範圍極窄的 credentials
+
+Isolation 保護 host，但本身無法防止 prompt injection、secret exfiltration、runaway cost，或 cross-user leakage。
+
+對 file-heavy autonomous work，Deep Agents 的重心更強。Mastra 則更能把 files 與 execution 自然融入更廣的 application。
+
+<br />
+
+---
+
+## 7. Observability、Evaluation 與 Safety
+
+要運營一個 agent，需要看到最終答案背後的路徑：model calls、tools、retrieval、subagents、workflow transitions、retries、latency、token usage、cost 與 errors。
+
+Mastra 為其 primitives 做 instrumentation，並把 traces 匯出到 Studio、Mastra Platform 或 OpenTelemetry backends。它也把 scorers、datasets 與 experiments 放進同一套 framework model。
+
+Deep Agents 繼承 LangChain 與 LangGraph tracing。LangSmith 再加上 dashboards、alerts、datasets、offline 與 online evaluators、annotation queues，以及 deployment monitoring。
+
+Mastra 的 observability 感覺像 framework primitive。LangSmith 則是更廣的 operations product。兩邊都可以接入既有的 OpenTelemetry pipeline。
+
+對任一 stack，都在五個層級做測試：
+
+1. 不呼叫 model 的 tool contracts
+2. 以 controlled responses 驗證 workflows 或 graphs
+3. 針對 quality 與 groundedness 的 dataset evaluations
+4. 針對 performance 與 failure paths 的 traces
+5. 針對 streaming、persistence、authentication 與 limits 的 deployed behavior
+
+Human approval 在兩套系統都可用，透過 suspended workflow steps、tool approval，或 LangGraph interrupts。Approval 不能取代 runtime isolation。
+
+Agent traces 可能包含 user messages、retrieved documents、tool arguments 與 generated code。應套用與應用資料相同的 access controls、redaction、retention 與 deletion rules。
+
+<br />
+
+---
+
+## 8. Deployment
+
+第一個 agent demo 很容易。Production 需要 durable state、background execution、authentication、secrets、observability，以及能撐過真實基礎設施的 streaming。
+
+### Mastra
+
+最整合的路徑是 Mastra Platform：
+
+```bash
+mastra deploy
+```
+
+Mastra 也可以建出 Node server，或部署到 Cloudflare 這類 platforms。Portability 仍然取決於 state：local SQLite files、vectors、memory 與 workflow data，都必須換成與 runtime 相容的 stores。
+
+### Deep Agents
+
+Deep Agents 主要有三條路徑：
+
+1. **Managed Deep Agents**，一套帶有明確意見的 hosted runtime，可用性需要自行確認。
+2. **LangSmith Deployment**，具備 persistent state、background execution、authentication hooks、webhooks、cron jobs、tracing，以及 Agent Protocol APIs。
+3. **Application-hosted deployment**，例如在 Next.js 或 Cloudflare 上使用 Agent Streaming Protocol。
+
+Application hosting 會把更多責任交給團隊：
+
+- 配置 durable checkpointer 與 store
+- 對每個 thread 做 authenticate 與 authorize
+- 隔離 tenant namespaces
+- 處理 host timeouts 與 background work
+- 把 code execution sandbox 到 web server 之外
+
+| Requirement                 | Mastra                   | Deep Agents                                       |
+| --------------------------- | ------------------------ | ------------------------------------------------- |
+| Simplest hosted path        | Mastra Platform          | Managed Deep Agents                               |
+| Established managed runtime | Mastra Platform          | LangSmith Deployment                              |
+| Custom hosting              | Built server or adapter  | Agent Protocol routes or Agent Server             |
+| Self-hosted durability      | Mastra storage providers | LangGraph checkpointer, store, and infrastructure |
+| Enterprise topology         | Platform-dependent       | Cloud, hybrid, or self-hosted LangSmith           |
+
+對 greenfield TypeScript 團隊來說，Mastra 的整合路徑更乾淨。若團隊已投入 LangChain，或需要 hybrid infrastructure，LangSmith 提供更多 runtime topologies。
+
+<br />
+
+---
+
+## How I Would Choose
+
+<Accordion type="multiple">
+  <AccordionItem value="mastra">
+    <AccordionTrigger>Choose Mastra when</AccordionTrigger>
+    <AccordionContent>
+      - agents 是 deterministic business workflows 的一部分 - 團隊想要一套
+      TypeScript model 同時涵蓋 tools、memory、RAG、evaluation 與 deployment -
+      透過 Studio 做 local inspection 很重要 - 盡快走到 hosted
+      application 很關鍵
+    </AccordionContent>
+  </AccordionItem>
+  <AccordionItem value="deep-agents">
+    <AccordionTrigger>Choose Deep Agents when</AccordionTrigger>
+    <AccordionContent>
+      - 主要任務是 open-ended research、coding、analysis 或 operations -
+      subagent delegation 與 context isolation 是核心 - agent 需要
+      files、skills、memory files 或 sandboxed execution - 團隊已經
+      使用 LangChain、LangGraph 或 LangSmith - graph state、middleware、
+      persistence 或 runtime topology 需要深度客製
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>
+
+<br />
+
+---
+
+我的實務預設：
+
+| Need                            | Default                                         |
+| ------------------------------- | ----------------------------------------------- |
+| Deterministic workflows         | Mastra, unless the team already knows LangGraph |
+| Conventional application memory | Mastra                                          |
+| Filesystem-native memory        | Deep Agents                                     |
+| Straightforward RAG             | Mastra                                          |
+| Specialized retrieval           | Deep Agents with LangChain                      |
+| Coding or research agent        | Deep Agents                                     |
+| Managed operations              | Deep Agents with LangSmith                      |
+| Existing OpenTelemetry pipeline | Either                                          |
+
+沒有放諸四海皆準的贏家。Mastra 優化的是 **AI application**。Deep Agents 優化的是 **autonomous agent harness**，並把它接到更廣的 LangChain stack。
+
+在做選擇前，先 prototype 最難的 production requirement。測試 approval workflows 的 suspend 與 resume、重新連上 long-running research、在真實文件上測量 RAG，並驗證 code execution 的 sandbox 與 credential boundaries。
+
+通過那項測試、且隱藏假設最少的 framework，就是更好的選擇。
+
+最新細節可參考官方 [Mastra agents](https://mastra.ai/docs/agents/overview)、[workflows](https://mastra.ai/docs/workflows/overview)、[memory](https://mastra.ai/docs/memory/overview)、[RAG](https://mastra.ai/docs/rag/overview)、[workspaces](https://mastra.ai/docs/workspace/overview)、[observability](https://mastra.ai/docs/observability/tracing/overview) 與 [deployment](https://mastra.ai/docs/mastra-platform/deploy) 文件。LangChain 方面可看 [Deep Agents](https://docs.langchain.com/oss/javascript/deepagents/overview)、[memory](https://docs.langchain.com/oss/javascript/deepagents/memory)、[RAG](https://docs.langchain.com/oss/javascript/deepagents/rag)、[sandboxes](https://docs.langchain.com/oss/javascript/deepagents/sandboxes)、[LangGraph persistence](https://docs.langchain.com/oss/javascript/langgraph/persistence)、[LangSmith observability](https://docs.langchain.com/langsmith/observability)，以及 [production deployment](https://docs.langchain.com/oss/javascript/deepagents/going-to-production)。

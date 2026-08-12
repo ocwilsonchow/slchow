@@ -1,0 +1,171 @@
+---
+title: Local Storage、Session Storage 与 Cookies
+description: 实务指南：browser storage、其取舍，以及 production 中真正重要的安全边界
+---
+
+Browser storage 看起来简单，直到它成为 authentication flow、multi-tab 体验，或必须撑过 schema changes 的应用的一部分。API 很少是困难之处。真正的决策是 **谁需要这些数据、它应该存活多久，以及它跨越了哪条安全边界**。
+
+<br />
+
+一个术语说明：浏览器并没有名为 `cookieStorage` 的标准 API。有通过 `document.cookie` 的传统 cookies，以及较新的异步 **Cookie Store API**（通过 `cookieStore`）。它们管理的是同一层底层 cookies，但两者的行为都不像 Web Storage。
+
+<br />
+
+## 概览
+
+| Property | `localStorage` | `sessionStorage` | Cookies |
+| --- | --- | --- | --- |
+| Typical lifetime | Until explicitly cleared or evicted | Current tab's page session | Session-based or until their expiry date |
+| Sent to server | No | No | Yes, on matching requests |
+| JavaScript access | Yes, synchronously | Yes, synchronously | Yes, unless marked `HttpOnly` |
+| Best suited for | Persistent, non-sensitive preferences | Temporary state that should survive reloads | Server-managed sessions and small server-readable values |
+
+<br />
+
+实务上的区别是：Web Storage 属于 client，而 cookies 参与 HTTP request lifecycle。两者都不应被当成可信的 database。
+
+<br />
+
+---
+
+## localStorage
+
+`localStorage` 会为一个 origin 在 page reloads 与 browser restarts 之间持久保存数据。它适合少量、非敏感的 preferences，例如 theme、已关闭的提示，或未完成的本地草稿。
+
+<br />
+
+```ts
+const preferences = {
+  theme: "dark",
+  density: "compact",
+}
+
+localStorage.setItem("preferences:v1", JSON.stringify(preferences))
+
+const stored = localStorage.getItem("preferences:v1")
+const parsed = stored ? JSON.parse(stored) : null
+```
+
+<br />
+
+便利也伴随限制。Values 是字符串，access 是同步的，每次 read 或 write 都会阻塞 main thread。Capacity 与 eviction 行为也因浏览器而异。我把它当成小型 persistence 机制，而不是 database。
+
+<br />
+
+任何在该 origin 上执行的 JavaScript 都能读取它。这包括通过 XSS 漏洞引入的恶意代码，所以我不会把 session tokens、passwords，或敏感个人数据存在 `localStorage`。长寿命的 bearer tokens 特别危险，因为窃取该值就足以在别处重用。
+
+<br />
+
+我也会为 stored keys 做 version，并验证 parsed data。已部署的应用会变，而旧的 browser data 仍在：
+
+<br />
+
+```ts
+type Preferences = {
+  theme: "light" | "dark"
+}
+
+function readPreferences(): Preferences | null {
+  try {
+    const value = JSON.parse(localStorage.getItem("preferences:v1") ?? "null")
+
+    if (value?.theme === "light" || value?.theme === "dark") {
+      return value
+    }
+  } catch {
+    // Corrupt or manually edited storage should not break the application.
+  }
+
+  return null
+}
+```
+
+<br />
+
+---
+
+## sessionStorage
+
+`sessionStorage` 有类似的字符串型 API，但它的 lifetime 绑定于 page session。它能撑过同一 tab 的 reloads，通常在该 tab 或 window 关闭时清除。不同 tabs 各自有独立的 storage。
+
+<br />
+
+这使它很适合临时 UI state：多步骤表单、return URL，或应撑过意外 refresh、却不该变成永久 preference 的 filters。
+
+<br />
+
+```ts
+sessionStorage.setItem(
+  "checkout:draft",
+  JSON.stringify({ step: 2, deliveryMethod: "pickup" })
+)
+```
+
+<br />
+
+它不是安全边界。页面上的 scripts 仍然可以读取它，用户也能以让 lifecycle 假设变得不那么明显的方式复制或还原 tabs。我使用 `sessionStorage`，是因为它的 **product lifetime** 匹配数据，而不是因为它比 `localStorage` 更安全。
+
+<br />
+
+---
+
+## Cookies 与 Cookie Store API
+
+Cookies 不同，因为浏览器可以把它们附加到 HTTP requests。这使它们适合在 server 需要该值时使用，尤其是 server-managed sessions。
+
+<br />
+
+安全敏感的 cookies 通常应由 server 创建：
+
+<br />
+
+```http
+Set-Cookie: session=opaque-value; Path=/; HttpOnly; Secure; SameSite=Lax
+```
+
+<br />
+
+`HttpOnly` 阻止 JavaScript 读取 cookie，`Secure` 将其限制在 HTTPS，`SameSite` 有助于限制 cross-site request forgery。这些 attributes 能降低风险，但它们不能取代 output escaping、Content Security Policy、CSRF 分析，或正确的 session expiration 与 rotation。
+
+<br />
+
+传统的 `document.cookie` 是同步的，而且解析起来别扭。**Cookie Store API** 在支持的环境中提供异步 interface：
+
+<br />
+
+```ts
+const preference = await cookieStore.get("theme")
+
+await cookieStore.set({
+  name: "theme",
+  value: "dark",
+  path: "/",
+  sameSite: "lax",
+})
+```
+
+<br />
+
+Client-side code 仍然无法通过 `cookieStore` 读取 `HttpOnly` cookie。这正是限制的意义。我也避免把一般 application state 放进 cookies：它们很小，domain 与 path 规则很微妙，而且随 requests 带上的 cookies 每次都会增加网络开销。
+
+<br />
+
+---
+
+## 我使用的决策
+
+我的默认选择是：
+
+- 当数据只需在当前页面打开期间存活时，使用 **in-memory state**。
+- 当临时 state 应在单一 tab 中撑过 reloads 时，使用 **sessionStorage**。
+- 对应需要跨多次访问持久保存的少量、非敏感 preferences，使用 **localStorage**。
+- 当 server 必须收到该值时使用 **cookies**，尤其是放在 secure、HTTP-only cookie 中的 opaque session identifier。
+- 当应用需要大量数据、结构化 records、transactions，或 offline 行为时，改用 **IndexedDB**。
+
+<br />
+
+关键原则是：以最短的有用 lifetime，存放最少的数据。Browser storage 由用户控制，可被清除或修改，绝不应被当成权威的 source of truth。读取时验证 values、处理 storage failures，并让 server-side authorization 独立于 client 可编辑的任何内容。
+
+<br />
+
+选择 storage 最终是架构决策，而不是 API 偏好。从数据的 lifetime 与信任等级出发；正确的 browser primitive 通常会随之而来。

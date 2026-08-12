@@ -1,0 +1,784 @@
+---
+title: 深入理解 React
+description: Elements、Fibers、update queues、lanes、reconciliation、commits、Hooks、Suspense 与 hydration 如何组成 React 的 rendering model
+---
+
+React 的公开模型常被概括成 `UI = f(state)`：你描述界面在给定 state 下应长什么样子，当 state 改变时，React 决定如何更新已渲染的输出。
+
+当我不再把一次 render 想成「React 调用我的 component 然后更新 DOM」时，React 变得比较好推理。那个描述跳过了能解释多数意外行为的机制：event handler 里的 stale state、state 在 list items 之间移动、开发时 Effect 跑两次，或 transition 做到一半被放弃。
+
+更有用的模型是：React 维护自己的界面表示。一次 update 被 **scheduled**，React 在 **render phase** 计算可能的下一棵树，然后才在 **commit phase** 发布结果。
+
+<br />
+
+```text
+event, promise, or external store
+  → enqueue an update
+  → assign a priority
+  → render and reconcile a possible next tree
+  → commit the finished changes
+  → let the browser paint
+```
+
+<br />
+
+这篇文章沿着那条路径，从 JSX 走到 pixels。有些概念——render purity、state snapshots、以 type 与 key 决定 identity，以及 render/commit 分割——属于 React 的公开心智模型。像 **Fiber**、**lanes**、`beginWork` 与 effect flags 这类名称描述的是 React 19.2 的实现。它们有助于理解 React，但应用代码不应依赖它们。
+
+<br />
+
+---
+
+## 1. JSX 产生的是描述，不是 DOM Nodes
+
+JSX 是描述 UI 的语法。现代 JSX transform 会把这段：
+
+<br />
+
+```tsx
+function Greeting({ name }: { name: string }) {
+  return <h1 className="greeting">Hello, {name}</h1>
+}
+```
+
+<br />
+
+转成调用 JSX runtime、建立一个 **React element**。概念上，结果类似：
+
+<br />
+
+```ts
+{
+  type: "h1",
+  key: null,
+  props: {
+    className: "greeting",
+    children: ["Hello, ", name],
+  },
+}
+```
+
+<br />
+
+这个对象是描述，不是 `<h1>` element，也不是 Fiber。它说明：若 React 选择 commit 这次 render，应该存在什么。
+
+Component element 的 `type` 是 function 或 class：
+
+<br />
+
+```tsx
+const element = <Greeting name="Ada" />
+```
+
+<br />
+
+React 稍后在 rendering 时调用 `Greeting`，并用它返回的 elements 继续构建描述。直接调用 component——`Greeting({ name: "Ada" })`——会绕过 React 的 component identity 与 Hook bookkeeping，所以 components 应出现在 JSX 里。
+
+React elements 是便宜、immutable 的 snapshots。建立一个并不会 mount 任何东西、跑 Effect，或碰 DOM。React 可能为一次永远不会 commit 的 render 建立并检查许多 elements。
+
+因此值得分开看待三棵不同的树：
+
+<br />
+
+```text
+React elements   declarative descriptions returned by components
+Fiber tree       React's persistent bookkeeping and unit-of-work tree
+Host tree        DOM nodes, native views, or another renderer's output
+```
+
+<br />
+
+Host tree 取决于 renderer：`react-dom` 产生 DOM nodes，React Native 产生 native views，React Three Fiber 建立 Three.js scene graph。React 本身对 renderer 无关——element 与 Fiber 层对每个 target 都以同样方式运作。
+
+混淆这些层会导致错误假设。新的 element object 不一定代表新的 DOM node，而一次 component render 也不一定代表可见的浏览器更新。
+
+<br />
+
+---
+
+## 2. Fiber 是 React 的 Unit of Work
+
+React 不能把 state 或 scheduling 信息存在 element objects 上，因为 elements 是暂时的描述。它需要一个能从一次 render 存活到下一次的持久结构。在目前的 renderer 里，那个结构就是 **Fiber tree**。
+
+一个 Fiber 对应 React tree 里的一个 component、host element、text node、Suspense boundary，或其他单位。除了其他字段外，Fiber 会记录：
+
+- 其 component 或 host 的 `type` 与 `key`
+- 进行中 render 的 `pendingProps`
+- 已完成工作的 `memoizedProps` 与 `memoizedState`
+- 指向 parent、first child 与 next sibling 的链接
+- 指向另一棵树中对应 Fiber 的 `alternate`
+- update queue 与 context dependencies
+- 代表 pending priorities 的 lanes
+- 描述 commit 期间需要工作的 flags
+- `stateNode`，例如 host Fiber 对应的 DOM node
+
+React 并非一直如此运作。在 React 16 之前，reconciliation 以一次对 component tree 的递归遍历执行——也就是 "stack reconciler"。一旦 rendering 开始，通常无法停到遍历完成为止。
+
+那个设计对大型 updates 造成问题：昂贵的 render 可能阻塞 input handling 并延迟 paint，React 无法暂停 rendering、无法干净地放弃过时工作，也难以把紧急 updates 排在非紧急 updates 之前。
+
+React 16 引入的 Fiber，把遍历状态从 JavaScript call stack 移到明确的 heap-allocated objects。每个 Fiber 就像 component 或 host element 的 **virtual stack frame**。
+
+Fibers 使用 `child`、`sibling` 与 `return` 链接，而不是嵌套的 JavaScript array：
+
+<br />
+
+```text
+App
+  child → Header
+            sibling → Main
+                        child → Article
+
+Article.return → Main
+Main.return    → App
+```
+
+<br />
+
+这种形状让 React 一次走一个 unit、在 units 之间暂停，并稍后继续。
+
+对于一次 update，React 通常处理两个相关的 Fiber 版本。**current** Fiber 属于屏幕上可见的那棵树。它的 `alternate` 指向 **work-in-progress** Fiber，React 在那里计算候选的下一状态。Work-in-progress Fiber 也指向回 current。
+
+<br />
+
+```text
+current tree                         work-in-progress tree
+
+App ───────────── alternate ───────────── App
+ └─ List ──────── alternate ──────────── List
+     └─ Item ──── alternate ──────────── Item
+```
+
+<br />
+
+React 可以突变其私有的 work-in-progress objects，同时保持 current tree 与 DOM 稳定。若更高优先级的工作到来或 rendering 失败，它可以放弃那次尝试。若 render 完成，完成的 work-in-progress tree 会在 commit 期间变成 current。
+
+这常被称为 **double buffering**，类似先在屏幕外画一帧再呈现。这并不表示 React 总是从头复制整个应用。Fibers 与 subtrees 可以重用，当 inputs 与 pending work 允许时，React 也可以 bail out。
+
+<br />
+
+---
+
+## 3. State Setter 会 Schedule 工作
+
+调用 state setter 并不会突变正在执行的 function 所捕捉的 state 变量。它建立一个 update，并请 React 再次 render。
+
+<br />
+
+```tsx
+function Counter() {
+  const [count, setCount] = useState(0)
+
+  function increment() {
+    setCount(count + 1)
+    console.log(count) // Still 0 in this event handler
+  }
+
+  return <button onClick={increment}>{count}</button>
+}
+```
+
+<br />
+
+`count` binding 属于某一次 `Counter` 的调用。它的 event handler 闭包住那次 render 的值。React 无法改写一个已在执行中的 JavaScript binding。相对地，`setCount` 把一个值排进未来的 render。
+
+在内部，一个 state update 包含 action 与其 lane 这类信息。React 把它 append 到 Hook 的 update queue、从该 Fiber 到 root 标记工作，并确保 root 被 scheduled。确切结构是实现细节，但可观察的模型是稳定的：
+
+<br />
+
+```text
+current state snapshot + queued updates → next state snapshot
+```
+
+<br />
+
+这解释了为什么当多个 updates 依赖前一个结果时，updater functions 很重要：
+
+<br />
+
+```tsx
+function addThree() {
+  setCount((value) => value + 1)
+  setCount((value) => value + 1)
+  setCount((value) => value + 1)
+}
+```
+
+<br />
+
+在下一次 render 期间，React 按 queue 顺序处理这些 functions，把每个结果传给下一个。若 `count` 是 `0`，下一状态就是 `3`。
+
+相对地，三次 `setCount(count + 1)` 都捕捉同一个 `count`，都请求替换值 `1`。它们并不形成一连串 `+1` 操作。
+
+React 也会 **batch** updates，以便在一组相关 setters 之后只 render 一次，而不是暴露半完成的 states。Batching 并不等于把每个 update 合并成一个值：每个 queued update 仍参与计算下一状态。它的意思是 React 延迟到适当的边界才处理。
+
+在某些情况下，React 可以 eagerly 计算 Hook update，并在下一个值依 `Object.is` 等于当前值时跳过 scheduling。那是优化，不是可围绕其建立应用逻辑的保证。即使 React 看起来 bail out，components 与 updater functions 仍必须保持 pure。
+
+<br />
+
+---
+
+## 4. Lanes 代表 Priority
+
+不是每个 update 都同样紧急。在 input 打字应立即有感；刷新大型搜索结果可以等；隐藏的工作可以等更久。
+
+React 19.2 用 **lanes** 表示这些 priorities。一个 lane 是 bitmask 里的一个 bit，一组 lanes 可以同时描述多类 pending 工作。Scheduler 可以选出最高优先级的 pending lanes，而不删除较低优先级的 updates。
+
+<br />
+
+```text
+urgent input update       ─┐
+default data update        ├─ pending lanes on the root
+transition update          ┤
+retry for Suspense        ─┘
+```
+
+<br />
+
+Update 依其来源与 context 取得一个 lane。React 把该 lane 沿 Fiber tree 传播到 root，选择要 render 哪些 lanes，并把被跳过的 updates 留在 queue 给稍后一轮。
+
+这就是为什么 priority 不只是「哪个 callback 先跑」。React 可能开始 render 一个 transition、收到紧急 input update、暂停或丢弃该 transition 尝试、commit 紧急结果，再以最新的 tree 重启 transition。
+
+`startTransition` 把 state updates 标记为非紧急：
+
+<br />
+
+```tsx
+const [query, setQuery] = useState("")
+const [filter, setFilter] = useState("")
+const [isPending, startTransition] = useTransition()
+
+function handleChange(value: string) {
+  setQuery(value)
+
+  startTransition(() => {
+    setFilter(value)
+  })
+}
+```
+
+<br />
+
+Input state 可以紧急更新，而基于 `filter` 的昂贵结果在背景 render。Transition 不会把 JavaScript 移到另一条 thread、不会让昂贵计算变免费，也不会延迟传给 `startTransition` 的 function。它把在该 function 内同步 scheduled 的 React updates 标上 transition priority。
+
+Lanes 的名称与数量可能随 React 版本改变。持久的教训是：React 分开跟踪 **哪些工作在 pending** 与 **现在应尝试哪些工作**。
+
+<br />
+
+---
+
+## 5. Render Phase 计算候选树
+
+一旦 root 在选定的 lanes 上有工作，React 进入 **render phase**。Rendering 回答：「若套用这些 updates，树应长什么样子？」
+
+高层来看，Fiber work loop 做 depth-first traversal：
+
+<br />
+
+```text
+beginWork(parent)
+  → beginWork(first child)
+    → beginWork(grandchild)
+    → completeWork(grandchild)
+  → completeWork(first child)
+→ completeWork(parent)
+```
+
+<br />
+
+`beginWork` 处理 Fiber 的 inputs，并决定其 children 应是什么。对 function component，这是 React 调用 component 并跑其 Hooks 的地方。然后它把返回的 children 与 current children 做 reconcile。
+
+`completeWork` 在 descendants 完成后执行。对 host components，React 可以建立或准备 DOM instances。它也把 subtree flags 与其他信息往 root 冒泡，让 commit phase 能跳过没有 effects 的分支。
+
+Render phase 必须是 **pure**，因为它是 speculative。在 concurrent rendering 里，React 可能 yield 给浏览器、以更新的 inputs 重启、对同一个 component render 不止一次，或丢弃结果而不 commit。
+
+这是不安全的：
+
+<br />
+
+```tsx
+let nextId = 0
+
+function Row() {
+  nextId += 1
+  return <li>Row {nextId}</li>
+}
+```
+
+<br />
+
+可见的 IDs 现在取决于 React 碰巧调用 `Row` 多少次，包括开发检查与被放弃的 renders。
+
+Rendering 可以读 props、state、context，以及 immutable 的外部 snapshots。它可以计算并返回 elements。它绝不能送 analytics、突变共享对象、订阅服务，或直接改 DOM。那些操作描述的是已发生的事，而 render 只描述可能的未来。
+
+<br />
+
+---
+
+## 6. Reconciliation 决定 Identity
+
+在 rendering 期间，React 必须把新的 child elements 与既有的 child Fibers 配对。一般的 tree-diff 算法很贵——任意树的最佳已知算法对 n 个 elements 是 O(n³)——所以 React 主要依 **type**、**position** 与 **key** 使用实用规则，让常见 UI updates 大致以线性时间处理。
+
+对同一位置的 child：
+
+- 相同 type 与相容的 key：重用 Fiber 并保留其 state。
+- 不同 type：移除旧 subtree 并 mount 新的。
+- 不同 key：即使 type 相同，也视为不同 identity。
+
+考虑：
+
+<br />
+
+```tsx
+function Profile({ editing }: { editing: boolean }) {
+  return editing ? <Editor /> : <Preview />
+}
+```
+
+<br />
+
+`Editor` 与 `Preview` 占同一位置但 type 不同，所以切换模式会重置 subtree 的 state。
+
+Key 可以有意地重置 state：
+
+<br />
+
+```tsx
+<Editor key={documentId} documentId={documentId} />
+```
+
+<br />
+
+当 `documentId` 改变时，React 看到新的 identity，并重建 `Editor` subtree。这通常比用 Effect 手动清掉每一块 local state 更干净。
+
+对 arrays，keys 让 React 在 insertions、removals 与 moves 之间配对 siblings：
+
+<br />
+
+```tsx
+{
+  todos.map((todo) => <TodoRow key={todo.id} todo={todo} />)
+}
+```
+
+<br />
+
+Keys 只需在 siblings 之间唯一，且不会作为一般 prop 传下去。Array index 只有在 item identity 真的跟随位置时才安全。若 reorder 改变了哪个 item 拥有 index `0`，React 可能保留 index `0` 的 component state，并把它接到错误的数据上。
+
+一个微妙点是：state 并不「活在 component function 里面」。React 把 state 与父树中特定位置上的 Fiber identity 关联起来。Component functions 会被再次调用；React 通过决定对应 Fiber 是否为同一个概念上的 component，来保留或重置其 state。
+
+<br />
+
+---
+
+## 7. Commit Phase 发布结果
+
+当 React 完成一次 render，它拥有一棵完成的 Fiber tree，以及一组描述必要变更的 flags。然后它进入 **commit phase**。
+
+与 concurrent rendering 不同，对一个 root 来说 committing 是同步的。一旦 React 开始发布完成的树，它不会显示一半这次 commit、一半另一次 commit。
+
+简化的 commit 顺序是：
+
+<br />
+
+```text
+before-mutation work
+  → DOM mutations and deletions
+  → current tree switches to the finished tree
+  → refs and layout effects
+  → browser gets an opportunity to paint
+  → passive effects
+```
+
+<br />
+
+确切的内部 functions 更细，但这个顺序解释了公开 APIs：
+
+- `getSnapshotBeforeUpdate` 在 mutations 正前方读取 host 信息。
+- React 在 mutation work 期间插入、更新与移除 host nodes。
+- Ref callbacks 与 `useLayoutEffect` 在浏览器通常画面之前观察已 commit 的 DOM。
+- `useEffect` 是 passive，通常在 paint 之后执行，虽然对某些 interaction-driven updates，React 可能更早 flush 它。
+
+Layout work 会阻塞 paint，所以应保留给必须在用户看到该帧之前完成的测量或视觉修正：
+
+<br />
+
+```tsx
+useLayoutEffect(() => {
+  const rectangle = tooltipRef.current?.getBoundingClientRect()
+  setTooltipHeight(rectangle?.height ?? 0)
+}, [])
+```
+
+<br />
+
+多数同步应放在 `useEffect`，让浏览器可以先 paint。
+
+Effect cleanup 也是 committing 的一部分。在 React 以变更的 dependencies 再次跑 Effect 之前，它会跑前一次的 cleanup。在 unmount 时，它跑最后的 cleanup。这让每个 Effect 成为独立的同步过程：
+
+<br />
+
+```tsx
+useEffect(() => {
+  const connection = connect(roomId)
+  connection.open()
+
+  return () => connection.close()
+}, [roomId])
+```
+
+<br />
+
+DOM 改变与 pixels 出现不是同一件事。React 在 JavaScript 占有 main thread 时突变 DOM。浏览器可以在那工作 yield 之后做 style、layout 与 paint。因此，长时间的 layout Effect 可能延迟一次 DOM 已更新之 commit 的 paint。
+
+<br />
+
+---
+
+## 8. Hooks 是 Fiber 上的 Positional State
+
+Hooks 看起来像普通 function calls，但它们的 state 由 React 存储，而不是本地 JavaScript 变量。在 React 19.2，function component Fiber 把它的 Hooks 以 linked list 存在 `memoizedState` 上。
+
+概念上：
+
+<br />
+
+```text
+Profile fiber
+  memoizedState
+    → useState hook
+    → useReducer hook
+    → useEffect hook
+    → null
+```
+
+<br />
+
+在下一次 render 期间，Hook dispatcher 依调用顺序走访旧的与 work-in-progress Hook lists。第一次 `useState` 调用拿到第一个 state cell，第二个 Hook 拿到第二个 cell，以此类推。
+
+这就是 Hooks 不能条件式调用的机械原因：
+
+<br />
+
+```tsx
+function Profile({ editable }: { editable: boolean }) {
+  const [name, setName] = useState("")
+
+  if (editable) {
+    useEffect(() => subscribeToDraft(name), [name]) // Incorrect
+  }
+
+  const [saved, setSaved] = useState(false)
+  // ...
+}
+```
+
+<br />
+
+若 `editable` 改变，条件之后的每个 Hook 都会移位。React 再也无法把调用与正确的 state cells 配对。「只在 top level 调用 Hooks」就是为了保住这个序列。
+
+条件应放在 Hook 里面：
+
+<br />
+
+```tsx
+useEffect(() => {
+  if (!editable) return
+  return subscribeToDraft(name)
+}, [editable, name])
+```
+
+<br />
+
+现在每次 render 的 Hook 序列都相同，条件逻辑只决定 Effect 做什么。
+
+每个 state Hook 也拥有一个 update queue。在 rendering 期间，React 把它的 base state 与本次 render 所含 lanes 的 updates 合并。较低优先级的 updates 可以留在 base queue，稍后再 replay。这让紧急 render 可以往前走，而不遗失 transition updates。
+
+Closures 补齐这个模型。每次 render 都建立新的 event handlers 与 Effect setup functions，捕捉那次 render 的 props 与 state。「Stale closure」不是 React 返回了旧变量；而是较旧 render 的代码稍后才执行。
+
+Dependencies 告诉 React 何时 Effect 的同步 inputs 改变了。省略 reactive dependency 不会把它冻在最新值——它会保留较旧的 closure：
+
+<br />
+
+```tsx
+useEffect(() => {
+  const id = setInterval(() => {
+    console.log(count)
+  }, 1000)
+
+  return () => clearInterval(id)
+}, []) // This closure keeps the initial count.
+```
+
+<br />
+
+正确修法取决于意图：包含 `count`、使用 functional state updater、把互动逻辑移到 event handler，或对由 Effect 调用的非 reactive 逻辑使用 Effect Event。关掉 dependency rule 只是隐藏不匹配，而不是改变 closure 语义。
+
+<br />
+
+---
+
+## 9. Bailouts 与 Memoization 跳过工作，不是跳过意义
+
+React 不必为每次 update 调用每个 component。当相关的 props、state、context 与 lanes 显示它或其 descendants 在当前 priority 下不需要工作时，Fiber 可以 bail out。
+
+`memo` 在 component boundary 加上 props 比较。`useMemo` 在 dependencies 保持相等时，在已 commit 的 renders 之间缓存计算。`useCallback` 对 function reference 做同样的事。
+
+这些 APIs 是性能工具，不是语义保证：
+
+<br />
+
+```tsx
+const visibleTodos = useMemo(
+  () => expensiveFilter(todos, filter),
+  [todos, filter]
+)
+```
+
+<br />
+
+即使 React 重新计算，计算仍必须正确。即使 component 再次 render，它仍必须正确。Memoization 无法让 impure render 变安全。
+
+父级 render 而子级不 render，或 component render 但其 DOM 不变，也都可能发生。Rendering 表示 React 要求一份描述。只有当 reconciliation 找到必须到达 host tree 的差异时，才会 commit host mutation。
+
+调查性能时，我会分开三个问题：
+
+1. 是否有 update 被 scheduled？
+2. 哪些 components 做了 render work？
+3. 哪些 host changes 与 Effects 被 committed？
+
+把三者都当成「一次 re-render」会让 profiles 与 logs 难解得多。
+
+<br />
+
+---
+
+## 10. Suspense 把等待变成 Render Control Flow
+
+Suspense 让一次 render 可以说树的一部分尚未准备好。在 React 19，`use` 可以读取 Promise：
+
+<br />
+
+```tsx
+function UserProfile({
+  userPromise,
+}: {
+  userPromise: Promise<{ name: string }>
+}) {
+  const user = use(userPromise)
+  return <h2>{user.name}</h2>
+}
+
+function Page({ userPromise }: { userPromise: Promise<{ name: string }> }) {
+  return (
+    <Suspense fallback={<p>Loading profile...</p>}>
+      <UserProfile userPromise={userPromise} />
+    </Suspense>
+  )
+}
+```
+
+<br />
+
+若 Promise 仍 pending，React 会 suspend 那条 rendering path、找到最近的 Suspense boundary，并可以 render 其 fallback。React 跟踪 pending resource，以便它 settle 时可以 schedule retry。
+
+<br />
+
+```text
+render UserProfile
+  → resource is pending
+  → mark nearest Suspense boundary
+  → render or preserve fallback/content
+  → Promise settles
+  → schedule retry
+  → render UserProfile again
+```
+
+<br />
+
+Suspense 本身不会 fetch。Framework 或 cache 必须提供稳定的 Promise 并协调其 lifetime。在每次 client render 建立全新 Promise，可能反复 suspend，因为每次 render 都看到新的 resource。
+
+Transitions 影响 Suspense 揭示什么。对非紧急 navigation，React 可以在准备下一状态时保留已可见的内容在屏幕上，而不是立刻用 fallback 替换。若 transition 被打断，当前已 commit 的 tree 仍可用。
+
+这直接来自 Fiber 的 current/work-in-progress 分割：等待属于候选树；已 commit 的树不必只因另一次 render 未完成就消失。
+
+<br />
+
+---
+
+## 11. Hydration 重用 Server HTML
+
+Server rendering 产生 HTML，但 HTML alone 不包含 React state、event handling，或 client Fiber tree。**Hydration** 在建立 client 表示的同时，把它与既有 host nodes 配对。
+
+<br />
+
+```text
+server
+  React tree → HTML stream → browser displays content
+
+client
+  load JavaScript
+    → create root work
+    → match Fibers to existing DOM
+    → attach event behavior
+    → continue as an interactive React tree
+```
+
+<br />
+
+Hydration 不只是「加上 event listeners」。React 必须走访 component output、重建 state 与 context、把 Fibers 与 host nodes 关联，并验证 client 预期相容的 markup。
+
+Mismatch 表示 server 与 client 为同一棵初始树产生了不同描述：
+
+<br />
+
+```tsx
+function Clock() {
+  return <time>{new Date().toLocaleTimeString()}</time>
+}
+```
+
+<br />
+
+Server 时间与 hydration 时间可能不同。仅浏览器可用的分支、随机值、变动的外部数据、locale 差异，以及无效的 HTML nesting，都会造成类似问题。
+
+修法是让初始 render 确定、把 server snapshot 传给 client，或有意地在 hydration 之后才 render 仅 client 的信息。`suppressHydrationWarning` 是针对已知的一层 text 或 attribute mismatch 的逃生口，不是通用修复机制。
+
+Suspense boundaries 也让 React 能分段协调 streaming 与 hydration。Server 可以在全部内容就绪前送出 shell，client 可以围绕用户互动优先 hydration。Frameworks 多半在更高层暴露这些行为，但底层目标相同：避免整页等待一次全有或全无的 render。
+
+<br />
+
+---
+
+## 12. Strict Mode 测试可重启的代码
+
+在开发时，Strict Mode 有意地做额外工作。它可能调用 render functions 两次、为 Effects 跑额外的 setup-and-cleanup 周期，并重跑 ref callbacks。这些检查在 production 不会以同样方式发生。
+
+这常被描述成 React「render 两次」，但目的更具体：找出在 rendering 重启或同步被 remount 时会坏掉的代码。
+
+Impure render 会自我暴露：
+
+<br />
+
+```tsx
+function StoryTray({ stories }: { stories: string[] }) {
+  stories.push("Create Story") // Mutates the prop during render.
+  return stories.map((story) => <div key={story}>{story}</div>)
+}
+```
+
+<br />
+
+额外的 render 会把项目加两次并揭示突变。正确的 component 建立新数组：
+
+<br />
+
+```tsx
+function StoryTray({ stories }: { stories: string[] }) {
+  const items = [...stories, "Create Story"]
+  return items.map((story) => <div key={story}>{story}</div>)
+}
+```
+
+<br />
+
+没有 cleanup 的 Effect 同样会暴露重复的 subscriptions。解法不是用 ref 压掉第二次 setup。解法是一个让 setup → cleanup → setup 等同于一次真实 setup 的 cleanup。
+
+因此 Strict Mode 是对 concurrent rendering、navigation、state preservation，以及未来 React 功能可能行使之假设的预览。在 render 期间保持 pure、在 Effect cleanup 期间保持对称的代码，不必在意 React 做了多少 speculative 尝试。
+
+<br />
+
+---
+
+## 13. 端到端跟一次 Update
+
+假设用户在搜索栏打字，应用紧急更新 input，同时在 transition 里 filter 一个大型 list。
+
+完整路径是：
+
+1. 浏览器通过 React 的 event system 派发 input event。
+2. Handler 调用 `setQuery`，建立紧急 Hook update。
+3. Handler 调用 `startTransition`，而 `setFilter` 建立 transition update。
+4. 两个 updates 都被 queued，它们的 lanes 传播到 root，React schedule 该 root。
+5. React 先选紧急工作，并建立或重用 work-in-progress Fibers。
+6. 在 `beginWork` 期间，它调用 inputs 或 lanes 需要工作的 components，并处理相关 Hook queues。
+7. Reconciliation 依 type、key 与 position，把返回的 elements 配对到 current child Fibers。
+8. `completeWork` 准备 host changes 并冒泡 effect flags。
+9. React 同步 commit 紧急结果，更新 input DOM 与 layout work。
+10. 浏览器可以 paint 最新的 input 值。
+11. React 尝试 transition lanes。Render 可以在 Fiber units 之间 yield。
+12. 若另一个按键到来，React 可以放弃或暂停这次尝试，并 commit 更新的紧急 input。
+13. 当一次 transition render 完成且未被取代时，React commit 过滤后的 list。
+14. 与 committed work 关联的 Passive Effects 依其 scheduling 执行。
+
+在任何时刻，React 都不会突变较旧 handler 里的 `query` binding。它以新的 snapshots 建立新的 renders。在任何时刻，部分完成的 transition 都不会泄进 DOM。只有完成的 commit 才会改变可见的 host tree。
+
+这一个 lifecycle 把 state snapshots、queues、lanes、Fiber traversal、reconciliation、atomic commits 与 concurrent rendering 连在一起。
+
+<br />
+
+---
+
+## 14. 我用来调试的问题
+
+当 React 行为让我意外时，我会依序想这些问题：
+
+1. **哪个 render 建立了这个 callback？** 它的 closure 包含那次 render 的 props 与 state。
+2. **Setter 拿到的是 replacement 还是 updater？** 重复的 replacements 可能都用同一个 snapshot。
+3. **这个 component 的 identity 是什么？** 检查其 parent position、type 与 key。
+4. **这段代码是在 render 还是 commit 期间跑？** Render 必须 pure；外部同步属于 Effect 或 event。
+5. **React 做了 render、commit，还是两者都做了？** Component 里的 console logs 不能证明 DOM 改变了。
+6. **工作可能被重启过吗？** Strict Mode 与 concurrent rendering 让可重启性可见。
+7. **Effect 是在与外部系统同步吗？** 若不是，那个值可能属于 render 或 event handler。
+8. **所有 reactive Effect dependencies 都声明了吗？** 若没有，很可能在重用较旧的 closure。
+9. **这个 update 是 urgent 还是 transitional？** Priority 影响何时尝试工作，不影响结果正确性。
+10. **Server 的第一次输出与 client 的第一次输出相同吗？** 若否，hydration 无法安全配对它们。
+
+这些问题比加上 `memo`、改 key、压掉 lint rule，或把代码移进 Effect 直到症状消失，更可靠。
+
+<br />
+
+---
+
+## 15. 常见误解
+
+有些关于 Fiber 的想法出现得够多，值得直接纠正。
+
+**「Fiber 就是 virtual DOM。」** 不完全是。如第 1 节的三棵树所示，elements 是 declarative descriptions；Fibers 是 reconciler 对工作与 state 的持久表示。「Virtual DOM」是有用的高层用语，但 React 内部比「一棵简单的 virtual nodes 树」更具体。
+
+**「Fiber 让每次 render 都更快。」** 不一定。Fiber 增加 scheduling 与 bookkeeping。它的主要好处不是单一 render 的原始吞吐；而是在大型或较低优先级 updates 期间优先排序工作、避免阻塞浏览器的能力。
+
+**「Concurrent 就是 parallel。」** 在这个语境下不是。React 仍在 main thread 上协调 JavaScript 工作。如第 4 节所述，concurrency 表示 React 可以交错工作、yield 控制，并丢弃过时的 renders——不是把 rendering 移到另一条 thread。
+
+**「Fiber 就是 React Three Fiber。」** 它们是不同的东西。React Fiber 是 React 内部的 reconciliation 架构。React Three Fiber 是把同一套 component model 应用到 Three.js scene graph 的社区 renderer，并以此命名。
+
+<br />
+
+---
+
+## 最终心智模型
+
+我用的最短且准确的模型是：
+
+<br />
+
+```text
+Elements describe.
+Fibers remember.
+Queues collect.
+Lanes prioritize.
+Rendering computes.
+Reconciliation matches.
+Committing publishes.
+Effects synchronize.
+```
+
+<br />
+
+Components 不会更新自己。它们为一个 state snapshot 返回描述。React 在那些 functions 之外存储持久 state、queue updates，并可能计算多个可能的未来。Reconciliation 决定哪些 component identities 存活。Commit phase 让一个完成的未来成为 current。
+
+Concurrent React 不是叠在上面的另一套 rendering model。它是当 render 保持 pure 且与 commit 分离时才变得可能的事：React 可以暂停、重启、优先排序、suspend，并丢弃工作，而不破坏可见界面。
+
+公开规则来自那个架构。保持 rendering pure，因为它是 speculative。使用稳定的 keys，因为 identity 控制 state。当工作依赖 queued state 时使用 updater functions。把 Effects 当同步，因为它们在 commit 之后执行。不要依赖 render 次数，因为尝试可能被放弃。
+
+至于建立在这个模型上的较新 APIs，见 [What's New in React 19](./react-19-new-features)。主要参考，我会回到 Andrew Clark 的 [React Fiber architecture notes](https://github.com/acdlite/react-fiber-architecture)，以及 React 文档关于 [render and commit](https://react.dev/learn/render-and-commit)、[state snapshots](https://react.dev/learn/state-as-a-snapshot)、[state update queues](https://react.dev/learn/queueing-a-series-of-state-updates)、[preserving state](https://react.dev/learn/preserving-and-resetting-state)、[Effects](https://react.dev/learn/synchronizing-with-effects)、[transitions](https://react.dev/reference/react/useTransition)、[Suspense](https://react.dev/reference/react/Suspense) 与 [hydration](https://react.dev/reference/react-dom/client/hydrateRoot)。
+
+这篇文章中的实现细节对应 React 19.2.7。相关源码在 [`ReactFiber.js`](https://github.com/facebook/react/blob/v19.2.7/packages/react-reconciler/src/ReactFiber.js)、[`ReactFiberWorkLoop.js`](https://github.com/facebook/react/blob/v19.2.7/packages/react-reconciler/src/ReactFiberWorkLoop.js)、[`ReactFiberBeginWork.js`](https://github.com/facebook/react/blob/v19.2.7/packages/react-reconciler/src/ReactFiberBeginWork.js)、[`ReactFiberCompleteWork.js`](https://github.com/facebook/react/blob/v19.2.7/packages/react-reconciler/src/ReactFiberCompleteWork.js)、[`ReactChildFiber.js`](https://github.com/facebook/react/blob/v19.2.7/packages/react-reconciler/src/ReactChildFiber.js)、[`ReactFiberHooks.js`](https://github.com/facebook/react/blob/v19.2.7/packages/react-reconciler/src/ReactFiberHooks.js) 与 [`ReactFiberLane.js`](https://github.com/facebook/react/blob/v19.2.7/packages/react-reconciler/src/ReactFiberLane.js)。那些文件解释今天的机制，不是 API 契约。
