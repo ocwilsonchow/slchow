@@ -231,7 +231,7 @@ function Trigger({
         onClick?.(event)
       }}
       className={cn(
-        "p-1.5 w-full h-9.5 font-medium leading-none rounded-full flex items-center justify-between text-content-ink-on-popover",
+        "px-1.25 w-full h-9 font-medium leading-none rounded-full flex items-center justify-between text-content-ink-on-popover",
         className
       )}
     >
@@ -240,9 +240,9 @@ function Trigger({
         variants={iconVariants}
         initial="hidden"
         animate={open ? "visible" : "hidden"}
-        className="bg-surface-alpha p-1.5 rounded-full"
+        className="bg-surface-alpha border border-stroke-soft/75 p-1.25 rounded-full"
       >
-        <PlusIcon size={16} strokeWidth={4} aria-hidden />
+        <PlusIcon size={14} strokeWidth={4} aria-hidden />
       </motion.div>
     </motion.button>
   )

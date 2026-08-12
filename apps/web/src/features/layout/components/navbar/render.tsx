@@ -138,9 +138,9 @@ function NavbarTriggerLabel() {
       <Image
         src={profilePicture}
         alt={tA11y("profileAlt")}
-        width={28}
-        height={28}
-        sizes="28px"
+        width={26}
+        height={26}
+        sizes="26px"
         priority
         className="rounded-full"
       />
