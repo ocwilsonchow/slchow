@@ -31,7 +31,7 @@ function Root({ className, ...props }: ComponentProps<"div">) {
 function Label({ className, ...props }: ComponentProps<"div">) {
   return (
     <div
-      className={cn("text-xs text-content-body-on-popover my-1.5", className)}
+      className={cn("text-xs text-content-body-on-popover/50 my-1.5", className)}
       {...props}
     />
   )

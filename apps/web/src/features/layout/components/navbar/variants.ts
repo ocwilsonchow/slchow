@@ -3,14 +3,14 @@ import type { Variants } from "motion/react"
 export const listVariants: Variants = {
   hidden: {
     transition: {
-      staggerChildren: 0,
+      staggerChildren: 0.05,
       staggerDirection: -1,
     },
   },
   visible: {
     transition: {
-      staggerChildren: 0,
-      delayChildren: 0.2,
+      staggerChildren: 0.1,
+      delayChildren: 0.25,
     },
   },
 }
@@ -19,15 +19,13 @@ export const itemVariants: Variants = {
   hidden: {
     opacity: 0,
     transition: {
-      ease: "easeInOut",
       duration: 0.25,
     },
   },
   visible: {
     opacity: 1,
     transition: {
-      ease: "easeInOut",
-      duration: 0.4,
+      duration: 0.5,
     },
   },
 }
@@ -62,7 +60,7 @@ export const contentVariants: Variants = {
       delayChildren: 0.2,
       type: "spring",
       stiffness: 250,
-      damping: 32,
+      damping: 30,
     },
   },
 }
