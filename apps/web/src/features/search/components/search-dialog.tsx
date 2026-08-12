@@ -180,6 +180,7 @@ export function SiteSearchDialog(props: SharedProps) {
           <SearchDialogInput
             aria-label={t("inputLabel")}
             autoComplete="off"
+            autoFocus
             className="text-content-ink-on-popover placeholder:text-content-body-on-popover"
             placeholder={t("placeholder")}
           />
