@@ -32,7 +32,9 @@ export function createSearchTokenizer(locale: string): Tokenizer {
       for (const match of normalized.matchAll(TOKEN_RUN)) {
         const value = match[0]
 
-        if (/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u.test(value)) {
+        if (
+          /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u.test(value)
+        ) {
           addCjkNgrams(tokens, value)
           continue
         }

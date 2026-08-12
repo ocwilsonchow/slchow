@@ -1,7 +1,5 @@
 "use client"
 
-import { useSearchContext } from "fumadocs-ui/contexts/search"
-import { SearchIcon } from "lucide-react"
 import Image from "next/image"
 import { useTranslations } from "next-intl"
 import { Fragment } from "react"
@@ -58,27 +56,6 @@ function getPathTitleKey(pathname: string) {
 function LanguageSettingsClose() {
   const { setOpen } = useNavbarContext()
   return <LanguageSettings onBeforeChange={() => setOpen(false)} />
-}
-
-function SearchTrigger() {
-  const { setOpen } = useNavbarContext()
-  const { setOpenSearch } = useSearchContext()
-  const t = useTranslations("search")
-
-  return (
-    <button
-      type="button"
-      aria-label={t("trigger")}
-      title={`${t("trigger")} (${t("shortcutHint")})`}
-      onClick={() => {
-        setOpen(false)
-        setOpenSearch(true)
-      }}
-      className="grid size-7 bg-surface-alpha shrink-0 place-items-center rounded-full"
-    >
-      <SearchIcon size={14} strokeWidth={3.5} aria-hidden />
-    </button>
-  )
 }
 
 export function RenderNewNavbar({

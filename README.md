@@ -2,15 +2,17 @@
 
 # slchow.com
 
-Personal site for [Wilson Chow](https://slchow.com) — notes, works, resume, and contact — plus a Hono / Mastra API for agents and auth. Bun + Turborepo monorepo, deployed to AWS with SST / OpenNext.
+Personal site for [Wilson Chow](https://slchow.com) — notes, works, designs, resume, and contact — plus a Hono / Mastra API for agents and auth. Bun + Turborepo monorepo, deployed to AWS with SST / OpenNext.
 
-**Live:** [slchow.com](https://slchow.com) · **Dev:** [dev.slchow.com](https://dev.slchow.com)
+**Live:** [slchow.com](https://slchow.com) · **Dev:** [dev.slchow.com](https://dev.slchow.com) (Basic Auth)
 
 ## Stack
 
-- [Next.js](https://nextjs.org/) (App Router) + React 19 + Tailwind CSS 4
+- [Next.js](https://nextjs.org/) 16 (App Router) + React 19 + Tailwind CSS 4
 - [next-intl](https://next-intl.dev/) for `en` / `hk` / `cn` / `ja`
-- [Fumadocs MDX](https://www.fumadocs.dev/) for notes, works, and content blocks
+- [Fumadocs](https://www.fumadocs.dev/) MDX for notes, works, and content blocks
+- [Orama](https://orama.com/) (via Fumadocs) for client-side full-text search
+- [Mermaid](https://mermaid.js.org/) for diagrams in MDX
 - [Hono](https://hono.dev/) + [Mastra](https://mastra.ai/) API (agents, workflows, OpenAPI)
 - [Better Auth](https://www.better-auth.com/) + [Drizzle](https://orm.drizzle.team/) / Postgres
 - [TanStack Query](https://tanstack.com/query) + [AI SDK](https://ai-sdk.dev/) on the web client
@@ -27,7 +29,7 @@ apps/
   web/          Next.js site (localhost:3003)
   api/          Hono + Mastra API (localhost:4111)
 packages/
-  content/      MDX source (en / hk / cn / ja: notes, works, blocks)
+  content/      MDX + design assets (en / hk / cn / ja)
   ds/           Shared design system (@repo/ds)
   intl/         next-intl message catalogs (@repo/intl)
   auth/         Better Auth server + client (@repo/auth)
@@ -37,12 +39,24 @@ scripts/        Production verify + a11y smoke
 sst.config.ts   App entry — currently wires @repo/infra/nextjs
 ```
 
+### Web app features (`apps/web`)
+
+| Area    | Notes                                                                         |
+| ------- | ----------------------------------------------------------------------------- |
+| Routes  | Home, resume, notes, works, designs, contact (locale-prefixed)                |
+| Content | Fumadocs MDX from `@repo/content`; Mermaid in notes                           |
+| Search  | ⌘/Ctrl+K; indexes notes, works, and current resume                            |
+| Designs | Gallery assets synced from `packages/content/design` → `public/design-assets` |
+| Motion  | Lenis smooth scroll + Motion / GSAP-friendly layout                           |
+| i18n    | `en`, `hk`, `cn`, `ja` via next-intl + Fumadocs                               |
+
 ## Requirements
 
 - Node.js 22+
 - [Bun](https://bun.sh/) (`1.3.14`)
 - AWS SSO profile `sinlongchow` (for deploy / `sst dev` cloud resources)
 - SST secrets for API/auth/db when running those stacks: `DATABASE_URL`, `BETTER_AUTH_SECRET`, `AI_GATEWAY_API_KEY`
+- Non-prod CloudFront Basic Auth secrets: `USERNAME`, `PASSWORD` (via `@repo/infra/secrets`)
 
 ## Setup
 
@@ -51,6 +65,8 @@ bun install          # also installs Husky git hooks via prepare
 bun run sso          # aws sso login --sso-session=sinlongchow
 bun dev              # sst dev --stage local → http://localhost:3003
 ```
+
+`apps/web` `predev` / `build` sync design assets, run `fumadocs-mdx`, and generate Orama search indexes into `public/search-index/` (gitignored).
 
 Pre-commit runs lint-staged (Prettier on staged `ts` / `tsx` / `md` / `mts` / `json`).
 
@@ -80,16 +96,38 @@ bun run auth:generate   # regenerate Better Auth tables into @repo/db
 | `bun run deploy`            | Deploy to `production` (`slchow.com`)       |
 | `bun run deploy:production` | Production deploy + Playwright verify       |
 | `bun run verify:production` | Crawl production sitemap and check pages    |
-| `bun run a11y:smoke`        | axe-core smoke against key routes           |
+| `bun run a11y:smoke`        | axe-core smoke against key routes + search  |
 | `bun run sso`               | Refresh AWS SSO session                     |
 | `bun run db:*`              | Drizzle generate / migrate / push / studio  |
 | `bun run auth:generate`     | Generate Better Auth schema into `@repo/db` |
+
+**Web-only helpers** (from `apps/web`):
+
+| Command                          | Description                                   |
+| -------------------------------- | --------------------------------------------- |
+| `bun run build:search-index`     | Write `public/search-index/{locale}.json`     |
+| `bun run sync:design-assets`     | Copy design files into `public/design-assets` |
+| `bun run optimize:design-assets` | Optimize design images with Sharp             |
 
 **CI:** GitHub Actions (`.github/workflows/ci.yml`) runs on PRs and pushes to `main` / `develop`. It runs `bun install --frozen-lockfile`, `lint`, `format:check`, `check-types`, and `build`. On completion it posts status to Discord via the `DISCORD_WEBHOOK` repository secret.
 
 ## Content & locales
 
-MDX lives in `packages/content/src/{en,hk,cn,ja}/` under `notes/`, `works/`, and `blocks/`. UI copy is in `packages/intl/messages/{en,hk,cn,ja}.json`. The web app loads content through Fumadocs (`apps/web/source.config.ts`).
+MDX lives in `packages/content/src/{en,hk,cn,ja}/` under `notes/`, `works/`, and `blocks/`. Design source images live in `packages/content/design/`. UI copy is in `packages/intl/messages/{en,hk,cn,ja}.json`. The web app loads content through Fumadocs (`apps/web/source.config.ts`).
+
+## Search
+
+Instant full-text search over **notes**, **works**, and the current resume (`blocks/resume-v2`), with a shared Unicode tokenizer for English and CJK.
+
+Indexes are built at compile time (`apps/web/scripts/build-search-index.ts`) and served as static files:
+
+```text
+public/search-index/{en,hk,cn,ja}.json   →   /search-index/{locale}.json
+```
+
+The client loads the locale file from the CDN (S3 / CloudFront via OpenNext assets). This avoids shipping the Orama dump through a Lambda route handler — large JSON responses exceed AWS Lambda’s sync payload limit and break `/api/search` on OpenNext.
+
+Open with ⌘/Ctrl+K or the header search trigger.
 
 ## API
 
@@ -104,5 +142,13 @@ Infrastructure modules live under `packages/infra/`; `sst.config.ts` currently l
 - App name: `oc2`
 - Production domain: `slchow.com` (www → apex)
 - Non-production domain: `{stage}.slchow.com` (e.g. `dev.slchow.com`)
+- Non-production stages: CloudFront Basic Auth via edge viewer-request
 - Production keeps one warm OpenNext server instance; other stages use `warm: 0`
 - Region: `ap-east-1`, AWS profile `sinlongchow`
+- SST `buildCommand` syncs design assets, then OpenNext runs `bun run build` (MDX + search indexes + `next build`)
+
+```sh
+bun run deploy:dev          # → https://dev.slchow.com
+bun run deploy              # → https://slchow.com
+bun run deploy:production   # production + verify:production
+```
