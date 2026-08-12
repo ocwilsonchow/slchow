@@ -17,6 +17,7 @@
   "dependencies": {
     "@ai-sdk/react": "^4.0.59",
     "@mastra/ai-sdk": "^1.7.2",
+    "@orama/orama": "^3.1.18",
     "@repo/content": "workspace:*",
     "@repo/ds": "workspace:*",
     "@repo/intl": "workspace:*",

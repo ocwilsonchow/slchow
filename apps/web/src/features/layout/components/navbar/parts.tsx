@@ -21,12 +21,7 @@ import {
   SITE_NAV_TRIGGER_ID,
   useNavbarContext,
 } from "./context"
-import {
-  useMediaQuery,
-  useNavbarFocusLock,
-  useNavbarScrollHide,
-  useOpenOnModK,
-} from "./hooks"
+import { useMediaQuery, useNavbarFocusLock, useNavbarScrollHide } from "./hooks"
 import { playNavbarToggleSound, preloadNavbarToggleSound } from "./sound"
 import {
   backdropVariants,
@@ -65,7 +60,6 @@ function Root({ children }: { children: ReactNode }) {
     preloadNavbarToggleSound()
   }, [])
 
-  useOpenOnModK(setOpen)
   useNavbarFocusLock({
     open,
     navRef,
@@ -205,7 +199,7 @@ function Trigger({
         onClick?.(event)
       }}
       className={cn(
-        "p-3 w-full h-12 font-medium leading-none rounded-full flex items-center justify-between text-content-ink-on-popover",
+        "p-1.5 w-full h-9.5 font-medium leading-none rounded-full flex items-center justify-between text-content-ink-on-popover",
         className
       )}
     >

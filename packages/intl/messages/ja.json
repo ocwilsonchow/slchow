@@ -28,6 +28,26 @@
     "socials": "ソーシャル",
     "tableOfContents": "目次"
   },
+  "search": {
+    "title": "検索",
+    "trigger": "検索",
+    "inputLabel": "サイト内を検索",
+    "resultsLabel": "検索結果",
+    "placeholder": "ノート、サイドクエスト、履歴書を検索…",
+    "close": "検索を閉じる",
+    "closeShort": "ESC",
+    "prompt": "入力するとサイトの全文を検索できます。",
+    "noResults": "結果が見つかりません。",
+    "error": "検索を読み込めませんでした。もう一度お試しください。",
+    "navigateHint": "<up>上矢印</up> <down>下矢印</down> で選択し、<enter>Enter</enter> で開く",
+    "shortcutHint": "<modifier>⌘/Ctrl</modifier> <key>K</key>",
+    "headerHint": "<modifier>⌘</modifier> + <key>K</key> で検索",
+    "categories": {
+      "notes": "ノート",
+      "works": "サイドクエスト",
+      "resume": "履歴書"
+    }
+  },
   "a11y": {
     "viewImage": "画像を全画面で表示",
     "viewImageNamed": "{alt} を全画面で表示",

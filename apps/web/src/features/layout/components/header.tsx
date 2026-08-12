@@ -4,6 +4,7 @@ import type { ComponentProps } from "react"
 import { getDesigns } from "@/features/design/get-designs"
 import { Link } from "@/i18n/navigation"
 import { getCategoryPages } from "@/lib/source"
+import { HeaderSearchTrigger } from "./header-search-trigger"
 
 export const Root = ({ ...props }: ComponentProps<"div">) => {
   return (
@@ -21,11 +22,15 @@ export const Info = ({ ...props }: ComponentProps<"div">) => {
   return (
     <div
       {...props}
-      className={cn("text-content-ink font-semibold", props.className)}
+      className={cn(
+        "text-content-ink font-semibold space-y-1.5 flex flex-row items-center justify-between md:items-start md:justify-start md:flex-col",
+        props.className
+      )}
     >
       <h1>
         <Link href="/">Wilson Chow</Link>
       </h1>
+      <HeaderSearchTrigger />
     </div>
   )
 }

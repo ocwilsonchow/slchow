@@ -1,5 +1,7 @@
 "use client"
 
+import { useSearchContext } from "fumadocs-ui/contexts/search"
+import { SearchIcon } from "lucide-react"
 import Image from "next/image"
 import { useTranslations } from "next-intl"
 import { Fragment } from "react"
@@ -56,6 +58,27 @@ function getPathTitleKey(pathname: string) {
 function LanguageSettingsClose() {
   const { setOpen } = useNavbarContext()
   return <LanguageSettings onBeforeChange={() => setOpen(false)} />
+}
+
+function SearchTrigger() {
+  const { setOpen } = useNavbarContext()
+  const { setOpenSearch } = useSearchContext()
+  const t = useTranslations("search")
+
+  return (
+    <button
+      type="button"
+      aria-label={t("trigger")}
+      title={`${t("trigger")} (${t("shortcutHint")})`}
+      onClick={() => {
+        setOpen(false)
+        setOpenSearch(true)
+      }}
+      className="grid size-7 bg-surface-alpha shrink-0 place-items-center rounded-full"
+    >
+      <SearchIcon size={14} strokeWidth={3.5} aria-hidden />
+    </button>
+  )
 }
 
 export function RenderNewNavbar({
@@ -127,28 +150,33 @@ export function RenderNewNavbar({
             <div className="h-3" />
           </Navbar.StaggerList>
         </Navbar.Content>
-        <Navbar.Trigger>
-          <div className="flex items-center justify-center gap-4">
-            <Image
-              src={profilePicture}
-              alt={tA11y("profileAlt")}
-              width={28}
-              height={28}
-              sizes="28px"
-              priority
-              className="rounded-full"
-            />
-            <div className="flex items-center gap-1.5 font-semibold">
-              <div>wilson</div>
-              <div aria-hidden className="text-content-body-on-popover text-xs">
-                /
-              </div>
-              <div className="text-content-body-on-popover lowercase">
-                {pathLabel}
+        <div className="flex items-center gap-1 p-1">
+          <Navbar.Trigger>
+            <div className="flex items-center justify-center gap-4">
+              <Image
+                src={profilePicture}
+                alt={tA11y("profileAlt")}
+                width={28}
+                height={28}
+                sizes="28px"
+                priority
+                className="rounded-full"
+              />
+              <div className="flex items-center gap-1.5 font-semibold">
+                <div>wilson</div>
+                <div
+                  aria-hidden
+                  className="text-content-body-on-popover text-xs"
+                >
+                  /
+                </div>
+                <div className="text-content-body-on-popover lowercase">
+                  {pathLabel}
+                </div>
               </div>
             </div>
-          </div>
-        </Navbar.Trigger>
+          </Navbar.Trigger>
+        </div>
       </Navbar.Frame>
     </Navbar.Root>
   )

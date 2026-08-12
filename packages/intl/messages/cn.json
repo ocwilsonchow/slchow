@@ -28,6 +28,26 @@
     "socials": "社交链接",
     "tableOfContents": "目录"
   },
+  "search": {
+    "title": "搜索",
+    "trigger": "搜索",
+    "inputLabel": "搜索网站内容",
+    "resultsLabel": "搜索结果",
+    "placeholder": "搜索笔记、支线任务和简历…",
+    "close": "关闭搜索",
+    "closeShort": "ESC",
+    "prompt": "输入文字以搜索网站全文。",
+    "noResults": "未找到结果。",
+    "error": "无法加载搜索，请重试。",
+    "navigateHint": "使用 <up>上箭头</up> <down>下箭头</down> 选择，按 <enter>回车</enter> 打开",
+    "shortcutHint": "<modifier>⌘/Ctrl</modifier> <key>K</key>",
+    "headerHint": "按 <modifier>⌘</modifier> + <key>K</key> 搜索",
+    "categories": {
+      "notes": "笔记",
+      "works": "支线任务",
+      "resume": "简历"
+    }
+  },
   "a11y": {
     "viewImage": "全屏查看图片",
     "viewImageNamed": "全屏查看 {alt}",

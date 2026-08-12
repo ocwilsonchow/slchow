@@ -28,6 +28,26 @@
     "socials": "社交連結",
     "tableOfContents": "目錄"
   },
+  "search": {
+    "title": "搜尋",
+    "trigger": "搜尋",
+    "inputLabel": "搜尋網站內容",
+    "resultsLabel": "搜尋結果",
+    "placeholder": "搜尋筆記、支線任務及履歷…",
+    "close": "關閉搜尋",
+    "closeShort": "ESC",
+    "prompt": "輸入文字以搜尋網站全文。",
+    "noResults": "找不到結果。",
+    "error": "無法載入搜尋，請再試一次。",
+    "navigateHint": "使用 <up>向上箭嘴</up> <down>向下箭嘴</down> 選擇，按 <enter>Enter</enter> 開啟",
+    "shortcutHint": "<modifier>⌘/Ctrl</modifier> <key>K</key>",
+    "headerHint": "按 <modifier>⌘</modifier> + <key>K</key> 搜尋",
+    "categories": {
+      "notes": "筆記",
+      "works": "支線任務",
+      "resume": "履歷"
+    }
+  },
   "a11y": {
     "viewImage": "全螢幕檢視圖片",
     "viewImageNamed": "全螢幕檢視 {alt}",
