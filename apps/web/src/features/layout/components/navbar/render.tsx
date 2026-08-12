@@ -33,16 +33,18 @@ const NAV_ITEMS: NavItem[] = [
   // { href: "/contact", labelKey: "contact" },
 ]
 
-type RenderNewNavbarProps = {
-  notesCount: number
-  designsCount: number
-}
-
 const SOCIAL_LINKS = [
   { href: "https://github.com/ocwilsonchow", label: "GitHub" },
   { href: "https://www.linkedin.com/in/wilsonslchow/", label: "LinkedIn" },
   { href: "https://www.instagram.com/duoengineers/", label: "Instagram" },
 ] as const
+
+type NavCounts = {
+  notesCount: number
+  designsCount: number
+}
+
+type SiteNavbarProps = NavCounts
 
 function getPathTitleKey(pathname: string) {
   if (pathname in PATH_TITLE_KEYS) {
@@ -53,22 +55,108 @@ function getPathTitleKey(pathname: string) {
   return null
 }
 
-function LanguageSettingsClose() {
-  const { setOpen } = useNavbarContext()
-  return <LanguageSettings onBeforeChange={() => setOpen(false)} />
+function NavLinks({ counts }: { counts: NavCounts }) {
+  const t = useTranslations("navigation")
+
+  return (
+    <>
+      {NAV_ITEMS.map((item) => {
+        const count = item.countKey ? counts[item.countKey] : null
+        return (
+          <Navbar.StaggerItem key={item.labelKey}>
+            <Navbar.Link href={item.href}>
+              {t(item.labelKey)}
+              {count !== null ? (
+                <>
+                  {" "}
+                  <sup className="text-content-subdued">{count}</sup>
+                </>
+              ) : null}
+            </Navbar.Link>
+          </Navbar.StaggerItem>
+        )
+      })}
+    </>
+  )
 }
 
-export function RenderNewNavbar({
-  notesCount,
-  designsCount,
-}: RenderNewNavbarProps) {
+function NavSettings() {
+  const { setOpen } = useNavbarContext()
+
+  return (
+    <>
+      <Navbar.StaggerItem className="mt-8 mb-3">
+        <ThemeSettings />
+      </Navbar.StaggerItem>
+      <Navbar.StaggerItem className="mb-3">
+        <LanguageSettings onBeforeChange={() => setOpen(false)} />
+      </Navbar.StaggerItem>
+    </>
+  )
+}
+
+function SocialLinks() {
+  const t = useTranslations("navigation")
+
+  return (
+    <Navbar.StaggerItem className="space-y-1 mb-10">
+      <div className="text-xs text-content-body-on-popover/50 mt-1.5">
+        {t("socials")}
+      </div>
+      <div className="flex items-center flex-wrap gap-x-2">
+        {SOCIAL_LINKS.map((social, index) => (
+          <Fragment key={social.href}>
+            {index > 0 ? (
+              <div aria-hidden className="text-content-body-on-popover">
+                /
+              </div>
+            ) : null}
+            <Link
+              href={social.href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:text-content-ink-on-popover"
+            >
+              {social.label}
+            </Link>
+          </Fragment>
+        ))}
+      </div>
+    </Navbar.StaggerItem>
+  )
+}
+
+function NavbarTriggerLabel() {
   const pathname = usePathname()
   const t = useTranslations("navigation")
   const tA11y = useTranslations("a11y")
-  const counts = { notesCount, designsCount }
-
   const pathTitleKey = getPathTitleKey(pathname)
   const pathLabel = pathTitleKey ? t(pathTitleKey) : pathname.replace(/^\//, "")
+
+  return (
+    <div className="flex items-center justify-center gap-4">
+      <Image
+        src={profilePicture}
+        alt={tA11y("profileAlt")}
+        width={28}
+        height={28}
+        sizes="28px"
+        priority
+        className="rounded-full"
+      />
+      <div className="flex items-center gap-1.5 font-semibold">
+        <div>wilson</div>
+        <div aria-hidden className="text-content-body-on-popover text-xs">
+          /
+        </div>
+        <div className="text-content-body-on-popover lowercase">{pathLabel}</div>
+      </div>
+    </div>
+  )
+}
+
+export function SiteNavbar({ notesCount, designsCount }: SiteNavbarProps) {
+  const counts = { notesCount, designsCount }
 
   return (
     <Navbar.Root>
@@ -76,79 +164,14 @@ export function RenderNewNavbar({
       <Navbar.Frame>
         <Navbar.Content>
           <Navbar.StaggerList className="p-5">
-            {NAV_ITEMS.map((item) => {
-              const count = item.countKey ? counts[item.countKey] : null
-              return (
-                <Navbar.StaggerItem key={item.labelKey}>
-                  <Navbar.Link href={item.href}>
-                    {t(item.labelKey)}
-                    {count !== null ? (
-                      <>
-                        {" "}
-                        <sup className="text-content-subdued">{count}</sup>
-                      </>
-                    ) : null}
-                  </Navbar.Link>
-                </Navbar.StaggerItem>
-              )
-            })}
-            <Navbar.StaggerItem className="mt-8 mb-3">
-              <ThemeSettings />
-            </Navbar.StaggerItem>
-            <Navbar.StaggerItem className="mb-3">
-              <LanguageSettingsClose />
-            </Navbar.StaggerItem>
-            <Navbar.StaggerItem className="space-y-1 mb-10">
-              <div className="text-xs text-content-body-on-popover/50 mt-1.5">
-                {t("socials")}
-              </div>
-              <div className="flex items-center flex-wrap gap-x-2">
-                {SOCIAL_LINKS.map((social, index) => (
-                  <Fragment key={social.href}>
-                    {index > 0 ? (
-                      <div aria-hidden className="text-content-body-on-popover">
-                        /
-                      </div>
-                    ) : null}
-                    <Link
-                      href={social.href}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="hover:text-content-ink-on-popover"
-                    >
-                      {social.label}
-                    </Link>
-                  </Fragment>
-                ))}
-              </div>
-            </Navbar.StaggerItem>
+            <NavLinks counts={counts} />
+            <NavSettings />
+            <SocialLinks />
           </Navbar.StaggerList>
         </Navbar.Content>
         <div className="flex items-center gap-1 p-1">
           <Navbar.Trigger>
-            <div className="flex items-center justify-center gap-4">
-              <Image
-                src={profilePicture}
-                alt={tA11y("profileAlt")}
-                width={28}
-                height={28}
-                sizes="28px"
-                priority
-                className="rounded-full"
-              />
-              <div className="flex items-center gap-1.5 font-semibold">
-                <div>wilson</div>
-                <div
-                  aria-hidden
-                  className="text-content-body-on-popover text-xs"
-                >
-                  /
-                </div>
-                <div className="text-content-body-on-popover lowercase">
-                  {pathLabel}
-                </div>
-              </div>
-            </div>
+            <NavbarTriggerLabel />
           </Navbar.Trigger>
         </div>
       </Navbar.Frame>

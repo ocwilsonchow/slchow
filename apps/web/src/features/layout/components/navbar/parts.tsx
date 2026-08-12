@@ -10,6 +10,7 @@ import {
   type ReactNode,
   type SetStateAction,
   useEffect,
+  useEffectEvent,
   useRef,
   useState,
 } from "react"
@@ -36,6 +37,11 @@ import {
   triggerIconVariants,
 } from "./variants"
 
+function useNavbarVariants<T>(normal: T, reduced: T) {
+  const { shouldReduceMotion } = useNavbarContext()
+  return shouldReduceMotion ? reduced : normal
+}
+
 function Root({ children }: { children: ReactNode }) {
   const [open, setOpenState] = useState(false)
   const openRef = useRef(false)
@@ -55,8 +61,9 @@ function Root({ children }: { children: ReactNode }) {
   }
 
   const toggle = () => setOpen((current) => !current)
-  const toggleRef = useRef(toggle)
-  toggleRef.current = toggle
+  const onToggleShortcut = useEffectEvent(() => {
+    toggle()
+  })
 
   useEffect(() => {
     preloadNavbarToggleSound()
@@ -81,7 +88,7 @@ function Root({ children }: { children: ReactNode }) {
       }
 
       event.preventDefault()
-      toggleRef.current()
+      onToggleShortcut()
     }
 
     document.addEventListener("keydown", onKeyDown)
@@ -116,7 +123,8 @@ function Root({ children }: { children: ReactNode }) {
 }
 
 function Backdrop({ className, ...props }: HTMLMotionProps<"button">) {
-  const { open, setOpen, backdropRef, shouldReduceMotion } = useNavbarContext()
+  const { open, setOpen, backdropRef } = useNavbarContext()
+  const variants = useNavbarVariants(backdropVariants, reducedBackdropVariants)
   const t = useTranslations("navigation")
 
   return (
@@ -129,9 +137,7 @@ function Backdrop({ className, ...props }: HTMLMotionProps<"button">) {
         tabIndex={open ? 0 : -1}
         {...(!open ? { inert: true as const } : {})}
         {...props}
-        variants={
-          shouldReduceMotion ? reducedBackdropVariants : backdropVariants
-        }
+        variants={variants}
         initial="hidden"
         animate={open ? "visible" : "hidden"}
         onClick={() => setOpen(false)}
@@ -153,7 +159,9 @@ function Frame({
   const { open, navRef, shouldReduceMotion } = useNavbarContext()
   const t = useTranslations("navigation")
   const isMobile = useMediaQuery("(max-width: 767px)")
-  const isScrollingDown = useNavbarScrollHide(isMobile, open)
+  const shellRef = useRef<HTMLDivElement | null>(null)
+
+  useNavbarScrollHide(shellRef, { isMobile, open, shouldReduceMotion })
 
   return (
     <Portal
@@ -165,13 +173,7 @@ function Frame({
       {...props}
     >
       <motion.div
-        animate={{
-          y: isMobile && isScrollingDown && !open ? "calc(100% + 1rem)" : "0%",
-        }}
-        transition={{
-          duration: shouldReduceMotion ? 0 : 0.3,
-          ease: "easeInOut",
-        }}
+        ref={shellRef}
         className="grid md:grid-cols-2 xl:grid-cols-4"
       >
         <nav
@@ -187,7 +189,8 @@ function Frame({
 }
 
 function Content({ className, children, ...props }: HTMLMotionProps<"div">) {
-  const { open, panelRef, shouldReduceMotion } = useNavbarContext()
+  const { open, panelRef } = useNavbarContext()
+  const variants = useNavbarVariants(contentVariants, reducedContentVariants)
 
   return (
     <motion.div
@@ -196,7 +199,7 @@ function Content({ className, children, ...props }: HTMLMotionProps<"div">) {
       id={SITE_NAV_PANEL_ID}
       aria-hidden={!open}
       {...(!open ? { inert: true as const } : {})}
-      variants={shouldReduceMotion ? reducedContentVariants : contentVariants}
+      variants={variants}
       initial="hidden"
       animate={open ? "visible" : "hidden"}
       className={cn("flex flex-col overflow-hidden", className)}
@@ -212,7 +215,11 @@ function Trigger({
   onClick,
   ...props
 }: Omit<HTMLMotionProps<"button">, "children"> & { children?: ReactNode }) {
-  const { open, toggle, triggerRef, shouldReduceMotion } = useNavbarContext()
+  const { open, toggle, triggerRef } = useNavbarContext()
+  const iconVariants = useNavbarVariants(
+    triggerIconVariants,
+    reducedTriggerIconVariants
+  )
 
   return (
     <motion.button
@@ -233,9 +240,7 @@ function Trigger({
     >
       {children}
       <motion.div
-        variants={
-          shouldReduceMotion ? reducedTriggerIconVariants : triggerIconVariants
-        }
+        variants={iconVariants}
         initial="hidden"
         animate={open ? "visible" : "hidden"}
         className="bg-surface-alpha p-1.5 rounded-full"
@@ -251,11 +256,11 @@ function StaggerList({
   children,
   ...props
 }: HTMLMotionProps<"div">) {
-  const { shouldReduceMotion } = useNavbarContext()
+  const variants = useNavbarVariants(listVariants, reducedListVariants)
 
   return (
     <motion.div
-      variants={shouldReduceMotion ? reducedListVariants : listVariants}
+      variants={variants}
       {...props}
       className={cn("flex flex-col gap-px p-3", className)}
     >
@@ -269,14 +274,10 @@ function StaggerItem({
   children,
   ...props
 }: HTMLMotionProps<"div">) {
-  const { shouldReduceMotion } = useNavbarContext()
+  const variants = useNavbarVariants(itemVariants, reducedItemVariants)
 
   return (
-    <motion.div
-      variants={shouldReduceMotion ? reducedItemVariants : itemVariants}
-      className={className}
-      {...props}
-    >
+    <motion.div variants={variants} className={className} {...props}>
       {children}
     </motion.div>
   )

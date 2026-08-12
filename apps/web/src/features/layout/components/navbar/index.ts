@@ -1,2 +1,2 @@
 export { Navbar } from "./parts"
-export { RenderNewNavbar } from "./render"
+export { SiteNavbar } from "./render"

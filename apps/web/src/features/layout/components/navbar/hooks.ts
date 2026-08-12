@@ -1,13 +1,15 @@
 "use client"
 
 import { useLenis } from "lenis/react"
+import { animate } from "motion/react"
 import {
   type Dispatch,
   type RefObject,
   type SetStateAction,
   useEffect,
+  useEffectEvent,
   useRef,
-  useState,
+  useSyncExternalStore,
 } from "react"
 
 const FOCUSABLE_SELECTOR = [
@@ -31,45 +33,66 @@ function getFocusableElements(container: HTMLElement) {
 }
 
 export function useMediaQuery(query: string) {
-  const [matches, setMatches] = useState(false)
-
-  useEffect(() => {
-    const mediaQuery = window.matchMedia(query)
-    const update = () => setMatches(mediaQuery.matches)
-
-    update()
-    mediaQuery.addEventListener("change", update)
-    return () => mediaQuery.removeEventListener("change", update)
-  }, [query])
-
-  return matches
+  return useSyncExternalStore(
+    (onStoreChange) => {
+      const mediaQuery = window.matchMedia(query)
+      mediaQuery.addEventListener("change", onStoreChange)
+      return () => mediaQuery.removeEventListener("change", onStoreChange)
+    },
+    () => window.matchMedia(query).matches,
+    () => false
+  )
 }
 
-export function useNavbarScrollHide(isMobile: boolean, open: boolean) {
-  const [isScrollingDown, setIsScrollingDown] = useState(false)
-  const isScrollingDownRef = useRef(false)
+type ScrollHideOptions = {
+  isMobile: boolean
+  open: boolean
+  shouldReduceMotion: boolean
+}
 
-  const setScrollingDown = (next: boolean) => {
-    if (isScrollingDownRef.current === next) return
-    isScrollingDownRef.current = next
-    setIsScrollingDown(next)
-  }
+/** Drive scroll-hide via Motion animate — no React state on scroll. */
+export function useNavbarScrollHide(
+  shellRef: RefObject<HTMLElement | null>,
+  { isMobile, open, shouldReduceMotion }: ScrollHideOptions
+) {
+  const hiddenRef = useRef(false)
+  const optionsRef = useRef({ isMobile, open, shouldReduceMotion })
+  optionsRef.current = { isMobile, open, shouldReduceMotion }
 
-  useLenis(
-    ({ scroll, velocity }) => {
-      if (!isMobile || open || scroll <= 0) {
-        setScrollingDown(false)
-        return
+  const setHidden = useEffectEvent((next: boolean) => {
+    if (hiddenRef.current === next) return
+    hiddenRef.current = next
+    const node = shellRef.current
+    if (!node) return
+
+    animate(
+      node,
+      { y: next ? "calc(100% + 1rem)" : "0%" },
+      {
+        duration: optionsRef.current.shouldReduceMotion ? 0 : 0.3,
+        ease: "easeInOut",
       }
+    )
+  })
 
-      if (velocity !== 0) {
-        setScrollingDown(velocity > 0)
-      }
-    },
-    [isMobile, open]
-  )
+  useEffect(() => {
+    if (!isMobile || open) {
+      setHidden(false)
+    }
+  }, [isMobile, open])
 
-  return isScrollingDown
+  useLenis(({ scroll, velocity }) => {
+    const { isMobile: mobile, open: isOpen } = optionsRef.current
+
+    if (!mobile || isOpen || scroll <= 0) {
+      setHidden(false)
+      return
+    }
+
+    if (velocity !== 0) {
+      setHidden(velocity > 0)
+    }
+  }, [])
 }
 
 type FocusLockOptions = {

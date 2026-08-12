@@ -9,7 +9,7 @@ import {
   setRequestLocale,
 } from "next-intl/server"
 import { getDesigns } from "@/features/design/get-designs"
-import { RenderNewNavbar } from "@/features/layout/components/navbar"
+import { SiteNavbar } from "@/features/layout/components/navbar"
 import { RootLayout } from "@/features/layout/components/root"
 import { SkipLink } from "@/features/layout/components/skip-link"
 import { SmoothScroll } from "@/features/layout/components/smooth-scroll"
@@ -97,8 +97,7 @@ export default async function LocaleLayout({ children, params }: Props) {
                   <NextIntlClientProvider locale={locale} messages={messages}>
                     <SiteSearchProvider>
                       <SkipLink />
-                      {/* <RenderNavbar /> */}
-                      <RenderNewNavbar
+                      <SiteNavbar
                         notesCount={notesCount}
                         designsCount={designsCount}
                       />
