@@ -76,7 +76,7 @@ bun dev              # sst dev --stage local → http://localhost:3003
 
 `apps/web` `predev` / `build` sync design assets, run `fumadocs-mdx`, and generate Orama search indexes into `public/search-index/` (gitignored).
 
-Pre-commit runs lint-staged (Prettier on staged `ts` / `tsx` / `md` / `mts` / `json`).
+Pre-commit runs lint-staged: Biome (`check --write`) on staged `apps/web` JS/TS/JSON/CSS, Prettier on other staged `ts` / `tsx` / `md` / `mts` / `json`.
 
 ### Database (local)
 

@@ -34,9 +34,6 @@
     "turbo": "^2.10.5",
     "typescript": "5.9.2"
   },
-  "lint-staged": {
-    "*.{ts,tsx,md,mts,json}": "prettier --write"
-  },
   "engines": {
     "node": ">=22"
   },

@@ -17,9 +17,9 @@ import { StylesProvider } from "@/features/layout/components/styles"
 import { SiteSearchProvider } from "@/features/search/components/search-provider"
 import { routing } from "@/i18n/routing"
 import { getHtmlLang, getOpenGraphLocale, OG_IMAGE } from "@/lib/metadata"
-import { getCategoryPages } from "@/lib/source"
 import { getPostHogProjectToken } from "@/lib/posthog"
 import { PostHogProvider } from "@/lib/posthog-provider"
+import { getCategoryPages } from "@/lib/source"
 import { TanstackProviders } from "@/lib/tanstack-providers"
 
 type Props = {
