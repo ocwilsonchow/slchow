@@ -9,8 +9,8 @@ export const listVariants: Variants = {
   },
   visible: {
     transition: {
-      staggerChildren: 0.1,
-      delayChildren: 0.25,
+      staggerChildren: 0.05,
+      delayChildren: 0.225,
     },
   },
 }
