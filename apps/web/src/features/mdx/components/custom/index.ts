@@ -1,4 +1,5 @@
 export * from "./img"
 export * from "./link"
+export * from "./mermaid"
 export * from "./pre"
 export * from "./typography"

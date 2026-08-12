@@ -33,6 +33,9 @@
     "viewImageNamed": "全螢幕檢視 {alt}",
     "fullScreenImage": "全螢幕圖片",
     "closeFullScreenImage": "關閉全螢幕圖片",
+    "zoomOutDiagram": "縮小圖表",
+    "resetDiagramZoom": "重設圖表縮放",
+    "zoomInDiagram": "放大圖表",
     "profileAlt": "Wilson Chow"
   },
   "notFound": {
@@ -72,7 +75,7 @@
     "body": "歡迎來信：<email>sinlongchow@gmail.com</email>"
   },
   "notes": {
-    "intro": "一些關於我感興趣主題的筆記。與 Grok 4.5、GPT-5.6 Sol 及 Gemini 3.1 Pro 共同撰寫與審核。"
+    "intro": "一些關於我感興趣主題的筆記。與 Grok 4.5、GPT-5.6 Sol 及 Kimi K3 Max 共同撰寫與審核。"
   },
   "designs": {
     "intro": "我喜歡打造用戶介面。以前我花很多時間在 Figma 上。"

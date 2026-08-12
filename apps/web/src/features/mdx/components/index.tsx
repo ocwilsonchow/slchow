@@ -5,8 +5,9 @@ import {
   AccordionTrigger,
 } from "@repo/ds/components/ui/accordion"
 import type { MDXComponents } from "mdx/types"
+import type { ComponentProps } from "react"
 import { MotionCollections } from "@/features/motion/components/collections"
-import { MDXImage, MDXLink, Pre } from "./custom"
+import { MDXImage, MDXLink, Mermaid, Pre } from "./custom"
 import {
   blockquote,
   code,
@@ -57,7 +58,10 @@ export function getMDXComponents(components?: MDXComponents): MDXComponents {
     td,
     ul,
     pre: Pre,
-    img: MDXImage,
+    img: (props) => (
+      <MDXImage {...(props as ComponentProps<typeof MDXImage>)} />
+    ),
+    Mermaid,
     MotionCollections,
     Accordion,
     AccordionItem,

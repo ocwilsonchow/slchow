@@ -19,16 +19,16 @@ The simplified model is:
 
 <br />
 
-```text
-HTML → DOM
-CSS  → CSSOM
-
-DOM + CSSOM
-  → style
-  → layout
-  → paint
-  → compositing
-  → pixels
+```mermaid
+flowchart LR
+  HTML[HTML] --> DOM[DOM]
+  CSS[CSS] --> CSSOM[CSSOM]
+  DOM --> Style[Style]
+  CSSOM --> Style
+  Style --> Layout[Layout]
+  Layout --> Paint[Paint]
+  Paint --> Composite[Compositing]
+  Composite --> Pixels[Pixels]
 ```
 
 <br />
@@ -36,6 +36,25 @@ DOM + CSSOM
 Real browsers pipeline and repeat these stages. The DOM can be built while HTML is still arriving, resources can download concurrently, and the browser can paint before the document is complete. JavaScript may later invalidate style, layout, or paint.
 
 The critical path is therefore a **dependency graph**, not a fixed sequence. A late stylesheet delays rendering. A parser-blocking script delays markup and resource discovery. A large JavaScript task delays painting even when every resource is cached.
+
+<br />
+
+```mermaid
+flowchart TD
+  Nav[Navigation] --> HTMLBytes[HTML bytes arrive]
+  HTMLBytes --> Parse[HTML parser builds DOM]
+  HTMLBytes --> Preload[Preload scanner discovers resources]
+  Preload --> CSSDownload[Download CSS / JS / images]
+  Parse --> CSSOMReady{CSSOM ready?}
+  CSSDownload --> CSSOMReady
+  CSSOMReady -->|No| WaitRender[Cannot paint safely]
+  CSSOMReady -->|Yes| Render[Style → Layout → Paint]
+  Parse --> ScriptBlock{Parser-blocking script?}
+  ScriptBlock -->|Yes| WaitScript[Pause parsing]
+  WaitScript --> ExecJS[Download + execute JS]
+  ExecJS --> Parse
+  ScriptBlock -->|No| Continue[Continue parsing]
+```
 
 <br />
 
@@ -116,6 +135,29 @@ The alternatives have different semantics:
 
 <br />
 
+```mermaid
+sequenceDiagram
+  participant Parser
+  participant Network
+  participant Main as Main thread
+
+  Note over Parser,Main: Classic script
+  Parser->>Network: Discover /legacy.js
+  Parser--xParser: Pause HTML parsing
+  Network-->>Main: Script ready
+  Main->>Main: Execute script
+  Main->>Parser: Resume parsing
+
+  Note over Parser,Main: defer / module
+  Parser->>Network: Discover /app.js
+  Parser->>Parser: Keep parsing HTML
+  Network-->>Main: Script ready
+  Parser->>Main: DOM complete
+  Main->>Main: Execute deferred scripts
+```
+
+<br />
+
 Application code should usually use a module or `defer`. Independent analytics may use `async`.
 
 Deferring a script removes parser blocking, not its CPU cost. The browser still has to transfer, parse, compile, and execute it. Large startup tasks can delay rendering and interaction after the DOM is ready.
@@ -176,6 +218,21 @@ APIs such as `getBoundingClientRect`, `offsetWidth`, and `getComputedStyle` are 
 
 Paint records drawing commands for text, backgrounds, borders, images, shadows, and effects. The browser rasterizes this work into tiles and may place content into composited layers.
 
+<br />
+
+```mermaid
+flowchart TD
+  Change[Property change] --> Q{Which stage?}
+  Q -->|width / height / top / left| Layout[Layout]
+  Layout --> Paint[Paint]
+  Paint --> Composite[Composite]
+  Q -->|color / background / box-shadow| Paint2[Paint]
+  Paint2 --> Composite
+  Q -->|transform / opacity| CompositeOnly[Composite only]
+```
+
+<br />
+
 Animations using `transform` and `opacity` can often run on the compositor without new layout or paint:
 
 <br />
@@ -202,12 +259,17 @@ JavaScript and most rendering work share the main thread. A simplified event-loo
 
 <br />
 
-```text
-run one task
-  → drain microtasks
-  → possibly update rendering
-  → requestAnimationFrame
-  → style, layout, paint, and composite
+```mermaid
+flowchart TD
+  Task[Run one task] --> Micro[Drain microtasks]
+  Micro --> Render{Update rendering?}
+  Render -->|Yes| RAF[requestAnimationFrame]
+  RAF --> Style[Style]
+  Style --> Layout[Layout]
+  Layout --> Paint[Paint]
+  Paint --> Composite[Composite]
+  Render -->|No| Next[Next task]
+  Composite --> Next
 ```
 
 <br />
@@ -293,24 +355,27 @@ On long pages, `content-visibility: auto` can skip offscreen rendering work. CSS
 
 ## 7. Framework Rendering and Hydration
 
-A client-rendered application often creates this waterfall:
+A client-rendered application often delays meaningful content until JavaScript, framework startup, and data fetching complete.
+
+Server rendering moves content and resource references into the HTML, allowing earlier discovery and paint. It does not remove JavaScript cost. A page can paint quickly and then become unresponsive while a large hydration task runs.
 
 <br />
 
-```text
-document
-  → JavaScript
-  → framework startup
-  → data request
-  → DOM
-  → style
-  → layout
-  → paint
+```mermaid
+flowchart LR
+  subgraph CSR["Client render"]
+    C1[HTML shell] --> C2[JS] --> C3[Data] --> C4[Paint]
+  end
+
+  subgraph SSR["Server render + hydrate"]
+    S1[HTML with content] --> S2[Early paint]
+    S1 --> S3[JS download]
+    S3 --> S4[Hydration]
+    S2 --> S4
+  end
 ```
 
 <br />
-
-Server rendering moves content and resource references into the HTML, allowing earlier discovery and paint. It does not remove JavaScript cost. A page can paint quickly and then become unresponsive while a large hydration task runs.
 
 Streaming SSR, selective hydration, islands, and Server Components all target the same problem: reduce startup work and keep non-critical JavaScript out of the initial dependency chain.
 
@@ -341,6 +406,23 @@ For a slow **Largest Contentful Paint**, divide the time into:
 2. **Resource load delay**
 3. **Resource load duration**
 4. **Element render delay**
+
+<br />
+
+```mermaid
+flowchart LR
+  Nav[Navigation] --> TTFB[TTFB]
+  TTFB --> Delay[Resource load delay]
+  Delay --> Duration[Resource load duration]
+  Duration --> Render[Element render delay]
+  Render --> LCP[LCP]
+
+  Delay -.->|late discovery / low priority| Fix1[Expose in HTML earlier]
+  Duration -.->|large asset / slow origin| Fix2[Compress / CDN / resize]
+  Render -.->|CSS / fonts / main thread| Fix3[Unblock style and paint]
+```
+
+<br />
 
 High load delay points to discovery or priority. High load duration points to asset size or origin speed. High render delay points to CSS, fonts, decoding, JavaScript, or main-thread contention.
 
