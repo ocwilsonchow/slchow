@@ -17,6 +17,7 @@ Personal site — notes, works, designs, resume, and contact — plus a Hono / M
 - [Better Auth](https://www.better-auth.com/) + [Drizzle](https://orm.drizzle.team/) / Postgres
 - [TanStack Query](https://tanstack.com/query) + [AI SDK](https://ai-sdk.dev/) on the web client
 - [SST](https://sst.dev/) + [OpenNext](https://open-next.js.org/) on AWS (`ap-east-1`)
+- [PostHog](https://posthog.com/) for page visits / autocapture (production only; client SDK + `/ingest` proxy)
 - Shared CloudFront [`Router`](https://sst.dev/docs/component/aws/router/) fronts the site (and future API subdomains)
 - [Turborepo](https://turborepo.dev/) for workspace tasks
 - [Biome](https://biomejs.dev/) for lint/format in `apps/web`
@@ -62,12 +63,14 @@ sst.config.ts   App entry — currently wires @repo/infra/nextjs
 - AWS SSO profile matching `sst.config.ts` (for deploy / `sst dev` cloud resources)
 - SST secrets for API/auth/db when running those stacks: `DATABASE_URL`, `BETTER_AUTH_SECRET`, `AI_GATEWAY_API_KEY`
 - Non-prod CloudFront Basic Auth secrets: `USERNAME`, `PASSWORD` (via `@repo/infra/secrets`)
+- PostHog analytics (page visits): production only. Set `bunx sst secret set POSTHOG_PROJECT_TOKEN phc_... --stage production` after creating a [PostHog Cloud](https://app.posthog.com) project. The secret is linked to the Next.js site and read via `Resource.POSTHOG_PROJECT_TOKEN` (not initialized on local/dev). If the project API key was exposed outside PostHog/SST, rotate it in PostHog project settings and re-run `sst secret set` for production.
 
 ## Setup
 
 ```sh
 bun install          # also installs Husky git hooks via prepare
 bun run sso          # refresh AWS SSO session
+bunx sst secret set POSTHOG_PROJECT_TOKEN phc_... --stage production   # PostHog (prod only)
 bun dev              # sst dev --stage local → http://localhost:3003
 ```
 
