@@ -3,13 +3,13 @@ import type { Variants } from "motion/react"
 export const listVariants: Variants = {
   hidden: {
     transition: {
-      staggerChildren: 0.025,
+      staggerChildren: 0,
       staggerDirection: -1,
     },
   },
   visible: {
     transition: {
-      staggerChildren: 0.06,
+      staggerChildren: 0,
       delayChildren: 0.2,
     },
   },
@@ -45,9 +45,10 @@ export const reducedItemVariants: Variants = {
 export const contentVariants: Variants = {
   hidden: {
     height: 0,
+
     transition: {
       when: "afterChildren",
-      staggerChildren: 0.06,
+      staggerChildren: 0,
       staggerDirection: -1,
       type: "spring",
       stiffness: 380,
@@ -56,6 +57,7 @@ export const contentVariants: Variants = {
   },
   visible: {
     height: "auto",
+
     transition: {
       delayChildren: 0.2,
       type: "spring",

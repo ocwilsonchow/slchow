@@ -22,10 +22,6 @@ declare module "sst" {
       "type": "sst.sst.Secret"
       "value": string
     }
-    "POSTHOG_PROJECT_TOKEN": {
-      "type": "sst.sst.Secret"
-      "value": string
-    }
     "Router": {
       "type": "sst.aws.Router"
       "url": string
