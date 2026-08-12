@@ -92,16 +92,13 @@ export function RenderNewNavbar({
                 </Navbar.StaggerItem>
               )
             })}
-            <div className="h-8" />
-            <Navbar.StaggerItem>
+            <Navbar.StaggerItem className="mt-8 mb-3">
               <ThemeSettings />
             </Navbar.StaggerItem>
-             <div className="h-3" />
-            <Navbar.StaggerItem>
+            <Navbar.StaggerItem className="mb-3">
               <LanguageSettingsClose />
             </Navbar.StaggerItem>
-            <div className="h-3" />
-            <Navbar.StaggerItem className="space-y-1">
+            <Navbar.StaggerItem className="space-y-1 mb-10">
               <div className="text-xs text-content-body-on-popover/50 mt-1.5">
                 {t("socials")}
               </div>
@@ -125,7 +122,6 @@ export function RenderNewNavbar({
                 ))}
               </div>
             </Navbar.StaggerItem>
-            <div className="h-10" />
           </Navbar.StaggerList>
         </Navbar.Content>
         <div className="flex items-center gap-1 p-1">

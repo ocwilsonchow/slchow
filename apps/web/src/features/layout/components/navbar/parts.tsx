@@ -55,9 +55,37 @@ function Root({ children }: { children: ReactNode }) {
   }
 
   const toggle = () => setOpen((current) => !current)
+  const toggleRef = useRef(toggle)
+  toggleRef.current = toggle
 
   useEffect(() => {
     preloadNavbarToggleSound()
+  }, [])
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) {
+        return
+      }
+      if (event.key !== "m" && event.key !== "M") return
+
+      const target = event.target
+      if (
+        target instanceof HTMLElement &&
+        (target.isContentEditable ||
+          target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.tagName === "SELECT")
+      ) {
+        return
+      }
+
+      event.preventDefault()
+      toggleRef.current()
+    }
+
+    document.addEventListener("keydown", onKeyDown)
+    return () => document.removeEventListener("keydown", onKeyDown)
   }, [])
 
   useNavbarFocusLock({
@@ -277,7 +305,7 @@ function NavLink({
         onClick?.(event)
       }}
       className={cn(
-        "block transition-colors hover:text-content-ink-on-popover py-px font-semibold text-lg lg:text-xl",
+        "block transition-colors rounded-xl hover:text-content-ink-on-popover py-px font-semibold text-lg lg:text-xl",
         isActive
           ? "text-content-ink-on-popover"
           : "text-content-body-on-popover",
