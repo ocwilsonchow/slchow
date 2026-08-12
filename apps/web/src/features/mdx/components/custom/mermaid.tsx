@@ -122,13 +122,16 @@ function MermaidContent({ chart }: { chart: string }) {
   )
 
   useEffect(() => {
+    if (!svg) return
+
     const container = diagramRef.current
     const svgElement = diagramRef.current?.querySelector("svg")
     if (!container || !svgElement) return
 
     const naturalWidth = Number(svgElement.getAttribute("width"))
     const naturalHeight = Number(svgElement.getAttribute("height"))
-    if (!Number.isFinite(naturalWidth) || !Number.isFinite(naturalHeight)) return
+    if (!Number.isFinite(naturalWidth) || !Number.isFinite(naturalHeight))
+      return
 
     const resizeDiagram = () => {
       const styles = getComputedStyle(container)
