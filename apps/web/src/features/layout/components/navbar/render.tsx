@@ -139,11 +139,11 @@ export function RenderNewNavbar({
               className="rounded-full"
             />
             <div className="flex items-center gap-1.5 font-semibold">
-              <div>Wilson</div>
+              <div>wilson</div>
               <div aria-hidden className="text-content-body-on-popover text-xs">
                 /
               </div>
-              <div className="text-content-body-on-popover capitalize">
+              <div className="text-content-body-on-popover lowercase">
                 {pathLabel}
               </div>
             </div>

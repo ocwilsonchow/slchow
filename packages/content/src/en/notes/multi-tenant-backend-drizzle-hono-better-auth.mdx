@@ -12,7 +12,7 @@ A production-grade service needs three layers that agree:
 2. **Request context** — every protected **Hono** handler receives a verified `userId` and `organizationId` (never from a client-controlled header alone)
 3. **Data boundary** — **PostgreSQL** row-level security denies cross-tenant rows even if application code forgets a filter
 
-This note assumes a typed backend with **Hono**, **Better Auth** sessions, **Drizzle**, and **PostgreSQL**. That base stack is covered in [Building Backend APIs with Hono, Drizzle and Zod OpenAPI](/notes/how-i-build-backend-apis). Here the focus is **tenant isolation**.
+This note assumes a typed backend with **Hono**, **Better Auth** sessions, **Drizzle**, and **PostgreSQL**. That base stack is covered in [Backend APIs with Hono, Drizzle, Zod OpenAPI, and SST](/notes/backend-apis-hono-sst). Here the focus is **tenant isolation**.
 
 <br />
 
@@ -680,7 +680,7 @@ If step 6 or 7 fails, the system is not multi-tenant yet. It is a single-tenant 
 
 **Better Auth** organizations provide membership UX: create, invite, roles, active workspace. **Postgres RLS** provides a data plane that does not trust every query author to remember the tenant filter. **Hono** is the place those two meet — typed context, explicit middleware, and handlers that open a tenant-scoped transaction before touching business tables.
 
-Start with a shared schema, static roles, and RLS on every tenant-owned table. Add teams or dynamic access control when a real product requirement appears. Keep deploy, OpenAPI, and Lambda details in the [base backend note](/notes/how-i-build-backend-apis); keep this note about the isolation contract.
+Start with a shared schema, static roles, and RLS on every tenant-owned table. Add teams or dynamic access control when a real product requirement appears. Keep deploy, OpenAPI, and Lambda details in the [backend API note](/notes/backend-apis-hono-sst); keep this note about the isolation contract.
 
 The production bar is simple: forgetting a `WHERE` clause must not become a cross-tenant incident.
 

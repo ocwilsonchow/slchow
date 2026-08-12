@@ -1,0 +1,132 @@
+---
+title: What I Have Learnt as a Frontend Engineer
+description: Four lessons from building and operating production web and mobile products
+date: 2026-08-12
+---
+
+Four years ago, I thought frontend engineering meant turning designs into polished interfaces. Production taught me to look beyond the component: architecture, data freshness, reliability, delivery, and measurable user outcomes are all part of the job.
+
+<br />
+
+The metrics below are project outcomes, not universal benchmarks. What matters is the link between a technical decision and an observable result.
+
+<br />
+
+## Outcomes at a Glance
+
+- **Architecture:** 80% faster page loads, 90% lower search latency, and PageSpeed above 90.
+- **Web performance:** LCP below 0.5 seconds and CLS below 0.1.
+- **Mobile reliability:** More than 99.5% crash-free sessions after launch.
+- **Delivery:** Build and deployment time reduced by more than 50% with SST.
+
+<br />
+
+## Four Lessons
+
+1. **Architecture changes beat local optimizations.** Measure the full path before tuning the React tree.
+2. **Caching is a freshness policy.** Static content, editorial updates, and mutable data have different lifecycles.
+3. **Reliability is user-facing.** Dropped frames, memory growth, loading failures, and crashes interrupt the same journey.
+4. **The delivery system is part of the product.** Shared foundations and safer releases compound across teams.
+
+<br />
+
+<Accordion type="multiple">
+  <AccordionItem value="architecture">
+    <AccordionTrigger>1. Fix the real bottleneck</AccordionTrigger>
+    <AccordionContent>
+      A legacy WordPress stack had become the bottleneck for page delivery and
+      search. We separated its responsibilities:
+
+      - **Strapi / Sanity** managed structured content and editorial workflows
+      - **Meilisearch / Algolia** handled indexing and retrieval
+      - **Next.js** owned rendering, caching, and the user experience
+
+      This reduced page load time by **80%** and search latency by **90%**. The
+      trade-off was explicit ownership of previews, webhooks, indexing, and
+      invalidation. Browser optimization still matters, but the largest gain may
+      sit upstream. See [The Critical Rendering Path in the
+      Browser](/notes/critical-rendering-path-in-the-browser).
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="caching">
+    <AccordionTrigger>2. Match the cache to the data</AccordionTrigger>
+    <AccordionContent>
+      One content platform needed fast public pages, immediate editorial updates,
+      and interactive workspaces. One cache strategy could not serve all three.
+
+      - generate core pages and the latest **100 articles** ahead of time
+      - generate long-tail content on demand
+      - invalidate affected pages by tag when Strapi publishes
+      - prefetch mutable workspace data on the server, then hydrate **TanStack Query**
+      - include the organization and URL filters in query keys to prevent tenant or search collisions
+
+      The content site reached **LCP below 0.5 seconds**, **CLS below 0.1**, and
+      PageSpeed above **90**. Hydration improved delivery; authorization still
+      belonged behind the API.
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="reliability">
+    <AccordionTrigger>3. Remove work users cannot see</AccordionTrigger>
+    <AccordionContent>
+      For an image-heavy React Native membership app, we:
+
+      - recycled long lists with **FlashList**
+      - tuned rendering windows instead of mounting everything eagerly
+      - froze inactive screens and deferred mounts
+      - cached remote images and avoided oversized assets
+      - used **Reanimated** only where native-thread execution helped
+
+      Device profiling and **Sentry** monitoring continued after release. The app
+      maintained more than **99.5% crash-free sessions**, giving us a concrete
+      reliability baseline rather than a launch-day opinion.
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="delivery">
+    <AccordionTrigger>4. Improve how the frontend ships</AccordionTrigger>
+    <AccordionContent>
+      Across **15+ React and React Native applications**, repeated friction became
+      delivery risk. We invested in:
+
+      - shared primitives with **Radix**, **Tailwind CSS**, and reusable hooks
+      - examples and guidance in **Storybook**, **Fumadocs**, and MDX
+      - **Cypress** coverage for critical journeys
+      - infrastructure and deployment configuration in code with **SST**
+
+      SST reduced build and deployment time by **more than 50%**. The 15+
+      applications are portfolio context, not proof of design-system impact; that
+      needs adoption, duplication, onboarding, and regression metrics.
+
+      Related: [Frontend Regression
+      Tests](/notes/frontend-regression-test) and [Using SST to Manage AWS
+      Infrastructure and
+      DevOps](/notes/using-sst-for-aws-infra-and-devops).
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>
+
+<br />
+
+## What “Senior” Means to Me Now
+
+- Measure the **user journey**, not only component render time.
+- Match the **architecture to the bottleneck**, even when it sits outside the frontend repository.
+- Model **freshness and ownership** instead of adding caches reactively.
+- Operate the product **after release** with real reliability signals.
+- Improve the path for the **next engineer** through shared foundations, tests, and safer delivery.
+
+<br />
+
+<Mermaid
+  chart={`flowchart LR
+    baseline[Establish a baseline] --> constraints[Understand constraints]
+    constraints --> decision[Make the trade-off]
+    decision --> ship[Ship safely]
+    ship --> verify[Verify the outcome]`}
+/>
+
+<br />
+
+Framework APIs will change. The judgment behind this loop should remain useful.

@@ -1,0 +1,119 @@
+---
+title: 履歴書
+---
+
+## 概要
+
+5 年の経験を持つフルスタックプロダクトエンジニア。Figma デザインから React / React Native、型付き API、AWS デプロイまでの納品を一貫して担当。15 以上の本番 Web／モバイルアプリをリリースし、クリティカルパスの読み込み時間を最大 **80%**、検索レイテンシを **90%** 削減。現在は持続的ワークフロー、RAG、MCP servers、evals を備えたマルチチャネル agent プラットフォームを主導。**AWS Solutions Architect Associate**。
+
+強み：エンドツーエンドのプロダクトオーナーシップ · React · フロントエンドエンジニアリング · 本番 AI agents · デザインシステム。
+
+スタック：Next.js、React Native、Hono、Drizzle、OpenAPI / tRPC / GraphQL、Mastra、AI SDK、Langchain、Postgres、SST、Terraform、AWS、Vercel；headless CMS と検索は Strapi、Sanity、Meilisearch。
+
+<br />
+
+---
+
+## 職歴
+
+### フルスタックエンジニア、Vioo Company Limited、2022 年 5 月〜現在
+
+並行する複数のクライアント製品の主要エンジニア — デザインからクラウドデプロイまで。ステークホルダーと連携して UX を定義し、本番リリースを届けた。
+
+- 高忠実度 Figma デザインと共有デザインシステムを含む、**15+** の本番 React / React Native アプリをエンドツーエンドで開発・保守。
+- レガシー WordPress を headless CMS（Strapi / Sanity）と検索（Meilisearch / Algolia）に置き換え：読み込み時間 **80%** 削減、検索レイテンシ **90%** 削減、PageSpeed Insights **>90** を達成。
+- Mastra、AI SDK、Langchain で本番 AI agents（workflows、memory、tool calls、observability）をリリース。組み合わせ可能なチャットとツール呼び出し UI を含む。
+- Radix / Tailwind の共有コンポーネント・hook ライブラリを Storybook、Fumadocs、MDX ドキュメント付きで整備し、複数クライアントアプリで再利用して UI の一貫性と納品速度を向上。
+- Hono、Drizzle、OpenAPI、tRPC で AWS Lambda / API Gateway 上に型付き API を構築。Postgres と DynamoDB をバックエンドに、Scalar で API ドキュメントを提供。
+- SST を導入してアプリデプロイとインフラを管理し、ビルド・デプロイ時間を **50%+** 短縮。
+- フロントエンドのコード／パフォーマンスレビューを主導（組み合わせ可能な React パターン、重い UI の遅延読み込み）。重要フローに Cypress E2E カバレッジを追加。
+- Shopify の headless GraphQL API 上にカスタム Next.js ストアフロントを納品。製品 UX が求める場面で高度な Framer Motion / D3 のモーションとチャートを実装。
+
+<br />
+
+---
+
+## 主なプロジェクト
+
+### マルチチャネル Agent プラットフォーム、2026 年 4 月〜現在
+
+持続的なマルチチャネルアシスタント（Web + Discord）向けのクライアント向け agent プラットフォーム。本番の信頼性と品質管理を備える。
+
+- 持続的ストリーミングを主導し、クライアントが実行中に切断しても進捗を失わず再開できるようにした。
+- Mastra と AI SDK 上に workflow、memory、scheduling、workspace のプリミティブを構築：pause/resume、retries、ファイル保存、サンドボックスツール、skills。
+- エンドツーエンドの RAG をリリース：ingest/parse、chunking、Pinecone による retrieval（query/rerank、必要に応じて graph query）。
+- Hono + Better Auth を ECS で運用。コアデータは Postgres、ファイルは S3。
+- ClickHouse で run/tool traces とコスト／レイテンシ指標を追加。golden prompts + LLM-as-judge によるスコア付き eval suites でリリース前の品質回帰を検出。
+- ワークスペースファイルを agent prompts に添付するための TipTap **@mention** ファイルタグ付けコンポーネントをリリース。
+
+---
+
+### 高性能マーケティングサイト、2025 年 11 月
+
+コンテンツ＋検索型マーケティングサイトのリードエンジニア — パフォーマンス、CMS、公開ワークフローをエンドツーエンドで担当。
+
+- Next.js + Strapi + Meilisearch のコンテンツサイトで **LCP &lt; 0.5s**、**CLS &lt; 0.1**、PageSpeed Insights **>90** を達成。
+- ハイブリッド ISR：主要ページと最新 100 記事をビルド時に事前レンダリング、残りはオンデマンド。Strapi webhooks による tag-based revalidation で、フルリビルドなしに公開を反映。
+- AI SDK を使った生成 AI コンテンツ作成用のカスタム Strapi plugin を構築。
+- アクセシビリティと SEO を納品基準に：セマンティック構造、キーボード対応のナビ／フォーム、Lighthouse + axe チェック；CMS 由来の metadata/OG、canonicals、sitemap、robots.txt、Article JSON-LD。
+- Turborepo を SST 経由で AWS ECS にデプロイ。API Gateway と S3 メディア。対話 UI は TanStack Query の prefetch/hydration と TanStack Form + Zod mutations。
+
+---
+
+### React Native 会員プラットフォーム、2024 年 4 月
+
+- ケータリングブランドの会員アプリ（デジタルカード、ポイント、オファー）の Figma デザインとフロントエンド開発を主導。iOS / Android を App Store と Play Store にリリース。
+- バックエンド保守も担当：Express API と Next.js 管理画面。
+- OpenAPI/Swagger から型付き REST クライアントを統合。Firebase Cloud Messaging でプッシュ通知とディープリンクキャンペーン（プロモとマイルストーン）。
+- ローンチ後 **>99.5%** の crash-free sessions を維持（Sentry）。
+- FlashList でリストのジャンクを削減。react-native-screens freeze と遅延マウントで非アクティブタブを軽量化。Reanimated はネイティブスレッド遷移に限定。
+- リモート画像をキャッシュし、長いリストでフル解像度アセットを避けてフィードの画像読み込みを短縮。
+
+<br />
+
+---
+
+## その他の仕事
+
+健康・ウェルネス RAG agent（Next.js、Langchain、Shopify API）、レストランのロイヤリティ／会員アプリ（React Native）、フォトブースイベントアプリ（React Native、Skia、Next.js）、CMS コンテンツプラットフォーム（Next.js、Strapi）、キャンペーン／イベントと EC サイト（Next.js、Sanity / Strapi、Shopify GraphQL）、RBAC リソースシステム（Next.js）、在宅高齢者ケアアプリ（Flutter）、書籍注文システム（Laravel + React）も納品。
+
+<br />
+
+---
+
+## スキル
+
+- **言語**：TypeScript、Python
+- **フロントエンド**：React、Next.js、React Native、Expo、TanStack Query、Framer Motion、Tailwind CSS、shadcn/ui、Storybook、Figma、MDX
+- **バックエンド**：Hono、Drizzle、OpenAPI、tRPC、GraphQL、Scalar、Strapi、Sanity、Meilisearch、Algolia、Pinecone
+- **AI**：Mastra、AI SDK、Langchain、Strands
+- **データ**：Postgres、DynamoDB
+- **テスト**：Cypress、Vitest、React Testing Library、Lighthouse、axe
+- **DevOps**：Docker、SST、Terraform、AWS、Vercel、Turborepo
+
+<br />
+
+---
+
+## 資格
+
+- AWS Solutions Architect Associate、2026
+- AWS Cloud Practitioner、2025
+
+<br />
+
+---
+
+## 学歴
+
+### University College London
+
+- MPharm Pharmacy、2016 – 2020 — First Class Honours
+- 登録薬剤師、GPhC、2021 年〜現在
+- ソフトウェアへキャリアチェンジ。厳密で細部にこだわる問題解決に慣れている
+
+<br />
+
+---
+
+履歴書は[こちら](/resume.pdf)からもダウンロードできます。

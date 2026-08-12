@@ -1,0 +1,349 @@
+---
+title: Frontend Regression Tests
+description: Vitest、React Testing Library、Cypress で frontend regressions を捕捉する実践的 playbook
+date: 2026-08-05
+---
+
+Frontend の **regression tests** は、coverage 率を追いかけるためではない。ユーザーがすでに依存している振る舞いを守るためだ：フォームが引き続き submit できる、draft がリクエスト失敗後も残る、login flow が refactor 後も正しい場所に着地する。
+
+<br />
+
+この note は実践的 playbook である。frontend regression とは何か、何を守る価値があるか、どのレイヤーで捕捉すべきか、そして **Vitest**、**React Testing Library**、**Cypress** を pull request に組み込む方法を扱う。
+
+<br />
+
+---
+
+## 1. 何を、どこでテストするか
+
+**blast radius** で優先順位をつける。テストの書きやすさではない。お金、auth、データ損失パス、高トラフィックの入口フロー、一度本番に出た bug に焦点を当てる。通常、使い捨ての chrome や純粋な visual polish は省略してよい。
+
+<br />
+
+**振る舞いを証明でき、かつ最も安価なレイヤー**で regressions を捕捉する：
+
+<br />
+
+| Layer | Tool | Use when |
+| --- | --- | --- |
+| Unit | Vitest | Pure logic、reducers、parsers、URL/state helpers |
+| Component | Vitest + React Testing Library | Interaction contracts：click → state → text/role |
+| Integration-ish | Vitest + RTL + MSW | mocked network 付き page sections |
+| E2E | Cypress | routes と auth を跨ぐ完全な critical journeys |
+
+<br />
+
+経験則：結果を信頼するために **real browser** と **real navigation** が必要なら Cypress を使う。それ以外は Vitest に留まる。同じ事実をすべてのレイヤーで証明しない。
+
+<br />
+
+---
+
+## 2. Vitest と RTL による Unit および Component Regressions
+
+component regressions では、**ユーザーが観察できる結果**をテストする。role と accessible name でクエリし、`userEvent` で UI を操作し、ユーザーが次に見える・できることを assert する。internal state、CSS class lists、private function calls の assert は避ける。
+
+<br />
+
+テスト名は、守っている regression にちなむ。`keeps draft when network fails` は、将来の読者に `handles error` より多くを伝える。
+
+<br />
+
+```tsx
+import { render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { describe, expect, it, vi } from "vitest"
+
+import { DraftForm } from "./draft-form"
+
+describe("DraftForm", () => {
+  it("keeps draft when network fails", async () => {
+    const user = userEvent.setup()
+    const onSubmit = vi.fn().mockRejectedValue(new Error("network"))
+
+    render(<DraftForm initialValue="hello" onSubmit={onSubmit} />)
+
+    await user.clear(screen.getByRole("textbox", { name: /draft/i }))
+    await user.type(screen.getByRole("textbox", { name: /draft/i }), "updated")
+    await user.click(screen.getByRole("button", { name: /save/i }))
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/could not save/i)
+    expect(screen.getByRole("textbox", { name: /draft/i })).toHaveValue("updated")
+    expect(screen.getByRole("button", { name: /save/i })).toBeEnabled()
+  })
+
+  it("disables save while a submit is in flight", async () => {
+    const user = userEvent.setup()
+    let resolveSubmit!: () => void
+    const onSubmit = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveSubmit = resolve
+        })
+    )
+
+    render(<DraftForm initialValue="hello" onSubmit={onSubmit} />)
+
+    await user.click(screen.getByRole("button", { name: /save/i }))
+
+    expect(screen.getByRole("button", { name: /save/i })).toBeDisabled()
+
+    resolveSubmit()
+    expect(await screen.findByRole("button", { name: /save/i })).toBeEnabled()
+  })
+})
+```
+
+<br />
+
+component がテストしにくくなったら、render tree と格闘するのではなく pure logic を抽出する。Formatting、validation、URL building は小さな関数に分け、unit tests を付ける。component test は wiring と interaction に集中できる。
+
+<br />
+
+```ts
+import { describe, expect, it } from "vitest"
+
+import { getNextDraftStatus } from "./draft-status"
+
+describe("getNextDraftStatus", () => {
+  it("returns error without clearing the draft value", () => {
+    expect(
+      getNextDraftStatus({
+        value: "updated",
+        result: { ok: false, reason: "network" },
+      })
+    ).toEqual({
+      value: "updated",
+      status: "error",
+      message: "Could not save",
+    })
+  })
+})
+```
+
+<br />
+
+### Custom Hooks のテスト
+
+複雑な state logic に UI が不要なときは、`renderHook` と `act` で hook を直接テストする。不要な DOM elements を mount せず、state transitions が機能することを証明できる。
+
+<br />
+
+```tsx
+import { renderHook, act } from "@testing-library/react"
+import { describe, expect, it } from "vitest"
+
+import { usePagination } from "./use-pagination"
+
+describe("usePagination", () => {
+  it("advances to the next page", () => {
+    const { result } = renderHook(() => usePagination({ total: 50, perPage: 10 }))
+
+    expect(result.current.page).toBe(1)
+
+    act(() => {
+      result.current.next()
+    })
+
+    expect(result.current.page).toBe(2)
+  })
+})
+```
+
+<br />
+
+### Type-Safe Test Data
+
+振る舞いについては、広い snapshots より **deterministic fixtures** を優先する。Snapshots は一部の serialization には有用だが、重要な contract が「ユーザーが failed save から回復できる」ことのとき、regression signal としては弱い。
+
+<br />
+
+fixtures を deterministic に保ちつつ、各テストで大きな objects を繰り返さないために、TypeScript の `Partial<T>` で type-safe data factories を使う。
+
+<br />
+
+```ts
+type Note = { id: string; title: string; status: "draft" | "published" }
+
+export function buildNote(overrides?: Partial<Note>): Note {
+  return {
+    id: "test-id",
+    title: "Default Title",
+    status: "draft",
+    ...overrides,
+  }
+}
+
+// Usage in a test:
+// const publishedNote = buildNote({ status: "published" })
+```
+
+<br />
+
+### 非同期 State を明示的にテストする
+
+data-driven components の多くは success state だけではない：
+
+1. Initial or empty
+2. Loading
+3. Success
+4. Error
+5. Retry or recovery
+
+<br />
+
+regression はしばしばこれらの state 間の transition に潜む。**MSW** はテストを HTTP boundary に留めつつ、各 response を deterministic にできる。
+
+<br />
+
+```tsx
+import { HttpResponse, http } from "msw"
+import { server } from "../test/server"
+import type { Note } from "@/types"
+
+it("retries after the first request fails", async () => {
+  const user = userEvent.setup()
+  let attempts = 0
+
+  server.use(
+    http.get("/api/notes", () => {
+      attempts += 1
+
+      if (attempts === 1) {
+        return HttpResponse.json(
+          { message: "Temporary failure" },
+          { status: 503 }
+        )
+      }
+
+      // TypeScript enforces that this matches the Note[] type
+      return HttpResponse.json<Note[]>([
+        { id: "1", title: "Regression playbook", status: "published" }
+      ])
+    })
+  )
+
+  render(<NotesList />)
+
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    /could not load notes/i
+  )
+
+  await user.click(screen.getByRole("button", { name: /retry/i }))
+
+  expect(
+    await screen.findByRole("link", { name: /regression playbook/i })
+  ).toBeVisible()
+})
+```
+
+<br />
+
+このテストが守るのは error copy 以上のものだ。failure が可視であること、retry が可能なままであること、後続の success が error state を置き換えることを証明する。component が内部で `fetch`、query library、custom hook のどれを使うか知る必要はない。
+
+<br />
+
+---
+
+## 3. Cypress による Critical-Path E2E
+
+Cypress は、routing、auth、実際の page shell があって初めて存在する journeys を守る場所だ。その suite は小さく保つ。通常 **3 から 7** 本の journeys であり、すべての component test の鏡像ではない。
+
+<br />
+
+典型的な保護セットは次のようになる：
+
+1. Sign in
+2. プロダクトのコアタスクを完了
+3. Sign out、または durable success state に到達
+
+<br />
+
+fixtures で seed し、production content に依存しないテストにする。ユーザーが気にする結果——URL、heading、success message——を assert し、途中のすべての CSS class ではない。テストが flake したら quarantine し、修正するか削除する。flake を正常化することは、suite に嘘をつかせることだ。
+
+<br />
+
+安定した E2E tests には data 以上の制御が必要：
+
+- **Authentication：** 各テストで sign-in UI を繰り返すのではなく、API または task で session を作成
+- **Time：** expiry、relative dates、scheduled behavior が重要なときは時計を固定
+- **Network：** 任意の timeout ではなく、named request または可視 outcome を待つ
+- **Isolation：** テスト固有の records を作成し、クリーンアップする
+- **Selectors：** role と label を優先。user-facing selector がないときだけ test ID を使う
+
+<br />
+
+`cy.loginAs()` のような custom commands を type-safe かつ発見しやすくするには、global `Cypress` namespace で宣言する。
+
+<br />
+
+```ts
+// cypress/support/index.d.ts
+declare global {
+  namespace Cypress {
+    interface Chainable {
+      loginAs(email: string): Chainable<void>
+    }
+  }
+}
+
+// cypress/support/commands.ts
+Cypress.Commands.add("loginAs", (email) => {
+  cy.request("POST", "/api/test/login", { email })
+})
+```
+
+<br />
+
+```ts
+describe("create note", () => {
+  beforeEach(() => {
+    cy.loginAs("writer@example.com")
+    cy.seedNotes([])
+  })
+
+  it("creates a note and lands on the detail page", () => {
+    cy.visit("/notes/new")
+
+    cy.findByRole("textbox", { name: /title/i }).type("Regression playbook")
+    cy.findByRole("textbox", { name: /body/i }).type(
+      "Protect high-value behavior at the cheapest reliable layer."
+    )
+    cy.findByRole("button", { name: /publish/i }).click()
+
+    cy.location("pathname").should("match", /\/notes\/.+/)
+    cy.findByRole("heading", { name: /regression playbook/i }).should(
+      "be.visible"
+    )
+  })
+})
+```
+
+<br />
+
+すべての edge case がここに属するわけではない。UI contract を full browser なしで証明できる edge cases は Vitest に留める。Cypress の価値は、false green build が壊れたプロダクトを ship してしまうパスにある。
+
+<br />
+
+E2E test は、理解可能な一つの理由で失敗すべきだ。sign in、profile settings 変更、note 作成、検索、削除、sign out を一つのテストで行うと、リアルな session に見えるが、終盤での失敗は診断情報が乏しい。durable boundaries で journeys を分割し、API commands で setup を再利用する。
+
+<br />
+
+---
+
+## Takeaway
+
+Frontend regression testing は **triage system** として最も機能する。高価値な振る舞いを最も安価で信頼できるレイヤーで守り、実際の failures から coverage を育て、Cypress を十分薄く保ち、red build が依然として意味を持つようにする。
+
+<br />
+
+どのツール選択より重要な習慣：一度壊れたものは、suite が二度目に捕捉することを保証する——できれば、数ヶ月後もプロダクトの約束のように読めるテスト名で。
+
+<br />
+
+**suite を健全に保つためのプロセスルール：**
+
+- **bug 修正時は、まず失敗するテストを書く。** 修正を当てる前に、正しい理由で失敗することを確認する。
+- **重要な場所でテストを実行：** ローカルでは focused tests、PR では unit/component suite、merge 前に critical E2E journeys。
+- **flake を正常化しない：** テストがランダムに失敗したら quarantine する。3 回目で通ったテストも flaky test だ。
+- **すべてを自動化しない：** pixel-perfect visual diffs、網羅的 E2E edge cases、framework internals への assertions は省略する。Manual exploratory testing も依然として重要。

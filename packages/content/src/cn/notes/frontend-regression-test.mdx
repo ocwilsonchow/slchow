@@ -1,0 +1,349 @@
+---
+title: Frontend Regression Tests
+description: 一份实用 playbook，说明如何用 Vitest、React Testing Library 与 Cypress 拦截 frontend regressions
+date: 2026-08-05
+---
+
+Frontend 的 **regression tests** 不是为了追逐 coverage 百分比，而是为了保护用户早已依赖的行为：表单仍然可以提交、draft 在请求失败后仍然保留、login flow 在 refactor 之后仍然会落到正确位置。
+
+<br />
+
+这篇 note 是一份实用 playbook。它会讲清楚什么算 frontend regression、哪些行为值得保护、应该由哪一层拦截，以及如何把这套做法放进 pull requests，搭配 **Vitest**、**React Testing Library** 与 **Cypress**。
+
+<br />
+
+---
+
+## 1. 测什么、在哪里测
+
+按 **blast radius** 排优先顺序，而不是按写测试有多容易。聚焦金钱、auth、数据丢失路径、高流量入口流程，以及曾经上线过的 bug。通常可略过一次性 chrome 与纯视觉 polish。
+
+<br />
+
+在**仍能证明行为、成本最低的那一层**拦截 regressions：
+
+<br />
+
+| Layer | Tool | Use when |
+| --- | --- | --- |
+| Unit | Vitest | Pure logic、reducers、parsers、URL/state helpers |
+| Component | Vitest + React Testing Library | Interaction contracts：click → state → text/role |
+| Integration-ish | Vitest + RTL + MSW | 搭配 mocked network 的 page sections |
+| E2E | Cypress | 跨 routes 与 auth 的完整 critical journeys |
+
+<br />
+
+经验法则：如果结果必须依赖 **real browser** 与 **real navigation** 才可信，就用 Cypress；否则留在 Vitest。避免同一件事在每一层都证明一次。
+
+<br />
+
+---
+
+## 2. 用 Vitest 与 RTL 拦截 Unit 与 Component Regressions
+
+测 component regressions 时，测**用户可观察的结果**。用 role 与 accessible name 查询，用 `userEvent` 驱动 UI，并 assert 用户接下来能看到或做到什么。避免 assert internal state、CSS class lists，或 private function calls。
+
+<br />
+
+用它保护的 regression 来命名测试。`keeps draft when network fails` 对未来读者的帮助，远大于 `handles error`。
+
+<br />
+
+```tsx
+import { render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { describe, expect, it, vi } from "vitest"
+
+import { DraftForm } from "./draft-form"
+
+describe("DraftForm", () => {
+  it("keeps draft when network fails", async () => {
+    const user = userEvent.setup()
+    const onSubmit = vi.fn().mockRejectedValue(new Error("network"))
+
+    render(<DraftForm initialValue="hello" onSubmit={onSubmit} />)
+
+    await user.clear(screen.getByRole("textbox", { name: /draft/i }))
+    await user.type(screen.getByRole("textbox", { name: /draft/i }), "updated")
+    await user.click(screen.getByRole("button", { name: /save/i }))
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/could not save/i)
+    expect(screen.getByRole("textbox", { name: /draft/i })).toHaveValue("updated")
+    expect(screen.getByRole("button", { name: /save/i })).toBeEnabled()
+  })
+
+  it("disables save while a submit is in flight", async () => {
+    const user = userEvent.setup()
+    let resolveSubmit!: () => void
+    const onSubmit = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveSubmit = resolve
+        })
+    )
+
+    render(<DraftForm initialValue="hello" onSubmit={onSubmit} />)
+
+    await user.click(screen.getByRole("button", { name: /save/i }))
+
+    expect(screen.getByRole("button", { name: /save/i })).toBeDisabled()
+
+    resolveSubmit()
+    expect(await screen.findByRole("button", { name: /save/i })).toBeEnabled()
+  })
+})
+```
+
+<br />
+
+当 component 变得难测时，抽出 pure logic，而不是跟 render tree 硬斗。Formatting、validation 与 URL building 适合放进小函数并配 unit tests。Component test 就可以继续聚焦 wiring 与 interaction。
+
+<br />
+
+```ts
+import { describe, expect, it } from "vitest"
+
+import { getNextDraftStatus } from "./draft-status"
+
+describe("getNextDraftStatus", () => {
+  it("returns error without clearing the draft value", () => {
+    expect(
+      getNextDraftStatus({
+        value: "updated",
+        result: { ok: false, reason: "network" },
+      })
+    ).toEqual({
+      value: "updated",
+      status: "error",
+      message: "Could not save",
+    })
+  })
+})
+```
+
+<br />
+
+### Testing Custom Hooks
+
+当复杂的 state logic 不需要 UI 时，直接用 `renderHook` 与 `act` 测 hook。这样不必 mount 多余的 DOM elements，仍能证明 state transitions 可行。
+
+<br />
+
+```tsx
+import { renderHook, act } from "@testing-library/react"
+import { describe, expect, it } from "vitest"
+
+import { usePagination } from "./use-pagination"
+
+describe("usePagination", () => {
+  it("advances to the next page", () => {
+    const { result } = renderHook(() => usePagination({ total: 50, perPage: 10 }))
+
+    expect(result.current.page).toBe(1)
+
+    act(() => {
+      result.current.next()
+    })
+
+    expect(result.current.page).toBe(2)
+  })
+})
+```
+
+<br />
+
+### Type-Safe Test Data
+
+对行为来说，优先用 **deterministic fixtures**，而不是宽泛的 snapshots。Snapshots 在某些 serialization 场景有用，但当真正重要的 contract 是「用户仍能从 failed save 恢复」时，它们是偏弱的 regression signal。
+
+<br />
+
+为了让 fixtures 保持 deterministic，又不必在每个测试重复大型 objects，可用 TypeScript 的 `Partial<T>` 建立 type-safe data factories。
+
+<br />
+
+```ts
+type Note = { id: string; title: string; status: "draft" | "published" }
+
+export function buildNote(overrides?: Partial<Note>): Note {
+  return {
+    id: "test-id",
+    title: "Default Title",
+    status: "draft",
+    ...overrides,
+  }
+}
+
+// Usage in a test:
+// const publishedNote = buildNote({ status: "published" })
+```
+
+<br />
+
+### Test Async States Explicitly
+
+多数 data-driven components 不只一种 success state：
+
+1. Initial or empty
+2. Loading
+3. Success
+4. Error
+5. Retry or recovery
+
+<br />
+
+Regression 往往藏在这些 states 之间的 transition。**MSW** 可以把测试留在 HTTP boundary，同时让每个 response 都 deterministic。
+
+<br />
+
+```tsx
+import { HttpResponse, http } from "msw"
+import { server } from "../test/server"
+import type { Note } from "@/types"
+
+it("retries after the first request fails", async () => {
+  const user = userEvent.setup()
+  let attempts = 0
+
+  server.use(
+    http.get("/api/notes", () => {
+      attempts += 1
+
+      if (attempts === 1) {
+        return HttpResponse.json(
+          { message: "Temporary failure" },
+          { status: 503 }
+        )
+      }
+
+      // TypeScript enforces that this matches the Note[] type
+      return HttpResponse.json<Note[]>([
+        { id: "1", title: "Regression playbook", status: "published" }
+      ])
+    })
+  )
+
+  render(<NotesList />)
+
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    /could not load notes/i
+  )
+
+  await user.click(screen.getByRole("button", { name: /retry/i }))
+
+  expect(
+    await screen.findByRole("link", { name: /regression playbook/i })
+  ).toBeVisible()
+})
+```
+
+<br />
+
+这个测试保护的不只是 error copy。它证明 failure 可见、retry 仍然可行，以及后续 success 会取代 error state。它不必知道 component 内部用的是 `fetch`、query library，还是 custom hook。
+
+<br />
+
+---
+
+## 3. 用 Cypress 保护 Critical-Path E2E
+
+Cypress 适合保护那些只有搭配 routing、auth 与真实 page shell 才存在的 journeys。这套 suite 要保持精简：通常是 **三到七** 条 journeys，而不是把每个 component test 再镜像一次。
+
+<br />
+
+一组典型的保护集合大概像这样：
+
+1. Sign in
+2. 完成产品的核心任务
+3. Sign out，或到达一个 durable success state
+
+<br />
+
+用 fixtures 做 seed，让测试不依赖 production content。Assert 用户在意的结果——URL、heading、success message——而不是沿途每一个 CSS class。若测试开始 flake，先 quarantine，再修复或删除。把 flake 正常化，等于教导 suite 说谎。
+
+<br />
+
+稳定的 E2E tests 需要控制的不只是 data：
+
+- **Authentication：** 通过 API 或 task 建立 session，而不是在每个测试重复 sign-in UI
+- **Time：** 当 expiry、relative dates 或 scheduled behavior 重要时，冻结时钟
+- **Network：** 等待 named request 或可见结果，绝不要任意 timeout
+- **Isolation：** 为测试建立独有 records，并清理干净
+- **Selectors：** 优先用 roles 与 labels；只有在没有 user-facing selector 时才用 test ID
+
+<br />
+
+要让 `cy.loginAs()` 这类 custom commands 既 type-safe 又容易发现，请在 global `Cypress` namespace 里声明它们。
+
+<br />
+
+```ts
+// cypress/support/index.d.ts
+declare global {
+  namespace Cypress {
+    interface Chainable {
+      loginAs(email: string): Chainable<void>
+    }
+  }
+}
+
+// cypress/support/commands.ts
+Cypress.Commands.add("loginAs", (email) => {
+  cy.request("POST", "/api/test/login", { email })
+})
+```
+
+<br />
+
+```ts
+describe("create note", () => {
+  beforeEach(() => {
+    cy.loginAs("writer@example.com")
+    cy.seedNotes([])
+  })
+
+  it("creates a note and lands on the detail page", () => {
+    cy.visit("/notes/new")
+
+    cy.findByRole("textbox", { name: /title/i }).type("Regression playbook")
+    cy.findByRole("textbox", { name: /body/i }).type(
+      "Protect high-value behavior at the cheapest reliable layer."
+    )
+    cy.findByRole("button", { name: /publish/i }).click()
+
+    cy.location("pathname").should("match", /\/notes\/.+/)
+    cy.findByRole("heading", { name: /regression playbook/i }).should(
+      "be.visible"
+    )
+  })
+})
+```
+
+<br />
+
+不是每个 edge case 都该放在这里。当 UI contract 不必靠完整 browser 就能证明时，edge cases 应留在 Vitest。Cypress 的价值，在于那些一旦出现 false green build，就会把坏掉的产品送上线的路径。
+
+<br />
+
+一条 E2E test 应该只因一个可理解的原因失败。单一测试若连续做 sign in、改 profile settings、create a note、搜索、删除，再 sign out，看起来很像真实 session，但接近尾声的失败几乎没有诊断价值。在 durable boundaries 切开 journeys，并通过 API commands 重用 setup。
+
+<br />
+
+---
+
+## Takeaway
+
+Frontend regression testing 最好当成一套 **triage system**。在成本最低且可靠的一层保护高价值行为，从真实 failures 长出 coverage，并让 Cypress 保持够薄，好让 red build 仍然有意义。
+
+<br />
+
+比工具选择更重要的习惯是：当某件事坏过一次，就要确保 suite 会在第二次抓住它——最好还用一个几个月后读起来仍像产品承诺的测试名称。
+
+<br />
+
+**几条维持 suite 健康的流程规则：**
+
+- **修 bug 时先写会失败的测试**，并确认它因正确原因失败，再套上修复。
+- **在重要的地方跑测试：** 本地跑 focused tests，PRs 跑 unit/component suite，merge 前跑 critical E2E journeys。
+- **不要把 flake 正常化：** 若测试随机失败，先 quarantine。第三次才通过的测试，仍然是 flaky test。
+- **不要自动化一切：** 略过 pixel-perfect visual diffs、exhaustive E2E edge cases，以及对 framework internals 的 assertions。Manual exploratory testing 仍然重要。

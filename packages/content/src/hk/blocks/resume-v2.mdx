@@ -1,0 +1,119 @@
+---
+title: 履歷
+---
+
+## 概要
+
+擁有 5 年經驗的全端產品工程師，負責從 Figma 設計、React／React Native、型別安全 API 到 AWS 部署的完整交付流程。已交付超過 15 個正式上線的 Web 與流動應用；關鍵路徑載入時間最多縮短 **80%**，搜尋延遲降低 **90%**。目前主導一個具備持久化工作流程、RAG、MCP servers 與 evals 的多渠道 agent 平台。已取得 **AWS Solutions Architect Associate** 認證。
+
+優勢：端到端產品交付 · React · 前端工程 · 生產級 AI agents · 設計系統。
+
+技術棧：Next.js、React Native、Hono、Drizzle、OpenAPI／tRPC／GraphQL、Mastra、AI SDK、Langchain、Postgres、SST、Terraform、AWS、Vercel；並使用 Strapi、Sanity 與 Meilisearch 建構 headless CMS 和搜尋功能。
+
+<br />
+
+---
+
+## 工作經驗
+
+### 全端工程師，Vioo Company Limited，2022 年 5 月至今
+
+擔任多個並行客戶產品的主要工程師，負責從設計到雲端部署的完整流程，並與持份者合作規劃 UX 和交付正式版本。
+
+- 端到端交付並維護超過 **15 個**正式上線的 React／React Native 應用，包括高保真 Figma 設計與共享設計系統。
+- 以 headless CMS（Strapi／Sanity）與搜尋服務（Meilisearch／Algolia）取代舊有 WordPress：載入時間縮短 **80%**、搜尋延遲降低 **90%**，PageSpeed Insights 分數達到 **>90**。
+- 使用 Mastra、AI SDK 與 Langchain 交付生產級 AI agents（workflows、memory、tool calls、observability），包括可組合的聊天與工具調用 UI。
+- 建立共享的 Radix／Tailwind 元件與 hook 函式庫，並透過 Storybook、Fumadocs 和 MDX 撰寫文件，供多個客戶應用共用，以統一 UI 並加快交付。
+- 使用 Hono、Drizzle、OpenAPI 與 tRPC 在 AWS Lambda／API Gateway 上建構型別安全 API，資料層採用 Postgres 與 DynamoDB，並以 Scalar 提供 API 文件。
+- 導入 SST 管理應用部署與基礎設施，使建置和部署時間縮短超過 **50%**。
+- 主導前端程式碼與效能審查（可組合的 React 模式、重型 UI 的延遲載入），並為關鍵流程加入 Cypress E2E 測試。
+- 基於 Shopify headless GraphQL API 交付自訂 Next.js storefront；在產品 UX 有需要時實作進階 Framer Motion／D3 動效與圖表。
+
+<br />
+
+---
+
+## 精選專案
+
+### 多渠道 Agent 平台，2026 年 4 月至今
+
+面向客戶的持久化多渠道助手平台（Web + Discord），具備生產級可靠性與品質控制。
+
+- 主導持久化串流功能，讓客戶端可在執行途中斷線並恢復，而不會遺失進度。
+- 基於 Mastra 與 AI SDK 建構 workflow、memory、scheduling 和 workspace 原語：支援 pause／resume、retries、檔案儲存、沙盒工具與 skills。
+- 端到端交付 RAG：ingest／parse、chunking，以及透過 Pinecone 實現 query／rerank 檢索（並在需要時支援 graph query）。
+- 將 Hono + Better Auth 部署於 ECS，以 Postgres 儲存核心資料，並以 S3 儲存檔案。
+- 在 ClickHouse 中加入 run／tool traces 與成本／延遲指標，並建立帶評分的 eval suites（golden prompts + LLM-as-judge），以便在發布前捕捉品質回退。
+- 交付 TipTap **@mention** 檔案標記元件，用於將 workspace 檔案附加至 agent prompts。
+
+---
+
+### 高效能行銷網站，2025 年 11 月
+
+擔任內容與搜尋型行銷網站的主要工程師，端到端負責效能、CMS 與發布流程。
+
+- 建構採用 Next.js + Strapi + Meilisearch 的內容網站，達到 **LCP &lt; 0.5s**、**CLS &lt; 0.1**，PageSpeed Insights 分數 **>90**。
+- 混合式 ISR：主要頁面與最新 100 篇文章在建置時預渲染，其餘頁面按需生成；透過 Strapi webhooks 進行 tag-based revalidation，讓內容發布後無需完整重建即可上線。
+- 使用 AI SDK 建構用於生成式 AI 內容創作的自訂 Strapi plugin。
+- 將無障礙與 SEO 納入交付標準：語意化結構、鍵盤可操作的導覽與表單、Lighthouse + axe 檢查；來自 CMS 的 metadata／OG、canonical URLs、sitemap、robots.txt 與 Article JSON-LD。
+- Turborepo 透過 SST 部署至 AWS ECS，並使用 API Gateway 與 S3 媒體儲存；互動式 UI 採用 TanStack Query prefetch／hydration，以及 TanStack Form + Zod mutations。
+
+---
+
+### React Native 會員平台，2024 年 4 月
+
+- 主導餐飲品牌會員應用（電子會員卡、積分、優惠）的 Figma 設計與前端開發；將 iOS 和 Android 版本發布至 App Store 與 Play Store。
+- 同時負責後端維護：Express API 與 Next.js 管理後台。
+- 整合由 OpenAPI／Swagger 生成的型別安全 REST clients；使用 Firebase Cloud Messaging 實作推播通知與 deep-linked 行銷活動（促銷及會員里程碑）。
+- 上線後維持 **>99.5%** crash-free sessions（Sentry）。
+- 使用 FlashList 改善列表卡頓；透過 react-native-screens freeze 與延遲掛載降低非作用中分頁的成本；僅在原生執行緒轉場中使用 Reanimated。
+- 透過快取遠端圖片，並避免在長列表中使用全解析度素材，縮短動態列表中的圖片載入時間。
+
+<br />
+
+---
+
+## 其他工作
+
+此外亦交付了健康與保健 RAG agent（Next.js、Langchain、Shopify API）、餐廳忠誠度與會員應用（React Native）、影相亭活動應用（React Native、Skia、Next.js）、CMS 內容平台（Next.js、Strapi）、活動／行銷與電商網站（Next.js、Sanity／Strapi、Shopify GraphQL）、RBAC 資源系統（Next.js）、居家長者照護應用（Flutter），以及圖書訂購系統（Laravel + React）。
+
+<br />
+
+---
+
+## 技能
+
+- **程式語言**：TypeScript、Python
+- **前端**：React、Next.js、React Native、Expo、TanStack Query、Framer Motion、Tailwind CSS、shadcn/ui、Storybook、Figma、MDX
+- **後端**：Hono、Drizzle、OpenAPI、tRPC、GraphQL、Scalar、Strapi、Sanity、Meilisearch、Algolia、Pinecone
+- **AI**：Mastra、AI SDK、Langchain、Strands
+- **資料**：Postgres、DynamoDB
+- **測試**：Cypress、Vitest、React Testing Library、Lighthouse、axe
+- **DevOps**：Docker、SST、Terraform、AWS、Vercel、Turborepo
+
+<br />
+
+---
+
+## 認證
+
+- AWS Solutions Architect Associate，2026
+- AWS Cloud Practitioner，2025
+
+<br />
+
+---
+
+## 教育背景
+
+### University College London
+
+- MPharm 藥學，2016 至 2020 年，一等榮譽學位
+- 註冊藥劑師（GPhC），2021 年至今
+- 轉行投身軟件行業，擅長處理嚴謹且注重細節的問題領域
+
+<br />
+
+---
+
+你亦可以在[這裡](/resume.pdf)下載我的履歷。

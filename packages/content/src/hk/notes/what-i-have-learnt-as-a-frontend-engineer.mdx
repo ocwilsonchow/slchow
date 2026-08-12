@@ -1,0 +1,132 @@
+---
+title: 作為 Frontend Engineer 的所學
+description: 從建構與營運生產級 web 與 mobile 產品中學到的四堂課
+date: 2026-08-12
+---
+
+四年前，我以為 frontend engineering 就是把設計變成精緻的介面。Production 教會我要把目光放在 component 之外：架構、資料新鮮度、可靠性、交付，以及可衡量的用戶結果，都是這份工作的一部分。
+
+<br />
+
+以下指標是專案成果，不是通用基準。重要的是技術決策與可觀察結果之間的連結。
+
+<br />
+
+## 成果一覽
+
+- **Architecture：** page load 加快 80%、search latency 降低 90%，PageSpeed 高於 90。
+- **Web performance：** LCP 低於 0.5 秒，CLS 低於 0.1。
+- **Mobile reliability：** 上線後 crash-free sessions 超過 99.5%。
+- **Delivery：** 以 SST 將 build 與 deployment 時間縮短超過 50%。
+
+<br />
+
+## 四堂課
+
+1. **架構層面的改變勝過局部優化。** 調整 React tree 之前，先衡量整條路徑。
+2. **Caching 是 freshness policy。** 靜態內容、編輯更新，以及可變資料，各有不同的生命週期。
+3. **可靠性是面向用戶的。** 掉幀、記憶體增長、載入失敗與 crash，打斷的是同一段旅程。
+4. **交付系統是產品的一部分。** 共用基礎與更安全的 releases，會跨團隊累積效益。
+
+<br />
+
+<Accordion type="multiple">
+  <AccordionItem value="architecture">
+    <AccordionTrigger>1. 修好真正的瓶頸</AccordionTrigger>
+    <AccordionContent>
+      一套遺留的 WordPress stack 已成為 page delivery 與
+      search 的瓶頸。我們拆分了它的職責：
+
+      - **Strapi / Sanity** 管理結構化內容與編輯工作流
+      - **Meilisearch / Algolia** 負責 indexing 與 retrieval
+      - **Next.js** 負責 rendering、caching 與用戶體驗
+
+      這讓 page load time 減少 **80%**，search latency 減少 **90%**。代價是
+      必須明確擁有 previews、webhooks、indexing 與
+      invalidation。Browser optimization 仍然重要，但最大的收益可能
+      在上游。參見 [Browser 裡的 Critical Rendering
+      Path](/notes/critical-rendering-path-in-the-browser)。
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="caching">
+    <AccordionTrigger>2. 讓 cache 匹配資料</AccordionTrigger>
+    <AccordionContent>
+      一個 content platform 需要快速的公開頁面、即時的編輯更新，
+      以及互動式 workspaces。單一 cache strategy 無法同時服務這三者。
+
+      - 預先 generate 核心頁面與最新的 **100 篇文章**
+      - 按需 generate long-tail content
+      - 當 Strapi 發佈時，依 tag invalidate 受影響的頁面
+      - 在 server 上 prefetch 可變的 workspace 資料，然後 hydrate **TanStack Query**
+      - 在 query keys 中納入 organization 與 URL filters，以避免 tenant 或 search 碰撞
+
+      Content site 達到 **LCP 低於 0.5 秒**、**CLS 低於 0.1**，以及
+      PageSpeed 高於 **90**。Hydration 改善了交付；authorization 仍然
+      屬於 API 之後。
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="reliability">
+    <AccordionTrigger>3. 拿掉用戶看不見的工作</AccordionTrigger>
+    <AccordionContent>
+      對於一個圖片密集的 React Native membership app，我們：
+
+      - 用 **FlashList** 回收長列表
+      - 調整 rendering windows，而不是急於 mount 全部內容
+      - freeze 非活躍畫面，並延遲 mounts
+      - cache 遠端圖片，並避免過大的 assets
+      - 只在 native-thread execution 有幫助時使用 **Reanimated**
+
+      發佈後仍持續進行 device profiling 與 **Sentry** monitoring。應用
+      維持超過 **99.5% crash-free sessions**，給了我們具體的
+      reliability baseline，而不是上線當天的主觀感覺。
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="delivery">
+    <AccordionTrigger>4. 改善 frontend 如何交付</AccordionTrigger>
+    <AccordionContent>
+      橫跨 **15+ React 與 React Native applications**，重複的摩擦變成了
+      delivery risk。我們投入於：
+
+      - 用 **Radix**、**Tailwind CSS** 與可重用 hooks 建立共用 primitives
+      - 在 **Storybook**、**Fumadocs** 與 MDX 中提供範例與指引
+      - 以 **Cypress** 覆蓋關鍵 journeys
+      - 用 **SST** 將基礎設施與 deployment configuration 寫成程式碼
+
+      SST 將 build 與 deployment 時間縮短了 **超過 50%**。這 15+
+      個 applications 是作品集背景，不是 design-system 影響力的證明；那
+      需要 adoption、duplication、onboarding 與 regression metrics。
+
+      相關：[Frontend Regression
+      Tests](/notes/frontend-regression-test) 與 [用 SST 管理 AWS
+      基礎設施與
+      DevOps](/notes/using-sst-for-aws-infra-and-devops)。
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>
+
+<br />
+
+## 「Senior」對我現在的意義
+
+- 衡量 **用戶旅程**，而不只是 component render time。
+- 讓 **架構對準瓶頸**，即使它落在 frontend repository 之外。
+- 建模 **freshness 與 ownership**，而不是被動地加 caches。
+- 用真實的 reliability signals **在發佈後營運產品**。
+- 透過共用基礎、tests 與更安全的 delivery，改善 **下一位工程師** 的路徑。
+
+<br />
+
+<Mermaid
+  chart={`flowchart LR
+    baseline[建立 baseline] --> constraints[理解約束]
+    constraints --> decision[做出取捨]
+    decision --> ship[安全地 ship]
+    ship --> verify[驗證結果]`}
+/>
+
+<br />
+
+Framework APIs 會變。這個迴圈背後的判斷力，應該仍然有用。

@@ -1,0 +1,505 @@
+---
+title: 2026 個人開発計画
+description: 堅実な frontend および applied AI engineer から、より深い technical judgment、reliability practices、チームへの影響力を持つ senior engineer へ成長するための計画
+date: 2026-08-06
+---
+
+**Senior Frontend Engineer** と **Applied AI Engineer** の期待に照らして履歴書を見直した。結果は励みになるが、有用なギャップも露わになった：履歴書は複雑なプロダクトを構築・ship できることを示しているが、senior engineer に期待されるより広い影響力、**quality systems**、**operational judgment** を一貫して示していない。
+
+これは履歴書上の evidence の評価であり、能力の完全な測定ではない。弱点の一部は、明確に記録していない経験かもしれない。他は意図的に伸ばす必要がある capability だ。
+
+<br />
+
+2026 年の目標は、framework 名を増やすことではない。**technical decisions** をより上手く下すこと、リスクを減らすこと、他の engineer の成果を高めること、frontend と AI systems を本番で信頼して運用することだ。
+
+<br />
+
+---
+
+## 1. 今の位置
+
+最も強いポジショニングは、**frontend product engineering** と **applied AI systems** の交点にある。
+
+<br />
+
+```text
+Frontend product engineering
+  React / Next.js / accessibility / performance / design systems
+                \
+                 → Senior Frontend Engineer for AI Products
+                /   Applied AI Engineer with frontend depth
+Applied AI systems
+  agents / RAG / evals / observability / durable workflows
+```
+
+<br />
+
+**React** および **React Native** アプリを 15 以上 ship し、共有 **component libraries** を構築し、**Figma** で UI を設計し、web および mobile **performance** を最適化し、typed APIs を開発し、**AWS** にインフラをデプロイした。**agent workflows**、**durable streaming**、**memory**、**RAG** pipelines、retrieval と reranking、**observability**、**evaluation suites** も構築している。
+
+この組み合わせに価値があるのは、AI product も依然として良いプロダクトである必要があるからだ。理解しやすい UI、**accessible** な interaction patterns、信頼できる **state management**、有用な **failure states**、高速な rendering、agent が生む回答と action の根拠が明確であることが必要だ。
+
+<br />
+
+監査から得られた定性的ベースライン：
+
+```text
+Resume-evidence baseline
+
+Senior frontend engineering   7.4 / 10  ███████░░░
+Applied AI engineering        7.6 / 10  ███████░░░
+Technical leadership          5.5 / 10  █████░░░░░
+Quality and risk management   5.8 / 10  █████░░░░░
+```
+
+<br />
+
+これらの数字は客観的な skill rating ではない。経験のどの部分が hiring team にすでに説得力があり、どの部分がまだ assumption に依存しているかを特定するためのものだ。
+
+<br />
+
+---
+
+## 2. 最も強い Signals
+
+| Signal | Evidence | なぜ重要か |
+| --- | --- | --- |
+| **Frontend delivery and performance** | 15+ React and React Native apps；load time、search latency、Core Web Vitals、deployment speed、crash-free sessions で測定可能な改善 | ユーザー向けシステムを ship し改善できることを示す |
+| **End-to-end ownership** | Design、frontend、typed APIs、data、AWS infrastructure、deployment、observability | プロダクトとシステム境界を跨いで意思決定できる |
+| **Applied AI systems** | Durable agents、RAG、tools、workflows、traces、cost and latency metrics、eval suites | chat-completion demo を超える production AI  work を示す |
+| **Product collaboration** | client と stakeholder との直接 scoping、UX iteration、delivery | 曖昧なニーズを technical work に翻訳できる |
+
+<br />
+
+### Frontend Delivery and Performance
+
+frontend product を design から production まで担える。**React**、**Next.js**、**React Native**、**design systems**、animation、data visualization、forms、state と server data、**CMS** integrations、search、deployment をカバーしている。
+
+履歴書には測定可能な performance 成果もある：
+
+- page load time を **80%** 削減
+- search latency を **90%** 削減
+- **LCP 0.5 秒未満**、**CLS 0.1 未満** を達成
+- build および deployment time を **50% 以上** 短縮
+- React Native アプリで **99.5% 超** の crash-free sessions を維持
+
+これらは技術リストより強い。問題を診断し、ユーザーまたは engineer が体感できる outcome を改善できることを示す。
+
+<br />
+
+### End-to-End Ownership
+
+component 境界の外でも快適に働ける。**typed APIs**、**authentication**、database access、search、**cloud infrastructure**、**observability**、**deployment pipelines** を frontend アプリと並行して構築してきた。
+
+この幅はより良い frontend decision に役立つ。データの出所、API が提供する保証、authentication が navigation と caching に与える影響、deployment architecture が performance に与える影響、production failures が起きやすい場所——これらを理解できる。
+
+<br />
+
+### Applied AI Systems
+
+AI 経験は chat completion endpoint を足す以上のものだ。次を扱ってきた：
+
+- クライアントが切断しても resume できる **durable agent runs**
+- **tools**、**workflows**、**memory**、scheduling、workspaces、retries
+- web と Discord を跨ぐ **multi-channel** 体験
+- **RAG** ingestion、chunking、retrieval、reranking、graph queries
+- agent **traces** と cost、latency metrics
+- golden prompts と **LLM-as-judge** による scored **evaluation suites**
+- composable な chat、tool-invocation、file-mention UI
+
+これは **Applied AI Engineer** または **Senior Frontend Engineer for AI Products** としての credible な profile を支える。
+
+<br />
+
+### Product and Stakeholder Collaboration
+
+client と stakeholder と直接協力し、scoping、UX iteration、release delivery を行ってきた。Seniority は spec を正しく実装すること以上を要求する。本当の **constraint** を見つけ、**trade-offs** を説明し、何を build すべきか team が決められるよう助ける必要がある。
+
+この evidence は一部あるが、decision とその impact をより明確に記録する必要がある。
+
+<br />
+
+---
+
+## 3. 強化すべき点
+
+| Gap | Current signal | Target evidence |
+| --- | --- | --- |
+| **Technical leadership** | Project leadership、reviews、shared libraries | Mentoring outcomes、採用された RFCs、team standards、cross-team influence |
+| **Frontend architecture** | 広い framework と delivery 経験 | 文書化された state boundaries、rendering decisions、browser constraints、trade-offs |
+| **Testing and reliability** | Cypress、Vitest、Testing Library、Sentry、observability | Layered test strategy、release gates、SLOs、incident 駆動の regression coverage |
+| **Accessibility** | Semantic HTML、keyboard support、Lighthouse、axe | WCAG 2.2 AA criteria、手動 keyboard と screen-reader audits、CI enforcement |
+| **AI safety and evaluation** | Durable runs、retries、traces、LLM-as-judge | Permission boundaries、adversarial cases、deterministic metrics、recovery behavior |
+| **Production operations** | Cloud deployment、application monitoring | Real-user monitoring、service objectives、alerting、incident ownership |
+
+<br />
+
+### Technical Leadership and Team Leverage
+
+現在の profile で最大の弱点は implementation ability ではない。仕事が team の output を改善した evidence が不足していることだ。
+
+履歴書には project を lead し、frontend code を review し、shared libraries を作ったとある。次は説明していない：
+
+- 何人の engineer を支援したか
+- 他の developers を **mentored** したか
+- どの **standards** や architecture decisions を導入したか
+- shared library の **adopted** 範囲
+- review time、defects、duplication、onboarding time を減らしたか
+- 意見の相違や曖昧な technical decision をどう扱ったか
+
+Senior engineer は **multiplier** である。clarity を生み、有用な constraints を確立し、他の engineer がより良い work を deliver できるよう助け、ボトルネックにならないことを示す必要がある。
+
+<br />
+
+### Frontend Architecture and Browser Fundamentals
+
+履歴書は強力な frontend toolset を示すが、ツールだけでは depth を証明しない。
+
+次についてどう考えるか、より強い evidence が必要：
+
+- **component API** design と composition
+- client、server、**URL state** boundaries
+- **rendering** と **hydration**
+- browser scheduling と **critical rendering path**
+- network behavior、caching、resource loading
+- 高度な **TypeScript** constraints
+- **design-system** governance と migration
+- 実デバイスと network 条件での performance measurement
+
+目標は browser trivia を暗記することではない。browser behavior を architectural decisions と user outcomes に結びつけることだ。
+
+<br />
+
+### Testing and Reliability
+
+履歴書には **Cypress**、**Vitest**、**React Testing Library**、**Lighthouse**、**axe**、**Sentry**、agent observability が載っている。有用なツールへの familiarity は示すが、**quality strategy** はまだ説明していない。
+
+次をどう決めるか示す必要がある：
+
+- どの振る舞いが **unit**、**component**、**integration**、**E2E** test に属するか
+- どの **critical journeys** が release を block すべきか
+- API と state boundaries をどうテストするか
+- **visual regressions** をどう検出するか
+- flaky tests をどう扱うか
+- production incidents が **regression tests** になる仕組み
+- monitoring、**SLOs**、**incident reviews** が development にどうフィードバックするか
+
+Senior signal は test を書けることではない。delivery を遅くしたり brittle にしたりせず、重要な failures を捕捉する **quality system** を設計できることだ。
+
+<br />
+
+### Accessibility Depth
+
+現在は **semantic HTML**、keyboard-accessible な navigation と forms、visible focus、意味のある alt text、**Lighthouse** と **axe** による自動チェックを記録している。
+
+有用な baseline だが、自動ツールが検出するのは accessibility 問題の一部だけだ。次をより深く実践する必要がある：
+
+- **WCAG 2.2 AA** requirements
+- 手動 **keyboard testing**
+- **VoiceOver** または他の screen reader
+- dialogs、menus、dynamic views での **focus management**
+- accessible names、descriptions、errors、status announcements
+- contrast、zoom、reflow、motion preferences、touch targets
+- **CI** における accessibility checks と release acceptance criteria
+
+Accessibility は design と implementation の一部であるべきで、最後に走らせる report ではない。
+
+<br />
+
+### AI Safety、Failure Handling、Evaluation Rigor
+
+AI work にはすでに retries、durable runs、traces、cost と latency metrics、scored evaluations が含まれる。次のステップは、何かが wrong になったときにこれらの systems が安全かつ予測可能に振る舞うことを証明することだ。
+
+次について、より強い経験と evidence が必要：
+
+- **prompt-injection** と data-exfiltration tests
+- スコープ付き **tool permissions** と authorization
+- **structured-output** validation
+- **idempotent** tool execution
+- timeouts、**circuit breakers**、model fallbacks
+- 敏感な action の前の **human approval**
+- **partial failure** と recovery
+- **adversarial** と regression evaluation sets
+- retrieval quality と generation quality の分離
+- models と retrieval strategies 間での quality、latency、cost の比較
+
+**LLM-as-judge** は有用だが、唯一の measurement であってはならない。deterministic checks と、**tool-call success**、**retrieval recall**、**groundedness**、end-to-end task completion など task-specific metrics も必要だ。
+
+<br />
+
+### Applied AI Versus ML Engineering
+
+現在の evidence は **applied AI** と **agent engineering** で最も強く、model 中心の **ML engineering** ではない。
+
+ML 偏重の role を狙うなら、statistics、experimentation、data preparation、model training、fine-tuning、model evaluation を深める必要がある。product と agent role を続けるなら、それを明示し、AI features を reliable にする **system-design** skills を深めるべきだ。
+
+現時点の intended positioning：
+
+> **Senior Frontend Engineer for AI Products** または **Applied AI Engineer with deep frontend expertise**。
+
+一般 AI または ML engineer として自分を提示するより、正確で差別化されている。
+
+<br />
+
+---
+
+## 4. Evidence Gaps と Capability Gaps
+
+よりよく describe すべき experience と、actively build すべき skills を区別する必要がある。
+
+| 捕捉すべき Evidence | 強化すべき Capabilities |
+| --- | --- |
+| Team size、mentees、cross-team influence | 正式な **mentoring** と technical-standard ownership |
+| Architecture options と trade-offs | Browser、rendering、state architecture の depth |
+| Users、traffic、agent runs、corpus size、p95 latency | **Real-user monitoring**、**SLOs**、incident response |
+| Test strategy と prevented defects | Integration、contract、visual、failure-path testing |
+| Design-system adoption と migration results | Design-system governance と deprecation |
+| Production failure stories と recovery outcomes | Agent security、permissions、adversarial evaluation |
+| すでに行った model と retrieval comparisons | Quantitative experiment design と ML fundamentals |
+
+<br />
+
+この区別は二つの誤りを防ぐ。すでにやっているが記録していないことを何ヶ月も学び直すべきではない。demonstrate していない capability を暗示する resume bullet に書き換えるべきでもない。
+
+<br />
+
+---
+
+## 5. 最初の 3 ヶ月：Work を Evidence に変える
+
+第一優先は、engineering reasoning を visible にし、より強い quality baseline を確立することだ。
+
+<br />
+
+```text
+0–3 months   Turn work into evidence
+             case studies → quality matrix → accessibility → agent evals
+
+3–6 months   Build reliability and team leverage
+             failure boundaries → SLOs → RFC / mentoring → model comparisons
+
+6–12 months  Demonstrate senior scope
+             cross-team leadership → governance → published case study
+```
+
+<br />
+
+### 3 つの Architecture Case Studies を書く
+
+同じ構造で 3 つの projects を文書化する：
+
+1. プロダクトと technical **constraint**
+2. Scale と **reliability** requirements
+3. 検討した options
+4. 選んだ approach
+5. **Trade-offs** と却下した alternatives
+6. Rollout と **failure handling**
+7. 測定した outcome
+8. 今なら何を変えるか
+
+少なくとも 1 つは **frontend architecture**、1 つは **durable agent systems**、1 つは backend または cloud architecture に焦点を当てる。
+
+**Success measure：** 具体的な constraints、decisions、outcomes を含む 3 つの completed case studies。
+
+<br />
+
+### Frontend Quality Matrix を確立する
+
+各 testing layer に何が属するか定義する：
+
+| Layer | Tool or practice | Protects |
+| --- | --- | --- |
+| **Unit** | Vitest | Pure logic、parsers、validation、state transitions |
+| **Component** | React Testing Library | ユーザーが観察できる interaction と accessible component contracts |
+| **Integration** | Testing Library with controlled API boundaries | State、data fetching、errors、retries、recovery |
+| **E2E** | Cypress | routing、authentication、real browser behavior を跨ぐ critical journeys |
+| **Visual** | Targeted visual regression checks | visual breakage が高コスト、または semantic に表現しにくい layouts |
+| **Accessibility** | axe in CI plus manual keyboard and screen-reader testing | 自動ルール違反と、自動化では検出できない interaction issues |
+| **Production** | RUM、error monitoring、SLOs | pre-production tests では再現できない failures と performance 条件 |
+
+**Success measure：** すべての active project に documented critical journeys があり、各 high-risk behavior に explicit test layer がある。
+
+<br />
+
+### Accessibility Testing を深める
+
+適切な箇所に **axe** checks を CI に追加するが、自動の green report を complete accessibility coverage とみなさない。
+
+重要な flows では次をテストする：
+
+- **keyboard-only** navigation
+- visible で logical な **focus**
+- **VoiceOver** output
+- form errors と dynamic announcements
+- zoom と reflow
+- **reduced motion**
+- **WCAG 2.2 AA** acceptance criteria
+
+**Success measure：** 1 つの reusable accessibility checklist、1 つの documented manual audit、critical pages 上の automated checks。
+
+<br />
+
+### Agent Evaluations を拡張する
+
+期待される successful prompts だけでなく、**failure-oriented evaluation set** を作る。
+
+suite には次を含める：
+
+- **tool-selection** と argument correctness
+- retrieval relevance と **recall**
+- citation または evidence **grounding**
+- end-to-end **task success**
+- permission failures
+- malformed tool output
+- model timeouts と unavailable dependencies
+- **prompt-injection** attempts
+- latency と cost budgets
+
+**Success measure：** deterministic checks、scored checks、failure categories、regressions を検出できる baseline を持つ versioned evaluation set。
+
+<br />
+
+---
+
+## 6. 3–6 ヶ月目：Reliability と Team Leverage を構築
+
+### Explicit Failure Boundaries を設計する
+
+agent system について、次を implement し文書化する：
+
+- **least-privilege** tool access
+- tool boundaries での **schema validation**
+- retried actions の **idempotency**
+- timeouts と bounded retries
+- model と retrieval **fallbacks**
+- 敏感な operations の **human approval**
+- UI における明確な **partial-failure** states
+- traceable な decisions と tool results
+
+**Success measure：** documented threat cases、recovery behavior、adversarial regression tests を持つ 1 つの production workflow。
+
+<br />
+
+### Production Service Objectives を追加
+
+frontend と agent observability を explicit service objectives に接続する。
+
+考えられる indicators：
+
+- 実ユーザーからの **Core Web Vitals**
+- frontend error と recovery rate
+- agent **task success**
+- **tool-call** failure rate
+- **p95** time to first token と total run duration
+- retrieval latency
+- cost per successful task
+
+**incident exercise** を実施し、concrete follow-up work を生む **blameless postmortem** を書く。
+
+**Success measure：** 少なくとも 1 つの documented **SLO**、user impact に基づく alerting、1 回の completed incident review。
+
+<br />
+
+### Team-Level Impact を生む
+
+1 つの engineering standard または **RFC** を所有し、meaningful な work を通じて別の engineer を mentor する。
+
+outcome は **adoption**、duplication 削減、onboarding 短縮、regressions 減少、review cycles 短縮で測れるべきだ。
+
+**Success measure：** 1 つの adopted RFC または standard、regular mentoring evidence、measurable team outcome。
+
+<br />
+
+### AI System Choices を Quantitatively に比較
+
+project が特定の **model**、**embedding**、**chunking strategy**、**reranker**、cache、routing policy を使う理由を文書化する。
+
+比較では次を考慮する：
+
+- task **quality**
+- retrieval quality
+- **latency**
+- **cost**
+- failure rate
+- operational complexity
+
+**Success measure：** production architecture decision を変更または検証する 1 つの reproducible comparison。
+
+<br />
+
+---
+
+## 7. 6–12 ヶ月目：Senior Scope を示す
+
+12 ヶ月の終わりまでに、単一の isolated example ではなく complex initiative を lead できる repeated evidence が欲しい。
+
+目指すこと：
+
+1. 曖昧な requirements から architecture、rollout、monitoring、iteration まで、**cross-team** project を lead する。
+2. design system または AI platform の **governance** を確立する。ownership、versioning、migration、deprecation を含む。
+3. engineering decisions と trade-offs を説明する sanitized technical case study または open-source artifact を公開する。
+4. applied AI decisions を改善する箇所で **ML fundamentals** を深め続ける。
+5. engineers を mentor し、constant involvement なしでも useful な standards を作る。
+
+**Success measure：** product impact、production reliability、improved team output を示す decisions と outcomes の portfolio。
+
+<br />
+
+---
+
+## 8. 進捗の測り方
+
+この plan の終わりまでに、次について evidence を提供できるはずだ：
+
+| Goal | Evidence |
+| --- | --- |
+| **Architectural judgment** を説明 | 3 つの case studies と少なくとも 1 つの adopted **RFC** |
+| Frontend **quality leadership** を示す | critical product risks に紐づく documented test strategy |
+| **Accessibility** depth を示す | **WCAG 2.2 AA** checklist、CI checks、manual assistive-technology testing |
+| Production systems を運用 | **RUM** または agent **SLIs**、**SLO**、alerts、incident review |
+| Reliable AI products を構築 | Versioned evals、adversarial cases、permission boundaries、validation、recovery paths |
+| Team output を増幅 | Mentoring evidence と measurable standard、library、process outcome |
+| Scale を伝える | Users、traffic、run volume、corpus size、**p95 latency**、reliability、cost（利用可能なら） |
+
+<br />
+
+この scorecard を四半期ごとに見直す。activity がこれらの outcomes のいずれかに接続できないなら、development time の highest-value use か疑うべきだ。
+
+<br />
+
+---
+
+## 9. 履歴書はどう変わるべきか
+
+履歴書にはすでに十分な technologies がある。次の版にはより多くの **evidence** を含めるべきだ。
+
+すべきこと：
+
+- summary で明確な **target identity** を選ぶ
+- 重要 systems の **scale** と **constraints** を describe する
+- 選んだ stack を名指しするだけでなく、difficult **decisions** を説明する
+- team と user **impact** を quantify する
+- **failures** がどう detect され recover されるか示す
+- **mentoring**、standards、cross-team influence を記録する
+- tool-only testing claims を **quality strategy** と outcomes に置き換える
+- **AI safety**、permission、evaluation evidence を含める
+
+work が support するまで claims を足してはならない。履歴書は wording が inflated になったからではなく、scope と judgment が成長したから強くなるべきだ。
+
+<br />
+
+---
+
+## Takeaway
+
+frontend、backend、cloud、applied AI を跨いでプロダクトを build する力はすでにある。より強い senior engineer になるには、意図的な shift が必要だ：
+
+| From | To |
+| --- | --- |
+| 自分の work を ship | **Team** の output を改善 |
+| testing tools を使う | **Quality systems** を設計 |
+| happy paths を測る | **Failure recovery** を engineering する |
+| 自動 accessibility checks | **Inclusive design** と manual validation |
+| agent features を build | **Safety**、**quality**、**reliability** を証明 |
+| technology choices を列挙 | **Technical judgment** を説明 |
+
+キャリアの次の段階は、知っている framework の数では決まらない。decision の quality、防いだ risks、operate できる systems、team にいることで work が better になる engineers——これらで決まる。

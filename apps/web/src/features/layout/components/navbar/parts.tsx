@@ -5,7 +5,14 @@ import { Portal } from "@repo/ds/components/ui/portal"
 import { PlusIcon } from "lucide-react"
 import { type HTMLMotionProps, motion, useReducedMotion } from "motion/react"
 import { useTranslations } from "next-intl"
-import { type ComponentProps, type ReactNode, useRef, useState } from "react"
+import {
+  type ComponentProps,
+  type ReactNode,
+  type SetStateAction,
+  useEffect,
+  useRef,
+  useState,
+} from "react"
 import { Link as I18nLink, usePathname } from "@/i18n/navigation"
 import { fontPresets } from "../styles"
 import {
@@ -20,6 +27,7 @@ import {
   useNavbarScrollHide,
   useOpenOnModK,
 } from "./hooks"
+import { playNavbarToggleSound, preloadNavbarToggleSound } from "./sound"
 import {
   backdropVariants,
   contentVariants,
@@ -34,14 +42,28 @@ import {
 } from "./variants"
 
 function Root({ children }: { children: ReactNode }) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpenState] = useState(false)
+  const openRef = useRef(false)
   const navRef = useRef<HTMLElement | null>(null)
   const panelRef = useRef<HTMLDivElement | null>(null)
   const backdropRef = useRef<HTMLButtonElement | null>(null)
   const triggerRef = useRef<HTMLButtonElement | null>(null)
   const shouldReduceMotion = useReducedMotion() ?? false
 
+  const setOpen = (value: SetStateAction<boolean>) => {
+    const current = openRef.current
+    const next = typeof value === "function" ? value(current) : value
+    if (next === current) return
+    openRef.current = next
+    if (!shouldReduceMotion) playNavbarToggleSound()
+    setOpenState(next)
+  }
+
   const toggle = () => setOpen((current) => !current)
+
+  useEffect(() => {
+    preloadNavbarToggleSound()
+  }, [])
 
   useOpenOnModK(setOpen)
   useNavbarFocusLock({
@@ -133,7 +155,7 @@ function Frame({
         <nav
           ref={navRef}
           aria-label={t("menu")}
-          className="bg-surface-popover text-content-body-on-popover rounded-3xl"
+          className="bg-surface-popover border border-stroke-soft/75 text-content-body-on-popover rounded-3xl"
         >
           {children}
         </nav>

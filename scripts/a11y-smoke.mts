@@ -9,6 +9,9 @@ const paths = [
   "/hk",
   "/hk/notes",
   "/hk/resume",
+  "/ja",
+  "/ja/notes",
+  "/ja/resume",
 ] as const
 
 const navigationTimeoutMs = 30_000

@@ -12,6 +12,7 @@ const openGraphLocales = {
   en: "en_US",
   hk: "zh_HK",
   cn: "zh_CN",
+  ja: "ja_JP",
 } as const satisfies Record<Locale, string>
 
 /** BCP 47 language tags for the document `lang` attribute and hreflang. */
@@ -19,6 +20,7 @@ const htmlLangs = {
   en: "en",
   hk: "zh-HK",
   cn: "zh-CN",
+  ja: "ja",
 } as const satisfies Record<Locale, string>
 
 export function getOpenGraphLocale(locale: string) {
@@ -37,7 +39,7 @@ function normalizePathname(pathname: string) {
 
 /**
  * BCP 47 hreflang map for a locale-stripped pathname.
- * Keys are valid hreflang tags (`en`, `zh-HK`, `zh-CN`, `x-default`);
+ * Keys are valid hreflang tags (`en`, `zh-HK`, `zh-CN`, `ja`, `x-default`);
  * values are site-relative locale-prefixed paths (`/hk/notes`).
  */
 export function buildLanguageAlternates(

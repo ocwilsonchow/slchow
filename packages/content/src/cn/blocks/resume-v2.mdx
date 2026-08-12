@@ -1,0 +1,119 @@
+---
+title: 简历
+---
+
+## 概要
+
+拥有 5 年经验的全栈产品工程师，负责从 Figma 设计、React／React Native、类型安全 API 到 AWS 部署的完整交付流程。已交付超过 15 个生产级 Web 与移动应用；关键路径加载时间最多缩短 **80%**，搜索延迟降低 **90%**。目前主导一个具备持久化工作流、RAG、MCP servers 与 evals 的多渠道 agent 平台。已获得 **AWS Solutions Architect Associate** 认证。
+
+优势：端到端产品交付 · React · 前端工程 · 生产级 AI agents · 设计系统。
+
+技术栈：Next.js、React Native、Hono、Drizzle、OpenAPI／tRPC／GraphQL、Mastra、AI SDK、Langchain、Postgres、SST、Terraform、AWS、Vercel；并使用 Strapi、Sanity 与 Meilisearch 构建 headless CMS 和搜索功能。
+
+<br />
+
+---
+
+## 工作经历
+
+### 全栈工程师，Vioo Company Limited，2022 年 5 月至今
+
+担任多个并行客户产品的主要工程师，负责从设计到云端部署的完整流程，并与利益相关者协作规划 UX 和交付生产版本。
+
+- 端到端交付并维护超过 **15 个**生产级 React／React Native 应用，包括高保真 Figma 设计与共享设计系统。
+- 以 headless CMS（Strapi／Sanity）与搜索服务（Meilisearch／Algolia）取代旧有 WordPress：加载时间缩短 **80%**、搜索延迟降低 **90%**，PageSpeed Insights 分数达到 **>90**。
+- 使用 Mastra、AI SDK 与 Langchain 交付生产级 AI agents（workflows、memory、tool calls、observability），包括可组合的聊天与工具调用 UI。
+- 建立共享的 Radix／Tailwind 组件与 hook 库，并通过 Storybook、Fumadocs 和 MDX 编写文档，供多个客户应用复用，以统一 UI 并加快交付。
+- 使用 Hono、Drizzle、OpenAPI 与 tRPC 在 AWS Lambda／API Gateway 上构建类型安全 API，数据层采用 Postgres 与 DynamoDB，并以 Scalar 提供 API 文档。
+- 引入 SST 管理应用部署与基础设施，使构建和部署时间缩短超过 **50%**。
+- 主导前端代码与性能审查（可组合的 React 模式、重型 UI 的延迟加载），并为关键流程加入 Cypress E2E 测试。
+- 基于 Shopify headless GraphQL API 交付自定义 Next.js storefront；在产品 UX 有需要时实现高级 Framer Motion／D3 动效与图表。
+
+<br />
+
+---
+
+## 精选项目
+
+### 多渠道 Agent 平台，2026 年 4 月至今
+
+面向客户的持久化多渠道助手平台（Web + Discord），具备生产级可靠性与质量控制。
+
+- 主导持久化串流功能，使客户端可在执行途中断线并恢复，而不会丢失进度。
+- 基于 Mastra 与 AI SDK 构建 workflow、memory、scheduling 和 workspace 原语：支持 pause／resume、retries、文件存储、沙箱工具与 skills。
+- 端到端交付 RAG：ingest／parse、chunking，以及通过 Pinecone 实现 query／rerank 检索（并在需要时支持 graph query）。
+- 将 Hono + Better Auth 部署于 ECS，以 Postgres 存储核心数据，并以 S3 存储文件。
+- 在 ClickHouse 中加入 run／tool traces 与成本／延迟指标，并建立带评分的 eval suites（golden prompts + LLM-as-judge），以便在发布前捕捉质量回退。
+- 交付 TipTap **@mention** 文件标记组件，用于将 workspace 文件附加至 agent prompts。
+
+---
+
+### 高性能营销网站，2025 年 11 月
+
+担任内容与搜索型营销网站的主要工程师，端到端负责性能、CMS 与发布流程。
+
+- 构建采用 Next.js + Strapi + Meilisearch 的内容网站，达到 **LCP &lt; 0.5s**、**CLS &lt; 0.1**，PageSpeed Insights 分数 **>90**。
+- 混合式 ISR：主要页面与最新 100 篇文章在构建时预渲染，其余页面按需生成；通过 Strapi webhooks 进行 tag-based revalidation，让内容发布后无需完整重建即可上线。
+- 使用 AI SDK 构建用于生成式 AI 内容创作的自定义 Strapi plugin。
+- 将无障碍与 SEO 纳入交付标准：语义化结构、键盘可操作的导航与表单、Lighthouse + axe 检查；来自 CMS 的 metadata／OG、canonical URLs、sitemap、robots.txt 与 Article JSON-LD。
+- Turborepo 通过 SST 部署至 AWS ECS，并使用 API Gateway 与 S3 媒体存储；交互式 UI 采用 TanStack Query prefetch／hydration，以及 TanStack Form + Zod mutations。
+
+---
+
+### React Native 会员平台，2024 年 4 月
+
+- 主导餐饮品牌会员应用（电子会员卡、积分、优惠）的 Figma 设计与前端开发；将 iOS 和 Android 版本发布至 App Store 与 Play Store。
+- 同时负责后端维护：Express API 与 Next.js 管理后台。
+- 集成由 OpenAPI／Swagger 生成的类型安全 REST clients；使用 Firebase Cloud Messaging 实现推送通知与 deep-linked 营销活动（促销及会员里程碑）。
+- 上线后维持 **>99.5%** crash-free sessions（Sentry）。
+- 使用 FlashList 改善列表卡顿；通过 react-native-screens freeze 与延迟挂载降低非活动标签页成本；仅在原生线程转场中使用 Reanimated。
+- 通过缓存远程图片，并避免在长列表中使用全分辨率素材，缩短动态列表中的图片加载时间。
+
+<br />
+
+---
+
+## 其他工作
+
+此外还交付了健康与保健 RAG agent（Next.js、Langchain、Shopify API）、餐厅忠诚度与会员应用（React Native）、拍照亭活动应用（React Native、Skia、Next.js）、CMS 内容平台（Next.js、Strapi）、活动／营销与电商网站（Next.js、Sanity／Strapi、Shopify GraphQL）、RBAC 资源系统（Next.js）、居家长者照护应用（Flutter），以及图书订购系统（Laravel + React）。
+
+<br />
+
+---
+
+## 技能
+
+- **编程语言**：TypeScript、Python
+- **前端**：React、Next.js、React Native、Expo、TanStack Query、Framer Motion、Tailwind CSS、shadcn/ui、Storybook、Figma、MDX
+- **后端**：Hono、Drizzle、OpenAPI、tRPC、GraphQL、Scalar、Strapi、Sanity、Meilisearch、Algolia、Pinecone
+- **AI**：Mastra、AI SDK、Langchain、Strands
+- **数据**：Postgres、DynamoDB
+- **测试**：Cypress、Vitest、React Testing Library、Lighthouse、axe
+- **DevOps**：Docker、SST、Terraform、AWS、Vercel、Turborepo
+
+<br />
+
+---
+
+## 认证
+
+- AWS Solutions Architect Associate，2026
+- AWS Cloud Practitioner，2025
+
+<br />
+
+---
+
+## 教育背景
+
+### University College London
+
+- MPharm 药学，2016 至 2020 年，一等荣誉学位
+- 注册药剂师（GPhC），2021 年至今
+- 转行进入软件行业，擅长处理严谨且注重细节的问题领域
+
+<br />
+
+---
+
+你也可以在[这里](/resume.pdf)下载我的简历。

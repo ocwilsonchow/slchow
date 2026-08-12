@@ -57,9 +57,9 @@ export const contentVariants: Variants = {
   visible: {
     height: "auto",
     transition: {
-      delayChildren: 0.15,
+      delayChildren: 0.2,
       type: "spring",
-      stiffness: 300,
+      stiffness: 250,
       damping: 32,
     },
   },

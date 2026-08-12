@@ -1,0 +1,305 @@
+---
+title: Using SST to Manage AWS Infrastructure and DevOps
+description: How stages, linked secrets, Next.js on OpenNext, and day-to-day AWS DevOps fit together with SST in a Turborepo monorepo
+date: 2026-08-12
+---
+
+Shipping a full-stack app on AWS works better when the AWS Console is not the source of truth. **Frontend**, **secrets**, **domains**, and **stage rules** belong in TypeScript next to the application, reviewed in pull requests, and applied the same way in every environment.
+
+That is what [SST](https://sst.dev/docs/) provides. The entire app is defined in code — usually starting from a single `sst.config.ts` — and SST automates the underlying AWS resources. This note covers that model for **infrastructure and DevOps** on this site: a Bun + Turborepo monorepo with Next.js on OpenNext, and stages for local, shared preview, and production.
+
+Three infra stories are easy to conflate, so they stay separate here:
+
+1. **Deployed today** — `sst.config.ts` imports the Next.js / OpenNext stack only.
+2. **Defined in-repo, not yet imported** — container API infra (`Vpc` → `Cluster` → `Service` + `Router`) lives under `packages/infra` and stays commented out of `run()` until that stack should deploy.
+3. **Related pattern elsewhere** — Lambda + API Gateway for a Hono API is covered in [Backend APIs with Hono, Drizzle, Zod OpenAPI, and SST](/notes/backend-apis-hono-sst). That note is not what this site’s `sst.config.ts` runs.
+
+This note owns the infra layout and DevOps loop around those boundaries.
+
+<br />
+
+---
+
+## 1. Why SST for This Stack
+
+SST is built so developers can define features of an app as **Components** without assembling every low-level resource by hand. For this stack, three things matter most — the same three SST calls out when comparing itself to general-purpose IaC tools like Pulumi or CDK for Terraform ([SST FAQ](https://sst.dev/docs/)):
+
+1. **Higher-level components** used here: `sst.aws.Nextjs`, `sst.Secret`, and (when the API module is wired) `sst.aws.Service`, `sst.aws.Router`, `sst.aws.Vpc`, and `sst.aws.Cluster`.
+2. **Resource linking** so runtime code can read infrastructure through a typed `Resource` SDK instead of hardcoded names and ARNs.
+3. **`sst dev`** as a unified local environment: infra watcher, frontend (and later container) `dev` processes from the same CLI, plus [Live](https://sst.dev/docs/live/) when Lambda handlers are in the stage.
+
+On this site that maps to Next.js via OpenNext in a chosen AWS region, stage-based domains (`example.com`, `dev.example.com`, `{stage}.example.com`), edge Basic Auth secrets on non-prod, and a monorepo where application packages stay separate from `packages/infra`.
+
+<br />
+
+---
+
+## 2. How SST Compares to Other IaC
+
+All of these tools share the same goal: **infrastructure as code**. They differ in primary audience and day-to-day friction. SST’s own framing is useful here: SST is for **developers**, while CDKTF and Pulumi are primarily for **DevOps engineers**. SST still uses open-source Pulumi and bridged Terraform providers under the hood; it does not require a Pulumi account, and app state stays with the team’s cloud account ([SST docs](https://sst.dev/docs/)).
+
+Terraform and Vercel remain useful in other projects. For *this* full-stack AWS app, SST is the default. That is a workflow choice, not a claim that every org should abandon Terraform.
+
+| Tool | Mental model | Strength | Why SST fits app stacks here |
+| --- | --- | --- | --- |
+| **Terraform / OpenTofu** | Declarative HCL, provider-centric | Universal, mature state and workflow; strong for org-wide platform teams | App and infra stay split; no first-class Live, linking, or `Nextjs` DX for this monorepo |
+| **AWS CDK** | TypeScript constructs → CloudFormation | Deep AWS coverage and Constructs ecosystem | Strong AWS-native modeling; weaker unified app loop (linking, `sst dev`, frontend + backend multiplexer) for this workflow |
+| **Pulumi / CDKTF** | General-purpose IaC in real languages | Flexible providers; good when a platform team owns the program | SST sits on Pulumi but adds app components, linking, and `sst dev` without a full Pulumi program for every feature |
+| **Serverless Framework** | Framework focused on serverless apps | Familiar Lambda packaging | Narrower than full-stack Next/OpenNext, containers, and stage workflows used here |
+| **Vercel / PaaS** | Git push → hosted platform | Fast frontend DX with little AWS surface | Strong when only a managed frontend is needed; SST when TypeScript ownership of AWS resources, domains, secrets, and optional ECS/API matters |
+
+Beyond the table: SST components encode common app patterns and still allow [`transform`](https://sst.dev/docs/components#transforms) plus [150+ providers](https://sst.dev/docs/all-providers#directory) when lower-level control is required. Linking closes the runtime gap that Terraform or CDK usually fill with hand-wired env vars and IAM. `sst dev` is a product feature rather than an assemble-yourself local stack. SST still has state — local plus a backup bucket — so managed resources should not be edited by hand in the Console ([Basics](https://sst.dev/docs/basics/)).
+
+SST is a poor fit when a platform team already owns shared networking in Terraform or OpenTofu, when Pulumi or Terraform is the team language for multi-cloud control planes, or when CloudFormation-native CDK construct libraries are the hiring and review surface. In those cases, SST still works well for app delivery while org-level IaC stays where the team already has leverage.
+
+<br />
+
+---
+
+## 3. Project Shape: `sst.config.ts` and `packages/infra`
+
+SST supports [drop-in mode](https://sst.dev/docs/#drop-in-mode) — a single `sst.config.ts` next to a Next.js app — and a [monorepo](https://sst.dev/docs/set-up-a-monorepo/) where the config stays at the root and infrastructure is split into modules. This project uses the monorepo shape.
+
+```text
+sst.config.ts          app name, region, protect / removal, imports
+packages/infra/        Next.js, secrets, domain, edge, optional API/VPC
+apps/web               Next.js site
+apps/api               Hono / Mastra API
+packages/*             shared auth, db, content, design system
+```
+
+The config file defines app identity and safety rules. The `run` function loads infra modules. Today only Next.js is imported; the API module stays commented until that stack should deploy:
+
+<br />
+
+```ts
+export default $config({
+  app(input) {
+    return {
+      name: "my-app",
+      removal: input?.stage === "production" ? "retain" : "remove",
+      protect: ["production"].includes(input?.stage),
+      home: "aws",
+      providers: {
+        aws: {
+          region: "us-east-1",
+        },
+      },
+    }
+  },
+  async run() {
+    // await import("./infra/api")
+    await import("./infra/nextjs")
+  },
+})
+```
+
+<br />
+
+`packages/infra` holds the pieces that get composed:
+
+- `nextjs` — OpenNext deployment and domains (imported today)
+- `secrets` — stage secrets such as edge Basic Auth credentials, plus database and auth secrets for the API path
+- `domain` / `edge` — apex domain and non-prod Basic Auth at the edge
+- `api` / `router` / `vpc` / `cluster` — container API path, defined but not imported yet
+
+Business logic stays out of these files. Infra modules create and link resources; application packages consume them.
+
+<br />
+
+---
+
+## 4. Components in This Stack
+
+### Next.js with OpenNext
+
+The site deploys with [`sst.aws.Nextjs`](https://sst.dev/docs/component/aws/nextjs/). Production uses the apex domain; other stages get `{stage}.example.com`. Production keeps one warm server instance; non-prod uses `warm: 0`. The `edge` prop attaches non-prod Basic Auth. A `dev` block tells `sst dev` how to start the local Next process.
+
+<br />
+
+```ts
+const isProd = $app.stage === "production"
+const domain = "example.com"
+
+export const nextjs = new sst.aws.Nextjs("Web", {
+  path: "apps/web",
+  domain: {
+    name: isProd ? domain : `${$app.stage}.${domain}`,
+    redirects: isProd ? [`www.${domain}`] : [],
+  },
+  warm: isProd ? 1 : 0,
+  environment: {
+    NEXT_PUBLIC_SITE_URL: `https://${domain}`,
+    SST_STAGE: $app.stage,
+  },
+  openNextVersion: "4.0.3",
+  // buildCommand: sync assets, then OpenNext build
+  edge,
+  dev: {
+    command: "bun run dev",
+    directory: "apps/web",
+    url: "http://localhost:3000",
+  },
+})
+```
+
+<br />
+
+### Secrets
+
+Secrets are first-class resources, not loose `.env` files that never make it into the deployment model. Edge Basic Auth uses username/password secrets on non-prod. Database and auth secrets are defined for the API path:
+
+<br />
+
+```ts
+export const username = new sst.Secret("Username")
+export const password = new sst.Secret("Password")
+export const databaseUrl = new sst.Secret("DatabaseUrl")
+export const betterAuthSecret = new sst.Secret("BetterAuthSecret")
+export const aiGatewayApiKey = new sst.Secret("AiGatewayApiKey")
+```
+
+<br />
+
+### Container API (defined, not imported)
+
+When the API module is imported, the path is `Vpc` → `Cluster` → `Service`, with `Router` for `api.example.com` or `{stage}.api.example.com`. Database, Better Auth, and AI Gateway secrets are linked into that service. Until `await import("./infra/api")` is enabled in `sst.config.ts`, that stack does not deploy.
+
+A different shape — Lambda behind API Gateway with a Lambda authorizer — is the pattern in [Backend APIs with Hono, Drizzle, Zod OpenAPI, and SST](/notes/backend-apis-hono-sst). That uses `sst.aws.Function` and `sst.aws.ApiGatewayV2`. It is a related SST approach for Hono APIs, not the infrastructure this site’s config currently loads.
+
+<br />
+
+---
+
+## 5. Linking Instead of Hardcoded Env
+
+[Resource linking](https://sst.dev/docs/linking/) is the bridge between infrastructure and runtime. A resource is created, passed in `link`, and read with the SDK. Linking injects values, generates types (`sst-env.d.ts`), and grants permissions where the component supports them.
+
+**On this site today**, the Next.js stack pulls edge Basic Auth credentials through the `edge` configuration (username/password secrets). The web app itself does not read `Resource.*` for the database.
+
+**When the API module is imported**, secrets are linked into the container service, and application code can read them like this:
+
+<br />
+
+```ts
+import { Resource } from "sst"
+
+const client = postgres(Resource.DatabaseUrl.value, {
+  ssl: "require",
+})
+```
+
+<br />
+
+For frontends, linked values are available on the **server** side only. Client components only see what is passed in explicitly.
+
+For CLIs that need stage secrets — Drizzle migrations, Better Auth schema generation — `sst shell` loads the linked stage environment without inventing a second secrets path.
+
+<br />
+
+---
+
+## 6. Stages as the DevOps Unit
+
+In SST, a [stage](https://sst.dev/docs/basics/) is an environment: a namespaced copy of the app. The practical map for this site looks like this:
+
+| Stage | Purpose | Domain pattern |
+| --- | --- | --- |
+| `local` / personal | Daily `sst dev` | local Next URL; cloud resources for that stage |
+| `dev` | Shared preview | `dev.example.com` |
+| `production` | Live site | `example.com` |
+
+Production is protected. Accidental `sst remove` should not wipe critical data, so the config uses `protect` and `removal: "retain"` on production, matching SST’s recommended template pattern ([removal policies](https://sst.dev/docs/reference/config/#removal)).
+
+Non-production stages also get a practical ops detail: CloudFront **Basic Auth** via an edge `viewerRequest` injection, so preview URLs are not public by default.
+
+Daily commands stay short:
+
+<br />
+
+```bash
+aws sso login               # refresh AWS credentials
+sst dev --stage local       # personal / local stage
+sst deploy --stage dev      # shared preview
+sst deploy --stage production
+```
+
+<br />
+
+Credentials stay in the local AWS credential chain (profile or SSO session). SST deploys into that account and region. Next.js and secret resources are not created by clicking through the Console by hand.
+
+<br />
+
+---
+
+## 7. Local Workflow: `sst dev`, Live, and Mode Discipline
+
+[`sst dev`](https://sst.dev/docs/reference/cli/#dev) is the local control plane. For this site’s wired Next.js stack, the valuable parts day to day are:
+
+1. A watcher that deploys infrastructure changes.
+2. The Next.js `dev` block — local Next, linked to the stage’s deployed resources.
+3. Later, when the API module is imported, the container `dev` command and an optional [tunnel](https://sst.dev/docs/reference/cli#tunnel) to VPC resources.
+
+[Live](https://sst.dev/docs/live/) — stub Lambdas in AWS that proxy to the local machine — matters most for Lambda-heavy stages, including the Function / API Gateway pattern in the backend APIs note. It is less central while this site only imports OpenNext, though OpenNext server paths can still involve Lambda under the hood depending on the deployment shape.
+
+`sst dev` belongs on a **personal** or `local` stage. Shared `dev` and `production` get `sst deploy`. Flipping the same stage between Live stubs and real deploys is slow and confusing: if the CLI is killed, stubs can remain and remote invokes time out waiting for the local machine ([Live quirks](https://sst.dev/docs/live/)).
+
+A shared URL means deploying a real stage. Debugging a Lambda handler with breakpoints means Live on a personal stage — with VS Code Auto Attach when debugging Node handlers.
+
+<br />
+
+---
+
+## 8. Production Safety and the CI Boundary
+
+IaC only helps if state and process stay honest.
+
+- **Do not Console-edit** resources SST manages. SST applies diffs from config against state; manual edits drift that state ([Basics](https://sst.dev/docs/basics/)).
+- **Protect production** with `protect` and `removal: "retain"` so SST-managed stateful resources are not wiped on an accidental production remove. The Postgres used by the API path is an external URL via `sst.Secret`, not an `sst.aws.Postgres` database created by this config.
+- **Verify, then deploy in CI.** GitHub Actions runs install, lint, format check, typecheck, tests, and build first. Only after those checks succeed does the workflow run `sst deploy` for the target stage (`dev` or `production`). Local `deploy:dev` / `deploy` scripts remain useful for intentional one-off deploys, but the default path is CI: green checks, then deploy.
+
+The [SST Console](https://sst.dev/docs/console/) is another way to get git-push autodeploy, preview environments, and monitoring. This site uses GitHub Actions for the verify-then-`sst deploy` sequence instead of requiring the Console for that loop.
+
+Tenant isolation and SaaS boundary design are a different problem — see [Building a Multi-Tenant Backend with Hono, Better Auth, Drizzle, and Postgres RLS](/notes/multi-tenant-backend-drizzle-hono-better-auth) when that is the question.
+
+<br />
+
+---
+
+## 9. Mental Model
+
+```text
+sst.config.ts
+  → packages/infra/nextjs   (imported today)
+      → Nextjs / OpenNext + edge Basic Auth secrets
+  → packages/infra/api      (defined, not imported)
+      → Vpc / Cluster / Service / Router + linked secrets
+  → link (when a consumer is linked)
+      → Resource.* in app runtime
+      → sst shell for CLIs
+
+stages: local | dev | production
+local: sst dev
+ci: checks → tests → build → sst deploy --stage …
+```
+
+<br />
+
+The operating loop stays small:
+
+1. Change infra TypeScript or application code.
+2. Use `sst dev` on a personal stage while iterating.
+3. Open a pull request; GitHub Actions runs checks, tests, and build.
+4. On success, CI runs `sst deploy` to the target stage (`dev` or `production`).
+
+<br />
+
+---
+
+## Final Thoughts
+
+SST keeps AWS infrastructure as reviewable TypeScript beside the app. Components encode common shipping features. Linking removes a class of env-var and IAM glue. Stages turn environments into a first-class DevOps unit. `sst dev` collapses the local stack into one command.
+
+Terraform, CDK, or Pulumi remain the better fit when the problem is org-wide platform ownership or a team that already standardized there. For a Next.js site on OpenNext with stage-based domains, secrets, and a container or Lambda API path ready when needed, SST is a strong default because it optimizes for the developer loop, not only for the resource graph.
+
+For the Hono API on Lambda or Fargate — including authorizer wiring, WAF, and alarms — continue with [Backend APIs with Hono, Drizzle, Zod OpenAPI, and SST](/notes/backend-apis-hono-sst). For current component and CLI details, start at the [SST docs](https://sst.dev/docs/).

@@ -1,0 +1,508 @@
+---
+title: React 19 新功能
+description: 我对 React 19 功能的笔记——它们如何改变我构建表单、处理异步工作，以及组织 components 的方式
+---
+
+React 19 感觉比较不像一堆互不相干的 API，而更像 React 补上了以往应用代码要自己处理的几个缺口。Forms 现在可以跑异步 Actions，optimistic updates 有专用的 Hook，components 可以用 `use` 读取 promises，而 refs、context 与 document metadata 等常见 pattern 也少了很多繁琐写法。
+
+React 19.2 在这个基础上加入了 `Activity`、`useEffectEvent`，以及更好的性能工具。以下是我觉得最实用的功能，以及决定何时使用时想记住的注意事项。
+
+<br />
+
+---
+
+## 1. Actions
+
+**Action** 是在 **Transition** 里执行的函数。它可以做异步工作，同时由 React 管理周围的 **pending state**、errors，以及最终的 state update。
+
+Actions 最显眼的用途是 `<form>` 上新的 `action` prop。不用再拦截 `onSubmit`、读取表单、追踪 loading flag，再手动重置表单——我可以直接把函数传给它。
+
+<br />
+
+```tsx
+function UpdateName() {
+  async function updateName(formData: FormData) {
+    const name = String(formData.get("name") ?? "")
+
+    await saveName(name)
+  }
+
+  return (
+    <form action={updateName}>
+      <label>
+        Name
+        <input name="name" />
+      </label>
+      <SubmitButton />
+    </form>
+  )
+}
+```
+
+当 Action 成功时，React 会自动重置表单里的 uncontrolled fields。同一个函数也可以指定给 button 的 `formAction` prop，让不同 submit buttons 有不同行为。
+
+Actions 不只限于 forms，但表单整合是它们砍掉最多例行 state management 的地方。
+
+<br />
+
+---
+
+## 2. `useActionState` 与 `useFormStatus`
+
+`useActionState` 把 Action 接到由其前一次结果产生的 state。它返回 **current state**、一个包装过的 Action，以及 `isPending` 值。
+
+Action 会在平常的参数之前先收到 previous state。对 form Action 来说，第二个参数就是提交的 `FormData`。
+
+<br />
+
+```tsx
+import { useActionState } from "react"
+import { useFormStatus } from "react-dom"
+
+type FormState = {
+  message: string
+  ok: boolean
+}
+
+const initialState: FormState = {
+  message: "",
+  ok: false,
+}
+
+async function saveEmail(
+  previousState: FormState,
+  formData: FormData
+): Promise<FormState> {
+  const email = String(formData.get("email") ?? "")
+
+  if (!email.includes("@")) {
+    return { message: "Enter a valid email address.", ok: false }
+  }
+
+  await subscribe(email)
+  return { message: "You are subscribed.", ok: true }
+}
+
+function SubmitButton() {
+  const { pending } = useFormStatus()
+
+  return (
+    <button type="submit" disabled={pending}>
+      {pending ? "Subscribing..." : "Subscribe"}
+    </button>
+  )
+}
+
+function NewsletterForm() {
+  const [state, formAction] = useActionState(saveEmail, initialState)
+
+  return (
+    <form action={formAction}>
+      <input name="email" type="email" />
+      <SubmitButton />
+      <p aria-live="polite">{state.message}</p>
+    </form>
+  )
+}
+```
+
+`useFormStatus` 读取其 parent form 的 status，所以必须从渲染在该 form **里面** 的 component 调用。若在创建 form 的同一个 component 里调用，就观察不到该 form 的 submission。
+
+当 server 结果应该变成 UI state 时，我会用 `useActionState`；若 controls 只需要知道周围 form 是否 pending，则用 `useFormStatus`。
+
+<br />
+
+---
+
+## 3. `useOptimistic`
+
+等 network round trip 完成才更新界面，会让本来很快的应用显得缓慢。`useOptimistic` 让 UI 在 Action 执行期间立刻显示 **预期结果**，完成后再与真实 state 对齐。
+
+<br />
+
+```tsx
+import { useOptimistic, useState } from "react"
+
+type Message = {
+  id: string
+  text: string
+  sending?: boolean
+}
+
+function MessageThread({ initialMessages }: { initialMessages: Message[] }) {
+  const [messages, setMessages] = useState(initialMessages)
+  const [optimisticMessages, addOptimisticMessage] = useOptimistic(
+    messages,
+    (current, text: string) => [
+      ...current,
+      { id: crypto.randomUUID(), text, sending: true },
+    ]
+  )
+
+  async function sendMessage(formData: FormData) {
+    const text = String(formData.get("message") ?? "")
+    addOptimisticMessage(text)
+
+    const savedMessage = await saveMessage(text)
+    setMessages((current) => [...current, savedMessage])
+  }
+
+  return (
+    <>
+      <ul>
+        {optimisticMessages.map((message) => (
+          <li key={message.id}>
+            {message.text}
+            {message.sending ? " (sending...)" : ""}
+          </li>
+        ))}
+      </ul>
+
+      <form action={sendMessage}>
+        <input name="message" />
+        <button type="submit">Send</button>
+      </form>
+    </>
+  )
+}
+```
+
+Optimistic value 是暂时的。Action 结束后，React 会回到 component 真实 state 或 props 提供的值。也就是说，**source of truth** 仍需要在 optimistic reducer 之外更新。
+
+Optimistic updates 最适合预期结果很明显、失败可以解释或还原的情况。对 destructive operations，或假装成功会误导用户的情况，我会更谨慎。
+
+<br />
+
+---
+
+## 4. 用 `use` 读取 Resources
+
+新的 `use` API 在 **render 期间读取 resource**。目前这类 resource 通常是 **Promise** 或 **Context**。
+
+当 `use` 收到 pending Promise 时，component 会 suspend，React 显示最近的 `<Suspense>` fallback。若 Promise reject，则由最近的 **Error Boundary** 处理 error。
+
+<br />
+
+```tsx
+import { Suspense, use } from "react"
+
+type Profile = {
+  name: string
+  role: string
+}
+
+function ProfileCard({ profilePromise }: { profilePromise: Promise<Profile> }) {
+  const profile = use(profilePromise)
+
+  return (
+    <article>
+      <h2>{profile.name}</h2>
+      <p>{profile.role}</p>
+    </article>
+  )
+}
+
+function ProfilePage({ profilePromise }: { profilePromise: Promise<Profile> }) {
+  return (
+    <Suspense fallback={<p>Loading profile...</p>}>
+      <ProfileCard profilePromise={profilePromise} />
+    </Suspense>
+  )
+}
+```
+
+与 Hooks 不同，`use` 可以在 conditions 与 loops 里调用。它仍必须在 React 正在 render component 或 custom Hook 时调用。
+
+重要的 Promise 注意点是 identity。在每次 Client Component render 时都创建新的 Promise，会导致反复 suspension。Promise 应来自 framework、cache，或 Server Component，才能重用同一个 resource。
+
+`use` 也可以有条件地读取 Context：
+
+<br />
+
+```tsx
+function Heading({ muted }: { muted: boolean }) {
+  if (muted) {
+    return <h2 className="muted">Archived</h2>
+  }
+
+  const theme = use(ThemeContext)
+  return <h2 className={theme}>Active</h2>
+}
+```
+
+我把 `use` 想成 render 与可能尚未就绪的 resource 之间的桥梁，而不是取代每个 data-fetching library。
+
+<br />
+
+---
+
+## 5. Refs 与 Context 少了繁琐写法
+
+Function components 在 React 19 可以把 **`ref` 当普通 prop** 接收。新 components 不再需要只为了 expose element 而使用 `forwardRef`。
+
+<br />
+
+```tsx
+import type { ComponentPropsWithRef } from "react"
+
+function SearchInput(props: ComponentPropsWithRef<"input">) {
+  return <input type="search" {...props} />
+}
+
+function Search() {
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  return <SearchInput ref={inputRef} placeholder="Search" />
+}
+```
+
+既有的 `forwardRef` components 仍然可用，所以不必立刻改写。React 计划在迁移有足够时间后，于未来版本 deprecate `forwardRef`。
+
+Ref callbacks 现在也可以返回 cleanup functions：
+
+<br />
+
+```tsx
+function Canvas() {
+  return (
+    <canvas
+      ref={(node) => {
+        if (!node) return
+
+        const observer = new ResizeObserver(() => draw(node))
+        observer.observe(node)
+
+        return () => observer.disconnect()
+      }}
+    />
+  )
+}
+```
+
+**Context providers** 也更短了。可以直接 render Context object，不必再用 `.Provider`。
+
+<br />
+
+```tsx
+// Before
+<ThemeContext.Provider value="dark">
+  <App />
+</ThemeContext.Provider>
+
+// React 19
+<ThemeContext value="dark">
+  <App />
+</ThemeContext>
+```
+
+这些改动不大，但拿掉了几乎每个 React codebase 都常见的 wrappers。
+
+<br />
+
+---
+
+## 6. Document Metadata 与 Resources
+
+React 19 能理解 components 里 render 的 `<title>`、`<meta>` 与 `<link>` tags。React 会把它们移到 document 的 `<head>`，也就是说 **metadata 可以放在拥有它的 route 或 content 附近**。
+
+<br />
+
+```tsx
+function ProductPage({ product }: { product: Product }) {
+  return (
+    <>
+      <title>{product.name} – Acme Store</title>
+      <meta name="description" content={product.summary} />
+      <link
+        rel="canonical"
+        href={`https://example.com/products/${product.slug}`}
+      />
+
+      <h1>{product.name}</h1>
+      <p>{product.summary}</p>
+    </>
+  )
+}
+```
+
+React 19 也会协调 stylesheets 与 scripts。Stylesheets 可以声明 `precedence`，React 会等相关 CSS 就绪后才显示 Suspense content。即使多个 components render 同一个 script，async scripts 也会被 deduplicate。
+
+React DOM 暴露了 `preconnect`、`preload`、`preinit`、`preloadModule`、`preinitModule` 等 resource hints，适用于应用在 React render 需要该 resource 的 element 之前就已知晓的情况。
+
+<br />
+
+```tsx
+import { preconnect, preload } from "react-dom"
+
+function ProductImage({ src, alt }: { src: string; alt: string }) {
+  preconnect("https://images.example.com")
+  preload(src, { as: "image" })
+
+  return <img src={src} alt={alt} />
+}
+```
+
+Frameworks 已经处理了其中不少工作，所以在直接调用这些 API 之前，我会先查看 framework 的惯例。
+
+<br />
+
+---
+
+## 7. 更好的 Custom Elements 与 Hydration Errors
+
+React 19 完整支持 **custom elements**。在 server rendering 期间，字符串与数字等 primitive props 会变成 attributes。在浏览器里，当 custom element 暴露对应 properties 时，React 会把值 assign 为 properties。
+
+<br />
+
+```tsx
+function Checkout() {
+  return (
+    <payment-card
+      customer-id="customer_123"
+      options={{ appearance: "compact" }}
+    />
+  )
+}
+```
+
+这让 web components 更容易使用，不必为每个非字符串值写 React-specific wrappers。
+
+Hydration diagnostics 也更实用。不再是好几条重叠的 warnings，React 19 会回报一条整合过的 error，并用 diff 显示 server-rendered HTML 与 client output 的差异。
+
+改进后的消息并不会让 hydration mismatches 变得无害。它只是让真正原因——例如不同的日期、仅在浏览器执行的分支、变化中的外部数据，或无效的 HTML nesting——更快被找到。
+
+<br />
+
+---
+
+## 8. React 19.2 的 `Activity`
+
+`Activity` 让 React 保持界面某一区块 mounted，同时控制它是否可见，以及其 updates 应以多高的紧急程度处理。
+
+<br />
+
+```tsx
+import { Activity } from "react"
+
+function Workspace({ activeTab }: { activeTab: "editor" | "preview" }) {
+  return (
+    <>
+      <Activity mode={activeTab === "editor" ? "visible" : "hidden"}>
+        <Editor />
+      </Activity>
+
+      <Activity mode={activeTab === "preview" ? "visible" : "hidden"}>
+        <Preview />
+      </Activity>
+    </>
+  )
+}
+```
+
+React 19.2 支持两种 modes：
+
+- `visible` 显示 children、mount 它们的 effects，并正常处理 updates。
+- `hidden` 隐藏 children、unmount 它们的 effects，并把 updates 延后到 React 没有可见工作为止。
+
+与 conditional rendering 有用的差异是 **preserved state**。隐藏的 editor 可以保留 draft、selection 与 component state，同时 React 也能在背景准备很可能会用到的下一个画面。
+
+这与用 CSS 把 component 留在可见状态不同。Hidden Activities 会清理 effects，所以 subscriptions 与其他外部 synchronization 必须能正确停止与重新启动。
+
+<br />
+
+---
+
+## 9. React 19.2 的 `useEffectEvent`
+
+Effects 常常混进两种不同想法：应对 dependency 作出反应的 synchronization，以及应读取最新 props、却不应重启该 synchronization 的 event-like logic。
+
+`useEffectEvent` 把 event-like 的部分分开。
+
+<br />
+
+```tsx
+import { useEffect, useEffectEvent } from "react"
+
+function ChatRoom({
+  roomId,
+  theme,
+}: {
+  roomId: string
+  theme: "light" | "dark"
+}) {
+  const onConnected = useEffectEvent(() => {
+    showNotification("Connected", theme)
+  })
+
+  useEffect(() => {
+    const connection = createConnection(roomId)
+
+    connection.on("connected", () => onConnected())
+    connection.connect()
+
+    return () => connection.disconnect()
+  }, [roomId])
+
+  return <p>Room: {roomId}</p>
+}
+```
+
+改变 `theme` 不再会重连 chat room，但当 connection event 触发时，`onConnected` 仍会读到最新的 theme。
+
+**Effect Events 不是用来隐藏缺失 dependencies 的方法。** 它们应代表概念上由 Effect 触发的逻辑，而且只能从同一个 component 或 custom Hook 里的 Effects 调用。它们不应被放进 dependency arrays。
+
+使用这个 API 也需要较新的 `eslint-plugin-react-hooks`，因为 linter 理解并会强制这些限制。
+
+<br />
+
+---
+
+## 10. React 19.2 的性能与 Server 改进
+
+React 19.2 在 Chrome DevTools performance profiles 加入了 **React Performance Tracks**。Scheduler tracks 显示 update priorities，以及 work 何时被 scheduled、blocked、rendered 或 painted。Components tracks 显示 components 何时 render，以及它们的 effects 何时 mount。
+
+这提供比 React DevTools Profiler 更底层的视角。当缓慢的互动牵涉 scheduling、浏览器工作与 React rendering，而不是某个明显昂贵的 component 时，我会用它。
+
+还有两项多数应用开发者会通过 framework 接触到的新增：
+
+- `cacheSignal` 为 React Server Component 工作提供与 `cache()` entry 生命周期绑定的 `AbortSignal`，让未使用的 requests 或其他工作可以被取消。
+- Partial pre-rendering APIs 让 framework 可以预先 render 静态 shell、存储 postponed work，稍后再 resume 剩余的 server render。
+
+React 19.2 也通过批次附近的 Suspense boundary reveals 改善了 streaming SSR，并为 Node.js 加入 Web Streams 支持。React 团队在 Node 环境仍建议使用 Node Streams APIs，因为它们更快，也更自然地配合 compression。
+
+<br />
+
+---
+
+## 11. 升级到 React 19
+
+我会把 React、React DOM，以及它们的 TypeScript definitions 一起升级，使用 framework 支持的最新 patched React 19 release。
+
+<br />
+
+```bash
+npm install react@^19 react-dom@^19
+npm install --save-dev @types/react@^19 @types/react-dom@^19
+```
+
+官方 upgrade guide 包含常见迁移的 codemods。值得先检查的 breaking changes 是已移除的 legacy APIs：
+
+- `ReactDOM.render` 与 `ReactDOM.hydrate` 由 `createRoot` 与 `hydrateRoot` 取代。
+- `unmountComponentAtNode` 由 `root.unmount()` 取代。
+- `findDOMNode`、string refs 与 `this.refs` 已移除。
+- Legacy Context APIs 与 function component `propTypes` 已移除。
+- Ref callback 的 TypeScript 规则更严格，因为 callbacks 现在可以返回 cleanup functions。
+
+我会把 **升级与功能采用当成分开的步骤**。先让既有应用在 React 19 上运作，再在 Actions、`use` 或 `Activity` 真正简化某个 pattern 的地方引入它们。Major upgrade 若没有与大规模 rewrite 混在一起，会更容易 debug。
+
+<br />
+
+---
+
+## 要点
+
+我在 React 19 看到的主题是 coordination。Actions 协调 async mutations 与 pending 及 optimistic UI。`use` 协调 rendering 与 resources。Document APIs 协调 metadata、styles 与 scripts。`Activity` 协调可见与背景工作，而 `useEffectEvent` 把 synchronization 与 event-like behavior 分开。
+
+我预期最常使用的功能是 form Actions、`useActionState`、`useOptimistic`、ref as a prop，以及 `useEffectEvent`。`use`、`Activity` 与 server rendering APIs 更依赖 framework 支持与应用架构，但它们指向一种 loading、mutations 与 rendering 被设计成一起运作的 React model。
+
+完整细节我会回头参考官方 [React 19 release notes](https://react.dev/blog/2024/12/05/react-19)、[React 19.2 release notes](https://react.dev/blog/2025/10/01/react-19-2)，以及 [React 19 upgrade guide](https://react.dev/blog/2024/04/25/react-19-upgrade-guide)。
