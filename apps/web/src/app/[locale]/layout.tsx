@@ -17,6 +17,8 @@ import { StylesProvider } from "@/features/layout/components/styles"
 import { SiteSearchProvider } from "@/features/search/components/search-provider"
 import { routing } from "@/i18n/routing"
 import { getHtmlLang, getOpenGraphLocale, OG_IMAGE } from "@/lib/metadata"
+import { getPostHogProjectToken } from "@/lib/posthog"
+import { PostHogProvider } from "@/lib/posthog-provider"
 import { getCategoryPages } from "@/lib/source"
 import { TanstackProviders } from "@/lib/tanstack-providers"
 
@@ -82,30 +84,33 @@ export default async function LocaleLayout({ children, params }: Props) {
     (total, design) => total + design.images.length,
     0
   )
+  const posthogToken = getPostHogProjectToken()
 
   return (
     <html lang={getHtmlLang(locale)} suppressHydrationWarning>
       <body>
-        <DesignSystemProvider>
-          <StylesProvider>
-            <SmoothScroll>
-              <TanstackProviders>
-                <NextIntlClientProvider locale={locale} messages={messages}>
-                  <SiteSearchProvider>
-                    <SkipLink />
-                    {/* <RenderNavbar /> */}
-                    <RenderNewNavbar
-                      notesCount={notesCount}
-                      designsCount={designsCount}
-                    />
-                    {/* <div className="fixed bottom-0 left-0 right-0 h-24 bg-linear-to-t pointer-events-none from-surface-canvas to-surface-canvas/0" /> */}
-                    <RootLayout>{children}</RootLayout>
-                  </SiteSearchProvider>
-                </NextIntlClientProvider>
-              </TanstackProviders>
-            </SmoothScroll>
-          </StylesProvider>
-        </DesignSystemProvider>
+        <PostHogProvider token={posthogToken}>
+          <DesignSystemProvider>
+            <StylesProvider>
+              <SmoothScroll>
+                <TanstackProviders>
+                  <NextIntlClientProvider locale={locale} messages={messages}>
+                    <SiteSearchProvider>
+                      <SkipLink />
+                      {/* <RenderNavbar /> */}
+                      <RenderNewNavbar
+                        notesCount={notesCount}
+                        designsCount={designsCount}
+                      />
+                      {/* <div className="fixed bottom-0 left-0 right-0 h-24 bg-linear-to-t pointer-events-none from-surface-canvas to-surface-canvas/0" /> */}
+                      <RootLayout>{children}</RootLayout>
+                    </SiteSearchProvider>
+                  </NextIntlClientProvider>
+                </TanstackProviders>
+              </SmoothScroll>
+            </StylesProvider>
+          </DesignSystemProvider>
+        </PostHogProvider>
       </body>
     </html>
   )

@@ -16,6 +16,11 @@ export const router = new sst.aws.Router("Router", {
     aliases: [isProd ? `*.${domain}` : `*.${$app.stage}.${domain}`],
     redirects: isProd ? [`www.${domain}`] : [],
   },
-  waf: isProd ? true : undefined,
+  waf: isProd
+    ? {
+        // Limits abuse of first-party `/ingest` (and the rest of the site).
+        rateLimitPerIp: 1000,
+      }
+    : undefined,
   edge: basicAuthEdge,
 })
