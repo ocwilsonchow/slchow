@@ -19,11 +19,7 @@ import {
 } from "fumadocs-ui/components/dialog/search"
 import { ArrowDownIcon, ArrowUpIcon, CornerDownLeftIcon } from "lucide-react"
 import { useLocale, useTranslations } from "next-intl"
-import {
-  type ComponentPropsWithoutRef,
-  type ReactNode,
-  useMemo,
-} from "react"
+import { type ComponentPropsWithoutRef, type ReactNode, useMemo } from "react"
 import { createSearchDatabase } from "@/lib/search-tokenizer"
 
 const SEARCH_OPTIONS = {

@@ -149,7 +149,9 @@ function NavbarTriggerLabel() {
         <div aria-hidden className="text-content-body-on-popover text-xs">
           /
         </div>
-        <div className="text-content-body-on-popover lowercase">{pathLabel}</div>
+        <div className="text-content-body-on-popover lowercase">
+          {pathLabel}
+        </div>
       </div>
     </div>
   )

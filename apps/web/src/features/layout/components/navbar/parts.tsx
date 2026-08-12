@@ -172,10 +172,7 @@ function Frame({
       )}
       {...props}
     >
-      <motion.div
-        ref={shellRef}
-        className="grid md:grid-cols-2 xl:grid-cols-4"
-      >
+      <motion.div ref={shellRef} className="grid md:grid-cols-2 xl:grid-cols-4">
         <nav
           ref={navRef}
           aria-label={t("menu")}
