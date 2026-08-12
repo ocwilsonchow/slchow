@@ -18,8 +18,16 @@ import {
   useSearch,
 } from "fumadocs-ui/components/dialog/search"
 import { ArrowDownIcon, ArrowUpIcon, CornerDownLeftIcon } from "lucide-react"
+import { useReducedMotion } from "motion/react"
 import { useLocale, useTranslations } from "next-intl"
-import { type ComponentPropsWithoutRef, type ReactNode, useMemo } from "react"
+import {
+  type ComponentPropsWithoutRef,
+  type ReactNode,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+} from "react"
+import { playNavbarToggleSound } from "@/features/layout/components/navbar/sound"
 import { createSearchDatabase } from "@/lib/search-tokenizer"
 
 const SEARCH_OPTIONS = {
@@ -153,6 +161,20 @@ function SearchFooterHints() {
 export function SiteSearchDialog(props: SharedProps) {
   const locale = useLocale()
   const t = useTranslations("search")
+  const shouldReduceMotion = useReducedMotion() ?? false
+  const prevOpenRef = useRef<boolean | undefined>(undefined)
+
+  useLayoutEffect(() => {
+    const prevOpen = prevOpenRef.current
+    if (prevOpen === undefined && !props.open) {
+      prevOpenRef.current = props.open
+      return
+    }
+    if (prevOpen === props.open) return
+    prevOpenRef.current = props.open
+    if (!shouldReduceMotion) playNavbarToggleSound()
+  }, [props.open, shouldReduceMotion])
+
   const client = useMemo(
     () =>
       oramaStaticClient({
