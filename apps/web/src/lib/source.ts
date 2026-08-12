@@ -115,3 +115,25 @@ export function getNotesStaticParams() {
 export function getMdxContent(category: string, slug: string, locale: string) {
   return content.getPage([category, slug], locale)
 }
+
+const getPageDate = (date?: string | Date) => {
+  if (!date) return 0
+  return new Date(date).getTime()
+}
+
+/** Next note in date-descending list order (typically older). Null on the oldest. */
+export function getNextNote(slug: string, locale: string) {
+  const notes = getCategoryPages(NOTES_CATEGORY, locale).sort(
+    (a, b) => getPageDate(b.data.date) - getPageDate(a.data.date)
+  )
+  const index = notes.findIndex(
+    (page) => page.slugs.slice(1).join("/") === slug
+  )
+  if (index === -1 || index >= notes.length - 1) return null
+
+  const next = notes[index + 1]
+  return {
+    slug: next.slugs.slice(1).join("/"),
+    title: next.data.title ?? "",
+  }
+}

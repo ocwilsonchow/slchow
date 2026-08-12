@@ -37,7 +37,7 @@ const Page = async ({ params }: Props) => {
         <Header.Links />
       </Header.Root>
       <div>
-        <div className="p-5">
+        <div className="pt-0 md:pt-5  p-5">
           <section id="introduction" className="">
             <RenderMdxBlockByPath
               category="blocks"
@@ -46,7 +46,7 @@ const Page = async ({ params }: Props) => {
             />
           </section>
           <Divider />
-          <section id="works-and-notes" className="flex flex-col pb-10">
+          <section id="works-and-notes" className="flex flex-col pb-20">
             <ListNotes locale={locale} />
             <Divider />
           </section>

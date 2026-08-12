@@ -6,6 +6,7 @@ import { Header } from "@/features/layout/components/header"
 import { PageLayout } from "@/features/layout/components/page"
 import { RenderMdxBlockByPath } from "@/features/mdx/components/render-mdx-block"
 import { CollapsibleToc } from "@/features/mdx/components/toc"
+import { NextNoteLink } from "@/features/notes/components/next-note-link"
 import { buildPageMetadata } from "@/lib/metadata"
 import { getMdxContent, getNotesStaticParams } from "@/lib/source"
 
@@ -57,8 +58,9 @@ const Page = async ({ params }: Props) => {
           <CollapsibleToc toc={toc} />
         </Header.Column>
       </Header.Root>
-      <article className="p-5 pb-24">
+      <article className="p-5">
         <RenderMdxBlockByPath category="notes" slug={slug} locale={locale} />
+        <NextNoteLink slug={slug} locale={locale} />
       </article>
     </PageLayout>
   )
