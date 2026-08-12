@@ -988,17 +988,15 @@ sequenceDiagram
   Server->>Cache: Read cached ProductDetails
   Cache-->>Server: Shared product fields
   Server-->>Browser: Static shell HTML + RSC + fallbacks
-  Browser->>Browser: Paint title; hydrate client boundaries
+  Browser->>Browser: Paint title and hydrate client boundaries
   Server->>DB: Fetch recommendations with session
   Server-->>Browser: Stream personalized region
-
   Browser->>Server: Prefetch sibling product via Link
   Server-->>Browser: RSC patch stored in Router Cache
-
   Browser->>Server: POST rename Server Action
   Server->>DB: Authorized update
-  Server->>Cache: updateTag product:123
-  Server-->>Browser: Action result + refreshed route data
+  Server->>Cache: updateTag product 123
+  Server-->>Browser: Action result and refreshed route data
 ```
 
 What a production investigation should confirm:
