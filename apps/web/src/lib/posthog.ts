@@ -5,10 +5,18 @@ type ProductionPostHogResources = {
   POSTHOG_PROJECT_TOKEN: { value: string }
 }
 
-/** Production-only PostHog project token from the linked SST Secret. */
+/**
+ * Production-only PostHog project token from the linked SST Secret.
+ * Uses `SST_STAGE` (set by infra) so CI / plain `next build` never touch
+ * `Resource` — SST links are inactive outside `sst dev` / deploy.
+ */
 export function getPostHogProjectToken(): string | undefined {
-  if (Resource.App.stage !== "production") return undefined
+  if (process.env.SST_STAGE !== "production") return undefined
 
-  return (Resource as typeof Resource & ProductionPostHogResources)
-    .POSTHOG_PROJECT_TOKEN.value
+  try {
+    return (Resource as typeof Resource & ProductionPostHogResources)
+      .POSTHOG_PROJECT_TOKEN.value
+  } catch {
+    return undefined
+  }
 }
