@@ -9,7 +9,7 @@ Personal site for [Wilson Chow](https://slchow.com) — notes, works, resume, an
 ## Stack
 
 - [Next.js](https://nextjs.org/) (App Router) + React 19 + Tailwind CSS 4
-- [next-intl](https://next-intl.dev/) for `en` / `hk` / `cn`
+- [next-intl](https://next-intl.dev/) for `en` / `hk` / `cn` / `ja`
 - [Fumadocs MDX](https://www.fumadocs.dev/) for notes, works, and content blocks
 - [Hono](https://hono.dev/) + [Mastra](https://mastra.ai/) API (agents, workflows, OpenAPI)
 - [Better Auth](https://www.better-auth.com/) + [Drizzle](https://orm.drizzle.team/) / Postgres
@@ -27,7 +27,7 @@ apps/
   web/          Next.js site (localhost:3003)
   api/          Hono + Mastra API (localhost:4111)
 packages/
-  content/      MDX source (en / hk / cn: notes, works, blocks)
+  content/      MDX source (en / hk / cn / ja: notes, works, blocks)
   ds/           Shared design system (@repo/ds)
   intl/         next-intl message catalogs (@repo/intl)
   auth/         Better Auth server + client (@repo/auth)
@@ -89,7 +89,7 @@ bun run auth:generate   # regenerate Better Auth tables into @repo/db
 
 ## Content & locales
 
-MDX lives in `packages/content/src/{en,hk,cn}/` under `notes/`, `works/`, and `blocks/`. UI copy is in `packages/intl/messages/{en,hk,cn}.json`. The web app loads content through Fumadocs (`apps/web/source.config.ts`).
+MDX lives in `packages/content/src/{en,hk,cn,ja}/` under `notes/`, `works/`, and `blocks/`. UI copy is in `packages/intl/messages/{en,hk,cn,ja}.json`. The web app loads content through Fumadocs (`apps/web/source.config.ts`).
 
 ## API
 

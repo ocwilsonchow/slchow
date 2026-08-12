@@ -1,0 +1,131 @@
+---
+title: 履歴書
+---
+
+## 概要
+
+5 年の経験を持つソフトウェア開発者。**Figma** デザインと **React** 開発から、バックエンドおよびクラウドデプロイまでのフルスタック納品を担当。15 以上の本番アプリをリリース。**AWS Solutions Architect Associate** 認定取得。
+
+デザインシステム、高度なアニメーション、高性能な **Next.js** / **React Native** アプリを構築。バックエンドは **Hono**、**Drizzle**、**OpenAPI**、**tRPC**、**GraphQL**。Headless CMS と検索は **Strapi**、**Sanity**、**Meilisearch**。
+
+本番向け **AI agents**、**RAGs**、**MCP servers** の経験あり。**AI SDK**、**Langchain**、**Mastra** を使用。
+
+**SST**、**Terraform**、**AWS**、**Vercel** によるクラウドインフラのデプロイと運用に習熟。
+
+<br />
+
+---
+
+## 職歴
+
+### ソフトウェア開発者、Vioo Company Limited、2022 年 5 月〜現在
+
+- エンドツーエンドで 15 以上の本番 **React** / **React Native** アプリを開発・保守。高忠実度の **Figma デザイン** と **デザインシステム** を設計。
+- クライアントおよびステークホルダーと連携し、スコープ定義、UX の反復、本番リリースを実施。
+- 共有コンポーネント／hook ライブラリ（**Radix**、**Tailwind CSS**）を **Storybook** / **Fumadocs** / **MDX** ドキュメント付きで整備し、複数クライアントアプリで利用。
+- **Framer Motion** による高度なアニメーションとマイクロインタラクション（scroll-based、animate presence、layout transitions）を複数クライアントアプリに実装。
+- **D3** と **Framer Motion** で高度なアニメーション折れ線グラフを構築。
+- **Mastra**、**AI SDK**、**Langchain** で本番 **AI agents**（workflows、memory、workspaces、observability）を構築。**組み合わせ可能な** agent チャットとツール呼び出し UI をリリース。
+- レガシー **WordPress** を headless **CMS**（**Strapi** / **Sanity**）と検索（**Meilisearch** / **Algolia**）に置き換え。読み込み時間 **80%** 削減、検索レイテンシ **90%** 削減、PageSpeed Insights **>90** を達成。
+- Shopify の headless **GraphQL** API 上にカスタム **Next.js** ストアフロントを構築。
+- **Hono**、**Drizzle**、**OpenAPI**、**tRPC** で **AWS Lambda** / **API Gateway** 上に型付き API を構築。**Postgres** と **DynamoDB** をバックエンドに、**Scalar** で API ドキュメントを提供。
+- **SST** を導入してアプリデプロイとインフラを管理し、ビルド・デプロイ時間を **50%+** 短縮。
+- フロントエンドのコード／パフォーマンスレビューを主導 — 組み合わせ可能な React パターン、重い UI の遅延読み込み — 重要フローに **Cypress** E2E カバレッジを追加。
+
+<br />
+
+---
+
+## 主なプロジェクト
+
+### _Agentic Platform、2026 年 4 月〜現在_
+
+- **マルチチャネル** agent プラットフォーム（web + Discord）を主導。持続的ストリーミングにより、クライアントは実行中に切断しても進捗を失わず再開できる。
+- **Mastra** と **AI SDK** 上に workflow、memory、scheduling、workspace のプリミティブを構築：pause/resume、retries、ファイル保存、サンドボックスツール、skills。
+- エンドツーエンドの **RAG** をリリース：ingest/parse、chunking、**Pinecone** retrieval（query/rerank、必要に応じて graph query）。
+- **Hono** + **Better Auth** バックエンドを **ECS** で運用。コアデータは **Postgres**、ファイルは **S3**。
+- **ClickHouse** で run/tool traces とコスト／レイテンシ指標を観測。golden prompts + LLM-as-judge によるスコア付き eval suites で品質回帰を検出。
+- ワークスペースファイルを agent prompts に添付するための **TipTap** **@mention** ファイルタグ付けコンポーネントを設計・リリース。
+
+---
+
+### _Full Stack Marketing Site、2025 年 11 月_
+
+- **Next.js** コンテンツサイトを **Strapi** バックエンドと **Meilisearch** で構築。**LCP < 0.5s**、**CLS < 0.1**、PageSpeed Insights **>90** を達成。
+- ハイブリッド **ISR**：主要ページと最新 100 記事をビルド時に事前レンダリング。残りはオンデマンドのフォールバック生成。
+- Strapi コンテンツ **webhooks** による **tag-based revalidation** で、フルリビルドなしに公開を反映。
+- 対話 UI は **TanStack Query** のサーバー prefetch/hydration。フォームは **TanStack Form**、**Zod**、Query mutations。
+- **Turborepo** を **SST** 経由で **AWS ECS** にデプロイ。**API Gateway** 経由でルーティング。メディアは **S3**。
+- **アクセシビリティ**：セマンティックな landmarks／見出し、キーボード操作可能なナビとフォーム、可視フォーカス、CMS メディアの意味のある alt text。**Lighthouse** と **axe** で a11y テスト。
+- **SEO**：Strapi 由来の metadata/OG tags、canonical URLs、sitemap + `robots.txt`、Article JSON-LD 構造化データでコンテンツページをインデックス可能に。
+- **AI SDK** による生成 AI コンテンツ作成用の **カスタム Strapi plugin** を構築。
+
+---
+
+### _React Native App、2024 年 4 月_
+
+- ケータリングブランド会員アプリ（デジタルカード、ポイント、オファー）の **Figma** デザインと **React Native** フロントエンドを主導。
+- **OpenAPI**/Swagger から型付き REST クライアントをバックエンドと統合。iOS & Android を App Store と Play Store にリリース。
+- プロモとマイルストーン向けのプッシュ＋ディープリンクキャンペーン。
+- ローンチ後 **>99.5%** の crash-free sessions を維持。**Sentry** で監視。
+- メニュー／履歴リストのジャンクを **FlashList**（recycling、batch/window 調整）で削減。ScrollView 行マップの代わりに使用。
+- **react-native-screens** freeze と遅延画面マウントで非アクティブタブを軽量化。**Reanimated** はネイティブスレッド遷移に限定。
+- フィードでリモート画像をキャッシュし、長いリストでフル解像度アセットを回避。
+
+<br />
+
+---
+
+## その他のプロジェクト
+
+以下のプロジェクトの開発にも携わりました：
+
+- **健康・ウェルネス RAG agent**（Next.js、Langchain、Shopify API）
+- **レストランロイヤリティアプリ**（React Native）
+- **CMS 付きコンテンツプラットフォーム**（Next.js、Strapi）
+- **事業者向け会員ポータル**（React Native）
+- **フォトブースイベントモバイルアプリ**（React Native、Skia、Next.js）
+- **イベント登録サイト**（Next.js）
+- **キャンペーン／マーケティングサイト**（Next.js、Sanity / Strapi）
+- **RBAC 付きリソース管理システム**（Next.js）
+- **EC ストアフロント**（Next.js、Shopify GraphQL）
+- **在宅高齢者ケアアプリ**（Flutter）
+- **書籍注文システム**（Laravel、React）
+
+---
+
+## スキル
+
+- **プログラミング言語**：Typescript、Python
+- **フロントエンド**：React、Next.js、React Native、Expo、Tanstack Query、Framer Motion、Tailwindcss、Shadcn UI、Storybook、Figma、MDX
+- **バックエンド**：Hono、Drizzle、OpenAPI、tRPC、Scalar、Pinecone、Meilisearch、Strapi、Sanity
+- **AI**：Mastra、AI SDK、Langchain、Strands
+- **テスト**：Cypress、Vitest、React Testing Library、Lighthouse、axe
+- **データベース**：Postgres、DynamoDB
+- **DevOps**：Docker、SST、AWS、Vercel、Turborepo
+
+<br />
+
+---
+
+## 学歴
+
+### University College London
+
+- MPharm Pharmacy、2016 - 2020
+- First class honours
+
+<br />
+
+---
+
+## 資格
+
+- AWS Solutions Architect Associate、2026
+- AWS Cloud Practitioner、2025
+
+<br />
+
+---
+
+履歴書は[こちら](/resume.pdf)からもダウンロードできます。

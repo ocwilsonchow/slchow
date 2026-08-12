@@ -1,0 +1,633 @@
+---
+title: Hono、Drizzle、Zod OpenAPI、SST による Backend API
+description: Lambda または Fargate 上の typed Hono stack——Zod OpenAPI、Better Auth、Drizzle、SST デプロイ、WAF、アラーム、バックアップドリル
+date: 2026-08-12
+---
+
+Backend API を構築するとき、request から database までの経路は短く、**validation**、**documentation**、**infrastructure** が同じコードから生まれることを望む。この stack は **Hono**、**Better Auth**、**Drizzle**、**PostgreSQL**、**Zod OpenAPI**、**Scalar**、そして **AWS Lambda** または **ECS Fargate** 上の **SST** である。
+
+Stages と deploy loop は [SST による AWS インフラと DevOps](/notes/using-sst-for-aws-infra-and-devops) を参照。Tenant isolation は [Hono、Better Auth、Drizzle、Postgres RLS による Multi-Tenant Backend](/notes/multi-tenant-backend-drizzle-hono-better-auth) を参照。このノートでは typed API から production の protect、monitor、recover までを扱う。
+
+<br />
+
+---
+
+## 1. Architecture
+
+デフォルトの形は、**API Gateway** の背後に 1 つの **Hono API Lambda**、2 番目の Lambda が **Better Auth authorizer** として動く。拒否された session は API function を invoke しない。同じ Hono app は Fargate 上で `handle(app)` の代わりに `serve({ fetch: app.fetch })` で実行できる。
+
+<br />
+
+| **Lambda** を選ぶとき… | **ECS Fargate** を選ぶとき… |
+| --- | --- |
+| スパイクまたはアイドル traffic、短い handler | 安定した traffic、長い request、streaming、agents |
+| API 実行前に authorizer で拒否 | 長寿命 process と connection reuse |
+| 薄い BFF の最小 ops 表面 | すでに container を出荷しているチーム |
+
+<br />
+
+```text
+Client
+  → Lambda:  API Gateway → throttle → authorizer → Hono Lambda
+  → Fargate: Router → WAF → ALB → task → Hono middleware
+  → Zod route → Drizzle → PostgreSQL
+  → OpenAPI JSON → Scalar
+  → logs / metrics / alarms
+```
+
+Lambda では identity が infrastructure 境界になる。Fargate では request が task に到達した後、process 内で実行される。どちらも edge controls は必要である。
+
+<br />
+
+---
+
+## 2. Hono
+
+entrypoint は薄く保つ。Business logic は Lambda や ECS を知る必要はない。
+
+<br />
+
+```ts
+import { OpenAPIHono } from "@hono/zod-openapi"
+import { handle } from "hono/aws-lambda"
+
+const app = new OpenAPIHono()
+
+app.options("*", (c) => c.body(null, 204))
+
+app.get("/api/health", (c) => c.json({ status: "ok" }))
+
+export const handler = handle(app)
+```
+
+<br />
+
+Fargate では同じ app を `serve({ fetch: app.fetch })` で提供する。Routes、Zod schemas、services は同じままである。
+
+<br />
+
+---
+
+## 3. Zod OpenAPI による Contract
+
+Contract とは、route が何を受け取り、何を返し、errors がどう見えるかである。1 つの Zod definition が validation、TypeScript types、OpenAPI を駆動する。
+
+<br />
+
+```ts
+import { createRoute, z } from "@hono/zod-openapi"
+import { ErrorSchema, GatewayErrorSchema } from "./schemas"
+
+app.openAPIRegistry.registerComponent("securitySchemes", "CookieAuth", {
+  type: "apiKey",
+  in: "header",
+  name: "Cookie",
+  description: "Better Auth session cookie",
+})
+
+const UserSchema = z
+  .object({
+    id: z.string().uuid(),
+    email: z.string().email(),
+    name: z.string(),
+  })
+  .openapi("User")
+
+const CreateUserSchema = z
+  .object({
+    email: z.string().email(),
+    name: z.string().min(1).max(100),
+  })
+  .openapi("CreateUser")
+
+const createUserRoute = createRoute({
+  method: "post",
+  path: "/users",
+  security: [{ CookieAuth: [] }],
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: CreateUserSchema,
+        },
+      },
+    },
+  },
+  responses: {
+    201: {
+      description: "User created",
+      content: {
+        "application/json": {
+          schema: UserSchema,
+        },
+      },
+    },
+    400: {
+      description: "Invalid request",
+      content: {
+        "application/json": {
+          schema: ErrorSchema,
+        },
+      },
+    },
+    401: {
+      description: "Authentication cookie is missing",
+      content: {
+        "application/json": {
+          schema: GatewayErrorSchema,
+        },
+      },
+    },
+    403: {
+      description: "The session is invalid or not authorized",
+      content: {
+        "application/json": {
+          schema: GatewayErrorSchema,
+        },
+      },
+    },
+  },
+})
+
+app.openapi(createUserRoute, async (c) => {
+  const input = c.req.valid("json")
+  const user = await createUser(input)
+  return c.json(user, 201)
+})
+```
+
+<br />
+
+共有 error shape により `400` / `404` / `409` を一貫させる。API Gateway authorizer の失敗は `401` / `403` 用の小さな gateway shape を使う——両方をドキュメント化する。
+
+<br />
+
+```ts
+export const ErrorSchema = z
+  .object({
+    code: z.string(),
+    message: z.string(),
+    requestId: z.string().optional(),
+    issues: z
+      .array(
+        z.object({
+          path: z.string(),
+          message: z.string(),
+        })
+      )
+      .optional(),
+  })
+  .openapi("ApiError")
+
+export const GatewayErrorSchema = z
+  .object({
+    message: z.string(),
+  })
+  .openapi("GatewayError")
+
+const app = new OpenAPIHono({
+  defaultHook: (result, c) => {
+    if (!result.success) {
+      return c.json(
+        {
+          code: "VALIDATION_ERROR",
+          message: "Request validation failed.",
+          issues: result.error.issues.map((issue) => ({
+            path: issue.path.map(String).join(".") || "request",
+            message: issue.message,
+          })),
+        },
+        400
+      )
+    }
+  },
+})
+```
+
+<br />
+
+早い段階で **request ID** を付与し、logs と error responses に含める。
+
+<br />
+
+---
+
+## 4. Drizzle と PostgreSQL
+
+PostgreSQL が durable authority である。Drizzle は SQL を隠さずに schema と query を typed に保つ。concurrency 下では check-then-insert より database constraints を優先する。
+
+<br />
+
+```ts
+import {
+  pgTable,
+  text,
+  timestamp,
+  uniqueIndex,
+  uuid,
+} from "drizzle-orm/pg-core"
+
+export const users = pgTable(
+  "users",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    email: text("email").notNull(),
+    name: text("name").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [uniqueIndex("users_email_idx").on(table.email)]
+)
+```
+
+<br />
+
+Lambda では handler の外で client を作成し、warm environment で再利用する。pool は小さく保つ：
+
+<br />
+
+```ts
+import { drizzle } from "drizzle-orm/postgres-js"
+import postgres from "postgres"
+import { Resource } from "sst"
+
+const client = postgres(Resource.DatabaseUrl.value, {
+  max: 1,
+  connect_timeout: 10,
+  idle_timeout: 20,
+  ssl: "require",
+})
+
+export const db = drizzle(client)
+```
+
+<br />
+
+warm environment ごとの reuse は global pooling ではない。concurrency を制限し、timeout を設定し、規模が大きくなれば pooler または RDS Proxy を使う。transaction-mode pooler が必要な場合は prepared statements を無効化する（`prepare: false`）。
+
+Migration は **deploy step** であり、request path の一部にしてはならない。Drizzle Kit で SQL を生成し、レビューし、使い捨て DB でテストし、code が新しい shape に依存する前に適用する。変更を atomically に ship できない場合は expand-and-contract を使う。
+
+<br />
+
+---
+
+## 5. Better Auth と Authorizer
+
+Better Auth は API 内で動く：sign-up、sign-in、session、account を Drizzle adapter 経由で Postgres に保存する。Secrets は linked SST resources から取得する。
+
+<br />
+
+```ts
+import { betterAuth } from "better-auth"
+import { drizzleAdapter } from "better-auth/adapters/drizzle"
+import { Resource } from "sst"
+import { db } from "./db"
+
+export const auth = betterAuth({
+  secret: Resource.BetterAuthSecret.value,
+  baseURL: process.env.BETTER_AUTH_URL,
+  database: drizzleAdapter(db, { provider: "pg" }),
+  emailAndPassword: { enabled: true },
+  trustedOrigins: ["https://app.example.com"],
+})
+```
+
+<br />
+
+auth を public route に mount する。`/api/health` と `/api/auth/*` は authorizer の対象外に保つ。
+
+<br />
+
+```ts
+app.on(["GET", "POST"], "/api/auth/*", (c) => auth.handler(c.req.raw))
+```
+
+<br />
+
+Lambda authorizer は API function 実行前に session を検証する：
+
+<br />
+
+```ts
+import type { APIGatewayRequestSimpleAuthorizerHandlerV2WithContext } from "aws-lambda"
+import { auth } from "./auth"
+
+type AuthContext = {
+  userId?: string
+  sessionId?: string
+}
+
+export const handler: APIGatewayRequestSimpleAuthorizerHandlerV2WithContext<
+  AuthContext
+> = async (event) => {
+  const headers = new Headers()
+
+  for (const [name, value] of Object.entries(event.headers ?? {})) {
+    if (value) headers.set(name, value)
+  }
+
+  if (event.cookies?.length) {
+    headers.set("cookie", event.cookies.join("; "))
+  }
+
+  const result = await auth.api.getSession({ headers })
+
+  if (!result) {
+    return { isAuthorized: false, context: {} }
+  }
+
+  return {
+    isAuthorized: true,
+    context: {
+      userId: result.user.id,
+      sessionId: result.session.id,
+    },
+  }
+}
+```
+
+<br />
+
+Cookie 欠如 → `401`。Authorizer deny → `403`。どちらも API Lambda を invoke しない。成功時、Hono は authorizer context から identity を読む——client の `X-User-Id` からは読まない。
+
+<br />
+
+```ts
+app.get("/users/me", (c) => {
+  const identity = (
+    c.env.event.requestContext as {
+      authorizer?: { lambda?: { userId: string; sessionId: string } }
+    }
+  ).authorizer?.lambda
+
+  if (!identity) {
+    return c.json(
+      { code: "UNAUTHORIZED", message: "Authentication is required." },
+      401
+    )
+  }
+
+  return c.json({ userId: identity.userId })
+})
+```
+
+<br />
+
+Authentication は *誰か* を答える。Authorization（roles、org membership、RLS）は app 側に残る——[multi-tenant ノート](/notes/multi-tenant-backend-drizzle-hono-better-auth) を参照。same-site domain（`app.example.com` / `api.example.com`）と secure HTTP-only cookie を優先する。revoke された session が残らないよう、最初は authorizer caching を無効にする。
+
+Fargate では同じ Better Auth session check が request が task に到達した後、Hono middleware として実行される。
+
+<br />
+
+---
+
+## 6. OpenAPI と Scalar
+
+<br />
+
+```ts
+app.doc("/openapi.json", {
+  openapi: "3.0.0",
+  info: { title: "Example API", version: "1.0.0" },
+})
+
+app.get(
+  "/docs",
+  Scalar({
+    url: "/openapi.json",
+    theme: "kepler",
+  })
+)
+```
+
+<br />
+
+production では docs を stage-gate または authenticate する。public reference は無料の reconnaissance である。OpenAPI JSON が portable artifact（CI、typed clients、breaking-change checks）であり、Scalar は presentation layer である。
+
+<br />
+
+---
+
+## 7. SST による Deploy
+
+catch-all の背後に 1 つの Hono API Lambda を置くと、middleware、errors、OpenAPI、DB setup を 1 か所に保てる。Authorizer は security boundary として分離する。function を分けるのは運用上の理由（permissions、timeouts、async work）のみであり、path が違うからではない。
+
+<br />
+
+```ts
+const databaseUrl = new sst.Secret("DatabaseUrl")
+const betterAuthSecret = new sst.Secret("BetterAuthSecret")
+
+const api = new sst.aws.ApiGatewayV2("Api", {
+  domain: "api.example.com",
+  cors: {
+    allowOrigins: ["https://app.example.com"],
+    allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowHeaders: ["Content-Type", "Authorization"],
+    allowCredentials: true,
+  },
+})
+
+const apiFunction = new sst.aws.Function("ApiFunction", {
+  handler: "src/index.handler",
+  link: [databaseUrl, betterAuthSecret],
+  environment: { BETTER_AUTH_URL: api.url },
+  logging: { retention: "1 month" },
+})
+
+const authorizerFunction = new sst.aws.Function("AuthorizerFunction", {
+  handler: "src/authorizer.handler",
+  link: [databaseUrl, betterAuthSecret],
+  environment: { BETTER_AUTH_URL: api.url },
+  logging: { retention: "1 month" },
+})
+
+const authorizer = api.addAuthorizer({
+  name: "BetterAuthAuthorizer",
+  lambda: {
+    function: authorizerFunction.arn,
+    identitySources: ["$request.header.Cookie"],
+    payload: "2.0",
+    response: "simple",
+  },
+})
+
+api.route("ANY /api/auth/{proxy+}", apiFunction.arn)
+api.route("OPTIONS /{proxy+}", apiFunction.arn)
+api.route("$default", apiFunction.arn, {
+  auth: { lambda: authorizer.id },
+})
+```
+
+<br />
+
+明示的な public `OPTIONS` が重要である：authorizer 付きの `$default` は browser preflight を拒否する。private resources に到達する必要がある場合のみ function を VPC に置く。
+
+container path では：`Vpc` → `Cluster` → `Service`、TLS と WAF は [`sst.aws.Router`](https://sst.dev/docs/component/aws/router) に載せる。
+
+<br />
+
+```ts
+const isProd = $app.stage === "production"
+const domain = "example.com"
+
+export const router = new sst.aws.Router("Router", {
+  domain: isProd ? `api.${domain}` : `${$app.stage}.api.${domain}`,
+  waf: {
+    rateLimitPerIp: 1000,
+    managedRules: {
+      coreRuleSet: true,
+      knownBadInputs: true,
+      sqlInjection: true,
+    },
+    logging: true,
+  },
+})
+
+const vpc = new sst.aws.Vpc("Vpc")
+const cluster = new sst.aws.Cluster("Cluster", { vpc })
+
+export const service = new sst.aws.Service("API", {
+  cluster,
+  cpu: "0.5 vCPU",
+  memory: "1 GB",
+  image: {
+    context: ".",
+    dockerfile: "apps/api/Dockerfile",
+  },
+  link: [databaseUrl, betterAuthSecret],
+  environment: { PORT: "4111" },
+  logging: { retention: "1 month" },
+  loadBalancer: {
+    rules: [{ listen: "80/http", forward: "4111/http" }],
+    health: {
+      "4111/http": { path: "/api/health" },
+    },
+  },
+  scaling: { min: 1, max: 4, cpuUtilization: 70 },
+})
+
+router.route("/", service.url)
+```
+
+<br />
+
+runtime-agnostic な app hardening：strict CORS、secure cookies、request IDs、structured logs（token は出さない）、WAF 下の `/api/auth/*` に app-level rate limits、Zod validation、必要なら production で invite-only signup。
+
+production stage では `protect` と `removal: "retain"` を使う（[SST config](https://sst.dev/docs/reference/config/#removal)）。
+
+<br />
+
+---
+
+## 8. Monitor と Recover
+
+Logs、metrics、traces は request id を共有すべきである。
+
+<br />
+
+| Signal | Fargate | Lambda |
+| --- | --- | --- |
+| Logs | Service `logging.retention` → CloudWatch | Function `logging.retention` |
+| Metrics | ALB 5xx / latency、ECS CPU / memory | Errors、duration、throttles、concurrency |
+| Alarms | Unhealthy hosts、p99、CPU | Error rate、throttles、timeout proximity |
+
+<br />
+
+symptom で alert する。SNS が「人間に知らせる」bus である：
+
+<br />
+
+```ts
+const alerts = new sst.aws.SnsTopic("ApiAlerts")
+
+new aws.sns.TopicSubscription("ApiAlertsEmail", {
+  topic: alerts.arn,
+  protocol: "email",
+  endpoint: "oncall@example.com",
+})
+
+new aws.cloudwatch.MetricAlarm("Api5xx", {
+  alarmName: `${$app.name}-${$app.stage}-api-5xx`,
+  comparisonOperator: "GreaterThanThreshold",
+  evaluationPeriods: 2,
+  metricName: "HTTPCode_Target_5XX_Count",
+  namespace: "AWS/ApplicationELB",
+  period: 60,
+  statistic: "Sum",
+  threshold: 10,
+  treatMissingData: "notBreaching",
+  alarmActions: [alerts.arn],
+  dimensions: {
+    LoadBalancer: service.nodes.loadBalancer.arnSuffix,
+  },
+})
+
+new aws.cloudwatch.MetricAlarm("ApiLambdaErrors", {
+  alarmName: `${$app.name}-${$app.stage}-api-lambda-errors`,
+  comparisonOperator: "GreaterThanThreshold",
+  evaluationPeriods: 1,
+  metricName: "Errors",
+  namespace: "AWS/Lambda",
+  period: 60,
+  statistic: "Sum",
+  threshold: 5,
+  treatMissingData: "notBreaching",
+  alarmActions: [alerts.arn],
+  dimensions: {
+    FunctionName: apiFunction.name,
+  },
+})
+```
+
+<br />
+
+CloudTrail と GuardDuty は account レベルで維持する——有効か確認し、SST-managed resources を Console で編集しない。
+
+Durable state はほぼすべて **Postgres** である。Compute は git + SST から再デプロイ可能である。まず **RPO** と **RTO** を書き、次に：
+
+- RPO に合う retention の automated backups
+- プロダクトが重要なら cross-region snapshot copy
+- restore 後の DB が追いつける versioned Drizzle migrations
+- restore drill：snapshot → non-prod `DATABASE_URL` → migrate → `/api/health` + 1 critical path → 実際の RTO を記録
+
+Multi-AZ は 1 region 内の high availability であり、cross-region disaster recovery ではない。
+
+<br />
+
+---
+
+## 9. Lifecycle、Tests、Trade-offs
+
+Lambda 上の `POST /users`：API Gateway → authorizer（Better Auth session）→ Hono adapter → request ID middleware → Zod → service → Drizzle → Postgres → `201`。同じ route schema が `/openapi.json` に現れる。
+
+テストは主に Lambda adapter **より下**で、`app.request` と mock authorizer context を使う。query と migration には real disposable Postgres を使う。deployed tests は authorizer decisions、CORS、linked secrets、domains 用に残す。
+
+受け入れる trade-offs：OpenAPI response の繰り返し、cold starts、意図的な connection limits、TypeScript が runtime で消える事実——Zod と Postgres constraints は依然として重要である。各 layer は置き換え可能なまま保つ。
+
+<br />
+
+---
+
+## Mental Model
+
+```text
+Contract   → Zod OpenAPI route + shared errors
+Auth       → Better Auth + authorizer (Lambda) or middleware (Fargate)
+Data       → Drizzle + Postgres constraints + migrate-on-deploy
+Deploy     → SST ApiGatewayV2 + Functions  or  Router/WAF + Service
+Protect    → WAF, rate limits, least-privilege secrets, docs gated
+Monitor    → requestId logs + runtime metrics + SNS alarms
+Recover    → RPO/RTO → backups → restore drills → sst deploy + DNS
+```
+
+<br />
+
+---
+
+## Final Thoughts
+
+経路を短く保つ：validated request、trusted identity、typed query、durable constraint、generated docs、reviewable infra。**Lambda** か **Fargate** かは traffic shape から選び、WAF と identity を正しい boundary に置き、symptom で alarm し、restore drill が書いた RPO/RTO に合うまで production-ready と呼ばない。
+
+stages と CI deploy loop については [SST による AWS インフラと DevOps](/notes/using-sst-for-aws-infra-and-devops) を続ける。tenant isolation については [multi-tenant backend ノート](/notes/multi-tenant-backend-drizzle-hono-better-auth) を参照。

@@ -1,0 +1,347 @@
+---
+title: JavaScript コア概念
+description: Call stack、event loop、task queues、closures、promises、generators が一つの JavaScript runtime モデルにどう収まるか
+---
+
+promises や `async`/`await` を毎日使いながら、runtime が下で何をしているかはっきりしていない、ということはよくあります。これらのノートでは、JavaScript の execution model を内側から外へ振り返ります。
+
+概念は一つのシステムを成します。同期コードは **call stack** 上で実行され、host environment が stack 外の処理を担当し、**event loop** がキューに入った callbacks をいつ実行するか調整します。Closures は functions が state をどう保持するかを説明し、promises、`async`/`await`、generators は処理を一時停止・再開する別の方法を提供します。
+
+<br />
+
+![JavaScript Event Loop in the browser](./images/javascript-event-loop-browser.png)
+
+ブラウザ event loop の概要：同期コードは call stack 上で実行され、host APIs はバックグラウンドで処理を完了して tasks を enqueue し、promise reactions は優先度の高い microtask queue に入ります。stack が空になるたび、event loop は次の callback を push します——先に microtasks、次に一度に一つの task。
+
+---
+
+## 1. Event Loop
+
+最初の印象として、event loop は非同期処理が終わったかどうかをチェックするだけ、と捉えがちです。より有用なモデルは、ブラウザの event-loop iteration ごとに、一般に **一つの task** を実行し、**すべての microtasks** を drain し、ブラウザに render の機会を与え、次の task に進む、というものです。
+
+<br />
+
+重要な帰結は、JavaScript が stack 上の現在のコードを中断しないことです。timer はバックグラウンドで終わっていても、その callback は現在の task と microtasks が終わるまで待たされます。だから 0 ミリ秒の timer でも即座には実行されません。
+
+<br />
+
+```ts
+const log: string[] = []
+
+log.push("sync start")
+
+setTimeout(() => {
+  log.push("macrotask")
+}, 0)
+
+Promise.resolve().then(() => {
+  log.push("microtask")
+})
+
+log.push("sync end")
+
+// After the timer runs:
+// ["sync start", "sync end", "microtask", "macrotask"]
+```
+
+<br />
+
+---
+
+## 2. Call Stack
+
+**Call stack** は、JavaScript が現在何をしているかの記録です。後入れ先出し構造で、function を呼ぶと frame が push され、return や throw でその frame が取り除かれます。実行できるのは一番上の frame だけです。
+
+<br />
+
+これは、アルゴリズムが論理的に正しくても深い再帰が失敗しうる理由を説明します。再帰呼び出しのたびに stack frame を消費し、engine が上限に達します。深さが無制限の入力には、iteration や別の定数 stack 手法の方が安全です。ES2015 では proper tail calls が規定され、一部の再帰形状を定数空間にできますが、主要 engine のうち実装したのは JavaScriptCore だけです——recursion depth は実務上の制限のままです。
+
+<br />
+
+```ts
+function factorialRecursive(n: number): number {
+  if (!Number.isInteger(n) || n < 0) {
+    throw new RangeError("n must be a non-negative integer")
+  }
+  if (n <= 1) return 1
+  return n * factorialRecursive(n - 1)
+}
+
+function factorialIterative(n: number): number {
+  if (!Number.isInteger(n) || n < 0) {
+    throw new RangeError("n must be a non-negative integer")
+  }
+
+  let result = 1
+  for (let i = 2; i <= n; i++) {
+    result *= i
+  }
+  return result
+}
+
+// Same result; iterative keeps O(1) stack frames
+factorialRecursive(5) // 120
+factorialIterative(5) // 120
+```
+
+<br />
+
+---
+
+## 3. Macrotask Queue
+
+**Macrotask** は一般的な用語で、HTML specification では単に **tasks** と呼ばれることが多いです。Timers、ユーザー操作、messages が task queues に処理を入れます。ブラウザは複数の queue を持ち、次に実行する runnable task を選ぶため、単一のグローバル FIFO queue は簡略化された mental model にすぎません。
+
+<br />
+
+覚えておくべきルールは、event loop が選ばれた task を一つ実行し、次の task を選ぶ前に microtask checkpoint を行うことです。ネストした `setTimeout` は将来の処理を schedule するだけで、親の現在のターンの中では続行できません。
+
+<br />
+
+```ts
+const order: string[] = []
+
+setTimeout(() => {
+  order.push("timeout-1")
+  setTimeout(() => {
+    order.push("timeout-2")
+  }, 0)
+}, 0)
+
+setTimeout(() => {
+  order.push("timeout-3")
+}, 0)
+
+// Typical order: timeout-1 → timeout-3 → timeout-2
+```
+
+<br />
+
+---
+
+## 4. Microtask Queue
+
+**Microtasks** は、非同期 JavaScript の初期理解で最も抜けやすい部分です。Promise handlers、`queueMicrotask`、`MutationObserver` callbacks はこの優先度の高い queue を使います。task が終わり stack が空になると、runtime は microtasks を **queue が空になるまで** drain します。
+
+<br />
+
+これが、promise handlers が ready な `setTimeout` callback より先に走る理由です。リスクもあります。microtask が別の microtask を enqueue すると、無限チェーンで timers、ユーザー入力、rendering を無期限に遅らせられます。
+
+<br />
+
+```ts
+const order: string[] = []
+
+setTimeout(() => {
+  order.push("macrotask")
+}, 0)
+
+queueMicrotask(() => {
+  order.push("micro-1")
+  queueMicrotask(() => {
+    order.push("micro-2")
+  })
+})
+
+Promise.resolve().then(() => {
+  order.push("promise")
+})
+
+// Final order after the timeout runs:
+// micro-1 → promise → micro-2 → macrotask
+```
+
+<br />
+
+---
+
+## 5. Execution Context
+
+**Execution context** は call stack と scope を結びつけます。JavaScript が global code に入るか function を呼ぶと、そのコード実行に必要な環境——bindings、outer lexical environment、`this` value——を作ります。
+
+<br />
+
+各 function call は独自の context と stack frame を持ちます。function が return すると frame は取り除かれますが、返された function が lexical environment を閉じ込めていれば、それは到達可能なままです。Arrow functions には有用な違いがあります。独自の `this` を作らず、周囲の context から捕捉します。
+
+<br />
+
+```ts
+const obj = {
+  label: "object",
+  regular(this: { label: string }): string {
+    const arrow = (): string => this.label
+    return arrow()
+  },
+}
+
+const globalLabel = "global"
+
+function outer(prefix: string) {
+  const local = "inner"
+
+  function inner(): string {
+    // Scope chain: inner → outer → global
+    return `${prefix}:${local}:${globalLabel}`
+  }
+
+  return inner
+}
+
+// The regular method receives `obj` as `this`, and its arrow captures it.
+obj.regular() // "object"
+
+// The returned function retains `prefix` and `local`.
+outer("ctx")() // "ctx:inner:global"
+```
+
+<br />
+
+---
+
+## 6. Closures
+
+**Closure** は、特別な種類の function というより、function が作成された lexical environment へのアクセスを自然に持ち、outer function が return した後でも呼ばれうる、と捉えるのが分かりやすいです。
+
+<br />
+
+private state、event handlers、多くの hook patterns がこれで可能になります。closure が何を保持するかは意識的に扱う価値があります。捕捉した objects は到達可能なままです。`var` で loop 内に作った callbacks は function-scoped binding を共有します。`let` の loop variable は iteration ごとに新しい binding を作り、よくある落とし穴を避けます。
+
+<br />
+
+```ts
+function createCounter(start = 0) {
+  let count = start
+
+  return {
+    inc(): number {
+      count += 1
+      return count
+    },
+    value(): number {
+      return count
+    },
+  }
+}
+
+const counter = createCounter(10)
+counter.inc() // 11
+counter.inc() // 12
+counter.value() // 12 — `count` is private to the closure
+```
+
+<br />
+
+---
+
+## 7. Promises
+
+**Promise** は操作の eventual result を表します。`pending` から始まり、`fulfilled` か `rejected` になります。見落としがちな点は、`.then`、`.catch`、`.finally` を呼んでも handler は即実行されず、settled した promise が handler を microtask queue に入れることです。
+
+<br />
+
+Promise combinators は、別の coordination 戦略として捉えると選びやすいです。`Promise.all` は fail fast、`Promise.allSettled` はすべての outcome を記録し、`Promise.race` は最初の結果で settle します。await する前に複数の promises を起動すれば、下の操作を重ねられます。
+
+<br />
+
+```ts
+type User = { id: string; name: string }
+type Settings = { theme: "light" | "dark" }
+
+function delay<T>(value: T, milliseconds: number): Promise<T> {
+  return new Promise((resolve) => {
+    setTimeout(() => resolve(value), milliseconds)
+  })
+}
+
+// Both timers start immediately; neither waits for the other.
+const userPromise = delay<User>({ id: "1", name: "Ada" }, 100)
+const settingsPromise = delay<Settings>({ theme: "dark" }, 50)
+
+Promise.all([userPromise, settingsPromise]).then(([user, settings]) => {
+  console.log(user.name, settings.theme)
+  // "Ada", "dark" — after roughly 100 ms, not 150 ms
+})
+```
+
+<br />
+
+---
+
+## 8. Async/Await
+
+`async`/`await` は promises の上に載った syntax で、別の concurrency システムではありません。`async` function は常に promise を返します。`await` に達するとその function は制御を譲り、awaited promise が settle すると、残りは microtask として queue されて再開します。
+
+<br />
+
+`await` は JavaScript thread をブロックせず、JavaScript をマルチスレッドにはしません。その async function だけを一時停止します。独立した操作は、一つずつ await するのではなく、まとめて起動すべきです。
+
+<br />
+
+```ts
+type User = { id: string; name: string }
+type Settings = { theme: "light" | "dark" }
+
+async function getJson<T>(url: string): Promise<T> {
+  const response = await fetch(url)
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`)
+  }
+
+  // This assertion describes the expected shape; it does not validate it.
+  return (await response.json()) as T
+}
+
+async function loadDashboard(userId: string) {
+  // Start both independent requests before waiting.
+  const userPromise = getJson<User>(`/api/users/${userId}`)
+  const settingsPromise = getJson<Settings>("/api/settings")
+
+  const [user, settings] = await Promise.all([
+    userPromise,
+    settingsPromise,
+  ])
+
+  return { user, settings }
+}
+```
+
+<br />
+
+---
+
+## 9. Generators
+
+**Generator**（`function*`）は、実行の一時停止を別角度から見たものです。generator を呼んでも body は即実行されません。iterator が返り、`.next()` のたびに次の `yield` か function return まで再開します。
+
+<br />
+
+値は要求されたときだけ生成されるため、lazy sequences に向いています。**Async generator** では `.next()` が iterator result の promise を返し、`for await...of` が各結果を待ちます。ページネーション responses や streams のように、値が時間的に届く場合に有用です。
+
+<br />
+
+```ts
+function* range(start: number, end: number): Generator<number, void, unknown> {
+  for (let i = start; i < end; i++) {
+    console.log(`producing ${i}`)
+    yield i
+  }
+}
+
+const values = range(0, 3) // logs nothing: the body has not run
+
+values.next() // logs "producing 0"; { value: 0, done: false }
+values.next() // logs "producing 1"; { value: 1, done: false }
+// 2 is not produced unless another value is requested.
+```
+
+<br />
+
+---
+
+## まとめ
+
+<br />
+
+これらは孤立した JavaScript 機能ではありません。Call stack と execution contexts が今何が走っているかを説明します。Task queues、microtasks、event loop が deferred work をいつ走らせるかを説明します。Closures が state がなぜ到達可能なままかを説明し、promises、`async`/`await`、generators が一時停止と再開のある処理を整理する別の方法を提供します。
+
+async コードの挙動が予想外のとき、次の三問で大半は解けます：**今 stack 上にあるのは何か？何が microtask として queue されるか？何が次の task を待たなければならないか？** 個々の event-loop 例の出力を暗記するより、この mental model の方が有用です。
