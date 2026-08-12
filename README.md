@@ -16,7 +16,8 @@ Personal site — notes, works, designs, resume, and contact — plus a Hono / M
 - [Hono](https://hono.dev/) + [Mastra](https://mastra.ai/) API (agents, workflows, OpenAPI)
 - [Better Auth](https://www.better-auth.com/) + [Drizzle](https://orm.drizzle.team/) / Postgres
 - [TanStack Query](https://tanstack.com/query) + [AI SDK](https://ai-sdk.dev/) on the web client
-- [SST](https://sst.dev/) + [OpenNext](https://open-next.js.org/) on AWS (`ap-east-1`) — shared CloudFront `Router` fronts the site (and future API)
+- [SST](https://sst.dev/) + [OpenNext](https://open-next.js.org/) on AWS (`ap-east-1`)
+- Shared CloudFront [`Router`](https://sst.dev/docs/component/aws/router/) fronts the site (and future API subdomains)
 - [Turborepo](https://turborepo.dev/) for workspace tasks
 - [Biome](https://biomejs.dev/) for lint/format in `apps/web`
 - [Husky](https://typicode.github.io/husky/) + [lint-staged](https://github.com/lint-staged/lint-staged) for pre-commit checks
@@ -34,7 +35,11 @@ packages/
   intl/         next-intl message catalogs (@repo/intl)
   auth/         Better Auth server + client (@repo/auth)
   db/           Drizzle schema + migrations (@repo/db)
-  infra/        SST resources (shared Router, Next.js, API, VPC, secrets, …)
+  infra/        SST resources
+    router.ts   Shared CloudFront Router (domain, Basic Auth, WAF)
+    nextjs.ts   OpenNext site → attaches to Router
+    api.ts      ECS API → routes on api.* via Router (opt-in)
+    domain.ts   Host helpers (site / api / app / mastra)
 scripts/        Production verify + a11y smoke
 sst.config.ts   App entry — currently wires @repo/infra/nextjs
 ```
@@ -125,7 +130,7 @@ Indexes are built at compile time (`apps/web/scripts/build-search-index.ts`) and
 public/search-index/{en,hk,cn,ja}.json   →   /search-index/{locale}.json
 ```
 
-The client loads the locale file from the CDN (S3 / CloudFront via OpenNext assets). This avoids shipping the Orama dump through a Lambda route handler — large JSON responses exceed AWS Lambda’s sync payload limit and break `/api/search` on OpenNext.
+The client loads the locale file from the CDN (OpenNext assets behind the shared Router). This avoids shipping the Orama dump through a Lambda route handler — large JSON responses exceed AWS Lambda’s sync payload limit and break `/api/search` on OpenNext.
 
 Open with ⌘/Ctrl+K or the header search trigger.
 
@@ -133,23 +138,40 @@ Open with ⌘/Ctrl+K or the header search trigger.
 
 `apps/api` is a Hono app with Mastra agents/workflows, Better Auth, OpenAPI / Scalar docs, and health routes. Locally it serves on `http://localhost:4111` (Mastra Studio can use port `4111` via `bun run studio` in `apps/api`).
 
-SST API infrastructure lives in `@repo/infra/api` (ECS service routed through the shared CloudFront Router on `api.slchow.com` / `api.{stage}.slchow.com`). It is defined but not imported from `sst.config.ts` yet — uncomment `await import("@repo/infra/api")` when ready to deploy the API stack.
+SST API infrastructure lives in `@repo/infra/api` (ECS service on the shared Router):
 
-## Deploy
+| Stage       | API host              |
+| ----------- | --------------------- |
+| production  | `api.slchow.com`      |
+| other       | `api.{stage}.slchow.com` |
 
-Infrastructure modules live under `packages/infra/`; `sst.config.ts` currently loads Next.js (which pulls in the shared Router):
+It is defined but not imported from `sst.config.ts` yet — uncomment `await import("@repo/infra/api")` when ready to deploy the API stack.
+
+## Infrastructure & deploy
+
+`sst.config.ts` loads `@repo/infra/nextjs`, which pulls in the shared Router.
+
+```text
+Client → CloudFront Router → OpenNext (site)
+                          └→ API / Lambda (later, via api.* subdomain)
+```
+
+| | Production | Non-production (e.g. `dev`) |
+| --- | --- | --- |
+| Site | `slchow.com` | `{stage}.slchow.com` |
+| Alias | `*.slchow.com` | `*.{stage}.slchow.com` |
+| Redirect | `www` → apex | — |
+| Basic Auth | off | on (Router viewer-request) |
+| WAF | on (`waf: true`) | off |
+| Warm servers | 1 | 0 |
 
 - App name: `oc2`
-- Shared CloudFront `Router` owns the custom domain, non-prod Basic Auth, and production WAF
-- Production domain: `slchow.com` (www → apex) + alias `*.slchow.com` (for future `api.slchow.com`, etc.)
-- Non-production domain: `{stage}.slchow.com` (e.g. `dev.slchow.com`) + alias `*.{stage}.slchow.com`
-- Next.js attaches via `router: { instance }` (no separate site CDN)
-- Non-production stages: CloudFront Basic Auth on the Router viewer-request
-- Production: AWS WAF on the Router (`waf: true`); one warm OpenNext server instance
-- Region: `ap-east-1` (AWS profile from `sst.config.ts`; CloudFront WAF is created in `us-east-1`)
-- SST `buildCommand` syncs design assets, then OpenNext runs `bun run build` (MDX + search indexes + `next build`)
+- Region: `ap-east-1` (profile from `sst.config.ts`); CloudFront WAF resources are created in `us-east-1`
+- Next.js uses `router: { instance }` — no separate site CloudFront distribution
+- Host helpers live in `@repo/infra/domain` (`siteHost`, `apiHost`, `appHost`, `mastraHost`)
+- OpenNext `buildCommand` syncs design assets, then runs `bun run build` (MDX + search indexes + `next build`)
 
-Deploy **dev** first after Router/CDN changes, smoke-test Basic Auth and site routes, then production (expect a short DNS/CloudFront cutover):
+After CDN / domain changes, deploy **dev** first, smoke-test Basic Auth and routes, then production. Route 53 alias updates are usually fast; CloudFront rollout and DNS caches often take **~5–20 minutes**.
 
 ```sh
 bun run deploy:dev          # → https://dev.slchow.com
