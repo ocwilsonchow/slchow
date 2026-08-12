@@ -16,7 +16,7 @@ Personal site — notes, works, designs, resume, and contact — plus a Hono / M
 - [Hono](https://hono.dev/) + [Mastra](https://mastra.ai/) API (agents, workflows, OpenAPI)
 - [Better Auth](https://www.better-auth.com/) + [Drizzle](https://orm.drizzle.team/) / Postgres
 - [TanStack Query](https://tanstack.com/query) + [AI SDK](https://ai-sdk.dev/) on the web client
-- [SST](https://sst.dev/) + [OpenNext](https://open-next.js.org/) on AWS (`ap-east-1`)
+- [SST](https://sst.dev/) + [OpenNext](https://open-next.js.org/) on AWS (`ap-east-1`) — shared CloudFront `Router` fronts the site (and future API)
 - [Turborepo](https://turborepo.dev/) for workspace tasks
 - [Biome](https://biomejs.dev/) for lint/format in `apps/web`
 - [Husky](https://typicode.github.io/husky/) + [lint-staged](https://github.com/lint-staged/lint-staged) for pre-commit checks
@@ -34,7 +34,7 @@ packages/
   intl/         next-intl message catalogs (@repo/intl)
   auth/         Better Auth server + client (@repo/auth)
   db/           Drizzle schema + migrations (@repo/db)
-  infra/        SST resources (Next.js, API, VPC, secrets, …)
+  infra/        SST resources (shared Router, Next.js, API, VPC, secrets, …)
 scripts/        Production verify + a11y smoke
 sst.config.ts   App entry — currently wires @repo/infra/nextjs
 ```
@@ -133,19 +133,23 @@ Open with ⌘/Ctrl+K or the header search trigger.
 
 `apps/api` is a Hono app with Mastra agents/workflows, Better Auth, OpenAPI / Scalar docs, and health routes. Locally it serves on `http://localhost:4111` (Mastra Studio can use port `4111` via `bun run studio` in `apps/api`).
 
-SST API infrastructure lives in `@repo/infra/api` (ECS service + router on `api.slchow.com` / `{stage}.api.slchow.com`). It is defined but not imported from `sst.config.ts` yet — uncomment `await import("@repo/infra/api")` when ready to deploy the API stack.
+SST API infrastructure lives in `@repo/infra/api` (ECS service routed through the shared CloudFront Router on `api.slchow.com` / `api.{stage}.slchow.com`). It is defined but not imported from `sst.config.ts` yet — uncomment `await import("@repo/infra/api")` when ready to deploy the API stack.
 
 ## Deploy
 
-Infrastructure modules live under `packages/infra/`; `sst.config.ts` currently loads Next.js only:
+Infrastructure modules live under `packages/infra/`; `sst.config.ts` currently loads Next.js (which pulls in the shared Router):
 
 - App name: `oc2`
-- Production domain: `slchow.com` (www → apex)
-- Non-production domain: `{stage}.slchow.com` (e.g. `dev.slchow.com`)
-- Non-production stages: CloudFront Basic Auth via edge viewer-request
-- Production keeps one warm OpenNext server instance; other stages use `warm: 0`
-- Region: `ap-east-1` (AWS profile from `sst.config.ts`)
+- Shared CloudFront `Router` owns the custom domain, non-prod Basic Auth, and production WAF
+- Production domain: `slchow.com` (www → apex) + alias `*.slchow.com` (for future `api.slchow.com`, etc.)
+- Non-production domain: `{stage}.slchow.com` (e.g. `dev.slchow.com`) + alias `*.{stage}.slchow.com`
+- Next.js attaches via `router: { instance }` (no separate site CDN)
+- Non-production stages: CloudFront Basic Auth on the Router viewer-request
+- Production: AWS WAF on the Router (`waf: true`); one warm OpenNext server instance
+- Region: `ap-east-1` (AWS profile from `sst.config.ts`; CloudFront WAF is created in `us-east-1`)
 - SST `buildCommand` syncs design assets, then OpenNext runs `bun run build` (MDX + search indexes + `next build`)
+
+Deploy **dev** first after Router/CDN changes, smoke-test Basic Auth and site routes, then production (expect a short DNS/CloudFront cutover):
 
 ```sh
 bun run deploy:dev          # → https://dev.slchow.com
