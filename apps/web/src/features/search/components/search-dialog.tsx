@@ -1,5 +1,6 @@
 "use client"
 
+import { cn } from "@repo/ds"
 import { useDocsSearch } from "fumadocs-core/search/client"
 import { oramaStaticClient } from "fumadocs-core/search/client/orama-static"
 import {
@@ -13,12 +14,19 @@ import {
   SearchDialogList,
   SearchDialogListItem,
   SearchDialogOverlay,
+  type SearchItemType,
   type SharedProps,
 } from "fumadocs-ui/components/dialog/search"
 import { ArrowDownIcon, ArrowUpIcon, CornerDownLeftIcon } from "lucide-react"
 import { useLocale, useTranslations } from "next-intl"
 import { type ReactNode, useMemo } from "react"
 import { createSearchDatabase } from "@/lib/search-tokenizer"
+
+const SEARCH_OPTIONS = {
+  limit: 24,
+  tolerance: 1,
+  threshold: 0.1,
+} as const
 
 function Kbd({ children }: { children: ReactNode }) {
   return (
@@ -29,9 +37,96 @@ function Kbd({ children }: { children: ReactNode }) {
 }
 
 function getCategoryKey(url: string) {
-  if (url.includes("/notes/")) return "notes"
-  if (url.includes("/works/")) return "works"
+  const section = url.split("/").filter(Boolean)[1]
+  if (section === "notes" || section === "works") return section
   return "resume"
+}
+
+function SearchMessage({
+  children,
+  role,
+  "aria-live": ariaLive,
+}: {
+  children: ReactNode
+  role?: "alert" | "status"
+  "aria-live"?: "polite" | "assertive" | "off"
+}) {
+  return (
+    <div
+      className="px-5 py-12 text-center text-sm text-content-body-on-popover"
+      role={role}
+      aria-live={ariaLive}
+    >
+      {children}
+    </div>
+  )
+}
+
+function SearchEmpty({ hasError }: { hasError: boolean }) {
+  const t = useTranslations("search")
+
+  return (
+    <SearchMessage role={hasError ? "alert" : "status"}>
+      {hasError ? t("error") : t("noResults")}
+    </SearchMessage>
+  )
+}
+
+function SearchResultItem({
+  item,
+  onClick,
+}: {
+  item: SearchItemType
+  onClick: () => void
+}) {
+  return (
+    <SearchDialogListItem
+      item={item}
+      onClick={onClick}
+      role="option"
+      className={cn(
+        "rounded-xl px-3 py-2.5 text-content-body-on-popover aria-selected:bg-surface-alpha aria-selected:text-content-ink-on-popover",
+        item.type === "heading" && "[&>svg]:hidden [&>div:last-child]:ps-4"
+      )}
+    />
+  )
+}
+
+function SearchFooterHints() {
+  const t = useTranslations("search")
+
+  return (
+    <SearchDialogFooter className="flex items-center justify-between border-stroke-soft/75 px-4 py-3 text-xs text-content-body-on-popover">
+      <span className="inline-flex flex-wrap items-center gap-1">
+        {t.rich("navigateHint", {
+          up: (label) => (
+            <Kbd>
+              <ArrowUpIcon size={12} aria-hidden />
+              <span className="sr-only">{label}</span>
+            </Kbd>
+          ),
+          down: (label) => (
+            <Kbd>
+              <ArrowDownIcon size={12} aria-hidden />
+              <span className="sr-only">{label}</span>
+            </Kbd>
+          ),
+          enter: (label) => (
+            <Kbd>
+              <CornerDownLeftIcon size={12} aria-hidden />
+              <span className="sr-only">{label}</span>
+            </Kbd>
+          ),
+        })}
+      </span>
+      <span className="inline-flex items-center gap-1">
+        {t.rich("shortcutHint", {
+          modifier: (key) => <Kbd>{key}</Kbd>,
+          key: (key) => <Kbd>{key}</Kbd>,
+        })}
+      </span>
+    </SearchDialogFooter>
+  )
 }
 
 export function SiteSearchDialog(props: SharedProps) {
@@ -44,11 +139,7 @@ export function SiteSearchDialog(props: SharedProps) {
         // response limit that breaks `/api/search` on OpenNext/SST.
         from: `/search-index/${locale}.json`,
         initOrama: () => createSearchDatabase(locale),
-        search: {
-          limit: 24,
-          tolerance: 1,
-          threshold: 0.1,
-        },
+        search: SEARCH_OPTIONS,
       }),
     [locale]
   )
@@ -98,12 +189,7 @@ export function SiteSearchDialog(props: SharedProps) {
         </SearchDialogHeader>
 
         {showPrompt ? (
-          <div
-            className="px-5 py-12 text-center text-sm text-content-body-on-popover"
-            aria-live="polite"
-          >
-            {t("prompt")}
-          </div>
+          <SearchMessage aria-live="polite">{t("prompt")}</SearchMessage>
         ) : null}
 
         <SearchDialogList
@@ -112,58 +198,11 @@ export function SiteSearchDialog(props: SharedProps) {
           aria-label={t("resultsLabel")}
           data-lenis-prevent
           className="border-stroke-soft/75"
-          Empty={() => (
-            <div
-              className="px-5 py-12 text-center text-sm text-content-body-on-popover"
-              role={hasError ? "alert" : "status"}
-            >
-              {hasError ? t("error") : t("noResults")}
-            </div>
-          )}
-          Item={({ item, onClick }) => (
-            <SearchDialogListItem
-              item={item}
-              onClick={onClick}
-              role="option"
-              className={`rounded-xl px-3 py-2.5 text-content-body-on-popover aria-selected:bg-surface-alpha aria-selected:text-content-ink-on-popover ${
-                item.type === "heading"
-                  ? "[&>svg]:hidden [&>div:last-child]:ps-4"
-                  : ""
-              }`}
-            />
-          )}
+          Empty={() => <SearchEmpty hasError={hasError} />}
+          Item={SearchResultItem}
         />
 
-        <SearchDialogFooter className="flex items-center justify-between border-stroke-soft/75 px-4 py-3 text-xs text-content-body-on-popover">
-          <span className="inline-flex flex-wrap items-center gap-1">
-            {t.rich("navigateHint", {
-              up: (label) => (
-                <Kbd>
-                  <ArrowUpIcon size={12} aria-hidden />
-                  <span className="sr-only">{label}</span>
-                </Kbd>
-              ),
-              down: (label) => (
-                <Kbd>
-                  <ArrowDownIcon size={12} aria-hidden />
-                  <span className="sr-only">{label}</span>
-                </Kbd>
-              ),
-              enter: (label) => (
-                <Kbd>
-                  <CornerDownLeftIcon size={12} aria-hidden />
-                  <span className="sr-only">{label}</span>
-                </Kbd>
-              ),
-            })}
-          </span>
-          <span className="inline-flex items-center gap-1">
-            {t.rich("shortcutHint", {
-              modifier: (key) => <Kbd>{key}</Kbd>,
-              key: (key) => <Kbd>{key}</Kbd>,
-            })}
-          </span>
-        </SearchDialogFooter>
+        <SearchFooterHints />
       </SearchDialogContent>
     </SearchDialog>
   )
