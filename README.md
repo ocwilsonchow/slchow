@@ -140,10 +140,10 @@ Open with ⌘/Ctrl+K or the header search trigger.
 
 SST API infrastructure lives in `@repo/infra/api` (ECS service on the shared Router):
 
-| Stage       | API host              |
-| ----------- | --------------------- |
-| production  | `api.slchow.com`      |
-| other       | `api.{stage}.slchow.com` |
+| Stage      | API host                 |
+| ---------- | ------------------------ |
+| production | `api.slchow.com`         |
+| other      | `api.{stage}.slchow.com` |
 
 It is defined but not imported from `sst.config.ts` yet — uncomment `await import("@repo/infra/api")` when ready to deploy the API stack.
 
@@ -156,14 +156,14 @@ Client → CloudFront Router → OpenNext (site)
                           └→ API / Lambda (later, via api.* subdomain)
 ```
 
-| | Production | Non-production (e.g. `dev`) |
-| --- | --- | --- |
-| Site | `slchow.com` | `{stage}.slchow.com` |
-| Alias | `*.slchow.com` | `*.{stage}.slchow.com` |
-| Redirect | `www` → apex | — |
-| Basic Auth | off | on (Router viewer-request) |
-| WAF | on (`waf: true`) | off |
-| Warm servers | 1 | 0 |
+|              | Production       | Non-production (e.g. `dev`) |
+| ------------ | ---------------- | --------------------------- |
+| Site         | `slchow.com`     | `{stage}.slchow.com`        |
+| Alias        | `*.slchow.com`   | `*.{stage}.slchow.com`      |
+| Redirect     | `www` → apex     | —                           |
+| Basic Auth   | off              | on (Router viewer-request)  |
+| WAF          | on (`waf: true`) | off                         |
+| Warm servers | 1                | 0                           |
 
 - App name: `oc2`
 - Region: `ap-east-1` (profile from `sst.config.ts`); CloudFront WAF resources are created in `us-east-1`
