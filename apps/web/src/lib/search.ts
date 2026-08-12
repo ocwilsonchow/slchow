@@ -1,3 +1,4 @@
+import { structure } from "fumadocs-core/mdx-plugins"
 import {
   type AdvancedIndex,
   createI18nSearchAPI,
@@ -12,6 +13,7 @@ type LocalizedSearchIndex = AdvancedIndex & {
 
 const SEARCHABLE_CATEGORIES = new Set(["notes", "works"])
 const RESUME_SLUG = "resume-v2"
+const FRONTMATTER = /^---\r?\n[\s\S]*?\r?\n---\r?\n?/
 
 function getSearchTarget(slugs: string[], pageUrl: string, locale: string) {
   const [category, slug] = slugs
@@ -33,6 +35,43 @@ function getSearchTarget(slugs: string[], pageUrl: string, locale: string) {
   return null
 }
 
+async function resolveStructuredData(page: {
+  path: string
+  data: {
+    structuredData?:
+      | AdvancedIndex["structuredData"]
+      | (() => Promise<AdvancedIndex["structuredData"]>)
+    getText?: (type: "raw" | "processed") => Promise<string>
+    load?: () => Promise<{ structuredData?: AdvancedIndex["structuredData"] }>
+  }
+}) {
+  let structuredData =
+    typeof page.data.structuredData === "function"
+      ? await page.data.structuredData()
+      : page.data.structuredData
+
+  if (
+    !structuredData &&
+    "load" in page.data &&
+    typeof page.data.load === "function"
+  ) {
+    structuredData = (await page.data.load()).structuredData
+  }
+
+  if (!structuredData && typeof page.data.getText === "function") {
+    const raw = await page.data.getText("raw")
+    structuredData = structure(raw.replace(FRONTMATTER, ""))
+  }
+
+  if (!structuredData) {
+    throw new Error(
+      `Cannot build search index for "${page.path}": structured MDX data is missing.`
+    )
+  }
+
+  return structuredData
+}
+
 async function buildSearchIndexes(): Promise<LocalizedSearchIndex[]> {
   const indexes: LocalizedSearchIndex[] = []
 
@@ -41,16 +80,7 @@ async function buildSearchIndexes(): Promise<LocalizedSearchIndex[]> {
       const target = getSearchTarget(page.slugs, page.url, language)
       if (!target) continue
 
-      const structuredData =
-        typeof page.data.structuredData === "function"
-          ? await page.data.structuredData()
-          : page.data.structuredData
-
-      if (!structuredData) {
-        throw new Error(
-          `Cannot build search index for "${page.path}": structured MDX data is missing.`
-        )
-      }
+      const structuredData = await resolveStructuredData(page)
 
       indexes.push({
         id: target.url,

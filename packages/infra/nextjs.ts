@@ -15,7 +15,9 @@ export const nextjs = new sst.aws.Nextjs("WEB", {
     SST_STAGE: $app.stage,
   },
   openNextVersion: "4.0.3",
-  // SST invokes OpenNext directly (skips package.json prebuild); sync public assets first.
+  // SST invokes OpenNext directly (skips package.json prebuild). Sync design
+  // assets first; OpenNext then runs `bun run build`, which generates
+  // `public/search-index/*.json` before `next build`.
   buildCommand:
     "bun run sync:design-assets && npx --yes @opennextjs/aws@4.0.3 build",
   edge,

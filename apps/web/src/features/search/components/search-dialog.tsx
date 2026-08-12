@@ -40,8 +40,10 @@ export function SiteSearchDialog(props: SharedProps) {
   const client = useMemo(
     () =>
       oramaStaticClient({
-        locale,
-        initOrama: createSearchDatabase,
+        // Served from S3/CDN via `public/search-index` — avoids Lambda's 6MB
+        // response limit that breaks `/api/search` on OpenNext/SST.
+        from: `/search-index/${locale}.json`,
+        initOrama: () => createSearchDatabase(locale),
         search: {
           limit: 24,
           tolerance: 1,

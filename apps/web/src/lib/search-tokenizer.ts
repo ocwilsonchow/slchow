@@ -1,11 +1,13 @@
 import { create, type Tokenizer } from "@orama/orama"
 
-const CJK_CHARACTER = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u
-const WORD = /[\p{L}\p{N}_'-]+/gu
+const TOKEN_RUN =
+  /(\p{Script=Han}+|\p{Script=Hiragana}+|\p{Script=Katakana}+|[^\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\s]+)/gu
+const LATIN_WORD = /[\p{L}\p{N}_'-]+/gu
 
 function addCjkNgrams(tokens: Set<string>, value: string) {
   const characters = Array.from(value)
-  const maxSize = Math.min(3, characters.length)
+  // Unigrams + bigrams keep CJK searchable without exploding the index.
+  const maxSize = Math.min(2, characters.length)
 
   for (let size = 1; size <= maxSize; size += 1) {
     for (let index = 0; index <= characters.length - size; index += 1) {
@@ -27,12 +29,16 @@ export function createSearchTokenizer(locale: string): Tokenizer {
       const normalized = raw.normalize("NFKC").toLocaleLowerCase(locale)
       const tokens = new Set<string>()
 
-      for (const match of normalized.matchAll(WORD)) {
+      for (const match of normalized.matchAll(TOKEN_RUN)) {
         const value = match[0]
-        tokens.add(value)
 
-        if (CJK_CHARACTER.test(value)) {
+        if (/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u.test(value)) {
           addCjkNgrams(tokens, value)
+          continue
+        }
+
+        for (const word of value.matchAll(LATIN_WORD)) {
+          tokens.add(word[0])
         }
       }
 
