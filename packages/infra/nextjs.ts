@@ -2,17 +2,14 @@
 
 import { isProd } from "./edge"
 import { router, siteDomain } from "./router"
-
-const posthogProjectToken = isProd
-  ? new sst.Secret("POSTHOG_PROJECT_TOKEN")
-  : undefined
+import { posthogProjectToken } from "./secrets"
 
 export const nextjs = new sst.aws.Nextjs("WEB", {
   path: "apps/web",
   router: {
     instance: router,
   },
-  link: posthogProjectToken ? [posthogProjectToken] : [],
+  link: isProd ? [posthogProjectToken] : [],
   warm: isProd ? 1 : 0,
   environment: {
     NEXT_PUBLIC_SITE_URL: `https://${siteDomain}`,

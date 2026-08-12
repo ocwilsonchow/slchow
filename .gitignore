@@ -39,3 +39,5 @@ yarn-error.log*
 
 # sst
 .sst
+sst-env.d.ts
+**/sst-env.d.ts
