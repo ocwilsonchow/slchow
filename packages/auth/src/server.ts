@@ -15,7 +15,13 @@ import {
   twoFactor,
 } from "better-auth/plugins"
 import { Resource } from "sst"
-import { domain } from "@repo/infra/domain"
+import {
+  apiHost,
+  appHost,
+  domain,
+  mastraHost,
+  siteHost,
+} from "@repo/infra/domain"
 
 export type AuthType = {
   user: typeof auth.$Infer.Session.user | null
@@ -23,10 +29,9 @@ export type AuthType = {
 }
 
 const isLocal = Resource.App.stage === "local"
+const stage = Resource.App.stage
 
-const baseURL = isLocal
-  ? "http://localhost:4111"
-  : `https://${Resource.App.stage}.api.${domain}`
+const baseURL = isLocal ? "http://localhost:4111" : `https://${apiHost(stage)}`
 
 export const auth = betterAuth({
   baseURL,
@@ -36,9 +41,11 @@ export const auth = betterAuth({
   },
   trustedOrigins: [
     "http://localhost:3000", // Mastra Studio
-    `https://${Resource.App.stage}.api.${domain}`,
-    `https://${Resource.App.stage}.app.${domain}`,
-    `https://${Resource.App.stage}.mastra.${domain}`,
+    "http://localhost:3003",
+    `https://${siteHost(stage)}`,
+    `https://${apiHost(stage)}`,
+    `https://${appHost(stage)}`,
+    `https://${mastraHost(stage)}`,
   ],
   advanced: {
     cookiePrefix: Resource.App.stage,

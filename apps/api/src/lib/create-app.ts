@@ -2,7 +2,7 @@ import { createRouter } from "@/lib/create-router"
 import { cors } from "hono/cors"
 import { logger } from "hono/logger"
 import { requestId } from "hono/request-id"
-import { domain } from "@repo/infra/domain"
+import { siteHost } from "@repo/infra/domain"
 import { Resource } from "sst"
 import { HTTPException } from "hono/http-exception"
 
@@ -14,8 +14,7 @@ export async function createApp() {
       origin: [
         "http://localhost:3000", // Mastra Studio
         "http://localhost:3003",
-        `https://${Resource.App.stage}.${domain}`,
-        `https://${domain}`,
+        `https://${siteHost(Resource.App.stage)}`,
       ],
       credentials: true,
     })
