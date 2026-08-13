@@ -2,6 +2,7 @@
 title: Agent memory の 4 層
 description: Conversation history、working memory、semantic recall、observational memory — Mastra が実際に remember する仕組み
 date: 2026-08-13
+category: ai
 ---
 
 LLM の memory は金魚並みである。bikes が好きだと書いてから facts を聞けば、モデルは *Memento* の男のように見つめてくる。naive な fix は直近 *N* messages を毎回 request に詰め込むこと。10 turns までは動く。tool dumps、新しい threads、message 1 に置いた goal では死ぬ。

@@ -11,6 +11,9 @@ export const docs = defineCollections({
     author: z.string().optional(),
     date: z.iso.date().or(z.date()).optional(),
     pinned: z.boolean().optional(),
+    category: z
+      .enum(["frontend", "backend", "ai", "computer-science", "personal"])
+      .optional(),
   }),
 })
 

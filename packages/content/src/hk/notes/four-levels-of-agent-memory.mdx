@@ -2,6 +2,7 @@
 title: Agent memory 的四個層級
 description: Conversation history、working memory、semantic recall 與 observational memory — Mastra 真正記住事情的方式
 date: 2026-08-13
+category: ai
 ---
 
 LLM 的記憶像金魚。你可以寫自己喜歡單車，接著問關於它們的事實，模型卻像《Memento》裡的男主角一樣一臉茫然。天真的修法是把最近 *N* 則 messages 塞進每次 request。十個 turns 還行。碰上 tool dumps、新 threads，或任何停在第一則 message 的 goal，它就死了。

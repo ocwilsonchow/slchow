@@ -2,6 +2,7 @@
 title: How to build a RAG system
 description: A tutorial for organization-scoped document RAG with Mastra workflows, Pinecone namespaces, and tool-called retrieval
 date: 2026-08-13
+category: ai
 ---
 
 A working RAG stack is not “embed text and hope.” It is two pipelines that share an embedding space: a **deterministic ingest workflow** that writes vectors, and a **tool-called retriever** that reads them. The hard part is the tenant boundary. If the model can choose *whose* index to search, you do not have RAG. You have a leak.

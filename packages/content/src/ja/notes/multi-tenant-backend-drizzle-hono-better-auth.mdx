@@ -2,6 +2,7 @@
 title: Hono、Better Auth、Drizzle、Postgres RLS による Multi-Tenant Backend
 description: Better Auth organizations、Hono request context、shared Drizzle schema 上の Postgres row-level security による tenant 分離
 date: 2026-08-06
+category: backend
 ---
 
 Multi-tenancy は isolation が `WHERE organization_id = ?` の習慣だけだと production で失敗する。1 つの filter 漏れ、workspace 間の confused deputy、tenant context を忘れた background job だけで data leak する。

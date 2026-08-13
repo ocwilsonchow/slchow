@@ -4,7 +4,7 @@ import { ListNotesItems } from "./list-notes-items"
 
 type ListNotesProps = {
   locale: string
-  limit?: number
+  preview?: boolean
   showHeading?: boolean
 }
 
@@ -13,37 +13,30 @@ const getPageDate = (date?: string | Date) => {
   return new Date(date).getTime()
 }
 
-const RESPONSIVE_MAX_LIMIT = 5
-
 export const ListNotes = async ({
   locale,
-  limit,
+  preview = false,
   showHeading = true,
 }: ListNotesProps) => {
   const t = await getTranslations("navigation")
+  const tNotes = await getTranslations("notes")
   const allNotes = getCategoryPages("notes", locale).sort(
     (a, b) => getPageDate(b.data.date) - getPageDate(a.data.date)
   )
-  const fetchLimit = limit ?? RESPONSIVE_MAX_LIMIT
-  const notes = allNotes.slice(0, fetchLimit).map((page) => ({
+  const notes = allNotes.map((page) => ({
     url: page.url,
     slug: page.slugs.slice(1).join("/"),
     title: page.data.title ?? "",
+    category: page.data.category
+      ? tNotes(`categories.${page.data.category}`)
+      : undefined,
   }))
-
-  // Infinity is not safe across the RSC → client boundary; use notes.length instead.
-  const clientLimit =
-    limit === undefined
-      ? undefined
-      : Number.isFinite(limit)
-        ? limit
-        : notes.length
 
   return (
     <ListNotesItems
       notes={notes}
       totalCount={allNotes.length}
-      limit={clientLimit}
+      preview={preview}
       showHeading={showHeading}
       notesLabel={t("notes")}
       listAllLabel={t("listAll")}

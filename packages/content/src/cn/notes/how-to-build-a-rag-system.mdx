@@ -2,6 +2,7 @@
 title: 如何搭建一套 RAG 系统
 description: 一份教程：用 Mastra workflows、Pinecone namespaces 与 tool-called retrieval，做 organization-scoped 的 document RAG
 date: 2026-08-13
+category: ai
 ---
 
 一套能跑的 RAG stack 不是「embed 文本然后祈祷」。它是两条共享 embedding space 的 pipelines：一条**deterministic ingest workflow** 负责写 vectors，一条**tool-called retriever** 负责读。难的是 tenant boundary。若 model 能选择搜*谁的* index，你就没有 RAG。你有的是泄漏。

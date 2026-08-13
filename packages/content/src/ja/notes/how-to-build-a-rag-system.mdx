@@ -2,6 +2,7 @@
 title: RAG システムの作り方
 description: Mastra workflows、Pinecone namespaces、tool-called retrieval による organization-scoped document RAG の tutorial
 date: 2026-08-13
+category: ai
 ---
 
 動く RAG stack は「embed して hope」ではない。同じ embedding space を共有する 2 つの pipelines である：vectors を write する **deterministic ingest workflow** と、それらを read する **tool-called retriever**。hard part は tenant boundary。model が *whose* index を search するか選べるなら、それは RAG ではない。leak である。

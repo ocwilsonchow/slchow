@@ -1,6 +1,6 @@
 "use client"
 
-import { type Transition, useReducedMotion } from "motion/react"
+import { motion, type Transition, useReducedMotion } from "motion/react"
 import { PHOTO_SIZES, STAGGER_EACH } from "../album"
 import type { Design, DesignImage } from "../get-designs"
 import { designImageLayoutId } from "../layout-ids"
@@ -28,7 +28,10 @@ export function DesignGallery({
   registerCard,
 }: DesignGalleryProps) {
   return (
-    <ul className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6 md:gap-8">
+    <motion.ul
+      transition={{}}
+      className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6 md:gap-8"
+    >
       {designs.map((design, index) => (
         <AlbumStack
           key={design.slug}
@@ -43,7 +46,7 @@ export function DesignGallery({
           registerCard={registerCard}
         />
       ))}
-    </ul>
+    </motion.ul>
   )
 }
 

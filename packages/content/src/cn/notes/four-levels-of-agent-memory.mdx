@@ -2,6 +2,7 @@
 title: Agent memory 的四个层级
 description: Conversation history、working memory、semantic recall 与 observational memory — Mastra 真正记住事情的方式
 date: 2026-08-13
+category: ai
 ---
 
 LLM 的记忆像金鱼。你可以写自己喜欢自行车，再问相关事实，模型就会像《记忆碎片》里的人一样一脸茫然。Naive 的修法是把最近 *N* 条 messages 塞进每次 request。十轮还能撑。遇到 tool dumps、新 thread，或目标写在第一条 message 里，就会崩。

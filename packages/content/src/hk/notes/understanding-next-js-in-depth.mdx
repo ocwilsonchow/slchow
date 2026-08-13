@@ -2,6 +2,7 @@
 title: 深入理解 Next.js
 description: Route trees、module graphs、React Server Components、Flight、streaming、caching、navigation 與 mutations 如何組成 Next.js 16 的 rendering model
 date: 2026-08-12
+category: frontend
 ---
 
 Next.js 常被介紹成「帶有 file-system routing 與 server-side rendering 的 React」。這個描述並沒有錯，但壓縮得太厲害，解釋不了為什麼加上 `'use client'` 會改變 bundle、為什麼一個 request 回傳 HTML 而另一個回傳 `text/x-component`、為什麼讀取 cookie 會改變工作何時發生，或為什麼 invalidate server data 不一定會取代瀏覽器裡已有的內容。

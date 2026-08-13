@@ -104,7 +104,14 @@
   },
   "notes": {
     "intro": "Some notes on the topics that interest me. Co-authored and co-audited with Grok 4.5, GPT-5.6 Sol and Kimi K3 Max.",
-    "readNext": "Read the next note"
+    "readNext": "Read the next note",
+    "categories": {
+      "frontend": "Frontend",
+      "backend": "Backend",
+      "ai": "AI",
+      "computer-science": "Computer Science",
+      "personal": "Personal"
+    }
   },
   "designs": {
     "intro": "I like crafting user interfaces. I used to spend a lot of time on Figma back in the days."

@@ -2,6 +2,7 @@
 title: 用 Hono、Better Auth、Drizzle 與 Postgres RLS 打造 Multi-Tenant 後端
 description: 如何在共用的 Drizzle schema 上，以 Better Auth organizations、Hono request context 與 Postgres row-level security 隔離 tenants
 date: 2026-08-06
+category: backend
 ---
 
 當 isolation 只剩 `WHERE organization_id = ?` 的習慣時，multi-tenancy 在 production 就會失效。少一個 filter、workspaces 之間出現 confused deputy，或某個 background job 忘了帶 tenant context，都足以洩漏資料。

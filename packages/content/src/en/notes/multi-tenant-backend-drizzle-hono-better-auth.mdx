@@ -2,6 +2,7 @@
 title: Building a Multi-Tenant Backend with Hono, Better Auth, Drizzle, and Postgres RLS
 description: How to isolate tenants with Better Auth organizations, Hono request context, and Postgres row-level security on a shared Drizzle schema
 date: 2026-08-06
+category: backend
 ---
 
 Multi-tenancy fails in production when isolation is only a `WHERE organization_id = ?` habit. One missed filter, one confused deputy between workspaces, or one background job that forgets the tenant context is enough to leak data.

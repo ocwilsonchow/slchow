@@ -2,6 +2,7 @@
 title: 用 Hono、Drizzle、Zod OpenAPI 與 SST 打造 Backend APIs
 description: 一套 typed Hono stack，跑在 Lambda 或 Fargate——Zod OpenAPI、Better Auth、Drizzle、SST 部署、WAF、alarms，以及 backup drills
 date: 2026-08-12
+category: backend
 ---
 
 當我建立 backend API 時，希望從 request 到 database 的路徑很短，也希望 **validation**、**documentation** 與 **infrastructure** 都來自同一份程式碼。這套 stack 是 **Hono**、**Better Auth**、**Drizzle**、**PostgreSQL**、**Zod OpenAPI**、**Scalar**，以及跑在 **AWS Lambda** 或 **ECS Fargate** 上的 **SST**。
