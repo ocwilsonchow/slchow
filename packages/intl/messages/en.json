@@ -56,7 +56,9 @@
     "zoomOutDiagram": "Zoom out diagram",
     "resetDiagramZoom": "Reset diagram zoom",
     "zoomInDiagram": "Zoom in diagram",
-    "profileAlt": "Wilson Chow"
+    "profileAlt": "Wilson Chow",
+    "openAlbum": "Open album {title}",
+    "backToAlbums": "Back to albums"
   },
   "notFound": {
     "title": "Oops!",

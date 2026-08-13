@@ -1,9 +1,9 @@
 import type { Metadata } from "next"
 import type { Locale } from "next-intl"
 import { getTranslations, setRequestLocale } from "next-intl/server"
-import { ListDesigns } from "@/features/design/components/list-designs"
+import { DesignPageView } from "@/features/design/components/design-page-view"
+import { getDesigns } from "@/features/design/get-designs"
 import { BackLink } from "@/features/layout/components/back-link"
-import { Header } from "@/features/layout/components/header"
 import { PageLayout } from "@/features/layout/components/page"
 import { buildPageMetadata } from "@/lib/metadata"
 
@@ -30,23 +30,17 @@ const Page = async ({ params }: Props) => {
 
   const t = await getTranslations({ locale, namespace: "metadata" })
   const tDesigns = await getTranslations({ locale, namespace: "designs" })
+  const tNav = await getTranslations({ locale, namespace: "navigation" })
 
   return (
     <PageLayout className="">
-      <Header.Root className="lg:relative">
-        <Header.Column>
-          <BackLink href="/" />
-        </Header.Column>
-        <Header.Column className="mt-10 lg:mt-0 grid gap-2">
-          <h1 className="font-semibold tracking-tight text-content-ink">
-            {t("designs.title")}
-          </h1>
-          <p className="leading-snug">{tDesigns("intro")}</p>
-        </Header.Column>
-      </Header.Root>
-      <div className="p-5">
-        <ListDesigns />
-      </div>
+      <DesignPageView
+        designs={getDesigns()}
+        designsTitle={t("designs.title")}
+        intro={tDesigns("intro")}
+        backLabel={tNav("back")}
+        homeBack={<BackLink href="/" />}
+      />
     </PageLayout>
   )
 }

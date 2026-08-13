@@ -56,7 +56,9 @@
     "zoomOutDiagram": "缩小图表",
     "resetDiagramZoom": "重置图表缩放",
     "zoomInDiagram": "放大图表",
-    "profileAlt": "Wilson Chow"
+    "profileAlt": "Wilson Chow",
+    "openAlbum": "打开相册 {title}",
+    "backToAlbums": "返回相册"
   },
   "notFound": {
     "title": "Oops!",

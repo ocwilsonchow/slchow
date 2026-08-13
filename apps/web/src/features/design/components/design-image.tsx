@@ -6,20 +6,26 @@ import { DesignAsset } from "./design-asset"
 type DesignImageProps = {
   src: string
   alt: string
-  onOpen: () => void
-  viewLabel: string
+  sizes: string
+  eager?: boolean
 }
 
-/** Matches design-gallery grid: 3 / 4 / 5 / 6 columns. */
-const THUMB_SIZES =
-  "(max-width: 768px) 33vw, (max-width: 1024px) 25vw, (max-width: 1280px) 20vw, 17vw"
-
-/** Lazy thumbnail — defers loading until near the viewport. */
-export function DesignImage({ src, alt, onOpen, viewLabel }: DesignImageProps) {
-  const ref = useRef<HTMLButtonElement>(null)
-  const [shouldLoad, setShouldLoad] = useState(false)
+/** Lazy thumbnail — defers loading until near the viewport unless `eager`. */
+export function DesignImage({
+  src,
+  alt,
+  sizes,
+  eager = false,
+}: DesignImageProps) {
+  const ref = useRef<HTMLSpanElement>(null)
+  const [shouldLoad, setShouldLoad] = useState(eager)
 
   useEffect(() => {
+    if (eager) {
+      setShouldLoad(true)
+      return
+    }
+
     const el = ref.current
     if (!el) return
 
@@ -34,26 +40,20 @@ export function DesignImage({ src, alt, onOpen, viewLabel }: DesignImageProps) {
 
     observer.observe(el)
     return () => observer.disconnect()
-  }, [])
+  }, [eager])
 
   return (
-    <button
-      ref={ref}
-      type="button"
-      aria-label={viewLabel}
-      className="relative h-full w-full cursor-zoom-in"
-      onClick={onOpen}
-    >
+    <span ref={ref} className="absolute inset-0 block">
       {shouldLoad ? (
         <DesignAsset
           src={src}
           alt={alt}
-          sizes={THUMB_SIZES}
-          loading="lazy"
-          fetchPriority="low"
+          sizes={sizes}
+          loading={eager ? "eager" : "lazy"}
+          fetchPriority={eager ? "high" : "low"}
           className="absolute inset-0 h-full w-full object-contain select-none pointer-events-none"
         />
       ) : null}
-    </button>
+    </span>
   )
 }
