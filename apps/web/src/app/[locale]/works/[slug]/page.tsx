@@ -7,7 +7,11 @@ import { PageLayout } from "@/features/layout/components/page"
 import { RenderMdxBlockByPath } from "@/features/mdx/components/render-mdx-block"
 import { CollapsibleToc } from "@/features/mdx/components/toc"
 import { buildPageMetadata } from "@/lib/metadata"
-import { getCategoryStaticParams, getMdxContent } from "@/lib/source"
+import {
+  getCategoryStaticParams,
+  getMdxContent,
+  getPageLocales,
+} from "@/lib/source"
 
 type Props = {
   params: Promise<{ locale: Locale; slug: string }>
@@ -23,6 +27,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     locale,
     pathname: `/works/${slug}`,
     type: "article",
+    locales: getPageLocales("works", slug),
   })
 }
 

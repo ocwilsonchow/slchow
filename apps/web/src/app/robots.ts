@@ -1,11 +1,5 @@
 import type { MetadataRoute } from "next"
-
-function getSiteUrl() {
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL
-  if (siteUrl) return new URL(siteUrl)
-
-  return new URL("http://localhost:3003")
-}
+import { getSiteUrl } from "@/lib/metadata"
 
 export default function robots(): MetadataRoute.Robots {
   if (process.env.SST_STAGE !== "production") {

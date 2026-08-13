@@ -15,6 +15,7 @@ import {
   useState,
 } from "react"
 import { Link as I18nLink, usePathname } from "@/i18n/navigation"
+import { playClickSound, preloadClickSound } from "@/lib/click-sound"
 import { fontPresets } from "../styles"
 import {
   NavbarContext,
@@ -23,7 +24,6 @@ import {
   useNavbarContext,
 } from "./context"
 import { useMediaQuery, useNavbarFocusLock, useNavbarScrollHide } from "./hooks"
-import { playNavbarToggleSound, preloadNavbarToggleSound } from "./sound"
 import {
   backdropVariants,
   contentVariants,
@@ -56,7 +56,7 @@ function Root({ children }: { children: ReactNode }) {
     const next = typeof value === "function" ? value(current) : value
     if (next === current) return
     openRef.current = next
-    if (!shouldReduceMotion) playNavbarToggleSound()
+    playClickSound()
     setOpenState(next)
   }
 
@@ -66,7 +66,7 @@ function Root({ children }: { children: ReactNode }) {
   })
 
   useEffect(() => {
-    preloadNavbarToggleSound()
+    preloadClickSound()
   }, [])
 
   useEffect(() => {

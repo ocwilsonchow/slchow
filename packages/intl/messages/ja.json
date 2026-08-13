@@ -56,11 +56,18 @@
     "zoomOutDiagram": "図を縮小",
     "resetDiagramZoom": "図のズームをリセット",
     "zoomInDiagram": "図を拡大",
-    "profileAlt": "Wilson Chow"
+    "profileAlt": "Wilson Chow",
+    "openAlbum": "{title} のアルバムを開く",
+    "backToAlbums": "アルバム一覧に戻る"
   },
   "notFound": {
     "title": "Oops!",
     "description": "このページは存在しません！"
+  },
+  "error": {
+    "title": "Oops!",
+    "description": "問題が発生しました！",
+    "retry": "もう一度試す"
   },
   "metadata": {
     "siteName": "Wilson Chow",

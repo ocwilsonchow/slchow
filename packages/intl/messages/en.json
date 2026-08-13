@@ -56,11 +56,18 @@
     "zoomOutDiagram": "Zoom out diagram",
     "resetDiagramZoom": "Reset diagram zoom",
     "zoomInDiagram": "Zoom in diagram",
-    "profileAlt": "Wilson Chow"
+    "profileAlt": "Wilson Chow",
+    "openAlbum": "Open album {title}",
+    "backToAlbums": "Back to albums"
   },
   "notFound": {
     "title": "Oops!",
     "description": "This page does not exist!"
+  },
+  "error": {
+    "title": "Oops!",
+    "description": "Something went wrong!",
+    "retry": "Try again"
   },
   "metadata": {
     "siteName": "Wilson Chow",

@@ -8,7 +8,11 @@ import { RenderMdxBlockByPath } from "@/features/mdx/components/render-mdx-block
 import { CollapsibleToc } from "@/features/mdx/components/toc"
 import { NextNoteLink } from "@/features/notes/components/next-note-link"
 import { buildPageMetadata } from "@/lib/metadata"
-import { getMdxContent, getNotesStaticParams } from "@/lib/source"
+import {
+  getMdxContent,
+  getNotesStaticParams,
+  getPageLocales,
+} from "@/lib/source"
 
 type Props = {
   params: Promise<{ locale: Locale; slug: string }>
@@ -24,6 +28,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     locale,
     pathname: `/notes/${slug}`,
     type: "article",
+    locales: getPageLocales("notes", slug),
   })
 }
 
