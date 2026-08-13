@@ -30,7 +30,6 @@ const Page = async ({ params }: Props) => {
 
   const t = await getTranslations({ locale, namespace: "metadata" })
   const tDesigns = await getTranslations({ locale, namespace: "designs" })
-  const tNav = await getTranslations({ locale, namespace: "navigation" })
 
   return (
     <PageLayout className="">
@@ -38,7 +37,6 @@ const Page = async ({ params }: Props) => {
         designs={getDesigns()}
         designsTitle={t("designs.title")}
         intro={tDesigns("intro")}
-        backLabel={tNav("back")}
         homeBack={<BackLink href="/" />}
       />
     </PageLayout>

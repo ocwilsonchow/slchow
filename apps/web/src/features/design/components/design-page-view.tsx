@@ -18,6 +18,7 @@ import {
   useRef,
   useState,
 } from "react"
+import { playClickSound } from "@/lib/click-sound"
 import type { Design } from "../get-designs"
 import { AlbumOverlayGrid, DesignGallery } from "./design-gallery"
 
@@ -25,7 +26,6 @@ type DesignPageViewProps = {
   designs: Design[]
   designsTitle: string
   intro: string
-  backLabel: string
   homeBack: ReactNode
 }
 
@@ -33,10 +33,10 @@ export function DesignPageView({
   designs,
   designsTitle,
   intro,
-  backLabel,
   homeBack,
 }: DesignPageViewProps) {
   const t = useTranslations("a11y")
+  const tNav = useTranslations("navigation")
   const lenis = useLenis()
   const shouldReduceMotion = useReducedMotion() ?? false
   const [expandedSlug, setExpandedSlug] = useState<string | null>(null)
@@ -49,16 +49,23 @@ export function DesignPageView({
     () =>
       shouldReduceMotion
         ? { duration: 0 }
-        : { type: "spring", bounce: 0.12, duration: 0.45 },
+        : {
+            type: "spring",
+            // bounce: 0.12,
+            stiffness: 400,
+            damping: 40,
+          },
     [shouldReduceMotion]
   )
 
   const collapse = useCallback(() => {
+    playClickSound()
     setExpandedSlug(null)
   }, [])
 
   const expand = useCallback(
     (slug: string) => {
+      playClickSound()
       lenis?.stop()
       setExpandedSlug(slug)
     },
@@ -153,7 +160,7 @@ export function DesignPageView({
             transition={{ duration: shouldReduceMotion ? 0 : 0.45 }}
           >
             <motion.div
-              className="bg-surface-canvas absolute inset-0"
+              className="bg-surface-canvas/80 backdrop-blur-sm absolute inset-0"
               initial={{ opacity: shouldReduceMotion ? 1 : 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: shouldReduceMotion ? 1 : 0 }}
@@ -172,7 +179,7 @@ export function DesignPageView({
                     size={10}
                     className="inline-block mr-1.5 group-hover:-translate-x-0.5"
                   />
-                  {backLabel}
+                  {tNav("back")}
                 </button>
               </div>
               <div className="p-5 pb-50">
