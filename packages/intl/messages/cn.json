@@ -26,7 +26,8 @@
     "previous": "上一首",
     "nowPlaying": "正在播放",
     "socials": "社交链接",
-    "tableOfContents": "目录"
+    "tableOfContents": "目录",
+    "shortcutHint": "<modifier>⌘</modifier> <key>M</key>"
   },
   "search": {
     "title": "搜索",

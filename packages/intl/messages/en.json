@@ -26,7 +26,8 @@
     "previous": "Previous track",
     "nowPlaying": "Now playing",
     "socials": "Socials",
-    "tableOfContents": "Table of contents"
+    "tableOfContents": "Table of contents",
+    "shortcutHint": "<modifier>⌘</modifier> <key>M</key>"
   },
   "search": {
     "title": "Search",

@@ -1,0 +1,771 @@
+---
+title: RAG システムの作り方
+description: Mastra workflows、Pinecone namespaces、tool-called retrieval による organization-scoped document RAG の tutorial
+date: 2026-08-13
+---
+
+動く RAG stack は「embed して hope」ではない。同じ embedding space を共有する 2 つの pipelines である：vectors を write する **deterministic ingest workflow** と、それらを read する **tool-called retriever**。hard part は tenant boundary。model が *whose* index を search するか選べるなら、それは RAG ではない。leak である。
+
+この design は Mastra workflows、`MDocument` chunking、OpenAI `text-embedding-3-small`（1536-d）、**namespace = `organizationId`** で partition した Pinecone serverless index を使う。identity と membership は既にある場所に置く：Better Auth organizations と Hono request context。[Hono、Better Auth、Drizzle、Postgres RLS による Multi-Tenant Backend](/notes/multi-tenant-backend-drizzle-hono-better-auth) と同じ。`userId` は actor。`organizationId` は library。同じ org の members は 1 つの corpus を share する。
+
+<br />
+
+---
+
+## 1. System shape
+
+files が source of truth。vectors は derived index。ingest status はその org と path の latest workflow run であり、documents table ではない。
+
+filesystem prefix から files を list。「この file はすでに searchable か？」は `resourceId = organizationId` の workflow runs を list し、run の input `path` を match して聞く。failed snapshot は failed ingest。どちらも知るために `documents` row は不要。S3 と Pinecone から drift できる row は、reconcile しなければいけない third source of truth である。
+
+Mastra Workspace search（`Workspace` + `PineconeVector` + embedder）は 1 つの agent sandbox を index する。coding agent の local files には正しい primitive。HTTP upload API、org-scoped library、membership-checked `requestContext` には間違った primitive。agent の working set には Workspace を keep。product corpus にはこの workflow を keep。
+
+<br />
+
+```text
+Write
+  POST /documents
+  → S3 orgs/organizationId/docs/filename
+  → workflow pinecone-document-ingestion
+  → extract text
+  → MDocument.chunk (token)
+  → embedMany text-embedding-3-small
+  → deleteVectors namespace + path
+  → upsert namespace=organizationId
+  → Pinecone index document-chunks
+
+Read (later turn)
+  chat → agent
+  → tool search-pinecone-documents
+  → embed query (same model)
+  → pinecone.query namespace=organizationId
+  → relevantContext + sources
+  → agent
+```
+
+<br />
+
+upload turn は依然 file parts を chat message に inline で carry。indexing は async。retrieval は org corpus に対する subsequent turns 用。この split は deliberate：user は今 attach した PDF を *this turn* で聞ける。Pinecone が chunks を持つ前に。later turns は whole file を re-send すべきではない。index を search する。
+
+<br />
+
+---
+
+## 2. Why a workflow for ingest, a tool for retrieve
+
+<br />
+
+| Concern | Primitive | Reason |
+| --- | --- | --- |
+| Load → extract → chunk → embed → upsert | `createWorkflow` | Fixed DAG、retries、run snapshots、skip vs fail |
+| 「User asked about the handbook」 | Agent 上の `createTool` | Open-ended；「hi」では retrieval を skip |
+| Tenant key | `requestContext`、never tool args | LLM は namespace を pick してはいけない |
+
+<br />
+
+Mastra の rule of thumb はこの split に match：defined multi-step processes は workflows、tools を使う decisions は agents。
+
+upload と chat で同じやり方で `requestContext` を populate：session → route の `organizationId` で membership を verify → `requestContext.set("organizationId", organizationId)` と `requestContext.set("userId", userId)`。client header、tool argument、model が influence できる `databaseConfig` から org を copy しない。
+
+<br />
+
+---
+
+## 3. Embedding contract
+
+ingest と query は **同じ model と dimension** を使わなければならない。2 つの embedding spaces をまたぐ cosine similarity は noise。Mastra の documented path は `provider/model` id 付き `ModelRouterEmbeddingModel`。
+
+<br />
+
+```ts
+import { ModelRouterEmbeddingModel } from "@mastra/core/llm"
+import { embedMany } from "ai"
+
+export const EMBEDDING_MODEL_ID = "openai/text-embedding-3-small"
+export const EMBEDDING_DIMENSION = 1536
+
+const embeddingModel = new ModelRouterEmbeddingModel(EMBEDDING_MODEL_ID)
+
+export async function embedTexts(values: string[]): Promise<number[][]> {
+  if (values.length === 0) return []
+  const { embeddings } = await embedMany({
+    model: embeddingModel,
+    values,
+  })
+  return embeddings
+}
+```
+
+<br />
+
+Pinecone index metric は `cosine`。dimension は `createIndex` で frozen。後で model を変えるなら新しい index と full re-ingest。
+
+`text-embedding-3-small` は input を 8191 tokens に cap。先に chunk、それから embed。unbounded PDF を 1 call で `embedMany` しない。embeddings と upserts を batch（Pinecone の practical ceiling は約 1000 vectors または request あたり 2 MB；1536-d で metadata に `text` があるなら 100 に近く保つ）。
+
+<br />
+
+---
+
+## 4. Vector layout: one index, many namespaces
+
+Pinecone は 3 つの tenant strategies を提供。org-scoped library で acceptable なのは 1 つだけ。
+
+<br />
+
+```text
+Per-org indexes (no)
+  document-chunks-org-a
+  document-chunks-org-b
+
+Shared index + metadata filter (no)
+  document-chunks
+    filter organizationId=a | organizationId=b
+
+Shared index + namespace (yes)
+  document-chunks
+    ns=org-a | ns=org-b
+```
+
+<br />
+
+- **Index per org：** isolation は real；`createIndex` は遅い；index-count limits が kill する。
+- **Metadata `filter: { organizationId }`：** 1 つの forgotten filter が corpus を leak。query cost も *whole* index で scale。これは pgvector pattern。namespaces があるなら Pinecone に port しない。
+- **Namespace = `organizationId`：** query、upsert、delete は常に `namespace` を取る。namespaces は first upsert で created。Pinecone は別々に store するので、missing metadata filter が別 tenant を見られない。query cost は targeted namespace の 1 RU per GB であり、whole index ではない。
+
+`namespace` を omit しても every tenant を search **しない**。default namespace を query する。isolation が hold するのは、その default namespace に never write する場合だけ。常に `namespace: organizationId` を渡す。
+
+index names：1–45 characters、lowercase alphanumeric と hyphens、start と end は alphanumeric。underscores なし、dots なし。`mastra_document_chunks` ではなく `document-chunks`。
+
+<br />
+
+```ts
+import { PineconeVector } from "@mastra/pinecone"
+
+export const PINECONE_INDEX_NAME = "document-chunks"
+
+export const pinecone = new PineconeVector({
+  id: "pinecone",
+  apiKey: process.env.PINECONE_API_KEY!,
+  cloud: "aws",
+  region: "us-east-1",
+})
+
+let indexReady: Promise<void> | undefined
+
+export async function ensurePineconeIndex() {
+  if (!indexReady) {
+    indexReady = pinecone
+      .createIndex({
+        indexName: PINECONE_INDEX_NAME,
+        dimension: EMBEDDING_DIMENSION,
+        metric: "cosine",
+      })
+      .catch((error: unknown) => {
+        indexReady = undefined
+        throw error
+      })
+  }
+  await indexReady
+}
+```
+
+<br />
+
+`@mastra/pinecone` の `createIndex` は 409 を「already exists」として扱い、それから dimension を check。上の latch はその round trip の繰り返しを避ける。
+
+per-vector metadata は **flat** でなければならない。Pinecone は nested objects を support しない（flatten もしてくれない）。metadata に `text` を keep しないと retrieval は prose なしの scores を返す。`maxSize: 512` の token chunks は 40 KB metadata cap の下に収まる。
+
+<br />
+
+```ts
+type ChunkMetadata = {
+  path: string
+  filename: string
+  chunkIndex: number
+  text: string
+  mediaType: string
+}
+```
+
+<br />
+
+`organizationId` は isolation key として metadata に属さない。namespace *が* tenant。metadata filters はその tenant *内* の relevance 用（`path`、later）。
+
+document identity は org prefix 下の `path`、典型的には `docs/filename`。同じ path の re-upload は overwrite。rename は新しい document。`docs/` 下で filename が collide する 2 files は同じ document。
+
+<br />
+
+---
+
+## 5. Ingest workflow
+
+input は upload route に match し、Studio と HTTP が contract を share：
+
+<br />
+
+```ts
+import { z } from "zod"
+
+const ingestionInputSchema = z.object({
+  path: z.string(), // "docs/handbook.pdf"
+  filename: z.string(),
+  mediaType: z.string(),
+})
+```
+
+<br />
+
+```text
+POST /documents
+  → writeFile(docs/filename)
+  → createRun resourceId=organizationId
+  → startAsync → runId
+  → list runs by resourceId, match input path
+
+Background run
+  → exists(path) → readFile(path)
+  → extractText → MDocument.chunk
+  → deleteVectors namespace + filter path
+  → upsert ids + vectors + metadata (if chunks)
+```
+
+<br />
+
+`startAsync` は fire-and-forget。すぐ `{ runId }` を return。route は `status` や `chunkCount` を wait しない。後で poll または list。
+
+<br />
+
+### Load, extract, and chunk
+
+images は skip。PDFs は text extractor を通す。それ以外は UTF-8。empty extract は throw せず `skipped`。skip でもその path の existing vectors は **delete**：同じ name の PDF を image に replace しても、古い handbook を searchable のまま残してはいけない。
+
+`MDocument.chunk` の `maxSize` は、`strategy: "token"` を使わない限り character count。tokens を使い、size を embedding model に match させる。
+
+<br />
+
+file bytes を step output に渡さない。workflow snapshots はその data を JSON-serialize する。各 step は already org-rooted filesystem から `path` で読む。
+
+`getWorkspaceOrganizationId` は server が org の set を忘れたら throw。upload route が `requestContext` に置いた、同じ membership-checked value。
+
+<br />
+
+```ts
+import { RequestContext } from "@mastra/core/request-context"
+import { createStep } from "@mastra/core/workflows"
+import { MDocument } from "@mastra/rag"
+import { z } from "zod"
+
+function getWorkspaceOrganizationId(requestContext: RequestContext): string {
+  const organizationId = requestContext.get("organizationId")
+  if (typeof organizationId !== "string" || !organizationId) {
+    throw new Error("organizationId missing from requestContext")
+  }
+  return organizationId
+}
+
+const loadOutputSchema = ingestionInputSchema.extend({
+  skipped: z.boolean().optional(),
+  skipReason: z.string().optional(),
+})
+
+const loadFile = createStep({
+  id: "load-file",
+  inputSchema: ingestionInputSchema,
+  outputSchema: loadOutputSchema,
+  execute: async ({ inputData }) => {
+    const exists = await filesystem.exists(inputData.path)
+    if (!exists) {
+      return {
+        ...inputData,
+        skipped: true,
+        skipReason: "File not found",
+      }
+    }
+    return inputData
+  },
+})
+```
+
+<br />
+
+次は extract。images、empty text、missing files はすべて `skipped`。index step はその path を依然 delete。
+
+<br />
+
+```ts
+const extractOutputSchema = loadOutputSchema.extend({
+  text: z.string().optional(),
+})
+
+const extractTextStep = createStep({
+  id: "extract-text",
+  inputSchema: loadOutputSchema,
+  outputSchema: extractOutputSchema,
+  execute: async ({ inputData }) => {
+    if (inputData.skipped) {
+      return inputData
+    }
+
+    if (inputData.mediaType.startsWith("image/")) {
+      return {
+        ...inputData,
+        skipped: true,
+        skipReason: "Images are not indexed",
+      }
+    }
+
+    const bytes = await filesystem.readFile(inputData.path)
+    const text =
+      inputData.mediaType === "application/pdf"
+        ? await extractPdfText(bytes)
+        : new TextDecoder("utf-8").decode(bytes)
+
+    if (!text.trim()) {
+      return {
+        ...inputData,
+        skipped: true,
+        skipReason: "Empty extract",
+      }
+    }
+
+    return { ...inputData, text }
+  },
+})
+```
+
+<br />
+
+chunk は last。`chunkIndex` は array index。`MDocument` chunks は `{ text, metadata }` — `chunkIndex` は持ってこない。
+
+<br />
+
+```ts
+const chunkOutputSchema = ingestionInputSchema.extend({
+  chunks: z.array(
+    z.object({
+      text: z.string(),
+      chunkIndex: z.number(),
+    }),
+  ),
+  skipped: z.boolean().optional(),
+  skipReason: z.string().optional(),
+})
+```
+
+<br />
+
+```ts
+const chunkDocument = createStep({
+  id: "chunk-document",
+  inputSchema: extractOutputSchema,
+  outputSchema: chunkOutputSchema,
+  execute: async ({ inputData }) => {
+    if (inputData.skipped || !inputData.text) {
+      return {
+        path: inputData.path,
+        filename: inputData.filename,
+        mediaType: inputData.mediaType,
+        chunks: [],
+        skipped: true,
+        skipReason: inputData.skipReason ?? "No text to chunk",
+      }
+    }
+
+    const doc =
+      inputData.mediaType === "text/markdown"
+        ? MDocument.fromMarkdown(inputData.text)
+        : inputData.mediaType === "text/html"
+          ? MDocument.fromHTML(inputData.text)
+          : inputData.mediaType === "application/json"
+            ? MDocument.fromJSON(inputData.text)
+            : MDocument.fromText(inputData.text)
+
+    const nodes = await doc.chunk({
+      strategy: "token",
+      maxSize: 512,
+      overlap: 50,
+      encodingName: "cl100k_base",
+    })
+
+    return {
+      path: inputData.path,
+      filename: inputData.filename,
+      mediaType: inputData.mediaType,
+      chunks: nodes.map((node, chunkIndex) => ({
+        text: node.text,
+        chunkIndex,
+      })),
+    }
+  },
+})
+```
+
+<br />
+
+media type が match するときは `fromMarkdown` / `fromHTML` / `fromJSON` を使い、separators が raw characters ではなく structure に follow するようにする。
+
+<br />
+
+### Index step: Pinecone has no `deleteFilter` on upsert
+
+pgvector は document を 1 call で replace できる：
+
+<br />
+
+```ts
+await pgVector.upsert({
+  indexName,
+  vectors: embeddings,
+  deleteFilter: { organizationId, path },
+  metadata,
+})
+```
+
+<br />
+
+Pinecone はできない。re-upload が fewer chunks を produce すると leftover neighbors が survive。namespace 内で path による delete を **first**、skip 時も含めて。それから write するものがあれば upsert。
+
+deterministic ids（`${path}:${chunkIndex}`）は in place で overwrite。存在しなくなった `chunkIndex` values は依然 remove しない。delete-first が正しい overwrite。prose に match するよう `ids` を渡す。
+
+<br />
+
+```ts
+const UPSERT_BATCH_SIZE = 100
+
+const indexOutputSchema = z.object({
+  status: z.enum(["indexed", "skipped"]),
+  path: z.string(),
+  chunkCount: z.number(),
+  reason: z.string().optional(),
+})
+
+const indexChunks = createStep({
+  id: "index-chunks",
+  inputSchema: chunkOutputSchema,
+  outputSchema: indexOutputSchema,
+  execute: async ({ inputData, requestContext }) => {
+    const organizationId = getWorkspaceOrganizationId(requestContext)
+
+    await ensurePineconeIndex()
+
+    await pinecone.deleteVectors({
+      indexName: PINECONE_INDEX_NAME,
+      namespace: organizationId,
+      filter: { path: inputData.path },
+    })
+
+    if (inputData.skipped || inputData.chunks.length === 0) {
+      return {
+        status: "skipped" as const,
+        path: inputData.path,
+        chunkCount: 0,
+        reason: inputData.skipReason ?? "No chunks to index",
+      }
+    }
+
+    await upsertChunkBatches(organizationId, inputData)
+
+    return {
+      status: "indexed" as const,
+      path: inputData.path,
+      chunkCount: inputData.chunks.length,
+    }
+  },
+})
+```
+
+<br />
+
+embed と upsert を batch。Pinecone の practical ceiling は約 1000 vectors または 2 MB；1536-d で metadata に `text` があるなら 100 の方が safer。
+
+<br />
+
+```ts
+async function upsertChunkBatches(
+  organizationId: string,
+  inputData: z.infer<typeof chunkOutputSchema>,
+) {
+  for (let i = 0; i < inputData.chunks.length; i += UPSERT_BATCH_SIZE) {
+    const batch = inputData.chunks.slice(i, i + UPSERT_BATCH_SIZE)
+    const embeddings = await embedTexts(batch.map((chunk) => chunk.text))
+
+    await pinecone.upsert({
+      indexName: PINECONE_INDEX_NAME,
+      namespace: organizationId,
+      ids: batch.map((chunk) => `${inputData.path}:${chunk.chunkIndex}`),
+      vectors: embeddings,
+      metadata: batch.map((chunk) => ({
+        path: inputData.path,
+        filename: inputData.filename,
+        chunkIndex: chunk.chunkIndex,
+        text: chunk.text,
+        mediaType: inputData.mediaType,
+      })),
+    })
+  }
+}
+```
+
+<br />
+
+delete then upsert は atomic ではない。同じ `path` の 2 concurrent re-uploads は interleave できる（delete A、delete B、upsert A、upsert B — あるいは worse、B の delete の後に upsert A）。それが matter するなら upload handler で `{ organizationId, path }` ごとに ingest を serialize。serverless search は eventually consistent でもある：`startAsync` と同じ turn の query は新しい chunks を miss できる。retrieval が later turns 用であり、current turn が inline file parts を使う別の理由。
+
+<br />
+
+### Wiring the DAG
+
+<br />
+
+```ts
+import { createWorkflow } from "@mastra/core/workflows"
+
+export const pineconeDocumentIngestion = createWorkflow({
+  id: "pinecone-document-ingestion",
+  inputSchema: ingestionInputSchema,
+  outputSchema: indexOutputSchema,
+})
+  .then(loadFile)
+  .then(extractTextStep)
+  .then(chunkDocument)
+  .then(indexChunks)
+
+pineconeDocumentIngestion.commit()
+```
+
+<br />
+
+store、workflow、agent（search tool 付き）を Mastra instance に register：
+
+<br />
+
+```ts
+import { Mastra } from "@mastra/core/mastra"
+
+export const mastra = new Mastra({
+  vectors: { pinecone },
+  workflows: { pineconeDocumentIngestion },
+  agents: { workspaceAgent },
+})
+```
+
+<br />
+
+upload handler から fire-and-forget。`resourceId` は user ではなく **organization**。`resourceId` は run を tenant に scope。path で join しない。file の latest ingest を見つけるには、その `resourceId` の runs を list し `input.path` を match。
+
+<br />
+
+```ts
+const run = await pineconeDocumentIngestion.createRun({
+  resourceId: organizationId,
+})
+const { runId } = await run.startAsync({
+  inputData: { path, filename, mediaType },
+  requestContext,
+})
+```
+
+<br />
+
+---
+
+## 6. Retrieval
+
+retrieval は **「every user message を embed して hits を prepend」ではない**。agent が呼ぶ tool。isolation は tool schema ではなく `execute` で apply。
+
+<br />
+
+```text
+User question
+  → agent (query, optional topK)
+  → tool execute
+      namespace = organizationId   (server)
+      embedTexts(query)
+      pinecone.query cosine ANN
+      keep text and score ≥ 0.2
+  → relevantContext + sources
+  → agent
+```
+
+<br />
+
+```ts
+import { createTool } from "@mastra/core/tools"
+import { z } from "zod"
+
+export const searchPineconeDocuments = createTool({
+  id: "search-pinecone-documents",
+  description:
+    "Search this organization's uploaded documents for relevant excerpts.",
+  inputSchema: z.object({
+    query: z.string().describe("The search query"),
+    topK: z.number().int().min(1).max(20).optional(),
+  }),
+  outputSchema: z.object({
+    relevantContext: z.string(),
+    sources: z.array(
+      z.object({
+        path: z.string(),
+        filename: z.string(),
+        score: z.number(),
+        text: z.string(),
+      }),
+    ),
+  }),
+  execute: async (inputData, { requestContext }) => {
+    return searchOrgDocuments(inputData, requestContext)
+  },
+})
+```
+
+<br />
+
+`execute` は `requestContext` から `organizationId` を取る。tool schema は別 tenant を name できない。
+
+<br />
+
+```ts
+async function searchOrgDocuments(
+  inputData: { query: string; topK?: number },
+  requestContext: RequestContext,
+) {
+  const organizationId = getWorkspaceOrganizationId(requestContext)
+  const topK = inputData.topK ?? 8
+
+  await ensurePineconeIndex()
+
+  const [queryVector] = await embedTexts([inputData.query])
+  if (!queryVector) {
+    return { relevantContext: "", sources: [] }
+  }
+
+  const results = await pinecone.query({
+    indexName: PINECONE_INDEX_NAME,
+    queryVector,
+    namespace: organizationId,
+    topK,
+    includeVector: false,
+  })
+
+  const minScore = 0.2
+  const sources = results.flatMap((result) => {
+    const text =
+      typeof result.metadata?.text === "string" ? result.metadata.text : ""
+    if (!text || result.score < minScore) return []
+    return [
+      {
+        path: String(result.metadata?.path ?? ""),
+        filename: String(result.metadata?.filename ?? ""),
+        score: result.score,
+        text,
+      },
+    ]
+  })
+
+  return {
+    relevantContext: sources.map((s) => s.text).join("\n\n"),
+    sources,
+  }
+}
+```
+
+<br />
+
+### Isolation vs relevance are different APIs
+
+<br />
+
+| Knob | Pinecone mechanism | Controlled by |
+| --- | --- | --- |
+| Tenant | `namespace: organizationId` | Server、always |
+| Which file | `filter: { path }` | Optional；v1 では omit |
+| Neighbor count | `topK` | Agent、capped 1–20 |
+| Weak matches | `minScore` 0.2 | Server constant |
+
+<br />
+
+v1 は **その organization の docs すべて** を search。path filters は later mention feature。「Postgres と consistent にするため」tenancy を metadata filter として implement しない。
+
+`0.2` は noise floor であり、calibrated confidence ではない。この model の unrelated pairs はしばしばその付近に座る；「typical range」として扱わない。`topK: 8` は context budget：8 × ~512-token overlapping chunks。Pinecone search は ANN；exact kNN で 9th に rank する chunk を miss できる。org library では acceptable。
+
+<br />
+
+### Why not `createVectorQueryTool`
+
+Mastra は Pinecone をこう bind できる：
+
+<br />
+
+```ts
+import { createVectorQueryTool } from "@mastra/rag"
+import { ModelRouterEmbeddingModel } from "@mastra/core/llm"
+
+const pineconeQueryTool = createVectorQueryTool({
+  vectorStoreName: "pinecone",
+  indexName: "document-chunks",
+  model: new ModelRouterEmbeddingModel("openai/text-embedding-3-small"),
+  databaseConfig: {
+    pinecone: { namespace: "production" },
+  },
+})
+```
+
+<br />
+
+この helper は、server が agent run **前** に authenticated org から `databaseConfig.pinecone.namespace`（または `VectorStoreResolver`）を set し、tool input schema が never namespace を含むなら usable。default examples は static namespace か `requestContext.set("databaseConfig", …)` を使い、wire を間違えやすく、`PINECONE_PROMPT` filter syntax 経由で model に expose しやすい。
+
+org-scoped user data では、authenticated principal から `execute` 内で namespace を derive し、**tool input schema に置かない**。custom tool がその only path にする。
+
+output shape `{ relevantContext, sources }` を keep し、後の pgvector からの cutover を agent rewrite ではなく tool swap にする。`PINECONE_PROMPT` を instructions に dump し、model に tenancy 用 `$and` / `$in` filters を invent させない。
+
+<br />
+
+---
+
+## 7. Delete, overwrite, and failure modes
+
+document identity は `path`。re-upload は object を replace し、`{ namespace, path }` の vectors を replace。delete は両方の stores を hit し、**vectors first**：
+
+<br />
+
+```ts
+await pinecone.deleteVectors({
+  indexName: PINECONE_INDEX_NAME,
+  namespace: organizationId,
+  filter: { path },
+})
+await filesystem.deleteFile(path, { force: true })
+```
+
+<br />
+
+object だけ delete すると retrieval は ghosts を serve し続ける。vectors だけ delete すると file が残り、later ingest が rebuild できる。leaked または stale excerpt より orphaned file を prefer。
+
+skip-with-delete（empty extract、images、missing file）は同じ rule：current object が source of truth なので、index はその path の previous version を keep してはいけない。
+
+<br />
+
+---
+
+## 8. What to leave out until it hurts
+
+**Hybrid sparse + dense。** `metric: "dotproduct"` と、upsert *と* query の両方に sparse vectors が必要。exact tokens（SKUs、error codes）に help。prose には dense cosine で足りる。later hybrid index は新しい index であり、`document-chunks` で flip する setting ではない。
+
+**Re-rank。** `topK=30` を fetch し、`rerankWithScorer` で 8 に落とす。ANN が「same topic, wrong paragraph」を返すときに help。cross-encoder（または agent scorer）hop を add。
+
+**GraphRAG。** chunks 間の edges を follow。wiki なら maybe。flat `docs/` prefix なら no。
+
+**Always-on injection。** every user message を embed。greetings で retrieve し tokens を burn。tool-calling は retrieval を default path から外す。
+
+<br />
+
+---
+
+## 9. Invariants
+
+1. Write と read で同じ embedding model と dimension。
+2. Namespace は organization。`userId` は actor。metadata filters はその tenant 内の relevance 用。
+3. Overwrite も skip も `deleteVectors(path)` から start。Pinecone はこれをやってくれない。
+4. Agent は *when* を search するかを選ぶ。server は *which org* が見えるかを選ぶ。
+5. Files が source of truth。vectors は derived。workflow runs は ingest status。`resourceId` は org；path は run input で match。
+
+それが system：four-step ingest DAG、organization で partition した cosine index、tool schema が別 tenant を name できない retriever。

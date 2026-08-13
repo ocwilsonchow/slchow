@@ -26,7 +26,8 @@
     "previous": "上一首",
     "nowPlaying": "正在播放",
     "socials": "社交連結",
-    "tableOfContents": "目錄"
+    "tableOfContents": "目錄",
+    "shortcutHint": "<modifier>⌘</modifier> <key>M</key>"
   },
   "search": {
     "title": "搜尋",

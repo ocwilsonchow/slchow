@@ -26,7 +26,8 @@
     "previous": "前の曲",
     "nowPlaying": "再生中",
     "socials": "ソーシャル",
-    "tableOfContents": "目次"
+    "tableOfContents": "目次",
+    "shortcutHint": "<modifier>⌘</modifier> <key>M</key>"
   },
   "search": {
     "title": "検索",
