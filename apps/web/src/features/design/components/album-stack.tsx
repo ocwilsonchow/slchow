@@ -73,7 +73,7 @@ export function AlbumStack({
         onPointerEnter={() => prefetchAlbumThumbs(design.images)}
         onFocus={() => prefetchAlbumThumbs(design.images)}
       >
-        <div className="relative aspect-square overflow-visible p-3">
+        <div className="relative aspect-square w-full overflow-visible p-3">
           {isExpanded
             ? null
             : design.images.map((image, imageIndex) => {
