@@ -97,7 +97,6 @@
   html,
   body {
     @apply text-content-body border-stroke-soft divide-stroke-soft bg-surface-canvas;
-    overscroll-behavior: none;
     scrollbar-gutter: stable;
     scroll-padding-top: 5rem;
   }
