@@ -63,7 +63,7 @@ const Page = async ({ params }: Props) => {
           <CollapsibleToc toc={toc} />
         </Header.Column>
       </Header.Root>
-      <article className="p-5">
+      <article className="min-w-0 p-5">
         <RenderMdxBlockByPath category="notes" slug={slug} locale={locale} />
         <NextNoteLink slug={slug} locale={locale} />
       </article>
