@@ -64,6 +64,11 @@
     "title": "Oops!",
     "description": "This page does not exist!"
   },
+  "error": {
+    "title": "Oops!",
+    "description": "Something went wrong!",
+    "retry": "Try again"
+  },
   "metadata": {
     "siteName": "Wilson Chow",
     "siteTitle": "Wilson Chow",

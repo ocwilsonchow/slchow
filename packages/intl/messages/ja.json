@@ -64,6 +64,11 @@
     "title": "Oops!",
     "description": "このページは存在しません！"
   },
+  "error": {
+    "title": "Oops!",
+    "description": "問題が発生しました！",
+    "retry": "もう一度試す"
+  },
   "metadata": {
     "siteName": "Wilson Chow",
     "siteTitle": "Wilson Chow",

@@ -64,6 +64,11 @@
     "title": "Oops!",
     "description": "此頁面不存在！"
   },
+  "error": {
+    "title": "Oops!",
+    "description": "出咗啲問題！",
+    "retry": "再試一次"
+  },
   "metadata": {
     "siteName": "Wilson Chow",
     "siteTitle": "Wilson Chow",

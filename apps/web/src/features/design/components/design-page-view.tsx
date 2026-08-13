@@ -37,8 +37,8 @@ export function DesignPageView({
 }: DesignPageViewProps) {
   const t = useTranslations("a11y")
   const tNav = useTranslations("navigation")
-  const lenis = useLenis()
   const shouldReduceMotion = useReducedMotion() ?? false
+  const lenis = useLenis()
   const [expandedSlug, setExpandedSlug] = useState<string | null>(null)
   const backRef = useRef<HTMLButtonElement>(null)
   const cardRefs = useRef(new Map<string, HTMLButtonElement>())
@@ -50,10 +50,9 @@ export function DesignPageView({
       shouldReduceMotion
         ? { duration: 0 }
         : {
-            type: "spring",
-            // bounce: 0.12,
-            stiffness: 400,
-            damping: 40,
+            type: "tween",
+            duration: 0.4,
+            ease: [0.32, 0.72, 0, 1],
           },
     [shouldReduceMotion]
   )
@@ -63,14 +62,10 @@ export function DesignPageView({
     setExpandedSlug(null)
   }, [])
 
-  const expand = useCallback(
-    (slug: string) => {
-      playClickSound()
-      lenis?.stop()
-      setExpandedSlug(slug)
-    },
-    [lenis]
-  )
+  const expand = useCallback((slug: string) => {
+    playClickSound()
+    setExpandedSlug(slug)
+  }, [])
 
   const registerCard = useCallback(
     (slug: string, el: HTMLButtonElement | null) => {
@@ -79,14 +74,6 @@ export function DesignPageView({
     },
     []
   )
-
-  useEffect(() => {
-    if (!expandedSlug) return
-    lenis?.stop()
-    return () => {
-      lenis?.start()
-    }
-  }, [expandedSlug, lenis])
 
   useEffect(() => {
     if (!expandedSlug) return
@@ -119,11 +106,24 @@ export function DesignPageView({
     }
   }, [expandedSlug])
 
+  useEffect(() => {
+    if (!expandedAlbum) return
+
+    lenis?.stop()
+    return () => {
+      lenis?.start()
+    }
+  }, [expandedAlbum, lenis])
+
   const isExpanded = Boolean(expandedAlbum)
 
   return (
     <LayoutGroup>
-      <div inert={isExpanded} aria-hidden={isExpanded || undefined}>
+      <div
+        inert={isExpanded}
+        aria-hidden={isExpanded || undefined}
+        className={isExpanded ? "invisible" : undefined}
+      >
         <div className="lg:grid lg:grid-cols-2 sm:space-y-4 lg:relative p-5">
           <div>{homeBack}</div>
           <div className="mt-10 lg:mt-0 grid gap-2">
@@ -155,18 +155,23 @@ export function DesignPageView({
             aria-modal="true"
             aria-label={expandedAlbum.title}
             className="fixed inset-0 z-50"
+            layoutRoot
             initial={false}
             exit={{ opacity: 1 }}
-            transition={{ duration: shouldReduceMotion ? 0 : 0.45 }}
+            transition={{ duration: shouldReduceMotion ? 0 : 0.4 }}
           >
             <motion.div
-              className="bg-surface-canvas/80 backdrop-blur-sm absolute inset-0"
+              className="bg-surface-canvas absolute inset-0"
               initial={{ opacity: shouldReduceMotion ? 1 : 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: shouldReduceMotion ? 1 : 0 }}
-              transition={{ duration: shouldReduceMotion ? 0 : 0.35 }}
+              transition={{ duration: shouldReduceMotion ? 0 : 0.28 }}
             />
-            <div className="relative z-10 h-full overflow-y-auto">
+            <motion.div
+              className="relative z-10 h-full overflow-y-auto overscroll-contain"
+              layoutScroll
+              data-lenis-prevent
+            >
               <div className="p-5">
                 <button
                   ref={backRef}
@@ -186,9 +191,10 @@ export function DesignPageView({
                 <AlbumOverlayGrid
                   album={expandedAlbum}
                   layoutTransition={layoutTransition}
+                  shouldReduceMotion={shouldReduceMotion}
                 />
               </div>
-            </div>
+            </motion.div>
           </motion.div>
         ) : null}
       </AnimatePresence>

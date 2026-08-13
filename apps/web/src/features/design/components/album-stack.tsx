@@ -1,11 +1,13 @@
 "use client"
 
 import type { Transition } from "motion/react"
+import { FAN_COUNT, PHOTO_SIZES } from "../album"
 import type { Design } from "../get-designs"
 import { designImageLayoutId } from "../layout-ids"
+import { prefetchAlbumThumbs } from "../prefetch"
 import { AlbumPhoto } from "./album-photo"
+import { DesignAsset } from "./design-asset"
 
-const FAN_COUNT = 4
 const FAN_ROTATE = [2, -7, 6, -4]
 const FAN_OFFSET = [
   { x: 0, y: 0 },
@@ -14,14 +16,10 @@ const FAN_OFFSET = [
   { x: 8, y: 14 },
 ]
 
-/** Matches the 2 / 3 / 4 stack grid. */
-const STACK_SIZES = "(max-width: 768px) 50vw, (max-width: 1024px) 33vw, 25vw"
-
-const TITLE_CLASS = "font-semibold tracking-tight text-content-ink"
-
 type AlbumStackProps = {
   design: Design
   isExpanded: boolean
+  isLcp: boolean
   openAlbumLabel: string
   shouldReduceMotion: boolean
   layoutTransition: Transition
@@ -32,6 +30,7 @@ type AlbumStackProps = {
 export function AlbumStack({
   design,
   isExpanded,
+  isLcp,
   openAlbumLabel,
   shouldReduceMotion,
   layoutTransition,
@@ -50,25 +49,45 @@ export function AlbumStack({
         aria-label={openAlbumLabel}
         className="flex w-full flex-col gap-3 text-left outline-none focus:outline-none focus-visible:outline-none"
         onClick={() => onExpand(design.slug)}
+        onPointerEnter={() => prefetchAlbumThumbs(design.images)}
+        onFocus={() => prefetchAlbumThumbs(design.images)}
       >
         <div className="relative aspect-square overflow-visible p-3">
           {isExpanded
             ? null
             : design.images.map((image, index) => {
                 const isFan = index < FAN_COUNT
-                const rotate =
-                  shouldReduceMotion || !isFan ? 0 : (FAN_ROTATE[index] ?? 0)
-                const offset =
-                  shouldReduceMotion || !isFan
-                    ? { x: 0, y: 0 }
-                    : (FAN_OFFSET[index] ?? { x: 0, y: 0 })
+                const isLcpCover = isLcp && index === 0
+
+                if (!isFan) {
+                  return (
+                    <div
+                      key={image.src}
+                      aria-hidden
+                      className="pointer-events-none absolute inset-10 opacity-0"
+                    >
+                      <DesignAsset
+                        src={image.src}
+                        alt=""
+                        sizes={PHOTO_SIZES}
+                        loading="lazy"
+                        className="h-full w-full object-contain"
+                      />
+                    </div>
+                  )
+                }
+
+                const rotate = shouldReduceMotion ? 0 : (FAN_ROTATE[index] ?? 0)
+                const offset = shouldReduceMotion
+                  ? { x: 0, y: 0 }
+                  : (FAN_OFFSET[index] ?? { x: 0, y: 0 })
 
                 return (
                   <div
                     key={image.src}
                     className="absolute inset-10"
                     style={{
-                      zIndex: design.images.length - index,
+                      zIndex: FAN_COUNT - index,
                       transform: `translate(${offset.x}px, ${offset.y}px) rotate(${rotate}deg)`,
                     }}
                   >
@@ -76,8 +95,10 @@ export function AlbumStack({
                       layoutId={designImageLayoutId(design.slug, image.name)}
                       src={image.src}
                       alt=""
-                      sizes={STACK_SIZES}
+                      sizes={PHOTO_SIZES}
                       layoutTransition={layoutTransition}
+                      loading={isLcpCover ? "eager" : "lazy"}
+                      fetchPriority={isLcpCover ? "high" : "low"}
                       className="bg-surface-alpha h-full w-full overflow-hidden shadow"
                     />
                   </div>
