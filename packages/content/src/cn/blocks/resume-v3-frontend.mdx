@@ -1,0 +1,110 @@
+---
+title: 简历 — 前端
+---
+
+## Wilson Chow
+
+拥有 5 年经验的前端软件工程师，负责将面向消费者的 React／React Native 产品从 Figma 交付至生产环境——包括从零到一的上线，以及 **15+** 个应用的多年演进，并覆盖这些产品所依赖的类型安全 API。关键路径加载时间最多缩短 **80%**，搜索延迟降低 **90%**。目前主导多渠道 agent 平台的客户端：聊天、工具调用与文件提及 UI，运行于可中断的持久化 agent runs。日常开发使用 **Cursor**／AI 辅助工具。已获得 **AWS Solutions Architect Associate** 认证。
+
+优势：前端工程 · 性能 · 复杂流程 · 类型安全 API · Agent UI
+
+---
+
+## 工作经历
+
+### 全栈工程师，Vioo Company Limited，2022 年 5 月至今
+
+担任多个并行客户产品的主要工程师，负责从 Figma 到生产 UI 及其背后的 API，并与利益相关者协作规划 UX 和交付。
+
+- 从零到一交付并多年维护 **15+** 个生产级 React／React Native 应用，包括高保真 Figma 设计与跨客户复用的共享设计系统。
+- 以自研 headless CMS（Strapi／Sanity）与搜索（Meilisearch／Algolia）取代第三方 WordPress，过渡期间发布流程不中断：加载时间缩短 **80%**、搜索延迟降低 **90%**，PageSpeed Insights **>90**。
+- 建立共享的 Radix／Tailwind 组件与 hook 库，并通过 Storybook、Fumadocs 和 MDX 编写文档，供多个客户应用复用。主导前端审查；为关键流程加入 Vitest／Cypress。
+- 将 Next.js 作为 isomorphic UI 与 BFF：SSR／ISR，聚合 Shopify GraphQL、CMS 与搜索 API 并做缓存。独立排查 Node 运行时问题与生产瓶颈（Lighthouse、Sentry）。
+- 将身份建模为可复用的客户端状态，对接类型安全 API：Better Auth sessions 与组织成员、OAuth 2.0／OIDC、JWT／session 生命周期、RBAC——而非散落的嵌套条件。Session 存放于 **HttpOnly／Secure／SameSite** cookies，而非 `localStorage` tokens。
+- 使用 Hono、Drizzle、OpenAPI 与 tRPC 在 AWS Lambda／API Gateway 上构建类型安全 API（Postgres／DynamoDB／S3）。加固边缘：**严格 CORS**、trusted origins、auth 路由的 WAF 限流，身份来自 authorizer cookie——绝不信任客户端传入的 user header。API keys、tokens 与凭据存放于 **SST Secret**，而非 `.env`。GitHub Actions + SST 做 CI／CD——部署前跑 lint、typecheck、tests 与 build——部署时间缩短 **50%+**。
+
+<br />
+
+---
+
+## 精选项目
+
+### 多渠道 Agent 平台，2026 年 4 月至今
+
+面向客户的 agent UI（Web + Discord）——持久化多渠道助手的产品表面。
+
+- 将每次 agent run 建模为**有状态、可中断、可恢复**的持久化串流：客户端可断线、重连并在执行途中恢复，而不会丢失进度——而非嵌套的聊天条件。
+- 交付可组合的聊天、工具调用与多步客户端流程，以及 TipTap @mention 文件标记组件，用于将 workspace 文件附加至 prompts。
+- 将失败视为一等、可测试的 UI：可见的 run 状态、重试与恢复——而不只是完成气泡。
+- 负责客户端契约；同时在 ECS 上运行 Hono + Better Auth，以 Postgres／S3 存储，Mastra／RAG／evals 支撑该表面。
+
+---
+
+### 高性能营销网站，2025 年 11 月
+
+担任内容与搜索型营销网站的前端负责人——性能、CMS 页面与发布 UX。
+
+- Next.js + Strapi + Meilisearch，达到 **LCP &lt; 0.5s**、**CLS &lt; 0.1**，PageSpeed Insights **>90**。
+- 选择混合 ISR 而非全量 SSG 或纯按需：主要页面与最新 100 篇文章在构建时生成，其余按需；通过 Strapi webhook 做 tag revalidation，发布后无需完整重建即可上线。
+- 将无障碍与 SEO 纳入交付标准：语义化结构、键盘可操作的导航与表单、Lighthouse + axe；来自 CMS 的 metadata／OG、canonicals、sitemap、robots.txt 与 Article JSON-LD。
+- 以 TanStack Query prefetch／hydration 与 TanStack Form + Zod 编排交互与多步流程；客户内容站点支持 locale-aware 路由、文案与日期／数字格式。
+
+---
+
+### React Native 会员平台，2024 年 4 月上线
+
+- 主导 Figma 设计与 iOS／Android 会员应用（电子会员卡、积分、优惠）；发布至 App Store 与 Play Store。同时维护 Express API 与 Next.js 管理后台。
+- 通过 Sentry 独立诊断生产崩溃、设备兼容性与性能瓶颈；上线后维持 **>99.5%** crash-free sessions。
+- 使用 FlashList 改善列表卡顿；通过 react-native-screens freeze 与延迟挂载降低非活动标签页成本；仅在原生线程转场中使用 Reanimated。
+- 通过缓存远程图片，并避免在长列表中使用全分辨率素材，缩短动态列表中的图片加载时间。
+- 使用 Firebase Cloud Messaging 实现推送与 deep links（促销及会员里程碑）。
+
+<br />
+
+---
+
+## 其他工作
+
+此外还交付了餐厅忠诚度应用（React Native）、活动／电商 storefronts（Next.js、Shopify GraphQL）、CMS 内容站点，以及拍照亭活动应用（React Native、Skia）。
+
+<br />
+
+---
+
+## 技能
+
+- **编程语言**：TypeScript、Node.js
+- **前端**：React、Next.js、React Native、Expo、TanStack Query、TanStack Form、Framer Motion、Tailwind CSS、shadcn/ui、Storybook、Figma、MDX、TipTap
+- **后端**：Hono、Drizzle、OpenAPI、tRPC、Postgres、DynamoDB、Better Auth
+- **Auth 与 i18n**：OAuth 2.0／OIDC、JWT、HttpOnly cookies、CORS、RBAC、next-intl
+- **测试与监控**：Cypress、Vitest、React Testing Library、Lighthouse、axe、Sentry、PostHog
+- **工作流**：Cursor、Claude Code
+- **DevOps**：SST、SST Secret、Docker、GitHub Actions、AWS
+- **亦使用**：Strapi、Sanity、Meilisearch
+
+<br />
+
+---
+
+## 认证
+
+- AWS Solutions Architect Associate，2026
+- AWS Cloud Practitioner，2025
+
+<br />
+
+---
+
+## 教育背景
+
+### University College London
+
+- MPharm 药学，2016 至 2020 年，一等荣誉学位
+- 注册药剂师（GPhC），2021 年至今
+- 等效行业经验：5 年交付 15+ 个生产级产品；AWS Solutions Architect Associate。药剂执业属于受监管、高风险领域——习惯在合规约束下做产品取舍。
+
+<br />
+
+---
+
+你也可以在[这里](/resume.pdf)下载我的简历。

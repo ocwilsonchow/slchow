@@ -6,6 +6,8 @@ export const resumeVariants = {
 
 export type ResumeVariant = keyof typeof resumeVariants
 
+export const publicResumeSlug = resumeVariants["full-stack"]
+
 export const resumeVariantParams = Object.keys(
   resumeVariants
 ) as ResumeVariant[]
