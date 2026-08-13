@@ -19,7 +19,7 @@ type ListNotesItemsProps = {
   listAllLabel: string
 }
 
-const NOTES_PREVIEW_LIMIT = { base: 3, md: 5 } as const
+const NOTES_PREVIEW_LIMIT = { base: 4, md: 10 } as const
 
 export function ListNotesItems({
   notes,
