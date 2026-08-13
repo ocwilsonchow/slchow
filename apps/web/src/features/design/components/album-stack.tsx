@@ -1,12 +1,12 @@
 "use client"
 
+import { cn } from "@repo/ds"
 import type { Transition } from "motion/react"
 import { FAN_COUNT, PHOTO_SIZES } from "../album"
 import type { Design } from "../get-designs"
 import { designImageLayoutId } from "../layout-ids"
 import { prefetchAlbumThumbs } from "../prefetch"
 import { AlbumPhoto } from "./album-photo"
-import { DesignAsset } from "./design-asset"
 
 const FAN_ROTATE = [2, -7, 6, -4]
 const FAN_OFFSET = [
@@ -16,8 +16,12 @@ const FAN_OFFSET = [
   { x: 8, y: 14 },
 ]
 
+const STAGGER_DELAY = 0.5
+const STAGGER_EACH = 0.05
+
 type AlbumStackProps = {
   design: Design
+  index: number
   isExpanded: boolean
   isLcp: boolean
   openAlbumLabel: string
@@ -29,6 +33,7 @@ type AlbumStackProps = {
 
 export function AlbumStack({
   design,
+  index,
   isExpanded,
   isLcp,
   openAlbumLabel,
@@ -38,7 +43,14 @@ export function AlbumStack({
   registerCard,
 }: AlbumStackProps) {
   return (
-    <li className="min-w-0">
+    <li
+      className={cn("min-w-0", !shouldReduceMotion && "animate-album-stack-enter")}
+      style={
+        shouldReduceMotion
+          ? undefined
+          : { animationDelay: `${STAGGER_DELAY + index * STAGGER_EACH}s` }
+      }
+    >
       <button
         ref={(el) => {
           if (!el) return
@@ -48,46 +60,35 @@ export function AlbumStack({
         type="button"
         aria-label={openAlbumLabel}
         className="flex w-full flex-col gap-3 text-left outline-none focus:outline-none focus-visible:outline-none"
-        onClick={() => onExpand(design.slug)}
+        onClick={() => {
+          prefetchAlbumThumbs(design.images)
+          onExpand(design.slug)
+        }}
         onPointerEnter={() => prefetchAlbumThumbs(design.images)}
         onFocus={() => prefetchAlbumThumbs(design.images)}
       >
         <div className="relative aspect-square overflow-visible p-3">
           {isExpanded
             ? null
-            : design.images.map((image, index) => {
-                const isFan = index < FAN_COUNT
-                const isLcpCover = isLcp && index === 0
-
-                if (!isFan) {
-                  return (
-                    <div
-                      key={image.src}
-                      aria-hidden
-                      className="pointer-events-none absolute inset-10 opacity-0"
-                    >
-                      <DesignAsset
-                        src={image.src}
-                        alt=""
-                        sizes={PHOTO_SIZES}
-                        loading="lazy"
-                        className="h-full w-full object-contain"
-                      />
-                    </div>
-                  )
-                }
-
-                const rotate = shouldReduceMotion ? 0 : (FAN_ROTATE[index] ?? 0)
-                const offset = shouldReduceMotion
-                  ? { x: 0, y: 0 }
-                  : (FAN_OFFSET[index] ?? { x: 0, y: 0 })
+            : design.images.map((image, imageIndex) => {
+                const isFan = imageIndex < FAN_COUNT
+                const isLcpCover = isLcp && imageIndex === 0
+                const rotate =
+                  shouldReduceMotion || !isFan
+                    ? 0
+                    : (FAN_ROTATE[imageIndex] ?? 0)
+                const offset =
+                  shouldReduceMotion || !isFan
+                    ? { x: 0, y: 0 }
+                    : (FAN_OFFSET[imageIndex] ?? { x: 0, y: 0 })
 
                 return (
                   <div
                     key={image.src}
+                    aria-hidden={!isFan || undefined}
                     className="absolute inset-10"
                     style={{
-                      zIndex: FAN_COUNT - index,
+                      zIndex: isFan ? FAN_COUNT - imageIndex : 0,
                       transform: `translate(${offset.x}px, ${offset.y}px) rotate(${rotate}deg)`,
                     }}
                   >
@@ -99,7 +100,11 @@ export function AlbumStack({
                       layoutTransition={layoutTransition}
                       loading={isLcpCover ? "eager" : "lazy"}
                       fetchPriority={isLcpCover ? "high" : "low"}
-                      className="bg-surface-alpha h-full w-full overflow-hidden shadow"
+                      className={
+                        isFan
+                          ? "bg-surface-alpha h-full w-full overflow-hidden shadow"
+                          : "bg-surface-alpha pointer-events-none h-full w-full overflow-hidden opacity-0"
+                      }
                     />
                   </div>
                 )

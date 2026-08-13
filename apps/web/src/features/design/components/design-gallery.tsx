@@ -1,7 +1,7 @@
 "use client"
 
 import type { Transition } from "motion/react"
-import { FAN_COUNT, PHOTO_SIZES } from "../album"
+import { PHOTO_SIZES } from "../album"
 import type { Design } from "../get-designs"
 import { designImageLayoutId } from "../layout-ids"
 import { AlbumPhoto } from "./album-photo"
@@ -32,6 +32,7 @@ export function DesignGallery({
         <AlbumStack
           key={design.slug}
           design={design}
+          index={index}
           isExpanded={design.slug === expandedSlug}
           isLcp={index === 0}
           openAlbumLabel={openAlbumLabel(design.title)}
@@ -48,37 +49,25 @@ export function DesignGallery({
 type AlbumOverlayGridProps = {
   album: Design
   layoutTransition: Transition
-  shouldReduceMotion: boolean
 }
 
 export function AlbumOverlayGrid({
   album,
   layoutTransition,
-  shouldReduceMotion,
 }: AlbumOverlayGridProps) {
   return (
     <ul className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-      {album.images.map((image, index) => {
+      {album.images.map((image) => {
         const alt = `${album.title} — ${image.name}`
-        const isShared = index < FAN_COUNT
 
         return (
           <li key={image.src} className="aspect-square">
             <AlbumPhoto
-              layoutId={
-                isShared
-                  ? designImageLayoutId(album.slug, image.name)
-                  : undefined
-              }
+              layoutId={designImageLayoutId(album.slug, image.name)}
               src={image.src}
               alt={alt}
               sizes={PHOTO_SIZES}
               layoutTransition={layoutTransition}
-              fadeIn={!isShared}
-              fadeDelay={
-                shouldReduceMotion ? 0 : 0.12 + (index - FAN_COUNT) * 0.04
-              }
-              shouldReduceMotion={shouldReduceMotion}
               className="bg-surface-alpha h-full w-full overflow-hidden"
             />
           </li>

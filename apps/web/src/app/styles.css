@@ -3,7 +3,14 @@
 @import "fumadocs-ui/css/generated/shared.css";
 @source "../**/*.{ts,tsx}";
 
+@keyframes album-stack-enter {
+  from {
+    opacity: 0;
+  }
+}
+
 @theme inline {
+  --animate-album-stack-enter: album-stack-enter 0.4s cubic-bezier(0.32, 0.72, 0, 1) backwards;
   --color-fd-background: var(--surface-canvas);
   --color-fd-foreground: var(--content-ink);
   --color-fd-primary: var(--content-accent);

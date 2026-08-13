@@ -14,8 +14,8 @@ import {
   useRef,
   useState,
 } from "react"
-import { playClickSound, preloadClickSound } from "@/lib/click-sound"
 import { Link as I18nLink, usePathname } from "@/i18n/navigation"
+import { playClickSound, preloadClickSound } from "@/lib/click-sound"
 import { fontPresets } from "../styles"
 import {
   NavbarContext,

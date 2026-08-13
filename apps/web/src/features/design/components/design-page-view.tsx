@@ -191,7 +191,6 @@ export function DesignPageView({
                 <AlbumOverlayGrid
                   album={expandedAlbum}
                   layoutTransition={layoutTransition}
-                  shouldReduceMotion={shouldReduceMotion}
                 />
               </div>
             </motion.div>
