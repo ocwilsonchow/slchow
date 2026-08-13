@@ -44,7 +44,10 @@ export function AlbumStack({
 }: AlbumStackProps) {
   return (
     <li
-      className={cn("min-w-0", !shouldReduceMotion && "animate-album-stack-enter")}
+      className={cn(
+        "min-w-0",
+        !shouldReduceMotion && "animate-album-stack-enter"
+      )}
       style={
         shouldReduceMotion
           ? undefined
