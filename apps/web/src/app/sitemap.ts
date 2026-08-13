@@ -1,17 +1,7 @@
 import type { MetadataRoute } from "next"
 import { routing } from "@/i18n/routing"
-import { buildAbsoluteLanguageAlternates } from "@/lib/metadata"
-import { getCategoryPages } from "@/lib/source"
-
-function getSiteUrl() {
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL
-  if (siteUrl) return new URL(siteUrl)
-
-  const vercelUrl = process.env.VERCEL_PROJECT_PRODUCTION_URL
-  if (vercelUrl) return new URL(`https://${vercelUrl}`)
-
-  return new URL("http://localhost:3003")
-}
+import { buildAbsoluteLanguageAlternates, getSiteUrl } from "@/lib/metadata"
+import { getNativeCategoryPages } from "@/lib/source"
 
 const staticPaths = [
   "",
@@ -22,35 +12,65 @@ const staticPaths = [
   "/contact",
 ] as const
 
+const contentCategories = ["notes", "works"] as const
+
+function toLastModified(date?: string | Date) {
+  if (!date) return undefined
+  const parsed = new Date(date)
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed
+}
+
 export default function sitemap(): MetadataRoute.Sitemap {
   const origin = getSiteUrl().origin
-  const lastModified = new Date()
   const entries: MetadataRoute.Sitemap = []
 
   for (const locale of routing.locales) {
     for (const path of staticPaths) {
       entries.push({
         url: `${origin}/${locale}${path}`,
-        lastModified,
         alternates: {
           languages: buildAbsoluteLanguageAlternates(origin, path),
         },
       })
     }
+  }
 
-    for (const category of ["notes", "works"] as const) {
-      for (const page of getCategoryPages(category, locale)) {
-        const slug = page.slugs.slice(1).join("/")
-        const pathname = `/${category}/${slug}`
-        entries.push({
-          url: `${origin}/${locale}${pathname}`,
-          lastModified,
-          alternates: {
-            languages: buildAbsoluteLanguageAlternates(origin, pathname),
-          },
+  const localesByPathname = new Map<string, string[]>()
+  const contentPages: Array<{
+    locale: string
+    pathname: string
+    lastModified?: Date
+  }> = []
+
+  for (const locale of routing.locales) {
+    for (const category of contentCategories) {
+      for (const page of getNativeCategoryPages(category, locale)) {
+        const pathname = `/${category}/${page.slugs.slice(1).join("/")}`
+        const locales = localesByPathname.get(pathname)
+        if (locales) locales.push(locale)
+        else localesByPathname.set(pathname, [locale])
+
+        contentPages.push({
+          locale,
+          pathname,
+          lastModified: toLastModified(page.data.date),
         })
       }
     }
+  }
+
+  for (const page of contentPages) {
+    entries.push({
+      url: `${origin}/${page.locale}${page.pathname}`,
+      ...(page.lastModified ? { lastModified: page.lastModified } : {}),
+      alternates: {
+        languages: buildAbsoluteLanguageAlternates(
+          origin,
+          page.pathname,
+          localesByPathname.get(page.pathname)
+        ),
+      },
+    })
   }
 
   return entries

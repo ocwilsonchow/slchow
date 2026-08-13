@@ -16,7 +16,12 @@ import { SmoothScroll } from "@/features/layout/components/smooth-scroll"
 import { StylesProvider } from "@/features/layout/components/styles"
 import { SiteSearchProvider } from "@/features/search/components/search-provider"
 import { routing } from "@/i18n/routing"
-import { getHtmlLang, getOpenGraphLocale, OG_IMAGE } from "@/lib/metadata"
+import {
+  getHtmlLang,
+  getOpenGraphLocale,
+  getSiteUrl,
+  OG_IMAGE,
+} from "@/lib/metadata"
 import { getPostHogProjectToken } from "@/lib/posthog"
 import { PostHogProvider } from "@/lib/posthog-provider"
 import { getCategoryPages } from "@/lib/source"
@@ -25,16 +30,6 @@ import { TanstackProviders } from "@/lib/tanstack-providers"
 type Props = {
   children: React.ReactNode
   params: Promise<{ locale: string }>
-}
-
-function getMetadataBase() {
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL
-  if (siteUrl) return new URL(siteUrl)
-
-  const vercelUrl = process.env.VERCEL_PROJECT_PRODUCTION_URL
-  if (vercelUrl) return new URL(`https://${vercelUrl}`)
-
-  return new URL("http://localhost:3003")
 }
 
 export async function generateMetadata({
@@ -46,7 +41,7 @@ export async function generateMetadata({
   const t = await getTranslations({ locale, namespace: "metadata" })
 
   return {
-    metadataBase: getMetadataBase(),
+    metadataBase: getSiteUrl(),
     title: {
       default: t("siteTitle"),
       template: `%s · ${t("siteName")}`,

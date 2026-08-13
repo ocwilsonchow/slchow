@@ -31,10 +31,31 @@ export function getHtmlLang(locale: string) {
   return htmlLangs[locale as Locale] ?? locale
 }
 
+export function getSiteUrl() {
+  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL
+  if (siteUrl) return new URL(siteUrl)
+
+  const vercelUrl = process.env.VERCEL_PROJECT_PRODUCTION_URL
+  if (vercelUrl) return new URL(`https://${vercelUrl}`)
+
+  return new URL("http://localhost:3003")
+}
+
 /** Normalize a locale-stripped pathname (`""` or `/notes/...`). */
 function normalizePathname(pathname: string) {
   if (!pathname || pathname === "/") return ""
   return pathname.startsWith("/") ? pathname : `/${pathname}`
+}
+
+function resolveAlternateLocales(locales?: readonly string[]) {
+  if (locales && locales.length > 0) return locales
+  return routing.locales
+}
+
+function resolveCanonicalLocale(locale: string, available: readonly string[]) {
+  if (available.includes(locale)) return locale
+  if (available.includes(routing.defaultLocale)) return routing.defaultLocale
+  return available[0] ?? locale
 }
 
 /**
@@ -43,14 +64,20 @@ function normalizePathname(pathname: string) {
  * values are site-relative locale-prefixed paths (`/hk/notes`).
  */
 export function buildLanguageAlternates(
-  pathname: string
+  pathname: string,
+  locales?: readonly string[]
 ): Record<string, string> {
   const path = normalizePathname(pathname)
+  const available = resolveAlternateLocales(locales)
+  const defaultLocale = available.includes(routing.defaultLocale)
+    ? routing.defaultLocale
+    : (available[0] ?? routing.defaultLocale)
+
   const languages: Record<string, string> = {
-    "x-default": `/${routing.defaultLocale}${path}`,
+    "x-default": `/${defaultLocale}${path}`,
   }
 
-  for (const locale of routing.locales) {
+  for (const locale of available) {
     languages[getHtmlLang(locale)] = `/${locale}${path}`
   }
 
@@ -62,9 +89,10 @@ export function buildLanguageAlternates(
  */
 export function buildAbsoluteLanguageAlternates(
   origin: string,
-  pathname: string
+  pathname: string,
+  locales?: readonly string[]
 ): Record<string, string> {
-  const relative = buildLanguageAlternates(pathname)
+  const relative = buildLanguageAlternates(pathname, locales)
   const absolute: Record<string, string> = {}
 
   for (const [hreflang, path] of Object.entries(relative)) {
@@ -81,6 +109,8 @@ type BuildPageMetadataOptions = {
   /** Locale-stripped path, e.g. `""`, `"/notes"`, `"/notes/to-study"`. */
   pathname: string
   type?: "website" | "article"
+  /** Locales that actually have this page. Defaults to every routed locale. */
+  locales?: readonly string[]
 }
 
 export function buildPageMetadata({
@@ -89,15 +119,18 @@ export function buildPageMetadata({
   locale,
   pathname,
   type = "website",
+  locales,
 }: BuildPageMetadataOptions): Metadata {
   const path = normalizePathname(pathname)
+  const available = resolveAlternateLocales(locales)
+  const canonicalLocale = resolveCanonicalLocale(locale, available)
 
   return {
     title,
     description,
     alternates: {
-      canonical: `/${locale}${path}`,
-      languages: buildLanguageAlternates(path),
+      canonical: `/${canonicalLocale}${path}`,
+      languages: buildLanguageAlternates(path, available),
     },
     openGraph: {
       type,

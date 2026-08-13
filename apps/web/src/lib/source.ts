@@ -93,6 +93,25 @@ export function getCategoryPages(category: string, locale: string) {
     .filter((page) => page.slugs[0] === category && page.slugs.length > 1)
 }
 
+function getSourceLocale(path: string) {
+  return path.split("/")[0]
+}
+
+/** Category pages authored in this locale, excluding Fumadocs fallbacks. */
+export function getNativeCategoryPages(category: string, locale: string) {
+  return getCategoryPages(category, locale).filter(
+    (page) => getSourceLocale(page.path) === locale
+  )
+}
+
+export function getPageLocales(category: string, slug: string) {
+  return fumadocsI18n.languages.filter((locale) =>
+    getNativeCategoryPages(category, locale).some(
+      (page) => page.slugs.slice(1).join("/") === slug
+    )
+  )
+}
+
 export function getNotesPage(slug: string[], locale: string) {
   return content.getPage([NOTES_CATEGORY, ...slug], locale)
 }
