@@ -47,14 +47,14 @@ sst.config.ts   App entry — currently wires @repo/infra/nextjs
 
 ### Web app features (`apps/web`)
 
-| Area    | Notes                                                                         |
-| ------- | ----------------------------------------------------------------------------- |
-| Routes  | Home, resume, notes, works, designs, contact (locale-prefixed)                |
-| Content | Fumadocs MDX from `@repo/content`; Mermaid in notes                           |
-| Search  | ⌘/Ctrl+K; indexes notes, works, and current resume                            |
-| Designs | Gallery assets synced from `packages/content/design` → `public/design-assets` |
-| Motion  | Lenis smooth scroll + Motion / GSAP-friendly layout                           |
-| i18n    | `en`, `hk`, `cn`, `ja` via next-intl + Fumadocs                               |
+| Area    | Notes                                                                                                                      |
+| ------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Routes  | Home, resume, notes, works, designs, contact (locale-prefixed)                                                             |
+| Content | Fumadocs MDX from `@repo/content`; Mermaid in notes                                                                        |
+| Search  | ⌘/Ctrl+K; indexes notes, works, and current resume                                                                         |
+| Designs | Album stacks (stills + in-view MP4); synced from `packages/content/design` → `public/design-assets` with 400/800w variants |
+| Motion  | Lenis smooth scroll + Motion / GSAP-friendly layout                                                                        |
+| i18n    | `en`, `hk`, `cn`, `ja` via next-intl + Fumadocs                                                                            |
 
 ## Requirements
 
@@ -74,7 +74,7 @@ bunx sst secret set POSTHOG_PROJECT_TOKEN phc_... --stage production   # PostHog
 bun dev              # sst dev --stage local → http://localhost:3003
 ```
 
-`apps/web` `predev` / `build` sync design assets, run `fumadocs-mdx`, and generate Orama search indexes into `public/search-index/` (gitignored).
+`apps/web` `predev` / `build` sync design assets (and write 400/800w variants), run `fumadocs-mdx`, and generate Orama search indexes into `public/search-index/` (gitignored).
 
 Pre-commit runs lint-staged: Biome (`check --write`) on staged `apps/web` JS/TS/JSON/CSS, Prettier on other staged `ts` / `tsx` / `md` / `mts` / `json`.
 
@@ -111,17 +111,33 @@ bun run auth:generate   # regenerate Better Auth tables into @repo/db
 
 **Web-only helpers** (from `apps/web`):
 
-| Command                          | Description                                   |
-| -------------------------------- | --------------------------------------------- |
-| `bun run build:search-index`     | Write `public/search-index/{locale}.json`     |
-| `bun run sync:design-assets`     | Copy design files into `public/design-assets` |
-| `bun run optimize:design-assets` | Optimize design images with Sharp             |
+| Command                          | Description                                                                              |
+| -------------------------------- | ---------------------------------------------------------------------------------------- |
+| `bun run build:search-index`     | Write `public/search-index/{locale}.json`                                                |
+| `bun run sync:design-assets`     | Copy design files into `public/design-assets` and write 400/800w variants                |
+| `bun run optimize:design-assets` | Optimize stills with Sharp; transcode MOV/MP4 to H.264 + WebP poster (`ffmpeg` required) |
 
 **CI:** GitHub Actions (`.github/workflows/ci.yml`) runs on PRs and pushes to `main` / `develop`. It runs `bun install --frozen-lockfile`, `lint`, `format:check`, `check-types`, and `build`. On completion it posts status to Discord via the `DISCORD_WEBHOOK` repository secret.
 
 ## Content & locales
 
-MDX lives in `packages/content/src/{en,hk,cn,ja}/` under `notes/`, `works/`, and `blocks/`. Design source images live in `packages/content/design/`. UI copy is in `packages/intl/messages/{en,hk,cn,ja}.json`. The web app loads content through Fumadocs (`apps/web/source.config.ts`).
+MDX lives in `packages/content/src/{en,hk,cn,ja}/` under `notes/`, `works/`, and `blocks/`. Design source stills and videos live in `packages/content/design/`. UI copy is in `packages/intl/messages/{en,hk,cn,ja}.json`. The web app loads content through Fumadocs (`apps/web/source.config.ts`).
+
+## Designs
+
+The `/design` page is a gallery of albums. Each folder under `packages/content/design/{slug}/` is one album. Collapsed cards fan the first four assets; opening an album overlays a grid (Motion `layoutId`). Videos are muted looping MP4s that play when in view (off under `prefers-reduced-motion`).
+
+Drop stills (any raster) and videos (MOV/MP4) into a slug folder, then from `apps/web`:
+
+1. `bun run optimize:design-assets` — Sharp WebP stills (max 2048); ffmpeg transcodes MOV/MP4 to H.264 (max 1920, no audio) plus a matching WebP poster. Requires `ffmpeg` (`brew install ffmpeg`). Manual; not part of `predev` / build.
+2. `bun run sync:design-assets` — copies into `public/design-assets` and writes `.w400.webp` / `.w800.webp` variants. Runs on `predev`, `prebuild`, and the OpenNext `buildCommand`.
+
+A video `foo.mp4` is paired with `foo.webp` as poster; that poster is not listed as a separate still. Runtime uses native `img` / `video` (no `/_next/image`) with a 400/800/2048 srcset.
+
+```text
+packages/content/design/{slug}/still.webp     →   still.w400.webp, still.w800.webp
+packages/content/design/{slug}/motion.mp4     →   motion.webp poster (not a gallery still)
+```
 
 ## Search
 

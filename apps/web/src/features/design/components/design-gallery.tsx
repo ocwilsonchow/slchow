@@ -1,9 +1,10 @@
 "use client"
 
-import type { Transition } from "motion/react"
+import { type Transition, useReducedMotion } from "motion/react"
 import { PHOTO_SIZES } from "../album"
-import type { Design } from "../get-designs"
+import type { Design, DesignImage } from "../get-designs"
 import { designImageLayoutId } from "../layout-ids"
+import { useInView } from "../use-in-view"
 import { AlbumPhoto } from "./album-photo"
 import { AlbumStack } from "./album-stack"
 
@@ -57,22 +58,47 @@ export function AlbumOverlayGrid({
 }: AlbumOverlayGridProps) {
   return (
     <ul className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-      {album.images.map((image) => {
-        const alt = `${album.title} — ${image.name}`
-
-        return (
-          <li key={image.src} className="aspect-square">
-            <AlbumPhoto
-              layoutId={designImageLayoutId(album.slug, image.name)}
-              src={image.src}
-              alt={alt}
-              sizes={PHOTO_SIZES}
-              layoutTransition={layoutTransition}
-              className="bg-surface-alpha h-full w-full overflow-hidden"
-            />
-          </li>
-        )
-      })}
+      {album.images.map((image) => (
+        <AlbumOverlayTile
+          key={image.src}
+          album={album}
+          image={image}
+          layoutTransition={layoutTransition}
+        />
+      ))}
     </ul>
+  )
+}
+
+type AlbumOverlayTileProps = {
+  album: Design
+  image: DesignImage
+  layoutTransition: Transition
+}
+
+function AlbumOverlayTile({
+  album,
+  image,
+  layoutTransition,
+}: AlbumOverlayTileProps) {
+  const { ref, inView } = useInView<HTMLLIElement>()
+  const shouldReduceMotion = useReducedMotion() ?? false
+  const playing = image.kind === "video" && inView && !shouldReduceMotion
+  const alt = `${album.title} — ${image.name}`
+
+  return (
+    <li ref={ref} className="aspect-square">
+      <AlbumPhoto
+        layoutId={designImageLayoutId(album.slug, image.name)}
+        src={image.src}
+        alt={alt}
+        sizes={PHOTO_SIZES}
+        layoutTransition={layoutTransition}
+        kind={image.kind}
+        poster={image.poster}
+        playing={playing}
+        className="bg-surface-card h-full w-full overflow-hidden"
+      />
+    </li>
   )
 }

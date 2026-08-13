@@ -6,6 +6,7 @@ import { FAN_COUNT, PHOTO_SIZES } from "../album"
 import type { Design } from "../get-designs"
 import { designImageLayoutId } from "../layout-ids"
 import { prefetchAlbumThumbs } from "../prefetch"
+import { useInView } from "../use-in-view"
 import { AlbumPhoto } from "./album-photo"
 
 const FAN_ROTATE = [2, -7, 6, -4]
@@ -42,8 +43,11 @@ export function AlbumStack({
   onExpand,
   registerCard,
 }: AlbumStackProps) {
+  const { ref, inView } = useInView<HTMLLIElement>()
+
   return (
     <li
+      ref={ref}
       className={cn(
         "min-w-0",
         !shouldReduceMotion && "animate-album-stack-enter"
@@ -103,10 +107,18 @@ export function AlbumStack({
                       layoutTransition={layoutTransition}
                       loading={isLcpCover ? "eager" : "lazy"}
                       fetchPriority={isLcpCover ? "high" : "low"}
+                      kind={image.kind}
+                      poster={image.poster}
+                      playing={
+                        imageIndex === 0 &&
+                        image.kind === "video" &&
+                        inView &&
+                        !shouldReduceMotion
+                      }
                       className={
                         isFan
-                          ? "bg-surface-alpha h-full w-full overflow-hidden shadow"
-                          : "bg-surface-alpha pointer-events-none h-full w-full overflow-hidden opacity-0"
+                          ? "bg-surface-card h-full w-full overflow-hidden shadow"
+                          : "bg-surface-card pointer-events-none h-full w-full overflow-hidden opacity-0"
                       }
                     />
                   </div>
