@@ -57,7 +57,7 @@ function LocalizedSearchInput({
       onChange={(e) => onSearchChange(e.target.value)}
       placeholder={t("placeholder")}
       className={cn(
-        "w-0 flex-1 bg-transparent text-lg focus-visible:outline-none",
+        "w-0 flex-1 bg-transparent text-base focus-visible:outline-none",
         className
       )}
     />
