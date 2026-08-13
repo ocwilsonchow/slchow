@@ -84,7 +84,6 @@ export function AlbumStack({
                 )
               })}
         </div>
-        <span className={TITLE_CLASS}>{design.title}</span>
       </button>
     </li>
   )
