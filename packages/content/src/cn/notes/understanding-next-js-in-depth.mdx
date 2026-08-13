@@ -927,7 +927,15 @@ export default async function ProductPage({
     </>
   )
 }
+```
 
+<br />
+
+Shared catalog fields 可以 cache。Recommendations 依赖 session cookie，所以留在 `'use cache'` 外面。
+
+<br />
+
+```tsx
 async function ProductDetails({ id }: { id: string }) {
   'use cache'
   cacheLife('hours')
@@ -942,7 +950,15 @@ async function Recommendations({ id }: { id: string }) {
   const items = await getRecommendations(id, sessionId)
   return <RecommendationList items={items} />
 }
+```
 
+<br />
+
+Rename form 是 Server Action。Auth 跑两次：一次决定要不要渲染 form，一次在 action 里再确认。
+
+<br />
+
+```tsx
 async function RenameForm({ id }: { id: string }) {
   await requireEditor()
 

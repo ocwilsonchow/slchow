@@ -295,7 +295,11 @@ import { organization } from "./auth-schema"
 
 // Provisioned by infrastructure as a restricted, non-owner login role.
 export const appUser = pgRole("app_user").existing()
+```
 
+<br />
+
+```ts
 export const projects = pgTable(
   "projects",
   {
@@ -462,6 +466,7 @@ Typed context 让 handlers 保持诚实：
 ```ts
 import { APIError } from "better-auth/api"
 import { createMiddleware } from "hono/factory"
+import type { Context } from "hono"
 import { auth } from "../auth"
 
 type Variables = {
@@ -492,32 +497,46 @@ export const requireTenant = createMiddleware<{ Variables: Variables }>(
       )
     }
 
-    try {
-      const { role } = await auth.api.getActiveMemberRole({
-        headers: c.req.raw.headers,
-        query: { organizationId },
-      })
-
-      c.set("userId", session.user.id)
-      c.set("organizationId", organizationId)
-      c.set("memberRole", role)
-    } catch (error) {
-      if (error instanceof APIError && error.statusCode < 500) {
-        return c.json(
-          {
-            code: "FORBIDDEN",
-            message: "You cannot access this organization.",
-          },
-          403
-        )
-      }
-
-      throw error
-    }
+    const denied = await bindTenant(c, session.user.id, organizationId)
+    if (denied) return denied
 
     await next()
   }
 )
+```
+
+<br />
+
+```ts
+async function bindTenant(
+  c: Context<{ Variables: Variables }>,
+  userId: string,
+  organizationId: string
+) {
+  try {
+    const { role } = await auth.api.getActiveMemberRole({
+      headers: c.req.raw.headers,
+      query: { organizationId },
+    })
+
+    c.set("userId", userId)
+    c.set("organizationId", organizationId)
+    c.set("memberRole", role)
+    return null
+  } catch (error) {
+    if (error instanceof APIError && error.statusCode < 500) {
+      return c.json(
+        {
+          code: "FORBIDDEN",
+          message: "You cannot access this organization.",
+        },
+        403
+      )
+    }
+
+    throw error
+  }
+}
 ```
 
 <br />
@@ -565,7 +584,11 @@ const createProjectRoute = createRoute({
     409: { description: "Project slug already exists" },
   },
 })
+```
 
+<br />
+
+```ts
 app.openapi(createProjectRoute, async (c) => {
   const { organizationId } = c.req.valid("param")
   const body = c.req.valid("json")

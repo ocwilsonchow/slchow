@@ -927,7 +927,15 @@ export default async function ProductPage({
     </>
   )
 }
+```
 
+<br />
+
+Shared catalog fields can be cached. Recommendations wait on the session cookie, so they stay outside `'use cache'`.
+
+<br />
+
+```tsx
 async function ProductDetails({ id }: { id: string }) {
   'use cache'
   cacheLife('hours')
@@ -942,7 +950,15 @@ async function Recommendations({ id }: { id: string }) {
   const items = await getRecommendations(id, sessionId)
   return <RecommendationList items={items} />
 }
+```
 
+<br />
+
+The rename form is a Server Action. Auth runs twice: once to decide whether to render the form, and again inside the action.
+
+<br />
+
+```tsx
 async function RenameForm({ id }: { id: string }) {
   await requireEditor()
 

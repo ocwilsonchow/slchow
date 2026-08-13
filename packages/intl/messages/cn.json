@@ -109,8 +109,6 @@
     "intro": "我喜欢打造用户界面。以前我花很多时间在 Figma 上。"
   },
   "code": {
-    "showMore": "显示更多",
-    "showLess": "显示较少",
     "copy": "复制代码",
     "copied": "已复制"
   }

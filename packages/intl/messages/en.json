@@ -109,8 +109,6 @@
     "intro": "I like crafting user interfaces. I used to spend a lot of time on Figma back in the days."
   },
   "code": {
-    "showMore": "Show more",
-    "showLess": "Show less",
     "copy": "Copy code",
     "copied": "Copied"
   }

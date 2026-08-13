@@ -99,7 +99,11 @@ const CreateUserSchema = z
     name: z.string().min(1).max(100),
   })
   .openapi("CreateUser")
+```
 
+<br />
+
+```ts
 const createUserRoute = createRoute({
   method: "post",
   path: "/users",
@@ -148,7 +152,11 @@ const createUserRoute = createRoute({
     },
   },
 })
+```
 
+<br />
+
+```ts
 app.openapi(createUserRoute, async (c) => {
   const input = c.req.valid("json")
   const user = await createUser(input)
