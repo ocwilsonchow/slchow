@@ -108,7 +108,7 @@ export function code({ className, ...props }: ComponentProps<"code">) {
         "[&:not(pre_code)]:px-1",
         "[&:not(pre_code)]:py-0.5",
         "[&:not(pre_code)]:text-content-ink",
-        "[&:not(pre_code)]:break-words",
+        "[&:not(pre_code)]:wrap-break-word",
         "[&:not(pre_code)]:wrap-anywhere",
         className
       )}
