@@ -1,7 +1,7 @@
 "use client"
 
 import { type Transition, useReducedMotion } from "motion/react"
-import { PHOTO_SIZES } from "../album"
+import { PHOTO_SIZES, STAGGER_EACH } from "../album"
 import type { Design, DesignImage } from "../get-designs"
 import { designImageLayoutId } from "../layout-ids"
 import { useInView } from "../use-in-view"
@@ -58,11 +58,12 @@ export function AlbumOverlayGrid({
 }: AlbumOverlayGridProps) {
   return (
     <ul className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-      {album.images.map((image) => (
+      {album.images.map((image, imageIndex) => (
         <AlbumOverlayTile
           key={image.src}
           album={album}
           image={image}
+          imageIndex={imageIndex}
           layoutTransition={layoutTransition}
         />
       ))}
@@ -73,12 +74,14 @@ export function AlbumOverlayGrid({
 type AlbumOverlayTileProps = {
   album: Design
   image: DesignImage
+  imageIndex: number
   layoutTransition: Transition
 }
 
 function AlbumOverlayTile({
   album,
   image,
+  imageIndex,
   layoutTransition,
 }: AlbumOverlayTileProps) {
   const { ref, inView } = useInView<HTMLLIElement>()
@@ -93,7 +96,10 @@ function AlbumOverlayTile({
         src={image.src}
         alt={alt}
         sizes={PHOTO_SIZES}
-        layoutTransition={layoutTransition}
+        layoutTransition={{
+          ...layoutTransition,
+          delay: shouldReduceMotion ? 0 : imageIndex * STAGGER_EACH,
+        }}
         kind={image.kind}
         poster={image.poster}
         playing={playing}

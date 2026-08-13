@@ -2,7 +2,7 @@
 
 import { cn } from "@repo/ds"
 import type { Transition } from "motion/react"
-import { FAN_COUNT, PHOTO_SIZES } from "../album"
+import { FAN_COUNT, PHOTO_SIZES, STAGGER_EACH } from "../album"
 import type { Design } from "../get-designs"
 import { designImageLayoutId } from "../layout-ids"
 import { prefetchAlbumThumbs } from "../prefetch"
@@ -18,7 +18,6 @@ const FAN_OFFSET = [
 ]
 
 const STAGGER_DELAY = 0.5
-const STAGGER_EACH = 0.05
 
 type AlbumStackProps = {
   design: Design
@@ -104,7 +103,13 @@ export function AlbumStack({
                       src={image.src}
                       alt=""
                       sizes={PHOTO_SIZES}
-                      layoutTransition={layoutTransition}
+                      layoutTransition={{
+                        ...layoutTransition,
+                        delay: shouldReduceMotion
+                          ? 0
+                          : (design.images.length - 1 - imageIndex) *
+                            STAGGER_EACH,
+                      }}
                       loading={isLcpCover ? "eager" : "lazy"}
                       fetchPriority={isLcpCover ? "high" : "low"}
                       kind={image.kind}

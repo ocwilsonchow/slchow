@@ -1,5 +1,8 @@
 /** Visible stacked covers that participate in the shared-element FLIP. */
-export const FAN_COUNT = 4
+export const FAN_COUNT = 3
+
+/** Per-photo delay (seconds) for staggered layout open/close. */
+export const STAGGER_EACH = 0.025
 
 /**
  * Shared `sizes` for stack + overlay so the browser keeps the same srcset
