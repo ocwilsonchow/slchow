@@ -4,6 +4,7 @@ import { useLenis } from "lenis/react"
 import { CornerDownLeftIcon } from "lucide-react"
 import {
   LayoutGroup,
+  motion,
   type Transition,
   useReducedMotion,
 } from "motion/react"
@@ -181,11 +182,17 @@ function DesignPageInner({
 
   return (
     <LayoutGroup>
-      <div
-        inert={isExpanded}
-        aria-hidden={isExpanded || undefined}
-      >
-        <div className="lg:grid lg:grid-cols-2 sm:space-y-4 lg:relative p-5">
+      <div inert={isExpanded} aria-hidden={isExpanded || undefined}>
+        <motion.div
+          initial={false}
+          animate={{ opacity: isExpanded ? 0 : 1 }}
+          transition={
+            shouldReduceMotion
+              ? { duration: 0 }
+              : { ...layoutTransition, delay: isExpanded ? 0 : 0.1 }
+          }
+          className="lg:grid lg:grid-cols-2 sm:space-y-4 lg:relative p-5"
+        >
           <div>{homeBack}</div>
           <div className="mt-10 lg:mt-0 grid gap-2">
             <h1 className="font-semibold tracking-tight text-content-ink">
@@ -193,7 +200,7 @@ function DesignPageInner({
             </h1>
             <p className="leading-snug">{intro}</p>
           </div>
-        </div>
+        </motion.div>
 
         <div className="p-5 pb-50">
           <DesignGallery
