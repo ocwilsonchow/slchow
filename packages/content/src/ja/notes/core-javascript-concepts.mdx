@@ -18,7 +18,7 @@ promises や `async`/`await` を毎日使いながら、runtime が下で何を�
 
 ## 1. Event Loop
 
-最初の印象として、event loop は非同期処理が終わったかどうかをチェックするだけ、と捉えがちです。より有用なモデルは、ブラウザの event-loop iteration ごとに、一般に **一つの task** を実行し、**すべての microtasks** を drain し、ブラウザに render の機会を与え、次の task に進む、というものです。
+最初の印象として、event loop は非同期処理が終わったかどうかをチェックするだけ、と捉えがちです。より有用なモデルは、ブラウザの event-loop iteration ごとに、一般に **一つの task** を実行し、**すべての microtasks** を drain し、ブラウザに render の機会を与え、次の task に進む、というものです。Stack、host APIs、両方の queues、そして `5 1 3 4 2` の順序パズルの専用 walkthrough は [JavaScript Event Loop を深く理解する](/notes/javascript-event-loop-in-depth) です。
 
 <br />
 

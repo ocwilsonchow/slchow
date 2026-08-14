@@ -18,7 +18,7 @@ The browser event loop at a glance: synchronous code runs on the call stack, hos
 
 ## 1. Event Loop
 
-A common first impression is that the event loop simply checks whether asynchronous work has finished. The more useful model is that each browser event-loop iteration generally runs **one task**, drains **all microtasks**, gives the browser an opportunity to render, and then moves to another task.
+A common first impression is that the event loop simply checks whether asynchronous work has finished. The more useful model is that each browser event-loop iteration generally runs **one task**, drains **all microtasks**, gives the browser an opportunity to render, and then moves to another task. The dedicated walkthrough of the stack, host APIs, both queues, and the `5 1 3 4 2` ordering puzzle is [The JavaScript Event Loop in Depth](/notes/javascript-event-loop-in-depth).
 
 <br />
 

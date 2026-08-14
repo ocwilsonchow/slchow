@@ -18,7 +18,7 @@ category: frontend
 
 ## 1. Event Loop
 
-常见的第一印象是：event loop 只是检查异步工作有没有做完。更有用的模型是：浏览器每次 event-loop iteration 通常会跑 **一个 task**、排空 **所有 microtasks**、给浏览器一次 render 机会，然后再进入另一个 task。
+常见的第一印象是：event loop 只是检查异步工作有没有做完。更有用的模型是：浏览器每次 event-loop iteration 通常会跑 **一个 task**、排空 **所有 microtasks**、给浏览器一次 render 机会，然后再进入另一个 task。Stack、host APIs、两条 queues，以及 `5 1 3 4 2` 排序谜题的完整 walkthrough 在 [深入理解 JavaScript Event Loop](/notes/javascript-event-loop-in-depth)。
 
 <br />
 
