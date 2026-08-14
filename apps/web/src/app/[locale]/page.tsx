@@ -1,7 +1,12 @@
-import { Divider } from "@repo/ds/components/ui/divider"
 import type { Metadata } from "next"
 import type { Locale } from "next-intl"
 import { getTranslations, setRequestLocale } from "next-intl/server"
+import {
+  FeaturedDesigns,
+  FeaturedStack,
+} from "@/features/design/components/featured-designs"
+import { getFeaturedImages } from "@/features/design/featured"
+import { getDesigns } from "@/features/design/get-designs"
 import { Header } from "@/features/layout/components/header"
 import { PageLayout } from "@/features/layout/components/page"
 import { RenderMdxBlockByPath } from "@/features/mdx/components/render-mdx-block"
@@ -30,28 +35,35 @@ const Page = async ({ params }: Props) => {
 
   setRequestLocale(locale)
 
+  const featuredImages = getFeaturedImages()
+  const designsCount = getDesigns().reduce(
+    (total, design) => total + design.images.length,
+    0
+  )
+
   return (
-    <PageLayout className="md:grid md:grid-cols-2 items-start">
-      <Header.Root className="flex flex-col md:h-screen">
-        <Header.Info className="" />
-        <Header.Links />
-      </Header.Root>
-      <div>
-        <div className="pt-0 md:pt-5  p-5">
-          <section id="introduction" className="">
-            <RenderMdxBlockByPath
-              category="blocks"
-              slug="introduction"
-              locale={locale}
-            />
-          </section>
-          <Divider />
-          <section id="works-and-notes" className="flex flex-col pb-20">
-            <ListNotes locale={locale} preview />
-            <Divider />
-          </section>
+    <PageLayout>
+      <FeaturedDesigns images={featuredImages} assetCount={designsCount}>
+        <Header.Root className="flex flex-col md:h-screen">
+          <Header.Info className="" />
+          <Header.Links />
+        </Header.Root>
+        <div>
+          <div className="pt-0 md:pt-5  p-5">
+            <section id="introduction" className="">
+              <RenderMdxBlockByPath
+                category="blocks"
+                slug="introduction"
+                locale={locale}
+              />
+            </section>
+            <section id="works-and-notes" className="flex flex-col pb-40">
+              <ListNotes locale={locale} preview />
+              <FeaturedStack />
+            </section>
+          </div>
         </div>
-      </div>
+      </FeaturedDesigns>
     </PageLayout>
   )
 }

@@ -1,3 +1,10 @@
+/** Query key for the open album on `/design`. */
+export const ALBUM_SEARCH_PARAM = "album"
+
+export function designAlbumHref(slug: string) {
+  return `/design?${ALBUM_SEARCH_PARAM}=${encodeURIComponent(slug)}`
+}
+
 /** Visible stacked covers that participate in the shared-element FLIP. */
 export const FAN_COUNT = 3
 

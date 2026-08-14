@@ -11,6 +11,7 @@ import { AlbumStack } from "./album-stack"
 type DesignGalleryProps = {
   designs: Design[]
   expandedSlug: string | null
+  returningSlug: string | null
   openAlbumLabel: (title: string) => string
   shouldReduceMotion: boolean
   layoutTransition: Transition
@@ -21,6 +22,7 @@ type DesignGalleryProps = {
 export function DesignGallery({
   designs,
   expandedSlug,
+  returningSlug,
   openAlbumLabel,
   shouldReduceMotion,
   layoutTransition,
@@ -38,6 +40,8 @@ export function DesignGallery({
           design={design}
           index={index}
           isExpanded={design.slug === expandedSlug}
+          isInactive={expandedSlug != null && design.slug !== expandedSlug}
+          isReturning={design.slug === returningSlug}
           isLcp={index === 0}
           openAlbumLabel={openAlbumLabel(design.title)}
           shouldReduceMotion={shouldReduceMotion}

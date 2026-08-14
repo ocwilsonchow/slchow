@@ -51,7 +51,7 @@ const Page = async ({ params }: Props) => {
           className="grid gap-5 max-h-screen overflow-y-auto lg:pb-20"
           data-lenis-prevent
         >
-          <div className="mt-8 lg:mt-0 space-y-2">
+          <div className="mt-8 lg:mt-0 space-y-2 max-w-prose">
             <h1 className="text-lg lg:text-sm font-semibold tracking-tight text-content-ink leading-tight">
               {page?.data.title}
             </h1>

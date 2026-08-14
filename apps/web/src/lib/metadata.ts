@@ -84,24 +84,6 @@ export function buildLanguageAlternates(
   return languages
 }
 
-/**
- * Absolute-URL hreflang map for sitemap entries.
- */
-export function buildAbsoluteLanguageAlternates(
-  origin: string,
-  pathname: string,
-  locales?: readonly string[]
-): Record<string, string> {
-  const relative = buildLanguageAlternates(pathname, locales)
-  const absolute: Record<string, string> = {}
-
-  for (const [hreflang, path] of Object.entries(relative)) {
-    absolute[hreflang] = `${origin}${path}`
-  }
-
-  return absolute
-}
-
 type BuildPageMetadataOptions = {
   title: string
   description?: string

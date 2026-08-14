@@ -24,6 +24,7 @@ import {
   useNavbarContext,
 } from "./context"
 import { useMediaQuery, useNavbarFocusLock, useNavbarScrollHide } from "./hooks"
+import { useNavbarVisibility } from "./visibility"
 import {
   backdropVariants,
   contentVariants,
@@ -50,6 +51,7 @@ function Root({ children }: { children: ReactNode }) {
   const backdropRef = useRef<HTMLButtonElement | null>(null)
   const triggerRef = useRef<HTMLButtonElement | null>(null)
   const shouldReduceMotion = useReducedMotion() ?? false
+  const { hiddenByOverlay } = useNavbarVisibility()
 
   const setOpen = (value: SetStateAction<boolean>) => {
     const current = openRef.current
@@ -62,6 +64,7 @@ function Root({ children }: { children: ReactNode }) {
 
   const toggle = () => setOpen((current) => !current)
   const onToggleShortcut = useEffectEvent(() => {
+    if (hiddenByOverlay) return
     toggle()
   })
 
@@ -142,7 +145,7 @@ function Backdrop({ className, ...props }: HTMLMotionProps<"button">) {
         animate={open ? "visible" : "hidden"}
         onClick={() => setOpen(false)}
         className={cn(
-          "fixed inset-0 z-40 bg-surface-backdrop/75 backdrop-blur-md",
+          "fixed inset-0 z-40 bg-surface-backdrop/75 backdrop-blur-md outline-none focus:outline-none focus-visible:outline-none",
           open ? "pointer-events-auto" : "pointer-events-none",
           className
         )}
@@ -156,12 +159,24 @@ function Frame({
   className,
   ...props
 }: ComponentProps<typeof Portal>) {
-  const { open, navRef, shouldReduceMotion } = useNavbarContext()
+  const { open, setOpen, navRef, shouldReduceMotion } = useNavbarContext()
+  const { hiddenByOverlay } = useNavbarVisibility()
   const t = useTranslations("navigation")
   const isMobile = useMediaQuery("(max-width: 767px)")
   const shellRef = useRef<HTMLDivElement | null>(null)
 
-  useNavbarScrollHide(shellRef, { isMobile, open, shouldReduceMotion })
+  useNavbarScrollHide(shellRef, {
+    isMobile,
+    open,
+    shouldReduceMotion,
+    forceHidden: hiddenByOverlay,
+  })
+
+  useEffect(() => {
+    if (hiddenByOverlay && open) {
+      setOpen(false)
+    }
+  }, [hiddenByOverlay, open, setOpen])
 
   return (
     <Portal
@@ -172,11 +187,16 @@ function Frame({
       )}
       {...props}
     >
-      <motion.div ref={shellRef} className="grid md:grid-cols-2 xl:grid-cols-4">
+      <motion.div
+        ref={shellRef}
+        inert={hiddenByOverlay || undefined}
+        aria-hidden={hiddenByOverlay || undefined}
+        className="grid md:grid-cols-2 xl:grid-cols-4"
+      >
         <nav
           ref={navRef}
           aria-label={t("menu")}
-          className="bg-surface-popover border border-stroke-soft/75 text-content-body-on-popover rounded-3xl"
+          className="bg-surface-popover border border-stroke-soft/75 text-content-body-on-popover rounded-3xl sm:max-w-sm [&_a]:outline-none [&_a]:focus:outline-none [&_a]:focus-visible:outline-none [&_button]:outline-none [&_button]:focus:outline-none [&_button]:focus-visible:outline-none"
         >
           {children}
         </nav>
@@ -303,7 +323,7 @@ function NavLink({
         onClick?.(event)
       }}
       className={cn(
-        "block transition-colors hover:text-content-ink-on-popover py-px font-semibold text-lg lg:text-xl",
+        "block transition-colors hover:text-content-ink-on-popover py-px font-semibold text-2xl",
         isActive
           ? "text-content-ink-on-popover"
           : "text-content-body-on-popover",

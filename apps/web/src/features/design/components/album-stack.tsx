@@ -1,7 +1,8 @@
 "use client"
 
 import { cn } from "@repo/ds"
-import type { Transition } from "motion/react"
+import { motion, type Transition } from "motion/react"
+import { useState } from "react"
 import { FAN_COUNT, PHOTO_SIZES, STAGGER_EACH } from "../album"
 import type { Design } from "../get-designs"
 import { designImageLayoutId } from "../layout-ids"
@@ -17,12 +18,27 @@ const FAN_OFFSET = [
   { x: 8, y: 14 },
 ]
 
+const UNFAN_ROTATE = [1, -16, 14]
+const UNFAN_OFFSET = [
+  { x: 0, y: 0 },
+  { x: 28, y: 12 },
+  { x: -24, y: 18 },
+]
+
+const UNFAN_TRANSITION: Transition = {
+  type: "tween",
+  duration: 0.35,
+  ease: [0.32, 0.72, 0, 1],
+}
+
 const STAGGER_DELAY = 0.5
 
 type AlbumStackProps = {
   design: Design
   index: number
   isExpanded: boolean
+  isInactive: boolean
+  isReturning: boolean
   isLcp: boolean
   openAlbumLabel: string
   shouldReduceMotion: boolean
@@ -35,6 +51,8 @@ export function AlbumStack({
   design,
   index,
   isExpanded,
+  isInactive,
+  isReturning,
   isLcp,
   openAlbumLabel,
   shouldReduceMotion,
@@ -43,6 +61,8 @@ export function AlbumStack({
   registerCard,
 }: AlbumStackProps) {
   const { ref, inView } = useInView<HTMLLIElement>()
+  const [isPeeking, setIsPeeking] = useState(false)
+  const peek = isPeeking && !shouldReduceMotion
 
   return (
     <li
@@ -57,6 +77,15 @@ export function AlbumStack({
           : { animationDelay: `${STAGGER_DELAY + index * STAGGER_EACH}s` }
       }
     >
+      <motion.div
+        initial={false}
+        animate={{ opacity: isInactive ? 0 : 1 }}
+        transition={
+          shouldReduceMotion
+            ? { duration: 0 }
+            : { ...layoutTransition, delay: 0.4 }
+        }
+      >
       <button
         ref={(el) => {
           if (!el) return
@@ -65,13 +94,26 @@ export function AlbumStack({
         }}
         type="button"
         aria-label={openAlbumLabel}
-        className="flex w-full flex-col gap-3 text-left outline-none focus:outline-none focus-visible:outline-none"
+        className={cn(
+          "flex w-full flex-col gap-3 text-left outline-none focus:outline-none focus-visible:outline-none",
+          isReturning && "relative z-60"
+        )}
         onClick={() => {
           prefetchAlbumThumbs(design.images)
           onExpand(design.slug)
         }}
-        onPointerEnter={() => prefetchAlbumThumbs(design.images)}
-        onFocus={() => prefetchAlbumThumbs(design.images)}
+        onPointerEnter={() => {
+          prefetchAlbumThumbs(design.images)
+          setIsPeeking(true)
+        }}
+        onPointerLeave={() => setIsPeeking(false)}
+        onFocus={(event) => {
+          prefetchAlbumThumbs(design.images)
+          if (event.currentTarget.matches(":focus-visible")) {
+            setIsPeeking(true)
+          }
+        }}
+        onBlur={() => setIsPeeking(false)}
       >
         <div className="relative aspect-square w-full overflow-visible p-3">
           {isExpanded
@@ -79,24 +121,37 @@ export function AlbumStack({
             : design.images.map((image, imageIndex) => {
                 const isFan = imageIndex < FAN_COUNT
                 const isLcpCover = isLcp && imageIndex === 0
-                const rotate =
-                  shouldReduceMotion || !isFan
-                    ? 0
-                    : (FAN_ROTATE[imageIndex] ?? 0)
-                const offset =
-                  shouldReduceMotion || !isFan
-                    ? { x: 0, y: 0 }
-                    : (FAN_OFFSET[imageIndex] ?? { x: 0, y: 0 })
+                const restRotate = FAN_ROTATE[imageIndex] ?? 0
+                const restOffset = FAN_OFFSET[imageIndex] ?? { x: 0, y: 0 }
+                const unfanRotate = UNFAN_ROTATE[imageIndex] ?? restRotate
+                const unfanOffset = UNFAN_OFFSET[imageIndex] ?? restOffset
 
                 return (
-                  <div
+                  <motion.div
                     key={image.src}
                     aria-hidden={!isFan || undefined}
-                    className="absolute inset-10"
+                    className="absolute inset-10 lg:inset-14"
                     style={{
                       zIndex: isFan ? FAN_COUNT - imageIndex : 0,
-                      transform: `translate(${offset.x}px, ${offset.y}px) rotate(${rotate}deg)`,
                     }}
+                    animate={
+                      shouldReduceMotion || !isFan
+                        ? { x: 0, y: 0, rotate: 0 }
+                        : peek
+                          ? {
+                              x: unfanOffset.x,
+                              y: unfanOffset.y,
+                              rotate: unfanRotate,
+                            }
+                          : {
+                              x: restOffset.x,
+                              y: restOffset.y,
+                              rotate: restRotate,
+                            }
+                    }
+                    transition={
+                      shouldReduceMotion ? { duration: 0 } : UNFAN_TRANSITION
+                    }
                   >
                     <AlbumPhoto
                       layoutId={designImageLayoutId(design.slug, image.name)}
@@ -120,17 +175,19 @@ export function AlbumStack({
                         inView &&
                         !shouldReduceMotion
                       }
+                      opacity={isFan ? undefined : 0}
                       className={
                         isFan
                           ? "bg-surface-card h-full w-full overflow-hidden shadow"
-                          : "bg-surface-card pointer-events-none h-full w-full overflow-hidden opacity-0"
+                          : "bg-surface-card pointer-events-none h-full w-full overflow-hidden"
                       }
                     />
-                  </div>
+                  </motion.div>
                 )
               })}
         </div>
       </button>
+      </motion.div>
     </li>
   )
 }

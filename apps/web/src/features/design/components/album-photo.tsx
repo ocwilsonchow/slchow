@@ -14,6 +14,8 @@ type AlbumPhotoProps = {
   layoutTransition: Transition
   className?: string
   layoutId?: string
+  /** Interpolated during layout FLIP so hidden stack slots stay hidden. */
+  opacity?: number
   loading?: "lazy" | "eager"
   fetchPriority?: "high" | "low" | "auto"
   kind?: DesignImage["kind"]
@@ -29,6 +31,7 @@ export function AlbumPhoto({
   layoutTransition,
   className,
   layoutId,
+  opacity,
   loading = "lazy",
   fetchPriority,
   kind,
@@ -40,7 +43,10 @@ export function AlbumPhoto({
       layoutId={layoutId}
       className={cn(className, kind === "video" && "bg-[#D0CFCF]")}
       style={{ borderRadius: ALBUM_PHOTO_RADIUS }}
-      transition={{ layout: layoutTransition }}
+      {...(opacity === undefined
+        ? {}
+        : { initial: false as const, animate: { opacity } })}
+      transition={{ layout: layoutTransition, opacity: layoutTransition }}
     >
       <DesignAsset
         src={src}

@@ -88,7 +88,7 @@ Host tree        DOM nodes, native views, or another renderer's output
 
 <br />
 
-The host tree depends on the renderer: `react-dom` produces DOM nodes, React Native produces native views, and React Three Fiber builds a Three.js scene graph. React itself is renderer-agnostic—the element and Fiber layers work the same way for every target.
+The host tree depends on the renderer: `react-dom` produces DOM nodes, React Native produces native views, and React Three Fiber builds a Three.js scene graph. React itself is renderer-agnostic—the element and Fiber layers work the same way for every target. For how React Native does that work through Expo, see [Understanding React Native in Depth](/notes/understanding-react-native-in-depth).
 
 Confusing these layers leads to incorrect assumptions. A new element object does not necessarily mean a new DOM node, and a component render does not necessarily mean a visible browser update.
 

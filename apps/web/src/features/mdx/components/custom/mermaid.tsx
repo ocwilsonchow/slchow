@@ -25,6 +25,11 @@ export function Mermaid({ chart }: { chart: string }) {
 }
 
 const cache = new Map<string, Promise<unknown>>()
+let mermaidMountCount = 0
+
+function removeMermaidTooltip() {
+  document.querySelector(".mermaidTooltip")?.remove()
+}
 
 function cachePromise<T>(
   key: string,
@@ -115,11 +120,21 @@ function MermaidContent({ chart }: { chart: string }) {
     },
   })
 
-  const { svg, bindFunctions } = use(
+  const { svg } = use(
     cachePromise(`${diagramStyleVersion}-${chart}-${resolvedTheme}`, () =>
       mermaid.render(id, chart.replaceAll("\\n", "\n"))
     )
   )
+
+  useEffect(() => {
+    mermaidMountCount += 1
+    return () => {
+      mermaidMountCount -= 1
+      if (mermaidMountCount === 0) {
+        removeMermaidTooltip()
+      }
+    }
+  }, [])
 
   useEffect(() => {
     if (!svg) return
@@ -194,10 +209,7 @@ function MermaidContent({ chart }: { chart: string }) {
       </div>
       <div
         className="min-w-0 max-w-full overflow-x-auto p-4 pt-12 [&_svg]:mx-auto [&_svg]:block [&_svg]:h-auto [&_svg]:max-w-none"
-        ref={(container) => {
-          diagramRef.current = container
-          if (container) bindFunctions?.(container)
-        }}
+        ref={diagramRef}
         // biome-ignore lint/security/noDangerouslySetInnerHtml: Mermaid returns trusted SVG from local chart source
         dangerouslySetInnerHTML={{ __html: svg }}
       />

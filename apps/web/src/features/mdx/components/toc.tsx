@@ -200,8 +200,8 @@ export const CollapsibleToc = ({
 
   return (
     <div className={cn(className)} {...props}>
-      <nav aria-label={t("tableOfContents")} className="lg:hidden">
-        <Accordion type="single" collapsible defaultValue="toc">
+      <nav aria-label={t("tableOfContents")} className="lg:hidden max-w-prose">
+        <Accordion type="single" collapsible>
           <AccordionItem value="toc" className="border-stroke-soft">
             <AccordionTrigger className="py-2 text-sm font-semibold">
               {t("tableOfContents")}

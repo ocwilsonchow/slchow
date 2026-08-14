@@ -2,6 +2,8 @@
 
 import { useBreakpointValues } from "@repo/ds/hooks/use-breakpoint-values"
 import { Link } from "@/i18n/navigation"
+import { cn } from "@repo/ds"
+import { ChevronRightIcon } from "lucide-react"
 
 export type ListNoteItem = {
   url: string
@@ -19,7 +21,7 @@ type ListNotesItemsProps = {
   listAllLabel: string
 }
 
-const NOTES_PREVIEW_LIMIT = { base: 4, md: 10 } as const
+const NOTES_PREVIEW_LIMIT = { base: 3, md: 5 } as const
 
 export function ListNotesItems({
   notes,
@@ -37,35 +39,41 @@ export function ListNotesItems({
   return (
     <div className="flex flex-col gap-2 leading-tight">
       {showHeading && (
-        <h2>
-          <Link href="/notes" className="font-semibold py-1">
+        <Link href="/notes" className="font-semibold py-1">
+          <h2 className="flex items-center gap-2 group">
             {notesLabel}{" "}
             <sup className="text-content-subdued">{totalCount}</sup>
-          </Link>
-        </h2>
+            <div className="bg-surface-alpha rounded-full text-content-subdued p-0.5 group-hover:translate-x-1 transition-transform duration-200">
+              <ChevronRightIcon size={12} strokeWidth={4} />
+            </div>
+          </h2>
+        </Link>
       )}
-      <ul className="grid list-disc list-outside ml-4">
+      <ul className="grid list-disc list-outside ml-4 gap-px">
         {visibleNotes.map((page) => (
           <li key={page.url} className="">
-            <Link
-              href={`/notes/${page.slug}`}
-              className="inline-flex items-baseline gap-2 text-content-ink py-0.75 font-semibold"
-            >
+            <Link href={`/notes/${page.slug}`} className={linkClassName}>
               {page.title}
             </Link>
           </li>
         ))}
-        {hasMore ? (
+        {/* {hasMore ? (
           <li>
             <Link
               href="/notes"
-              className="inline-block py-0.75 text-content-subdued hover:text-content-ink/75"
+              className={cn(
+                linkClassName,
+                "text-content-subdued hover:text-content-body"
+              )}
             >
               {listAllLabel}{" "}
             </Link>
           </li>
-        ) : null}
+        ) : null} */}
       </ul>
     </div>
   )
 }
+
+const linkClassName =
+  "flex items-baseline gap-2 text-content-ink py-0.75 px-1.5 font-semibold hover:bg-surface-alpha rounded-md"

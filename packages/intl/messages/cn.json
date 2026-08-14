@@ -4,6 +4,7 @@
     "close": "关闭",
     "skipToContent": "跳到主要内容",
     "home": "首页",
+    "role": "软件工程师",
     "homePage": "首页",
     "resume": "简历",
     "back": "返回",
@@ -59,7 +60,10 @@
     "zoomInDiagram": "放大图表",
     "profileAlt": "Wilson Chow",
     "openAlbum": "打开相册 {title}",
-    "backToAlbums": "返回相册"
+    "backToAlbums": "返回相册",
+    "openFeatured": "打开精选设计",
+    "backToFeatured": "关闭精选设计",
+    "featuredDesigns": "精选设计"
   },
   "notFound": {
     "title": "Oops!",
@@ -114,7 +118,8 @@
     }
   },
   "designs": {
-    "intro": "我喜欢打造用户界面。以前我花很多时间在 Figma 上。"
+    "intro": "我喜欢打造用户界面。以前我花很多时间在 Figma 上。",
+    "fullCollection": "全部作品 ({count})"
   },
   "code": {
     "copy": "复制代码",
