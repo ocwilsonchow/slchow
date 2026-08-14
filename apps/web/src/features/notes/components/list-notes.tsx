@@ -19,7 +19,6 @@ export const ListNotes = async ({
   showHeading = true,
 }: ListNotesProps) => {
   const t = await getTranslations("navigation")
-  const tNotes = await getTranslations("notes")
   const allNotes = getCategoryPages("notes", locale).sort(
     (a, b) => getPageDate(b.data.date) - getPageDate(a.data.date)
   )
@@ -27,9 +26,6 @@ export const ListNotes = async ({
     url: page.url,
     slug: page.slugs.slice(1).join("/"),
     title: page.data.title ?? "",
-    category: page.data.category
-      ? tNotes(`categories.${page.data.category}`)
-      : undefined,
   }))
 
   return (
@@ -39,7 +35,6 @@ export const ListNotes = async ({
       preview={preview}
       showHeading={showHeading}
       notesLabel={t("notes")}
-      listAllLabel={t("listAll")}
     />
   )
 }

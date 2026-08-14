@@ -4,7 +4,7 @@ title: Resume — Frontend
 
 ## Wilson Chow
 
-Frontend software engineer with 5 years of experience shipping React / React Native consumer products from Figma through production — including zero-to-one launches and multi-year evolution of **15+** apps, plus the typed APIs those products run on. Cut critical-path load times by up to **80%** and search latency by **90%**. Currently leading the client surface of a multi-channel agent platform: chat, tool-invocation, and file-mention UIs on durable, interruptible agent runs. Daily workflow includes **Cursor** / AI-assisted development. **AWS Solutions Architect Associate**.
+Frontend software engineer with 5 years of experience shipping React / React Native consumer products from Figma through production — including zero-to-one launches and multi-year evolution of **15+** apps, plus the typed Node.js APIs those products run on. Cut critical-path load times by up to **80%** and search latency by **90%**. Currently leading the client surface of a multi-channel agent platform: chat, tool-invocation, and file-mention UIs on durable, interruptible agent runs. Daily workflow includes **Cursor** / AI-assisted development. **AWS Solutions Architect Associate**.
 
 Strengths: Frontend engineering · Performance · Complex flows · Typed APIs · Agent UI
 
@@ -21,7 +21,8 @@ Primary engineer for concurrent client products — Figma through production UI 
 - Established shared Radix / Tailwind component and hook libraries with Storybook, Fumadocs, and MDX docs, reused across client apps. Led frontend reviews; Vitest / Cypress on critical flows.
 - Built Next.js apps as isomorphic UI plus a BFF layer: SSR / ISR, aggregating Shopify GraphQL, CMS, and search APIs with caching. Independently debug Node runtime issues and production bottlenecks (Lighthouse, Sentry).
 - Modeled identity as reusable client states against a typed API: Better Auth sessions and org membership, OAuth 2.0 / OIDC, JWT / session lifecycle, RBAC — not nested auth conditionals. Sessions live in **HttpOnly / Secure / SameSite** cookies, not `localStorage` tokens.
-- Built typed APIs with Hono, Drizzle, OpenAPI, and tRPC on AWS Lambda / API Gateway (Postgres / DynamoDB / S3). Hardened the edge: **strict CORS**, trusted origins, WAF rate limits on auth routes, identity from the authorizer cookie — never a client-supplied user header. API keys, tokens, and credentials in **SST Secret**, not `.env`. GitHub Actions + SST for CI/CD — lint, typecheck, tests, and build before deploy — cutting deploy time by **50%+**.
+- Built typed Node.js APIs with Hono, Drizzle / Prisma, OpenAPI, and tRPC on AWS Lambda / API Gateway (Postgres / DynamoDB / S3). Hardened the edge: **strict CORS**, trusted origins, WAF rate limits on auth routes, identity from the authorizer cookie — never a client-supplied user header. API keys, tokens, and credentials in **SST Secret**, not `.env`. GitHub Actions + SST for CI/CD — lint, typecheck, tests, and build before deploy — cutting deploy time by **50%+**.
+- Mentored summer interns and junior developers through pairing, code reviews, and shipping production work.
 
 <br />
 
@@ -75,7 +76,7 @@ Also shipped restaurant loyalty apps (React Native), campaign / e-commerce store
 
 - **Languages**: TypeScript, Node.js
 - **Frontend**: React, Next.js, React Native, Expo, TanStack Query, TanStack Form, Framer Motion, Tailwind CSS, shadcn/ui, Storybook, Figma, MDX, TipTap
-- **Backend**: Hono, Drizzle, OpenAPI, tRPC, Postgres, DynamoDB, Better Auth
+- **Backend**: Hono, Drizzle, Prisma, OpenAPI, tRPC, Postgres, DynamoDB, Better Auth
 - **Auth & i18n**: OAuth 2.0 / OIDC, JWT, HttpOnly cookies, CORS, RBAC, next-intl
 - **Testing & monitoring**: Cypress, Vitest, React Testing Library, Lighthouse, axe, Sentry, PostHog
 - **Workflow**: Cursor, Claude Code
@@ -100,8 +101,7 @@ Also shipped restaurant loyalty apps (React Native), campaign / e-commerce store
 ### University College London
 
 - MPharm Pharmacy, 2016 – 2020 — First Class Honours
-- Registered Pharmacist, GPhC, 2021 – Present
-- Equivalent industry experience: 5 years shipping 15+ production products; AWS Solutions Architect Associate. Pharmacy practice is a regulated, high-stakes domain — used to compliance constraints on product decisions.
+- Career switch from pharmacy after finding a passion for building apps and systems
 
 <br />
 

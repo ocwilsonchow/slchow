@@ -4,9 +4,9 @@ title: Resume — Full-Stack
 
 ## Wilson Chow
 
-Full-stack software engineer with 5 years of experience owning delivery from Figma through React / React Native, typed APIs, and AWS deploy — including zero-to-one launches and multi-year evolution of **15+** apps. Cut critical-path load times by up to **80%** and search latency by **90%**. Currently leading a multi-channel agent platform with durable, interruptible workflows, memory, RAG, scorers, and evals. Daily workflow includes **Cursor** / AI-assisted development. **AWS Solutions Architect Associate**.
+Full-stack software engineer with 5 years of experience owning delivery from Figma through React / React Native, Node.js, typed APIs, and AWS deploy — including zero-to-one launches and multi-year evolution of **15+** apps. Cut critical-path load times by up to **80%** and search latency by **90%**. Currently leading a multi-channel agent platform with durable, interruptible workflows, memory, RAG, scorers, and evals. Daily workflow includes **Cursor** / AI-assisted development. **AWS Solutions Architect Associate**.
 
-Strengths: End-to-end delivery · Frontend · Typed APIs · Production AI agents · AWS
+Strengths: End-to-end delivery · Auth · Typed APIs · Production AI agents · AWS
 
 ---
 
@@ -16,12 +16,16 @@ Strengths: End-to-end delivery · Frontend · Typed APIs · Production AI agents
 
 Primary engineer for concurrent client products — design through cloud deployment, partnering with stakeholders to scope UX and ship production releases.
 
-- Shipped and maintained **15+** production React / React Native apps from zero-to-one and over multiple years, including high-fidelity Figma design and shared design systems.
+- Shipped and maintained **15+** production React / React Native apps from zero-to-one and over multiple years, including high-fidelity Figma design, shared design systems, and App Store / Play Store releases.
 - Replaced a third-party WordPress stack with an in-house headless CMS (Strapi / Sanity) and search (Meilisearch / Algolia) so publishing continued through the transition: cut load time by **80%**, search latency by **90%**, and hit PageSpeed Insights **>90**.
 - Shipped production AI agents (workflows, memory, tool calls, observability, evals) with Mastra, Vercel AI SDK, and Langchain.
 - Established shared Radix / Tailwind component and hook libraries with Storybook, Fumadocs, and MDX docs, reused across client apps. Vitest / Cypress on critical flows.
-- Modeled identity as reusable states against a typed API: Better Auth sessions and org membership, OAuth 2.0 / OIDC, JWT / session lifecycle, RBAC — not nested auth conditionals. Sessions live in **HttpOnly / Secure / SameSite** cookies, not `localStorage` tokens.
-- Built typed APIs with Hono, Drizzle, OpenAPI, and tRPC on AWS Lambda / API Gateway (Postgres / DynamoDB / S3), with Scalar docs. Hardened the edge: **strict CORS**, trusted origins, WAF rate limits on auth routes, identity from the authorizer cookie — never a client-supplied user header. API keys, tokens, and credentials in **SST Secret**, not `.env`. GitHub Actions + SST for CI/CD — lint, typecheck, tests, and build before deploy — cutting deploy time by **50%+**.
+- Modeled identity against a typed API: Better Auth sessions and org membership, OAuth 2.0 / OIDC, JWT / session lifecycle, and RBAC. Sessions live in **HttpOnly / Secure / SameSite** cookies, not `localStorage` tokens.
+- Modeled Postgres data with Drizzle / Prisma — SQL schemas, migrations, org-scoped tables, and RBAC — so access is enforced in the data model, not only in route handlers. DynamoDB / S3 where the access pattern fit.
+- Built typed Node.js APIs with Hono, OpenAPI, and tRPC on AWS Lambda / API Gateway, with Scalar docs.
+- Hardened the edge: **strict CORS**, trusted origins, WAF rate limits on auth routes, identity from the authorizer cookie — never a client-supplied user header. API keys, tokens, and credentials in **SST Secret**, not `.env`.
+- GitHub Actions + SST for CI/CD — lint, typecheck, tests, and build before deploy — cutting deploy time by **50%+**.
+- Mentored summer interns and junior developers through pairing, code reviews, and shipping production work.
 
 <br />
 
@@ -72,14 +76,14 @@ Loyalty and membership apps, CMS content sites, Shopify storefronts, a health/we
 
 ## Skills
 
-- **Languages**: TypeScript, Node.js
+- **Languages**: TypeScript, Node.js, SQL
 - **Frontend**: React, Next.js, React Native, Expo, TanStack Query, TanStack Form, Tailwind CSS, shadcn/ui, Storybook, Figma, TipTap
-- **Backend**: Hono, Drizzle, OpenAPI, tRPC, GraphQL, Postgres, DynamoDB, Better Auth
+- **Backend**: Hono, Drizzle, Prisma, OpenAPI, tRPC, GraphQL, Postgres, DynamoDB, Better Auth
 - **Auth & i18n**: OAuth 2.0 / OIDC, JWT, HttpOnly cookies, CORS, RBAC, next-intl
 - **AI**: Mastra, Vercel AI SDK, Langchain, Pinecone
 - **Testing & monitoring**: Cypress, Vitest, React Testing Library, Lighthouse, axe, Sentry, PostHog
 - **Workflow**: Cursor, Claude Code
-- **DevOps**: SST, SST Secret, Docker, GitHub Actions, AWS, Turborepo
+- **DevOps**: SST, Docker, GitHub Actions, AWS, Turborepo
 
 <br />
 
@@ -99,8 +103,7 @@ Loyalty and membership apps, CMS content sites, Shopify storefronts, a health/we
 ### University College London
 
 - MPharm Pharmacy, 2016 – 2020 — First Class Honours
-- Registered Pharmacist, GPhC, 2021 – Present
-- Equivalent industry experience: 5 years shipping 15+ production products; AWS Solutions Architect Associate. Pharmacy practice is a regulated, high-stakes domain — used to compliance constraints on product decisions.
+- Career switch from pharmacy after finding a passion for building apps and systems
 
 <br />
 

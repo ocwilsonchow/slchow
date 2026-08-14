@@ -1,12 +1,9 @@
 "use client"
 
 import { cn } from "@repo/ds"
+import { ChevronBadge } from "@repo/ds/components/ui/chevron-badge"
 import { useLenis } from "lenis/react"
-import {
-  ArrowRightIcon,
-  ChevronRightIcon,
-  CornerDownLeftIcon,
-} from "lucide-react"
+import { ArrowRightIcon, CornerDownLeftIcon } from "lucide-react"
 import {
   AnimatePresence,
   LayoutGroup,
@@ -17,6 +14,7 @@ import {
 import { useTranslations } from "next-intl"
 import {
   createContext,
+  type FocusEvent,
   type ReactNode,
   type RefObject,
   use,
@@ -314,13 +312,6 @@ export function FeaturedDesigns({
   )
 }
 
-function isInside(
-  container: EventTarget & Element,
-  related: EventTarget | null
-) {
-  return related instanceof Node && container.contains(related)
-}
-
 export function FeaturedStack() {
   const {
     images,
@@ -343,106 +334,105 @@ export function FeaturedStack() {
     setIsPeeking(true)
   }, [images])
 
+  const peekOff = useCallback(() => {
+    setIsPeeking(false)
+  }, [])
+
+  const peekOnKeyboard = useCallback(
+    (event: FocusEvent<HTMLElement>) => {
+      if (
+        event.target instanceof Element &&
+        event.target.matches(":focus-visible")
+      ) {
+        peekOn()
+      }
+    },
+    [peekOn]
+  )
+
   return (
     <div ref={inViewRef} className="mt-8 space-y-3">
       <Link href="/design" className="block group">
         <h2 className="text-content-ink font-semibold text-sm flex items-center gap-2">
           {tNav("designs")}{" "}
           <sup className="text-content-subdued">{assetCount}</sup>
-          <div className="bg-surface-alpha rounded-full text-content-subdued p-0.5 group-hover:translate-x-1 transition-transform duration-200">
-            <ChevronRightIcon size={12} strokeWidth={4} />
-          </div>
+          <ChevronBadge />
         </h2>
       </Link>
-      <div
-        className="w-32"
-        onPointerEnter={peekOn}
-        onPointerLeave={() => setIsPeeking(false)}
-        onFocus={(event) => {
-          if (isInside(event.currentTarget, event.relatedTarget)) return
-          if (
-            event.target instanceof Element &&
-            event.target.matches(":focus-visible")
-          ) {
-            peekOn()
-          }
-        }}
-        onBlur={(event) => {
-          if (isInside(event.currentTarget, event.relatedTarget)) return
-          setIsPeeking(false)
-        }}
-      >
+      <div className="w-32">
         <Link
           href="/design"
           aria-label={tNav("designs")}
           className="block outline-none focus:outline-none focus-visible:outline-none"
+          onPointerEnter={peekOn}
+          onPointerLeave={peekOff}
+          onFocus={peekOnKeyboard}
+          onBlur={peekOff}
         >
           <div className="relative aspect-square w-full overflow-visible p-2">
-              {isExpanded
-                ? null
-                : images.map((image, imageIndex) => {
-                    const restRotate = REST_ROTATE[imageIndex] ?? 0
-                    const restOffset = REST_OFFSET[imageIndex] ?? { x: 0, y: 0 }
-                    const unfanRotate = UNFAN_ROTATE[imageIndex] ?? restRotate
-                    const unfanOffset = UNFAN_OFFSET[imageIndex] ?? restOffset
+            {isExpanded
+              ? null
+              : images.map((image, imageIndex) => {
+                  const restRotate = REST_ROTATE[imageIndex] ?? 0
+                  const restOffset = REST_OFFSET[imageIndex] ?? { x: 0, y: 0 }
+                  const unfanRotate = UNFAN_ROTATE[imageIndex] ?? restRotate
+                  const unfanOffset = UNFAN_OFFSET[imageIndex] ?? restOffset
 
-                    return (
-                      <motion.div
-                        key={image.src}
-                        className="absolute inset-3"
-                        style={{ zIndex: images.length - imageIndex }}
-                        initial={false}
-                        animate={
-                          shouldReduceMotion
-                            ? { x: 0, y: 0, rotate: 0 }
-                            : peek
-                              ? {
-                                  x: unfanOffset.x,
-                                  y: unfanOffset.y,
-                                  rotate: unfanRotate,
-                                }
-                              : {
-                                  x: restOffset.x,
-                                  y: restOffset.y,
-                                  rotate: restRotate,
-                                }
+                  return (
+                    <motion.div
+                      key={image.src}
+                      className="absolute inset-3"
+                      style={{ zIndex: images.length - imageIndex }}
+                      initial={false}
+                      animate={
+                        shouldReduceMotion
+                          ? { x: 0, y: 0, rotate: 0 }
+                          : peek
+                            ? {
+                                x: unfanOffset.x,
+                                y: unfanOffset.y,
+                                rotate: unfanRotate,
+                              }
+                            : {
+                                x: restOffset.x,
+                                y: restOffset.y,
+                                rotate: restRotate,
+                              }
+                      }
+                      transition={
+                        shouldReduceMotion ? { duration: 0 } : UNFAN_TRANSITION
+                      }
+                    >
+                      <AlbumPhoto
+                        layoutId={
+                          sharedLayout
+                            ? featuredImageLayoutId(image.slug, image.name)
+                            : undefined
                         }
-                        transition={
-                          shouldReduceMotion
-                            ? { duration: 0 }
-                            : UNFAN_TRANSITION
+                        src={image.src}
+                        alt=""
+                        sizes={sharedLayout ? PHOTO_SIZES : "128px"}
+                        layoutTransition={{
+                          ...layoutTransition,
+                          delay: shouldReduceMotion
+                            ? 0
+                            : (images.length - 1 - imageIndex) * STAGGER_EACH,
+                        }}
+                        loading="eager"
+                        fetchPriority={imageIndex === 0 ? "high" : "low"}
+                        decoding={sharedLayout ? "sync" : "async"}
+                        kind={image.kind}
+                        poster={image.poster}
+                        playing={
+                          image.kind === "video" &&
+                          inView &&
+                          !shouldReduceMotion
                         }
-                      >
-                        <AlbumPhoto
-                          layoutId={
-                            sharedLayout
-                              ? featuredImageLayoutId(image.slug, image.name)
-                              : undefined
-                          }
-                          src={image.src}
-                          alt=""
-                          sizes={sharedLayout ? PHOTO_SIZES : "128px"}
-                          layoutTransition={{
-                            ...layoutTransition,
-                            delay: shouldReduceMotion
-                              ? 0
-                              : (images.length - 1 - imageIndex) * STAGGER_EACH,
-                          }}
-                          loading="eager"
-                          fetchPriority={imageIndex === 0 ? "high" : "low"}
-                          decoding={sharedLayout ? "sync" : "async"}
-                          kind={image.kind}
-                          poster={image.poster}
-                          playing={
-                            image.kind === "video" &&
-                            inView &&
-                            !shouldReduceMotion
-                          }
-                          className="bg-surface-card h-full w-full overflow-hidden shadow"
-                        />
-                      </motion.div>
-                    )
-                  })}
+                        className="bg-surface-card h-full w-full overflow-hidden shadow"
+                      />
+                    </motion.div>
+                  )
+                })}
           </div>
         </Link>
         <button
@@ -451,6 +441,8 @@ export function FeaturedStack() {
           hidden
           className="text-content-subdued hover:text-content-ink text-sm outline-none focus:outline-none focus-visible:outline-none"
           onClick={expand}
+          onFocus={peekOnKeyboard}
+          onBlur={peekOff}
         >
           {tDesigns("preview")}
         </button>

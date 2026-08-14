@@ -3,6 +3,7 @@ import "lenis/dist/lenis.css"
 import type { Metadata } from "next"
 import { notFound } from "next/navigation"
 import { hasLocale, type Locale, NextIntlClientProvider } from "next-intl"
+import NextTopLoader from "nextjs-toploader"
 import {
   getMessages,
   getTranslations,
@@ -87,6 +88,12 @@ export default async function LocaleLayout({ children, params }: Props) {
   return (
     <html lang={getHtmlLang(locale)} suppressHydrationWarning>
       <body>
+        <NextTopLoader
+          color="var(--content-ink)"
+          height={2}
+          shadow="0 0 10px var(--content-ink),0 0 5px var(--content-ink)"
+          showSpinner={false}
+        />
         <PostHogProvider token={posthogToken}>
           <DesignSystemProvider>
             <StylesProvider>
