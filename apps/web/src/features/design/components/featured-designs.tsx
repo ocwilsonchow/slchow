@@ -2,7 +2,11 @@
 
 import { cn } from "@repo/ds"
 import { useLenis } from "lenis/react"
-import { ArrowRightIcon, CornerDownLeftIcon } from "lucide-react"
+import {
+  ArrowRightIcon,
+  ChevronRightIcon,
+  CornerDownLeftIcon,
+} from "lucide-react"
 import {
   AnimatePresence,
   LayoutGroup,
@@ -300,10 +304,13 @@ export function FeaturedStack() {
 
   return (
     <div ref={inViewRef} className="mt-8 space-y-3">
-      <Link href="/design" className="block">
-        <h2 className="text-content-ink font-semibold text-sm">
+      <Link href="/design" className="block group">
+        <h2 className="text-content-ink font-semibold text-sm flex items-center gap-2">
           {tNav("designs")}{" "}
           <sup className="text-content-subdued">{assetCount}</sup>
+          <div className="bg-surface-alpha rounded-full text-content-subdued p-0.5 group-hover:translate-x-1 transition-transform duration-200">
+            <ChevronRightIcon size={12} strokeWidth={4} />
+          </div>
         </h2>
       </Link>
       <button
