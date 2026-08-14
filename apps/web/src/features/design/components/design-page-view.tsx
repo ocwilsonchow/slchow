@@ -18,6 +18,7 @@ import {
   useRef,
   useState,
 } from "react"
+import { useHideNavbarForOverlay } from "@/features/layout/components/navbar"
 import { playClickSound } from "@/lib/click-sound"
 import type { Design } from "../get-designs"
 import { AlbumOverlayGrid, DesignGallery } from "./design-gallery"
@@ -116,6 +117,7 @@ export function DesignPageView({
   }, [expandedAlbum, lenis])
 
   const isExpanded = Boolean(expandedAlbum)
+  useHideNavbarForOverlay(isExpanded)
 
   return (
     <LayoutGroup>
@@ -159,6 +161,7 @@ export function DesignPageView({
             initial={false}
             exit={{ opacity: 1 }}
             transition={{ duration: shouldReduceMotion ? 0 : 0.4 }}
+            onClick={collapse}
           >
             <motion.div
               className="bg-surface-canvas absolute inset-0"
@@ -175,13 +178,23 @@ export function DesignPageView({
               layoutScroll
               data-lenis-prevent
             >
-              <div className="p-5">
+              <motion.div
+                className="p-5"
+                initial={false}
+                exit={{
+                  opacity: 0,
+                  transition: { duration: shouldReduceMotion ? 0 : 0.15 },
+                }}
+              >
                 <button
                   ref={backRef}
                   type="button"
                   aria-label={t("backToAlbums")}
-                  className="group hover:text-content-ink"
-                  onClick={collapse}
+                  className="group hover:text-content-ink outline-none focus:outline-none focus-visible:outline-none"
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    collapse()
+                  }}
                 >
                   <CornerDownLeftIcon
                     size={10}
@@ -189,7 +202,7 @@ export function DesignPageView({
                   />
                   {tNav("back")}
                 </button>
-              </div>
+              </motion.div>
               <div className="p-5 pb-50">
                 <AlbumOverlayGrid
                   album={expandedAlbum}

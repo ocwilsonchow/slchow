@@ -48,16 +48,22 @@ type ScrollHideOptions = {
   isMobile: boolean
   open: boolean
   shouldReduceMotion: boolean
+  forceHidden: boolean
 }
 
 /** Drive scroll-hide via Motion animate — no React state on scroll. */
 export function useNavbarScrollHide(
   shellRef: RefObject<HTMLElement | null>,
-  { isMobile, open, shouldReduceMotion }: ScrollHideOptions
+  { isMobile, open, shouldReduceMotion, forceHidden }: ScrollHideOptions
 ) {
   const hiddenRef = useRef(false)
-  const optionsRef = useRef({ isMobile, open, shouldReduceMotion })
-  optionsRef.current = { isMobile, open, shouldReduceMotion }
+  const optionsRef = useRef({
+    isMobile,
+    open,
+    shouldReduceMotion,
+    forceHidden,
+  })
+  optionsRef.current = { isMobile, open, shouldReduceMotion, forceHidden }
 
   const setHidden = useEffectEvent((next: boolean) => {
     if (hiddenRef.current === next) return
@@ -76,13 +82,26 @@ export function useNavbarScrollHide(
   })
 
   useEffect(() => {
+    if (forceHidden) {
+      setHidden(true)
+      return
+    }
     if (!isMobile || open) {
       setHidden(false)
     }
-  }, [isMobile, open])
+  }, [isMobile, open, forceHidden])
 
   useLenis(({ scroll, velocity }) => {
-    const { isMobile: mobile, open: isOpen } = optionsRef.current
+    const {
+      isMobile: mobile,
+      open: isOpen,
+      forceHidden: forced,
+    } = optionsRef.current
+
+    if (forced) {
+      setHidden(true)
+      return
+    }
 
     if (!mobile || isOpen || scroll <= 0) {
       setHidden(false)

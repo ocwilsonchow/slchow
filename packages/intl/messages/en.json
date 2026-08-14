@@ -60,7 +60,10 @@
     "zoomInDiagram": "Zoom in diagram",
     "profileAlt": "Wilson Chow",
     "openAlbum": "Open album {title}",
-    "backToAlbums": "Back to albums"
+    "backToAlbums": "Back to albums",
+    "openFeatured": "Open featured designs",
+    "backToFeatured": "Close featured designs",
+    "featuredDesigns": "Featured designs"
   },
   "notFound": {
     "title": "Oops!",
@@ -115,7 +118,8 @@
     }
   },
   "designs": {
-    "intro": "I like crafting user interfaces. I used to spend a lot of time on Figma back in the days."
+    "intro": "I like crafting user interfaces. I used to spend a lot of time on Figma back in the days.",
+    "fullCollection": "Full collection ({count})"
   },
   "code": {
     "copy": "Copy code",

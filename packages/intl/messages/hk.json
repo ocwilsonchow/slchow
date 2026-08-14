@@ -60,7 +60,10 @@
     "zoomInDiagram": "放大圖表",
     "profileAlt": "Wilson Chow",
     "openAlbum": "開啟相簿 {title}",
-    "backToAlbums": "返回相簿"
+    "backToAlbums": "返回相簿",
+    "openFeatured": "開啟精選設計",
+    "backToFeatured": "關閉精選設計",
+    "featuredDesigns": "精選設計"
   },
   "notFound": {
     "title": "Oops!",
@@ -115,7 +118,8 @@
     }
   },
   "designs": {
-    "intro": "我喜歡打造用戶介面。以前我花很多時間在 Figma 上。"
+    "intro": "我喜歡打造用戶介面。以前我花很多時間在 Figma 上。",
+    "fullCollection": "全部作品 ({count})"
   },
   "code": {
     "copy": "複製程式碼",

@@ -12,7 +12,10 @@ export const BackLink = async ({ href }: Props) => {
 
   return (
     <div className="space-y-0.5">
-      <Link href={href} className="block group hover:text-content-ink">
+      <Link
+        href={href}
+        className="block group hover:text-content-ink outline-none focus:outline-none focus-visible:outline-none"
+      >
         <CornerDownLeftIcon
           size={10}
           className="inline-block mr-1.5 group-hover:-translate-x-0.5"

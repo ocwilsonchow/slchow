@@ -60,7 +60,10 @@
     "zoomInDiagram": "図を拡大",
     "profileAlt": "Wilson Chow",
     "openAlbum": "{title} のアルバムを開く",
-    "backToAlbums": "アルバム一覧に戻る"
+    "backToAlbums": "アルバム一覧に戻る",
+    "openFeatured": "注目のデザインを開く",
+    "backToFeatured": "注目のデザインを閉じる",
+    "featuredDesigns": "注目のデザイン"
   },
   "notFound": {
     "title": "Oops!",
@@ -115,7 +118,8 @@
     }
   },
   "designs": {
-    "intro": "ユーザーインターフェースを作るのが好きです。以前は Figma に多くの時間を費やしていました。"
+    "intro": "ユーザーインターフェースを作るのが好きです。以前は Figma に多くの時間を費やしていました。",
+    "fullCollection": "すべての作品 ({count})"
   },
   "code": {
     "copy": "コードをコピー",

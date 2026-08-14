@@ -9,7 +9,10 @@ import {
   setRequestLocale,
 } from "next-intl/server"
 import { getDesigns } from "@/features/design/get-designs"
-import { SiteNavbar } from "@/features/layout/components/navbar"
+import {
+  NavbarVisibilityProvider,
+  SiteNavbar,
+} from "@/features/layout/components/navbar"
 import { RootLayout } from "@/features/layout/components/root"
 import { SkipLink } from "@/features/layout/components/skip-link"
 import { SmoothScroll } from "@/features/layout/components/smooth-scroll"
@@ -92,12 +95,14 @@ export default async function LocaleLayout({ children, params }: Props) {
                   <NextIntlClientProvider locale={locale} messages={messages}>
                     <SiteSearchProvider>
                       <SkipLink />
-                      <SiteNavbar
-                        notesCount={notesCount}
-                        designsCount={designsCount}
-                      />
-                      {/* <div className="fixed bottom-0 left-0 right-0 h-24 bg-linear-to-t pointer-events-none from-surface-canvas to-surface-canvas/0" /> */}
-                      <RootLayout>{children}</RootLayout>
+                      <NavbarVisibilityProvider>
+                        <SiteNavbar
+                          notesCount={notesCount}
+                          designsCount={designsCount}
+                        />
+                        {/* <div className="fixed bottom-0 left-0 right-0 h-24 bg-linear-to-t pointer-events-none from-surface-canvas to-surface-canvas/0" /> */}
+                        <RootLayout>{children}</RootLayout>
+                      </NavbarVisibilityProvider>
                     </SiteSearchProvider>
                   </NextIntlClientProvider>
                 </TanstackProviders>
