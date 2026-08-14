@@ -48,7 +48,7 @@ Client
 
 <br />
 
-```ts
+```ts title="src/index.ts"
 import { OpenAPIHono } from "@hono/zod-openapi"
 import { handle } from "hono/aws-lambda"
 
@@ -287,7 +287,7 @@ Better Auth 跑在 API 裡：sign-up、sign-in、sessions、accounts 透過 Driz
 
 <br />
 
-```ts
+```ts title="src/auth.ts"
 import { betterAuth } from "better-auth"
 import { drizzleAdapter } from "better-auth/adapters/drizzle"
 import { Resource } from "sst"
@@ -318,7 +318,7 @@ Lambda authorizer 在 API function 執行前驗證 session：
 
 <br />
 
-```ts
+```ts title="src/authorizer.ts"
 import type { APIGatewayRequestSimpleAuthorizerHandlerV2WithContext } from "aws-lambda"
 import { auth } from "./auth"
 
@@ -424,7 +424,7 @@ app.get(
 
 <br />
 
-```ts
+```ts title="packages/infra/api.ts"
 const databaseUrl = new sst.Secret("DatabaseUrl")
 const betterAuthSecret = new sst.Secret("BetterAuthSecret")
 

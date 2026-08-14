@@ -393,7 +393,7 @@ network edge or host
 
 在 Next.js 16，明确启用这个模型：
 
-```ts
+```ts title="next.config.ts"
 import type { NextConfig } from 'next'
 
 const nextConfig: NextConfig = {
@@ -616,7 +616,7 @@ Server Components、Server Actions、Route Handlers 与 Proxy 都在 server side
 
 用 `route.ts` 做明确的 HTTP resource：webhooks、公开 APIs、file responses、feeds、callbacks，或非 React clients 消费的 endpoints。
 
-```ts
+```ts title="route.ts"
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ id: string }> }

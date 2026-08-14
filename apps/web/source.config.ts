@@ -1,4 +1,7 @@
-import { remarkMdxMermaid } from "fumadocs-core/mdx-plugins"
+import {
+  rehypeCodeDefaultOptions,
+  remarkMdxMermaid,
+} from "fumadocs-core/mdx-plugins"
 import { pageSchema } from "fumadocs-core/source/schema"
 import { defineCollections, defineConfig } from "fumadocs-mdx/config"
 import { z } from "zod"
@@ -25,6 +28,23 @@ export default defineConfig({
         light: "github-light",
         dark: "vesper",
       },
+      addLanguageClass: true,
+      transformers: [
+        ...(rehypeCodeDefaultOptions.transformers ?? []),
+        {
+          name: "code-block-label",
+          pre(hast) {
+            const lang = this.options.lang
+            if (lang) {
+              hast.properties["data-language"] = lang
+            }
+            const title = this.options.meta?.title
+            if (typeof title === "string" && title.length > 0) {
+              hast.properties["data-title"] = title
+            }
+          },
+        },
+      ],
     },
   },
 })

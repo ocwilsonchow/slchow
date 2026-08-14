@@ -73,7 +73,7 @@ config ファイルは app identity と safety rules を定義する。`run` fun
 
 <br />
 
-```ts
+```ts title="sst.config.ts"
 export default $config({
   app(input) {
     return {
@@ -118,7 +118,7 @@ business logic はこれらのファイルから除外する。Infra modules は
 
 <br />
 
-```ts
+```ts title="packages/infra/nextjs.ts"
 const isProd = $app.stage === "production"
 const domain = "example.com"
 
@@ -152,7 +152,7 @@ Secrets は first-class resources であり、deployment model に入らない l
 
 <br />
 
-```ts
+```ts title="packages/infra/secrets.ts"
 export const username = new sst.Secret("Username")
 export const password = new sst.Secret("Password")
 export const databaseUrl = new sst.Secret("DatabaseUrl")

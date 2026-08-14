@@ -135,7 +135,7 @@ Allowed origins belong in `next.config` when the app sits behind a reverse proxy
 
 <br />
 
-```ts
+```ts title="next.config.ts"
 const nextConfig = {
   serverActions: {
     allowedOrigins: ["app.example.com"],
@@ -160,7 +160,7 @@ Matchers miss paths. Rewrites change what the app thinks the URL is. Edge/proxy 
 
 <br />
 
-```ts
+```ts title="proxy.ts"
 import { NextResponse } from "next/server"
 import type { NextRequest } from "next/server"
 
@@ -300,7 +300,7 @@ export function safeNextPath(value: string | undefined) {
 
 <br />
 
-```ts
+```ts title="next.config.ts"
 images: {
   remotePatterns: [
     {
@@ -385,7 +385,7 @@ A typical Android baseline is: system CAs only, no cleartext:
 
 <br />
 
-```xml
+```xml title="network_security_config.xml"
 <network-security-config>
   <base-config cleartextTrafficPermitted="false">
     <trust-anchors>

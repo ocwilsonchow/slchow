@@ -708,7 +708,7 @@ Same product surface. Fetch a list, pull to refresh, push a detail, load the bod
 
 **React Native (expo-router)**
 
-```tsx
+```tsx title="app/notes/_layout.tsx"
 // app/notes/_layout.tsx
 import { Stack } from "expo-router"
 
@@ -719,7 +719,7 @@ export default function NotesLayout() {
 
 <br />
 
-```tsx
+```tsx title="app/notes/index.tsx"
 // app/notes/index.tsx
 import { useCallback, useEffect, useState } from "react"
 import {
@@ -783,7 +783,7 @@ export default function NotesListScreen() {
 
 <br />
 
-```tsx
+```tsx title="app/notes/[id].tsx"
 // app/notes/[id].tsx
 import { useEffect, useState } from "react"
 import { ActivityIndicator, Text } from "react-native"

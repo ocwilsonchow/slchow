@@ -393,7 +393,7 @@ Each layer has its own identity and invalidation path. A fresh database row does
 
 In Next.js 16, enable the model explicitly:
 
-```ts
+```ts title="next.config.ts"
 import type { NextConfig } from 'next'
 
 const nextConfig: NextConfig = {
@@ -616,7 +616,7 @@ Use for mutations initiated by this React application when action/form integrati
 
 Use `route.ts` for an explicit HTTP resource: webhooks, public APIs, file responses, feeds, callbacks, or endpoints consumed by non-React clients.
 
-```ts
+```ts title="route.ts"
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ id: string }> }

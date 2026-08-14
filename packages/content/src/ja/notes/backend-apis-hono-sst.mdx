@@ -48,7 +48,7 @@ entrypoint は薄く保つ。Business logic は Lambda や ECS を知る必要�
 
 <br />
 
-```ts
+```ts title="src/index.ts"
 import { OpenAPIHono } from "@hono/zod-openapi"
 import { handle } from "hono/aws-lambda"
 
@@ -287,7 +287,7 @@ Better Auth は API 内で動く：sign-up、sign-in、session、account を Dri
 
 <br />
 
-```ts
+```ts title="src/auth.ts"
 import { betterAuth } from "better-auth"
 import { drizzleAdapter } from "better-auth/adapters/drizzle"
 import { Resource } from "sst"
@@ -318,7 +318,7 @@ Lambda authorizer は API function 実行前に session を検証する：
 
 <br />
 
-```ts
+```ts title="src/authorizer.ts"
 import type { APIGatewayRequestSimpleAuthorizerHandlerV2WithContext } from "aws-lambda"
 import { auth } from "./auth"
 
@@ -424,7 +424,7 @@ catch-all の背後に 1 つの Hono API Lambda を置くと、middleware、erro
 
 <br />
 
-```ts
+```ts title="packages/infra/api.ts"
 const databaseUrl = new sst.Secret("DatabaseUrl")
 const betterAuthSecret = new sst.Secret("BetterAuthSecret")
 

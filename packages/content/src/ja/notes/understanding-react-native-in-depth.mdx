@@ -464,7 +464,7 @@ Expo の **Expo Modules API** は同じ JSI layer 上にあります。`expo-sec
 
 <br />
 
-```json
+```json title="app.json"
 {
   "expo": {
     "plugins": [
@@ -542,7 +542,7 @@ native stack を使います。Expo Router の `Stack` は `@react-navigation/na
 
 <br />
 
-```tsx
+```tsx title="app/_layout.tsx"
 import { Stack } from "expo-router"
 
 export default function Layout() {
@@ -556,7 +556,7 @@ product が platform feel を care するなら tabs も native にすべきで�
 
 <br />
 
-```tsx
+```tsx title="app/(tabs)/_layout.tsx"
 import { NativeTabs } from "expo-router/unstable-native-tabs"
 
 export default function TabLayout() {

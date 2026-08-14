@@ -464,7 +464,7 @@ Expo 的 **Expo Modules API** 坐在同一 JSI layer 上。`expo-secure-store`�
 
 <br />
 
-```json
+```json title="app.json"
 {
   "expo": {
     "plugins": [
@@ -542,7 +542,7 @@ Hermes 也解释一些 debugging 形状。React Native DevTools 与 engine 对�
 
 <br />
 
-```tsx
+```tsx title="app/_layout.tsx"
 import { Stack } from "expo-router"
 
 export default function Layout() {
@@ -556,7 +556,7 @@ export default function Layout() {
 
 <br />
 
-```tsx
+```tsx title="app/(tabs)/_layout.tsx"
 import { NativeTabs } from "expo-router/unstable-native-tabs"
 
 export default function TabLayout() {

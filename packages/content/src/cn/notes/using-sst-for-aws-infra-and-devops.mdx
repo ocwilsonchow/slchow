@@ -73,7 +73,7 @@ Config 文件定义 app identity 与安全规则。`run` function 加载 infra m
 
 <br />
 
-```ts
+```ts title="sst.config.ts"
 export default $config({
   app(input) {
     return {
@@ -118,7 +118,7 @@ Business logic 不放进这些文件。Infra modules 创建并 link resources；
 
 <br />
 
-```ts
+```ts title="packages/infra/nextjs.ts"
 const isProd = $app.stage === "production"
 const domain = "example.com"
 
@@ -152,7 +152,7 @@ Secrets 是 first-class resources，不是从未进入 deployment model 的松�
 
 <br />
 
-```ts
+```ts title="packages/infra/secrets.ts"
 export const username = new sst.Secret("Username")
 export const password = new sst.Secret("Password")
 export const databaseUrl = new sst.Secret("DatabaseUrl")

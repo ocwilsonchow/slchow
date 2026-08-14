@@ -517,7 +517,7 @@ delete then upsert は atomic ではない。同じ `path` の 2 concurrent re-u
 
 <br />
 
-```ts
+```ts title="src/mastra/workflows/pinecone-document-ingestion.ts"
 import { createWorkflow } from "@mastra/core/workflows"
 
 export const pineconeDocumentIngestion = createWorkflow({
@@ -539,7 +539,7 @@ store、workflow、agent（search tool 付き）を Mastra instance に register
 
 <br />
 
-```ts
+```ts title="src/mastra/index.ts"
 import { Mastra } from "@mastra/core/mastra"
 
 export const mastra = new Mastra({
@@ -589,7 +589,7 @@ User question
 
 <br />
 
-```ts
+```ts title="src/mastra/tools/search-pinecone-documents.ts"
 import { createTool } from "@mastra/core/tools"
 import { z } from "zod"
 

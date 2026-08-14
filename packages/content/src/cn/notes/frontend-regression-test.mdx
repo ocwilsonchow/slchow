@@ -296,7 +296,7 @@ Cypress.Commands.add("loginAs", (email) => {
 
 <br />
 
-```ts
+```ts title="cypress/e2e/create-note.cy.ts"
 describe("create note", () => {
   beforeEach(() => {
     cy.loginAs("writer@example.com")

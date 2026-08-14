@@ -464,7 +464,7 @@ Two Expo contracts decide whether a module exists in the binary at all.
 
 <br />
 
-```json
+```json title="app.json"
 {
   "expo": {
     "plugins": [
@@ -542,7 +542,7 @@ Use the native stack. Expo Router's `Stack` is `@react-navigation/native-stack`.
 
 <br />
 
-```tsx
+```tsx title="app/_layout.tsx"
 import { Stack } from "expo-router"
 
 export default function Layout() {
@@ -556,7 +556,7 @@ Tabs should be native too when the product cares about platform feel:
 
 <br />
 
-```tsx
+```tsx title="app/(tabs)/_layout.tsx"
 import { NativeTabs } from "expo-router/unstable-native-tabs"
 
 export default function TabLayout() {
