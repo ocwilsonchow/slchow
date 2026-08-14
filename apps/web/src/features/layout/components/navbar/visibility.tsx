@@ -2,10 +2,9 @@
 
 import {
   createContext,
-  type Dispatch,
   type ReactNode,
-  type SetStateAction,
   use,
+  useCallback,
   useEffect,
   useMemo,
   useState,
@@ -13,7 +12,8 @@ import {
 
 type NavbarVisibilityContextValue = {
   hiddenByOverlay: boolean
-  setHiddenByOverlay: Dispatch<SetStateAction<boolean>>
+  acquireHide: () => void
+  releaseHide: () => void
 }
 
 const NavbarVisibilityContext =
@@ -24,10 +24,20 @@ export function NavbarVisibilityProvider({
 }: {
   children: ReactNode
 }) {
-  const [hiddenByOverlay, setHiddenByOverlay] = useState(false)
+  const [hideCount, setHideCount] = useState(0)
+  const acquireHide = useCallback(() => {
+    setHideCount((count) => count + 1)
+  }, [])
+  const releaseHide = useCallback(() => {
+    setHideCount((count) => Math.max(0, count - 1))
+  }, [])
   const value = useMemo(
-    () => ({ hiddenByOverlay, setHiddenByOverlay }),
-    [hiddenByOverlay]
+    () => ({
+      hiddenByOverlay: hideCount > 0,
+      acquireHide,
+      releaseHide,
+    }),
+    [hideCount, acquireHide, releaseHide]
   )
 
   return (
@@ -47,10 +57,11 @@ export function useNavbarVisibility() {
 
 /** Hide the site navbar while `active` is true; restore on false or unmount. */
 export function useHideNavbarForOverlay(active: boolean) {
-  const { setHiddenByOverlay } = useNavbarVisibility()
+  const { acquireHide, releaseHide } = useNavbarVisibility()
 
   useEffect(() => {
-    setHiddenByOverlay(active)
-    return () => setHiddenByOverlay(false)
-  }, [active, setHiddenByOverlay])
+    if (!active) return
+    acquireHide()
+    return () => releaseHide()
+  }, [active, acquireHide, releaseHide])
 }

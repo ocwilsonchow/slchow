@@ -1,5 +1,6 @@
 "use client"
 
+import { useSearchContext } from "fumadocs-ui/contexts/search"
 import Image from "next/image"
 import { useTranslations } from "next-intl"
 import { Fragment } from "react"
@@ -8,6 +9,7 @@ import { Link, usePathname } from "@/i18n/navigation"
 import { LanguageSettings, ThemeSettings } from "../navbar-settings"
 import { useNavbarContext } from "./context"
 import { Navbar } from "./parts"
+import { useHideNavbarForOverlay } from "./visibility"
 
 const PATH_TITLE_KEYS = {
   "/": "homePage",
@@ -158,6 +160,8 @@ function NavbarTriggerLabel() {
 }
 
 export function SiteNavbar({ notesCount, designsCount }: SiteNavbarProps) {
+  const { open: searchOpen } = useSearchContext()
+  useHideNavbarForOverlay(searchOpen)
   const counts = { notesCount, designsCount }
 
   return (

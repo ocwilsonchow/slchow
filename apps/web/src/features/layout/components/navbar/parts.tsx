@@ -145,7 +145,7 @@ function Backdrop({ className, ...props }: HTMLMotionProps<"button">) {
         animate={open ? "visible" : "hidden"}
         onClick={() => setOpen(false)}
         className={cn(
-          "fixed inset-0 z-40 bg-surface-backdrop/75 backdrop-blur-md",
+          "fixed inset-0 z-40 bg-surface-backdrop/75 backdrop-blur-md outline-none focus:outline-none focus-visible:outline-none",
           open ? "pointer-events-auto" : "pointer-events-none",
           className
         )}
@@ -196,7 +196,7 @@ function Frame({
         <nav
           ref={navRef}
           aria-label={t("menu")}
-          className="bg-surface-popover border border-stroke-soft/75 text-content-body-on-popover rounded-3xl sm:max-w-sm"
+          className="bg-surface-popover border border-stroke-soft/75 text-content-body-on-popover rounded-3xl sm:max-w-sm [&_a]:outline-none [&_a]:focus:outline-none [&_a]:focus-visible:outline-none [&_button]:outline-none [&_button]:focus:outline-none [&_button]:focus-visible:outline-none"
         >
           {children}
         </nav>
