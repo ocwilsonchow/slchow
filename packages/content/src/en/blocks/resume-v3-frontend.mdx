@@ -4,7 +4,7 @@ title: Resume — Frontend
 
 ## Wilson Chow
 
-Frontend software engineer with 5 years of experience shipping React / React Native consumer products from Figma through production — including zero-to-one launches and multi-year evolution of **15+** apps, plus the typed Node.js APIs those products run on. Cut critical-path load times by up to **80%** and search latency by **90%**. Currently leading the client surface of a multi-channel agent platform: chat, tool-invocation, and file-mention UIs on durable, interruptible agent runs. Daily workflow includes **Cursor** / AI-assisted development. **AWS Solutions Architect Associate**.
+Frontend **software engineer** with **5 years** delivering **medium-to-large** production initiatives in a fast-paced, multi-client environment — React / React Native consumer products from Figma through production, plus the typed Node.js APIs those products run on. Zero-to-one and multi-year evolution of **15+** apps, including App Store / Play Store releases. Cut critical-path load times by up to **80%** and search latency by **90%**. Currently leading the client surface of a multi-channel **Generative AI** agent platform: chat, tool-invocation, and file-mention UIs on durable, interruptible agent runs. Daily workflow includes **Cursor** / AI-assisted development. **AWS Solutions Architect Associate**.
 
 Strengths: Frontend engineering · Performance · Complex flows · Typed APIs · Agent UI
 
@@ -14,14 +14,14 @@ Strengths: Frontend engineering · Performance · Complex flows · Typed APIs ·
 
 ### Full-Stack Engineer, Vioo Company Limited, May 2022 – Present
 
-Primary engineer for concurrent client products — Figma through production UI and the APIs behind it, partnering with stakeholders to scope UX and ship releases.
+Primary engineer for concurrent client products — Figma through production UI and the APIs behind it, partnering with technical and non-technical stakeholders to scope UX and ship reliable, usable releases.
 
-- Shipped and maintained **15+** production React / React Native apps from zero-to-one and over multiple years, including high-fidelity Figma design and shared design systems reused across client work.
-- Replaced a third-party WordPress stack with an in-house headless CMS (Strapi / Sanity) and search (Meilisearch / Algolia) so publishing continued through the transition: cut load time by **80%**, search latency by **90%**, and hit PageSpeed Insights **>90**.
+- Shipped and maintained **15+** production React / React Native apps from zero-to-one and over multiple years, including high-fidelity Figma design, shared design systems reused across client work, and App Store / Play Store releases.
+- Replaced a third-party WordPress stack with an in-house headless CMS (Strapi / Sanity) and search (Meilisearch / Algolia) in a **Turborepo**, deployed with **SST**, so publishing continued through the transition: cut load time by **80%**, search latency by **90%**, and hit PageSpeed Insights **>90**. **Dockerized** Node.js APIs and ran them on **ECS Fargate**; other workloads on Lambda / API Gateway. Familiar with **Kubernetes** from AWS Solutions Architect study; production containers are Docker on ECS, not self-managed K8s.
 - Established shared Radix / Tailwind component and hook libraries with Storybook, Fumadocs, and MDX docs, reused across client apps. Led frontend reviews; Vitest / Cypress on critical flows.
-- Built Next.js apps as isomorphic UI plus a BFF layer: SSR / ISR, aggregating Shopify GraphQL, CMS, and search APIs with caching. Independently debug Node runtime issues and production bottlenecks (Lighthouse, Sentry).
-- Modeled identity as reusable client states against a typed API: Better Auth sessions and org membership, OAuth 2.0 / OIDC, JWT / session lifecycle, RBAC — not nested auth conditionals. Sessions live in **HttpOnly / Secure / SameSite** cookies, not `localStorage` tokens.
-- Built typed Node.js APIs with Hono, Drizzle / Prisma, OpenAPI, and tRPC on AWS Lambda / API Gateway (Postgres / DynamoDB / S3). Hardened the edge: **strict CORS**, trusted origins, WAF rate limits on auth routes, identity from the authorizer cookie — never a client-supplied user header. API keys, tokens, and credentials in **SST Secret**, not `.env`. GitHub Actions + SST for CI/CD — lint, typecheck, tests, and build before deploy — cutting deploy time by **50%+**.
+- Built Next.js apps as isomorphic UI plus a BFF layer: SSR / ISR, aggregating Shopify GraphQL, CMS, and search APIs with caching. Independently debugged Node runtime issues and production bottlenecks across UI and API (Lighthouse, Sentry).
+- Modeled identity as reusable client states against a typed API: Better Auth sessions and org membership, OAuth 2.0 / OIDC, JWT / session lifecycle, and RBAC. Sessions live in **HttpOnly / Secure / SameSite** cookies, not `localStorage` tokens.
+- Built typed Node.js APIs with Hono, Drizzle / Prisma, OpenAPI, and tRPC. GitHub Actions + SST for CI/CD — lint, typecheck, tests, and build before deploy — cutting deploy time by **50%+**.
 - Mentored summer interns and junior developers through pairing, code reviews, and shipping production work.
 
 <br />
@@ -37,7 +37,7 @@ Client-facing agent UI (web + Discord) — the product surface for durable, mult
 - Modeled each agent run as a **stateful, interruptible, resumable** durable stream: clients disconnect, reconnect, and resume mid-run without losing progress — not nested chat conditionals.
 - Shipped composable chat, tool-invocation, and multi-step client flows, plus a TipTap @mention file-tagging component for attaching workspace files into prompts.
 - Treated failure as first-class, testable UI: visible run status, retries, and resume — not only a completion bubble.
-- Owned the client contract; also ran Hono + Better Auth on ECS with Postgres / S3, and Mastra / RAG / evals behind the surface.
+- Owned the client contract for the **SST** / **ECS Fargate** API behind the surface.
 
 ---
 
@@ -55,7 +55,7 @@ Lead frontend for a content + search marketing site — performance, CMS-backed 
 ### React Native Membership Platform, shipped Apr 2024
 
 - Led Figma design and the iOS / Android membership app (digital card, points, offers); shipped to the App Store and Play Store. Also maintained the Express API and Next.js admin.
-- Diagnosed production crashes, device compatibility, and performance bottlenecks independently via Sentry; maintained **>99.5%** crash-free sessions post-launch.
+- Diagnosed production crashes, device compatibility, and performance bottlenecks independently via Sentry across app and API; maintained **99%** crash-free sessions post-launch.
 - Cut list jank with FlashList; froze inactive tabs via react-native-screens and deferred mounts; reserved Reanimated for native-thread transitions.
 - Shortened feed image loading by caching remotes and avoiding full-resolution assets in long lists.
 - Push + deep links via Firebase Cloud Messaging for promos and milestones.
@@ -76,11 +76,12 @@ Also shipped restaurant loyalty apps (React Native), campaign / e-commerce store
 
 - **Languages**: TypeScript, Node.js
 - **Frontend**: React, Next.js, React Native, Expo, TanStack Query, TanStack Form, Framer Motion, Tailwind CSS, shadcn/ui, Storybook, Figma, MDX, TipTap
-- **Backend**: Hono, Drizzle, Prisma, OpenAPI, tRPC, Postgres, DynamoDB, Better Auth
+- **Backend**: Hono, Drizzle, Prisma, OpenAPI, tRPC, Postgres, DynamoDB, Better Auth, Multitenancy
 - **Auth & i18n**: OAuth 2.0 / OIDC, JWT, HttpOnly cookies, CORS, RBAC, next-intl
+- **AI**: Mastra, Vercel AI SDK, Langchain, Pinecone, Strands, AWS Bedrock
 - **Testing & monitoring**: Cypress, Vitest, React Testing Library, Lighthouse, axe, Sentry, PostHog
 - **Workflow**: Cursor, Claude Code
-- **DevOps**: SST, SST Secret, Docker, GitHub Actions, AWS
+- **DevOps**: SST, Docker, ECS Fargate, GitHub Actions, AWS · Kubernetes (familiar)
 - **Also used**: Strapi, Sanity, Meilisearch
 
 <br />
@@ -101,7 +102,7 @@ Also shipped restaurant loyalty apps (React Native), campaign / e-commerce store
 ### University College London
 
 - MPharm Pharmacy, 2016 – 2020 — First Class Honours
-- Career switch from pharmacy after finding a passion for building apps and systems
+- Career switch from pharmacy — a regulated, high-stakes domain — after finding a passion for building apps and systems
 
 <br />
 

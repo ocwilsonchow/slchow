@@ -4,7 +4,7 @@ title: Resume — Applied AI
 
 ## Wilson Chow
 
-Software engineer focused on production AI systems. Five years shipping full-stack Node.js products; currently leading a multi-channel agent platform with durable workflows, memory, RAG, scorers, and evals. Builds the typed APIs and UIs those agents run through — not a chat-completion wrapper. **AWS Solutions Architect Associate**.
+**Software engineer** with **5 years** delivering **medium-to-large** full-stack Node.js initiatives in a fast-paced, multi-client environment. Currently leading a multi-channel **Generative AI** agent platform with durable workflows, memory, RAG, scorers, and evals. Builds the typed APIs and UIs those agents run through — not a chat-completion wrapper. **AWS Solutions Architect Associate**.
 
 Strengths: Production agents · Durable workflows · RAG · Evals · Observability
 
@@ -14,14 +14,14 @@ Strengths: Production agents · Durable workflows · RAG · Evals · Observabili
 
 ### Full-Stack Engineer, Vioo Company Limited, May 2022 – Present
 
-Primary engineer for concurrent client products. Recent work is production agents — workflows, memory, tools, and quality gates — on top of typed APIs and AWS.
+Primary engineer for concurrent client products, partnering with technical and non-technical stakeholders. Recent work is production **Generative AI** agents — workflows, memory, tools, and quality gates — on top of typed APIs and AWS.
 
 - Shipped production AI agents (workflows, memory, tool calls, observability) with Mastra, Vercel AI SDK, and Langchain, including composable chat and tool-invocation UIs.
 - Added scored eval suites (golden prompts + LLM-as-judge) and run/tool traces so prompt or tool changes fail in CI-style checks instead of in front of clients.
-- Built typed Node.js APIs with Hono, Drizzle / Prisma, OpenAPI, and tRPC on AWS Lambda / API Gateway, backed by Postgres / DynamoDB / S3.
+- Built typed Node.js APIs with Hono, Drizzle / Prisma, OpenAPI, and tRPC in a **Turborepo**, deployed with **SST**. **Dockerized** APIs on **ECS Fargate**; other workloads on Lambda / API Gateway. Familiar with **Kubernetes** from AWS Solutions Architect study; production containers are Docker on ECS, not self-managed K8s.
 - Replaced legacy WordPress search with Meilisearch / Algolia: **90%** lower search latency — retrieval work that later informed RAG ranking choices.
 - Adopted SST for app deploy and infra, cutting deploy time by **50%+**. GitHub Actions runs lint, typecheck, tests, and build before `sst deploy`.
-- Shipped 15+ production web and mobile apps; the agent platform is the current system, not a side demo.
+- Shipped **15+** production web and mobile apps as **medium-to-large** initiatives; the agent platform is the current system, not a side demo.
 - Mentored summer interns and junior developers through pairing, code reviews, and shipping production work.
 
 <br />
@@ -36,9 +36,9 @@ Client-facing agent platform for durable assistants (web + Discord) with product
 
 - Chose durable streaming over request/response chat so long tool loops survive disconnects; clients resume mid-run without losing progress.
 - Built workflow, memory, scheduling, and workspace primitives on Mastra and AI SDK: pause/resume, retries, file storage, sandboxed tools, and skills.
-- Shipped end-to-end RAG: ingest/parse, chunking, Pinecone retrieval with query/rerank (graph query where needed).
-- Added ClickHouse run/tool traces and cost/latency metrics; gated releases on scored evals after prompt or tool changes.
-- Ran Hono + Better Auth on ECS, Postgres for core data, S3 for files — so agent state and artifacts outlive a single request.
+- Shipped end-to-end RAG: ingest/parse, chunking, Pinecone retrieval with query/rerank (graph query where needed). Retrieval is **org-scoped** (namespace = organization) so the model cannot search another tenant.
+- Added ClickHouse run/tool traces and cost/latency metrics; gated releases on scored evals after prompt or tool changes — diagnosing issues across UI, API, and agent runs.
+- Ran **Dockerized** Hono + Better Auth on **ECS Fargate**, Postgres for core data, S3 for files — so agent state and artifacts outlive a single request.
 - Shipped a TipTap @mention file-tagging component so workspace files enter prompts as first-class context, not pasted blobs.
 
 ---
@@ -62,10 +62,10 @@ Health and wellness RAG agent (Next.js, Langchain, Shopify API): ingest store/co
 ## Skills
 
 - **Languages**: TypeScript, Node.js, Python
-- **AI**: Mastra, Vercel AI SDK, Langchain, Pinecone, evals (golden prompts, LLM-as-judge), ClickHouse traces
-- **Backend**: Hono, Drizzle, Prisma, OpenAPI, tRPC, Postgres, DynamoDB, S3, Better Auth
+- **AI**: Mastra, Vercel AI SDK, Langchain, Pinecone, Strands, AWS Bedrock, evals (golden prompts, LLM-as-judge), ClickHouse traces
+- **Backend**: Hono, Drizzle, Prisma, OpenAPI, tRPC, Postgres, DynamoDB, S3, Better Auth, Multitenancy
 - **Frontend (agent UI)**: React, Next.js, TipTap
-- **DevOps**: SST, Docker, AWS (Lambda, API Gateway, ECS), GitHub Actions
+- **DevOps**: SST, Docker, ECS Fargate, GitHub Actions, AWS (Lambda, API Gateway) · Kubernetes (familiar)
 
 <br />
 
@@ -85,7 +85,7 @@ Health and wellness RAG agent (Next.js, Langchain, Shopify API): ingest store/co
 ### University College London
 
 - MPharm Pharmacy, 2016 – 2020 — First Class Honours
-- Career switch from pharmacy after finding a passion for building apps and systems; used to high-stakes, detail-heavy failure cases — useful for eval design
+- Career switch from pharmacy — a regulated, high-stakes domain — after finding a passion for building apps and systems
 
 <br />
 
