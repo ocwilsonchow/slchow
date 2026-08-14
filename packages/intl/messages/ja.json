@@ -119,7 +119,8 @@
   },
   "designs": {
     "intro": "ユーザーインターフェースを作るのが好きです。以前は Figma に多くの時間を費やしていました。",
-    "fullCollection": "すべての作品 ({count})"
+    "fullCollection": "すべての作品 ({count})",
+    "preview": "プレビュー"
   },
   "code": {
     "copy": "コードをコピー",

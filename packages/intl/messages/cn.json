@@ -119,7 +119,8 @@
   },
   "designs": {
     "intro": "我喜欢打造用户界面。以前我花很多时间在 Figma 上。",
-    "fullCollection": "全部作品 ({count})"
+    "fullCollection": "全部作品 ({count})",
+    "preview": "预览"
   },
   "code": {
     "copy": "复制代码",

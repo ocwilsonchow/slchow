@@ -119,7 +119,8 @@
   },
   "designs": {
     "intro": "I like crafting user interfaces. I used to spend a lot of time on Figma back in the days.",
-    "fullCollection": "Full collection ({count})"
+    "fullCollection": "Full collection ({count})",
+    "preview": "Preview"
   },
   "code": {
     "copy": "Copy code",
