@@ -18,18 +18,23 @@ export const Root = ({ ...props }: ComponentProps<"div">) => {
   )
 }
 
-export const Info = ({ ...props }: ComponentProps<"div">) => {
+export const Info = async ({ ...props }: ComponentProps<"div">) => {
+  const t = await getTranslations("navigation")
+
   return (
     <div
       {...props}
       className={cn(
-        "text-content-ink font-semibold space-y-1.5 flex flex-row items-center justify-between md:items-start md:justify-start md:flex-col",
+        "text-content-ink font-semibold space-y-5 flex flex-row items-center justify-between md:items-start md:justify-start md:flex-col",
         props.className
       )}
     >
-      <h1>
-        <Link href="/">Wilson Chow</Link>
-      </h1>
+      <div>
+        <h1>
+          <Link href="/">Wilson Chow</Link>
+        </h1>
+        <h2 className="text-content-subdued font-medium text-sm">{t("role")}</h2>
+      </div>
       <HeaderSearchTrigger />
     </div>
   )
@@ -56,7 +61,7 @@ export const Links = async ({ className, ...props }: ComponentProps<"div">) => {
   )
 
   return (
-    <div {...props} className={cn("hidden md:flex flex-col gap-3", className)}>
+    <div {...props} className={cn("hidden md:flex flex-col gap-5", className)}>
       <ul className="flex flex-col gap-px">
         <HeaderLink href="/resume">{t("resume")}</HeaderLink>
         <HeaderLink href="/notes">

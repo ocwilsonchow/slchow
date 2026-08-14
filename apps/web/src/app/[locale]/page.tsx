@@ -45,10 +45,8 @@ const Page = async ({ params }: Props) => {
               locale={locale}
             />
           </section>
-          <Divider />
           <section id="works-and-notes" className="flex flex-col pb-20">
             <ListNotes locale={locale} preview />
-            <Divider />
           </section>
         </div>
       </div>

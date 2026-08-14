@@ -176,7 +176,7 @@ function Frame({
         <nav
           ref={navRef}
           aria-label={t("menu")}
-          className="bg-surface-popover border border-stroke-soft/75 text-content-body-on-popover rounded-3xl"
+          className="bg-surface-popover border border-stroke-soft/75 text-content-body-on-popover rounded-3xl sm:max-w-sm"
         >
           {children}
         </nav>
