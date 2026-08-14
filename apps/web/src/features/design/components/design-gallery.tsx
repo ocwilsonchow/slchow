@@ -1,7 +1,7 @@
 "use client"
 
 import { motion, type Transition, useReducedMotion } from "motion/react"
-import { PHOTO_SIZES, STAGGER_EACH } from "../album"
+import { FAN_COUNT, PHOTO_SIZES, STAGGER_EACH } from "../album"
 import type { Design, DesignImage } from "../get-designs"
 import { designImageLayoutId } from "../layout-ids"
 import { useInView } from "../use-in-view"
@@ -95,6 +95,7 @@ function AlbumOverlayTile({
   const shouldReduceMotion = useReducedMotion() ?? false
   const playing = image.kind === "video" && inView && !shouldReduceMotion
   const alt = `${album.title} — ${image.name}`
+  const isFan = imageIndex < FAN_COUNT
 
   return (
     <li ref={ref} className="aspect-square">
@@ -107,6 +108,10 @@ function AlbumOverlayTile({
           ...layoutTransition,
           delay: shouldReduceMotion ? 0 : imageIndex * STAGGER_EACH,
         }}
+        opacity={isFan ? undefined : 1}
+        x={0}
+        y={0}
+        rotate={0}
         kind={image.kind}
         poster={image.poster}
         playing={playing}

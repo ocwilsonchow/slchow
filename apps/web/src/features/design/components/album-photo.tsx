@@ -16,6 +16,9 @@ type AlbumPhotoProps = {
   layoutId?: string
   /** Interpolated during layout FLIP so hidden stack slots stay hidden. */
   opacity?: number
+  x?: number
+  y?: number
+  rotate?: number
   loading?: "lazy" | "eager"
   fetchPriority?: "high" | "low" | "auto"
   kind?: DesignImage["kind"]
@@ -32,21 +35,40 @@ export function AlbumPhoto({
   className,
   layoutId,
   opacity,
+  x,
+  y,
+  rotate,
   loading = "lazy",
   fetchPriority,
   kind,
   poster,
   playing = false,
 }: AlbumPhotoProps) {
+  const hasOpacity = opacity !== undefined
+  const hasPose = x !== undefined || y !== undefined || rotate !== undefined
+  const animate =
+    hasOpacity || hasPose
+      ? {
+          ...(hasOpacity ? { opacity } : {}),
+          ...(hasPose ? { x: x ?? 0, y: y ?? 0, rotate: rotate ?? 0 } : {}),
+        }
+      : undefined
+
   return (
     <motion.div
       layoutId={layoutId}
       className={cn(className, kind === "video" && "bg-[#D0CFCF]")}
       style={{ borderRadius: ALBUM_PHOTO_RADIUS }}
-      {...(opacity === undefined
-        ? {}
-        : { initial: false as const, animate: { opacity } })}
-      transition={{ layout: layoutTransition, opacity: layoutTransition }}
+      {...(animate
+        ? { initial: false as const, animate }
+        : {})}
+      transition={{
+        layout: layoutTransition,
+        opacity: layoutTransition,
+        x: layoutTransition,
+        y: layoutTransition,
+        rotate: layoutTransition,
+      }}
     >
       <DesignAsset
         src={src}

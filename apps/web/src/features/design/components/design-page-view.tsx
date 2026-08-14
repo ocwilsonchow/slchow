@@ -3,9 +3,7 @@
 import { useLenis } from "lenis/react"
 import { CornerDownLeftIcon } from "lucide-react"
 import {
-  AnimatePresence,
   LayoutGroup,
-  motion,
   type Transition,
   useReducedMotion,
 } from "motion/react"
@@ -152,6 +150,8 @@ function DesignPageInner({
     previousSlugRef.current = expandedSlug
 
     if (expandedSlug) {
+      const card = cardRefs.current.get(expandedSlug)
+      card?.scrollIntoView({ block: "center", behavior: "auto" })
       const frame = requestAnimationFrame(() => {
         backRef.current?.focus({ preventScroll: true })
       })
@@ -208,23 +208,6 @@ function DesignPageInner({
           />
         </div>
       </div>
-
-      <AnimatePresence initial={false}>
-        {expandedAlbum ? (
-          <motion.div
-            key="album-backdrop"
-            className="bg-surface-canvas fixed inset-0 z-50"
-            initial={{ opacity: shouldReduceMotion ? 1 : 0 }}
-            animate={{ opacity: 1 }}
-            exit={{
-              opacity: shouldReduceMotion ? 1 : 0,
-              transition: { duration: 0 },
-            }}
-            transition={{ duration: shouldReduceMotion ? 0 : 0.3 }}
-            onClick={collapse}
-          />
-        ) : null}
-      </AnimatePresence>
 
       {expandedAlbum ? (
         <div

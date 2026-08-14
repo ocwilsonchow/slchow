@@ -83,7 +83,7 @@ export function AlbumStack({
         transition={
           shouldReduceMotion
             ? { duration: 0 }
-            : { ...layoutTransition, delay: 0.4 }
+            : { ...layoutTransition, delay: 0.2 }
         }
       >
       <button
@@ -125,46 +125,43 @@ export function AlbumStack({
                 const restOffset = FAN_OFFSET[imageIndex] ?? { x: 0, y: 0 }
                 const unfanRotate = UNFAN_ROTATE[imageIndex] ?? restRotate
                 const unfanOffset = UNFAN_OFFSET[imageIndex] ?? restOffset
+                const pose =
+                  shouldReduceMotion || !isFan
+                    ? { x: 0, y: 0, rotate: 0 }
+                    : peek
+                      ? {
+                          x: unfanOffset.x,
+                          y: unfanOffset.y,
+                          rotate: unfanRotate,
+                        }
+                      : {
+                          x: restOffset.x,
+                          y: restOffset.y,
+                          rotate: restRotate,
+                        }
 
                 return (
-                  <motion.div
+                  <div
                     key={image.src}
                     aria-hidden={!isFan || undefined}
                     className="absolute inset-10 lg:inset-14"
-                    style={{
-                      zIndex: isFan ? FAN_COUNT - imageIndex : 0,
-                    }}
-                    animate={
-                      shouldReduceMotion || !isFan
-                        ? { x: 0, y: 0, rotate: 0 }
-                        : peek
-                          ? {
-                              x: unfanOffset.x,
-                              y: unfanOffset.y,
-                              rotate: unfanRotate,
-                            }
-                          : {
-                              x: restOffset.x,
-                              y: restOffset.y,
-                              rotate: restRotate,
-                            }
-                    }
-                    transition={
-                      shouldReduceMotion ? { duration: 0 } : UNFAN_TRANSITION
-                    }
+                    style={{ zIndex: isFan ? FAN_COUNT - imageIndex : 0 }}
                   >
                     <AlbumPhoto
                       layoutId={designImageLayoutId(design.slug, image.name)}
                       src={image.src}
                       alt=""
                       sizes={PHOTO_SIZES}
-                      layoutTransition={{
-                        ...layoutTransition,
-                        delay: shouldReduceMotion
-                          ? 0
-                          : (design.images.length - 1 - imageIndex) *
-                            STAGGER_EACH,
-                      }}
+                      layoutTransition={
+                        shouldReduceMotion
+                          ? { duration: 0 }
+                          : peek
+                            ? UNFAN_TRANSITION
+                            : {
+                                ...layoutTransition,
+                                delay: imageIndex * STAGGER_EACH,
+                              }
+                      }
                       loading={isLcpCover ? "eager" : "lazy"}
                       fetchPriority={isLcpCover ? "high" : "low"}
                       kind={image.kind}
@@ -176,13 +173,16 @@ export function AlbumStack({
                         !shouldReduceMotion
                       }
                       opacity={isFan ? undefined : 0}
+                      x={pose.x}
+                      y={pose.y}
+                      rotate={pose.rotate}
                       className={
                         isFan
                           ? "bg-surface-card h-full w-full overflow-hidden shadow"
                           : "bg-surface-card pointer-events-none h-full w-full overflow-hidden"
                       }
                     />
-                  </motion.div>
+                  </div>
                 )
               })}
         </div>
