@@ -121,14 +121,18 @@ export function AlbumStack({
             : design.images.map((image, imageIndex) => {
                 const isFan = imageIndex < FAN_COUNT
                 const isLcpCover = isLcp && imageIndex === 0
-                const restRotate = FAN_ROTATE[imageIndex] ?? 0
-                const restOffset = FAN_OFFSET[imageIndex] ?? { x: 0, y: 0 }
+                const restRotate =
+                  FAN_ROTATE[imageIndex % FAN_ROTATE.length] ?? 0
+                const restOffset = FAN_OFFSET[imageIndex % FAN_OFFSET.length] ?? {
+                  x: 0,
+                  y: 0,
+                }
                 const unfanRotate = UNFAN_ROTATE[imageIndex] ?? restRotate
                 const unfanOffset = UNFAN_OFFSET[imageIndex] ?? restOffset
                 const pose =
-                  shouldReduceMotion || !isFan
+                  shouldReduceMotion || isReturning
                     ? { x: 0, y: 0, rotate: 0 }
-                    : peek
+                    : peek && isFan
                       ? {
                           x: unfanOffset.x,
                           y: unfanOffset.y,
@@ -147,41 +151,49 @@ export function AlbumStack({
                     className="absolute inset-10 lg:inset-14"
                     style={{ zIndex: isFan ? FAN_COUNT - imageIndex : 0 }}
                   >
-                    <AlbumPhoto
-                      layoutId={designImageLayoutId(design.slug, image.name)}
-                      src={image.src}
-                      alt=""
-                      sizes={PHOTO_SIZES}
-                      layoutTransition={
-                        shouldReduceMotion
+                    <motion.div
+                      className="h-full w-full"
+                      initial={false}
+                      animate={pose}
+                      transition={
+                        shouldReduceMotion || isReturning
                           ? { duration: 0 }
-                          : peek
-                            ? UNFAN_TRANSITION
+                          : UNFAN_TRANSITION
+                      }
+                    >
+                      <AlbumPhoto
+                        layoutId={designImageLayoutId(design.slug, image.name)}
+                        src={image.src}
+                        alt=""
+                        sizes={PHOTO_SIZES}
+                        layoutTransition={
+                          shouldReduceMotion
+                            ? { duration: 0 }
                             : {
                                 ...layoutTransition,
                                 delay: imageIndex * STAGGER_EACH,
                               }
-                      }
-                      loading={isLcpCover ? "eager" : "lazy"}
-                      fetchPriority={isLcpCover ? "high" : "low"}
-                      kind={image.kind}
-                      poster={image.poster}
-                      playing={
-                        imageIndex === 0 &&
-                        image.kind === "video" &&
-                        inView &&
-                        !shouldReduceMotion
-                      }
-                      opacity={isFan ? undefined : 0}
-                      x={pose.x}
-                      y={pose.y}
-                      rotate={pose.rotate}
-                      className={
-                        isFan
-                          ? "bg-surface-card h-full w-full overflow-hidden shadow"
-                          : "bg-surface-card pointer-events-none h-full w-full overflow-hidden"
-                      }
-                    />
+                        }
+                        loading={isFan || isLcpCover ? "eager" : "lazy"}
+                        fetchPriority={isLcpCover ? "high" : "low"}
+                        decoding={isFan || isLcpCover ? "sync" : "async"}
+                        kind={image.kind}
+                        poster={image.poster}
+                        playing={
+                          !isReturning &&
+                          imageIndex === 0 &&
+                          image.kind === "video" &&
+                          inView &&
+                          !shouldReduceMotion
+                        }
+                        opacity={isFan ? undefined : 0}
+                        className={
+                          isFan
+                            ? "bg-surface-card h-full w-full overflow-hidden shadow"
+                            : "bg-surface-card pointer-events-none h-full w-full overflow-hidden"
+                        }
+                      />
+                    </motion.div>
                   </div>
                 )
               })}

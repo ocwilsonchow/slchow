@@ -22,8 +22,9 @@ import {
 import { useHideNavbarForOverlay } from "@/features/layout/components/navbar"
 import { usePathname, useRouter } from "@/i18n/navigation"
 import { playClickSound } from "@/lib/click-sound"
-import { ALBUM_SEARCH_PARAM, designAlbumHref } from "../album"
+import { ALBUM_SEARCH_PARAM, designAlbumHref, STAGGER_EACH } from "../album"
 import type { Design } from "../get-designs"
+import { prefetchAlbumThumbs } from "../prefetch"
 import { AlbumOverlayGrid, DesignGallery } from "./design-gallery"
 
 type DesignPageViewProps = {
@@ -79,6 +80,8 @@ function DesignPageInner({
   const expandedSlugRef = useRef(expandedSlug)
   expandedSlugRef.current = expandedSlug
   const expandedAlbum = designs.find((design) => design.slug === expandedSlug)
+  const closingAlbum = designs.find((design) => design.slug === closingSlug)
+  const overlayAlbum = expandedAlbum ?? closingAlbum
 
   useEffect(() => {
     if (!albumFromUrl && expandedSlugRef.current) {
@@ -90,12 +93,14 @@ function DesignPageInner({
 
   useEffect(() => {
     if (expandedSlug || !closingSlug) return
+    const album = designs.find((design) => design.slug === closingSlug)
+    const lastDelay = Math.max(0, (album?.images.length ?? 1) - 1) * STAGGER_EACH
     const timeout = window.setTimeout(
       () => setClosingSlug(null),
-      shouldReduceMotion ? 0 : 400
+      shouldReduceMotion ? 0 : Math.round((0.4 + lastDelay) * 1000)
     )
     return () => window.clearTimeout(timeout)
-  }, [expandedSlug, closingSlug, shouldReduceMotion])
+  }, [expandedSlug, closingSlug, shouldReduceMotion, designs])
 
   const layoutTransition = useMemo<Transition>(
     () =>
@@ -135,6 +140,10 @@ function DesignPageInner({
     []
   )
 
+  const isExpanded = Boolean(expandedAlbum)
+  const overlayOpen = Boolean(overlayAlbum)
+  useHideNavbarForOverlay(overlayOpen)
+
   useEffect(() => {
     if (!expandedSlug) return
 
@@ -147,24 +156,25 @@ function DesignPageInner({
   }, [expandedSlug, collapse])
 
   useEffect(() => {
-    const previousSlug = previousSlugRef.current
+    if (!expandedSlug) return
     previousSlugRef.current = expandedSlug
-
-    if (expandedSlug) {
-      const frame = requestAnimationFrame(() => {
-        backRef.current?.focus({ preventScroll: true })
-      })
-      return () => cancelAnimationFrame(frame)
-    }
-
-    if (previousSlug) {
-      const card = cardRefs.current.get(previousSlug)
-      const frame = requestAnimationFrame(() => {
-        card?.focus({ preventScroll: true })
-      })
-      return () => cancelAnimationFrame(frame)
-    }
+    const frame = requestAnimationFrame(() => {
+      backRef.current?.focus({ preventScroll: true })
+    })
+    return () => cancelAnimationFrame(frame)
   }, [expandedSlug])
+
+  useEffect(() => {
+    if (overlayOpen) return
+    const previousSlug = previousSlugRef.current
+    if (!previousSlug) return
+    previousSlugRef.current = null
+    const card = cardRefs.current.get(previousSlug)
+    const frame = requestAnimationFrame(() => {
+      card?.focus({ preventScroll: true })
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [overlayOpen])
 
   useEffect(() => {
     if (!expandedAlbum && !closingSlug) return
@@ -175,12 +185,16 @@ function DesignPageInner({
     }
   }, [expandedAlbum, closingSlug, lenis])
 
-  const isExpanded = Boolean(expandedAlbum)
-  useHideNavbarForOverlay(isExpanded)
+  useEffect(() => {
+    if (!expandedSlug) return
+    const album = designs.find((design) => design.slug === expandedSlug)
+    if (!album) return
+    prefetchAlbumThumbs(album.images)
+  }, [expandedSlug, designs])
 
   return (
     <LayoutGroup>
-      <div inert={isExpanded} aria-hidden={isExpanded || undefined}>
+      <div inert={overlayOpen} aria-hidden={overlayOpen || undefined}>
         <motion.div
           initial={false}
           animate={{ opacity: isExpanded ? 0 : 1 }}
@@ -214,16 +228,18 @@ function DesignPageInner({
         </div>
       </div>
 
-      {expandedAlbum ? (
-        <div
+      {overlayAlbum ? (
+        <motion.div
           role="dialog"
           aria-modal="true"
-          aria-label={expandedAlbum.title}
+          aria-label={overlayAlbum.title}
           className="fixed inset-0 z-50"
-          onClick={collapse}
+          layoutRoot
+          onClick={isExpanded ? collapse : undefined}
         >
-          <div
+          <motion.div
             className="relative z-10 h-full overflow-y-auto overscroll-contain"
+            layoutScroll
             data-lenis-prevent
           >
             <div className="p-5">
@@ -234,6 +250,7 @@ function DesignPageInner({
                 className="group hover:text-content-ink outline-none focus:outline-none focus-visible:outline-none"
                 onClick={(event) => {
                   event.stopPropagation()
+                  if (!isExpanded) return
                   collapse()
                 }}
               >
@@ -245,13 +262,15 @@ function DesignPageInner({
               </button>
             </div>
             <div className="p-5 pb-50">
-              <AlbumOverlayGrid
-                album={expandedAlbum}
-                layoutTransition={layoutTransition}
-              />
+              {expandedAlbum ? (
+                <AlbumOverlayGrid
+                  album={expandedAlbum}
+                  layoutTransition={layoutTransition}
+                />
+              ) : null}
             </div>
-          </div>
-        </div>
+          </motion.div>
+        </motion.div>
       ) : null}
     </LayoutGroup>
   )

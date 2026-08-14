@@ -1,5 +1,4 @@
-import { FAN_COUNT } from "./album"
-import { designThumbSrc } from "./asset-urls"
+import { DESIGN_THUMB_WIDTHS, designThumbSrc } from "./asset-urls"
 import type { DesignImage } from "./get-designs"
 
 const prefetched = new Set<string>()
@@ -8,15 +7,17 @@ function stillSrc(image: DesignImage) {
   return image.kind === "video" ? image.poster : image.src
 }
 
-/** Warm 800w thumbs for stills/posters that are not in the visible fan. */
+/** Warm 400/800w thumbs for every still/poster the overlay and stack will request. */
 export function prefetchAlbumThumbs(images: DesignImage[]) {
-  for (const image of images.slice(FAN_COUNT)) {
+  for (const image of images) {
     const src = stillSrc(image)
     if (!src) continue
-    const thumb = designThumbSrc(src, 800)
-    if (prefetched.has(thumb)) continue
-    prefetched.add(thumb)
-    const img = new Image()
-    img.src = thumb
+    for (const width of DESIGN_THUMB_WIDTHS) {
+      const thumb = designThumbSrc(src, width)
+      if (prefetched.has(thumb)) continue
+      prefetched.add(thumb)
+      const img = new Image()
+      img.src = thumb
+    }
   }
 }

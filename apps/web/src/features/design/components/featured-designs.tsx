@@ -32,6 +32,7 @@ import { playClickSound } from "@/lib/click-sound"
 import { designAlbumHref, PHOTO_SIZES, STAGGER_EACH } from "../album"
 import type { DesignImage } from "../get-designs"
 import { featuredImageLayoutId } from "../layout-ids"
+import { prefetchAlbumThumbs } from "../prefetch"
 import { useInView } from "../use-in-view"
 import { AlbumPhoto } from "./album-photo"
 
@@ -123,8 +124,9 @@ export function FeaturedDesigns({
 
   const expand = useCallback(() => {
     playClickSound()
+    prefetchAlbumThumbs(images)
     setIsExpanded(true)
-  }, [])
+  }, [images])
 
   useEffect(() => {
     if (!isExpanded) return
@@ -319,7 +321,10 @@ export function FeaturedStack() {
         aria-label={t("openFeatured")}
         className="w-32 text-left outline-none focus:outline-none focus-visible:outline-none"
         onClick={expand}
-        onPointerEnter={() => setIsPeeking(true)}
+        onPointerEnter={() => {
+          prefetchAlbumThumbs(images)
+          setIsPeeking(true)
+        }}
         onPointerLeave={() => setIsPeeking(false)}
         onFocus={(event) => {
           if (event.currentTarget.matches(":focus-visible")) {
@@ -373,8 +378,9 @@ export function FeaturedStack() {
                           ? 0
                           : (images.length - 1 - imageIndex) * STAGGER_EACH,
                       }}
-                      loading={imageIndex === 0 ? "eager" : "lazy"}
+                      loading="eager"
                       fetchPriority={imageIndex === 0 ? "high" : "low"}
+                      decoding="sync"
                       kind={image.kind}
                       poster={image.poster}
                       playing={
@@ -454,6 +460,8 @@ function FeaturedOverlayTile({
             ...layoutTransition,
             delay: shouldReduceMotion ? 0 : imageIndex * STAGGER_EACH,
           }}
+          loading="eager"
+          decoding="sync"
           kind={image.kind}
           poster={image.poster}
           playing={playing}

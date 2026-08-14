@@ -21,6 +21,7 @@ type AlbumPhotoProps = {
   rotate?: number
   loading?: "lazy" | "eager"
   fetchPriority?: "high" | "low" | "auto"
+  decoding?: "async" | "sync" | "auto"
   kind?: DesignImage["kind"]
   poster?: string
   playing?: boolean
@@ -40,6 +41,7 @@ export function AlbumPhoto({
   rotate,
   loading = "lazy",
   fetchPriority,
+  decoding,
   kind,
   poster,
   playing = false,
@@ -62,13 +64,7 @@ export function AlbumPhoto({
       {...(animate
         ? { initial: false as const, animate }
         : {})}
-      transition={{
-        layout: layoutTransition,
-        opacity: layoutTransition,
-        x: layoutTransition,
-        y: layoutTransition,
-        rotate: layoutTransition,
-      }}
+      transition={layoutTransition}
     >
       <DesignAsset
         src={src}
@@ -76,6 +72,7 @@ export function AlbumPhoto({
         sizes={sizes}
         loading={loading}
         fetchPriority={fetchPriority}
+        decoding={decoding}
         kind={kind}
         poster={poster}
         playing={playing}

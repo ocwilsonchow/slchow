@@ -109,9 +109,8 @@ function AlbumOverlayTile({
           delay: shouldReduceMotion ? 0 : imageIndex * STAGGER_EACH,
         }}
         opacity={isFan ? undefined : 1}
-        x={0}
-        y={0}
-        rotate={0}
+        loading="eager"
+        decoding="sync"
         kind={image.kind}
         poster={image.poster}
         playing={playing}
