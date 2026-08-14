@@ -4,9 +4,9 @@ title: Resume — Frontend
 
 ## Wilson, Chow Sin Long
 
-Frontend **software engineer** with **5 years** delivering **medium-to-large** production initiatives in a fast-paced, multi-client environment — React / React Native consumer products from Figma through production, plus the typed Node.js APIs those products run on. Zero-to-one and multi-year evolution of **15+** apps, including App Store / Play Store releases. Cut critical-path load times by up to **80%** and search latency by **90%**. Currently leading the client surface of a multi-channel **Generative AI** agent platform: chat, tool-invocation, and file-mention UIs on durable, interruptible agent runs. Daily workflow includes **Cursor** / AI-assisted development. **AWS Solutions Architect Associate**.
+Frontend **software engineer** with **5 years** delivering **medium-to-large** production initiatives in a fast-paced, multi-client environment — **TypeScript** React / React Native consumer products from Figma through App Store / Play Store, typed REST APIs those apps run on, and mobile auth (OAuth / OIDC, SecureStore / Keychain, biometrics). Zero-to-one and multi-year evolution of **15+** apps. Cut critical-path load times by up to **80%** and search latency by **90%**. Currently leading the client surface of a multi-channel **Generative AI** agent platform: chat, tool-invocation, and file-mention UIs on durable, interruptible agent runs. Daily workflow includes **Cursor** / AI-assisted development. **AWS Solutions Architect Associate**.
 
-Strengths: Frontend engineering · Performance · Complex flows · Typed APIs · Agent UI
+Strengths: Frontend · React Native · Performance · Mobile auth · Typed APIs
 
 ---
 
@@ -17,10 +17,10 @@ Strengths: Frontend engineering · Performance · Complex flows · Typed APIs ·
 Primary engineer for concurrent client products — Figma through production UI and the APIs behind it, partnering with technical and non-technical stakeholders to scope UX and ship reliable, usable releases.
 
 - Shipped and maintained **15+** production React / React Native apps from zero-to-one and over multiple years, including high-fidelity Figma design, shared design systems reused across client work, and App Store / Play Store releases.
-- Replaced a third-party WordPress stack with an in-house headless CMS (Strapi / Sanity) and search (Meilisearch / Algolia) in a **Turborepo**, deployed with **SST**, so publishing continued through the transition: cut load time by **80%**, search latency by **90%**, and hit PageSpeed Insights **>90**. **Dockerized** Node.js APIs and ran them on **ECS Fargate**; other workloads on Lambda / API Gateway. Familiar with **Kubernetes** from AWS Solutions Architect study; production containers are Docker on ECS, not self-managed K8s.
+- Replaced a third-party WordPress stack with an in-house headless CMS (Strapi / Sanity) and search (Meilisearch / Algolia) in a **Turborepo**, deployed with **SST**, so publishing continued through the transition: cut load time by **80%**, search latency by **90%**, and hit PageSpeed Insights **>90**. **Dockerized** Node.js APIs on **ECS Fargate**; other workloads on Lambda / API Gateway.
 - Established shared Radix / Tailwind component and hook libraries with Storybook, Fumadocs, and MDX docs, reused across client apps. Led frontend reviews; Vitest / Cypress on critical flows.
 - Built Next.js apps as isomorphic UI plus a BFF layer: SSR / ISR, aggregating Shopify GraphQL, CMS, and search APIs with caching. Independently debugged Node runtime issues and production bottlenecks across UI and API (Lighthouse, Sentry).
-- Modeled identity as reusable client states against a typed API: Better Auth sessions and org membership, OAuth 2.0 / OIDC, JWT / session lifecycle, and RBAC. Sessions live in **HttpOnly / Secure / SameSite** cookies, not `localStorage` tokens.
+- Modeled identity against a typed API: OAuth 2.0 / OIDC, JWT lifecycle, Better Auth sessions, org membership, and RBAC. On React Native: access token in memory, refresh token in **SecureStore** (iOS Keychain / Android Keystore) — not AsyncStorage — with Face ID / fingerprint to unlock the session. On web: **HttpOnly / Secure / SameSite** cookies, not `localStorage`.
 - Built typed Node.js APIs with Hono, Drizzle / Prisma, OpenAPI, and tRPC. GitHub Actions + SST for CI/CD — lint, typecheck, tests, and build before deploy — cutting deploy time by **50%+**.
 - Mentored summer interns and junior developers through pairing, code reviews, and shipping production work.
 
@@ -55,6 +55,7 @@ Lead frontend for a content + search marketing site — performance, CMS-backed 
 ### React Native Membership Platform, shipped Apr 2024
 
 - Led Figma design and the iOS / Android membership app (digital card, points, offers); shipped to the App Store and Play Store. Also maintained the Express API and Next.js admin.
+- Integrated typed **REST** clients from **OpenAPI**/Swagger with the Express API. Refresh tokens in SecureStore / Keychain; Face ID / fingerprint to unlock the session.
 - Diagnosed production crashes, device compatibility, and performance bottlenecks independently via Sentry across app and API; maintained **99%** crash-free sessions post-launch.
 - Cut list jank with FlashList; froze inactive tabs via react-native-screens and deferred mounts; reserved Reanimated for native-thread transitions.
 - Shortened feed image loading by caching remotes and avoiding full-resolution assets in long lists.
@@ -66,7 +67,7 @@ Lead frontend for a content + search marketing site — performance, CMS-backed 
 
 ## Other Work
 
-Also shipped restaurant loyalty apps (React Native), campaign / e-commerce storefronts (Next.js, Shopify GraphQL), CMS content sites, and a photobooth event app (React Native, Skia).
+Also shipped restaurant loyalty apps (React Native), a homebound elderly care app (Flutter), campaign / e-commerce storefronts (Next.js, Shopify GraphQL), CMS content sites, and a photobooth event app (React Native, Skia).
 
 <br />
 
@@ -76,13 +77,14 @@ Also shipped restaurant loyalty apps (React Native), campaign / e-commerce store
 
 - **Languages**: TypeScript, Node.js
 - **Frontend**: React, Next.js, React Native, Expo, TanStack Query, TanStack Form, Framer Motion, Tailwind CSS, shadcn/ui, Storybook, Figma, MDX, TipTap
+- **Mobile**: FlashList, Reanimated, FCM
 - **Backend**: Hono, Drizzle, Prisma, OpenAPI, tRPC, Postgres, DynamoDB, Better Auth, Multitenancy
-- **Auth & i18n**: OAuth 2.0 / OIDC, JWT, HttpOnly cookies, CORS, RBAC, next-intl
+- **Auth & i18n**: OAuth 2.0 / OIDC, JWT, SecureStore, Keychain / Keystore, biometrics, HttpOnly cookies, CORS, RBAC, next-intl
 - **AI**: Mastra, Vercel AI SDK, Langchain, Pinecone, Strands, AWS Bedrock
 - **Testing & monitoring**: Cypress, Vitest, React Testing Library, Lighthouse, axe, Sentry, PostHog
 - **Workflow**: Cursor, Claude Code
 - **DevOps**: SST, Docker, ECS Fargate, GitHub Actions, AWS · Kubernetes (familiar)
-- **Also used**: Strapi, Sanity, Meilisearch
+- **Also used**: Flutter, Strapi, Sanity, Meilisearch
 
 <br />
 
