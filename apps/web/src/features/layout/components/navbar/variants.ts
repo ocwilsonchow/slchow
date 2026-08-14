@@ -49,8 +49,8 @@ export const contentVariants: Variants = {
       staggerChildren: 0,
       staggerDirection: -1,
       type: "spring",
-      stiffness: 380,
-      damping: 40,
+      stiffness: 600,
+      damping: 60,
     },
   },
   visible: {
@@ -59,8 +59,8 @@ export const contentVariants: Variants = {
     transition: {
       delayChildren: 0.2,
       type: "spring",
-      stiffness: 250,
-      damping: 30,
+      stiffness: 500,
+      damping: 50,
     },
   },
 }
