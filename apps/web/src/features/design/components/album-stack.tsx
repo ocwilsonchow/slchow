@@ -37,6 +37,8 @@ type AlbumStackProps = {
   design: Design
   index: number
   isExpanded: boolean
+  isInactive: boolean
+  isReturning: boolean
   isLcp: boolean
   openAlbumLabel: string
   shouldReduceMotion: boolean
@@ -49,6 +51,8 @@ export function AlbumStack({
   design,
   index,
   isExpanded,
+  isInactive,
+  isReturning,
   isLcp,
   openAlbumLabel,
   shouldReduceMotion,
@@ -73,6 +77,15 @@ export function AlbumStack({
           : { animationDelay: `${STAGGER_DELAY + index * STAGGER_EACH}s` }
       }
     >
+      <motion.div
+        initial={false}
+        animate={{ opacity: isInactive ? 0 : 1 }}
+        transition={
+          shouldReduceMotion
+            ? { duration: 0 }
+            : { ...layoutTransition, delay: 0.4 }
+        }
+      >
       <button
         ref={(el) => {
           if (!el) return
@@ -81,7 +94,10 @@ export function AlbumStack({
         }}
         type="button"
         aria-label={openAlbumLabel}
-        className="flex w-full flex-col gap-3 text-left outline-none focus:outline-none focus-visible:outline-none"
+        className={cn(
+          "flex w-full flex-col gap-3 text-left outline-none focus:outline-none focus-visible:outline-none",
+          isReturning && "relative z-60"
+        )}
         onClick={() => {
           prefetchAlbumThumbs(design.images)
           onExpand(design.slug)
@@ -159,10 +175,11 @@ export function AlbumStack({
                         inView &&
                         !shouldReduceMotion
                       }
+                      opacity={isFan ? undefined : 0}
                       className={
                         isFan
                           ? "bg-surface-card h-full w-full overflow-hidden shadow"
-                          : "bg-surface-card pointer-events-none h-full w-full overflow-hidden opacity-0"
+                          : "bg-surface-card pointer-events-none h-full w-full overflow-hidden"
                       }
                     />
                   </motion.div>
@@ -170,6 +187,7 @@ export function AlbumStack({
               })}
         </div>
       </button>
+      </motion.div>
     </li>
   )
 }

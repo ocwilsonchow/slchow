@@ -29,7 +29,7 @@ import {
 import { useHideNavbarForOverlay } from "@/features/layout/components/navbar"
 import { Link } from "@/i18n/navigation"
 import { playClickSound } from "@/lib/click-sound"
-import { PHOTO_SIZES, STAGGER_EACH } from "../album"
+import { designAlbumHref, PHOTO_SIZES, STAGGER_EACH } from "../album"
 import type { DesignImage } from "../get-designs"
 import { featuredImageLayoutId } from "../layout-ids"
 import { useInView } from "../use-in-view"
@@ -430,25 +430,36 @@ function FeaturedOverlayTile({
   layoutTransition,
   shouldReduceMotion,
 }: FeaturedOverlayTileProps) {
+  const t = useTranslations("a11y")
   const { ref, inView } = useInView<HTMLLIElement>()
   const playing = image.kind === "video" && inView && !shouldReduceMotion
 
   return (
     <li ref={ref} className="aspect-square" data-featured-photo="">
-      <AlbumPhoto
-        layoutId={featuredImageLayoutId(image.slug, image.name)}
-        src={image.src}
-        alt=""
-        sizes={PHOTO_SIZES}
-        layoutTransition={{
-          ...layoutTransition,
-          delay: shouldReduceMotion ? 0 : imageIndex * STAGGER_EACH,
+      <Link
+        href={designAlbumHref(image.slug)}
+        aria-label={t("openAlbum", { title: image.slug })}
+        className="block h-full w-full outline-none focus:outline-none focus-visible:outline-none"
+        onClick={(event) => {
+          event.stopPropagation()
+          playClickSound()
         }}
-        kind={image.kind}
-        poster={image.poster}
-        playing={playing}
-        className="bg-surface-card h-full w-full overflow-hidden"
-      />
+      >
+        <AlbumPhoto
+          layoutId={featuredImageLayoutId(image.slug, image.name)}
+          src={image.src}
+          alt=""
+          sizes={PHOTO_SIZES}
+          layoutTransition={{
+            ...layoutTransition,
+            delay: shouldReduceMotion ? 0 : imageIndex * STAGGER_EACH,
+          }}
+          kind={image.kind}
+          poster={image.poster}
+          playing={playing}
+          className="bg-surface-card h-full w-full overflow-hidden"
+        />
+      </Link>
     </li>
   )
 }
