@@ -22,9 +22,15 @@ import {
 import { useHideNavbarForOverlay } from "@/features/layout/components/navbar"
 import { usePathname, useRouter } from "@/i18n/navigation"
 import { playClickSound } from "@/lib/click-sound"
-import { ALBUM_SEARCH_PARAM, designAlbumHref, STAGGER_EACH } from "../album"
+import {
+  ALBUM_SEARCH_PARAM,
+  CHEAP_MOTION_DURATION,
+  designAlbumHref,
+  STAGGER_EACH,
+} from "../album"
 import type { Design } from "../get-designs"
 import { prefetchAlbumThumbs } from "../prefetch"
+import { useCoarsePointer } from "../use-coarse-pointer"
 import { AlbumOverlayGrid, DesignGallery } from "./design-gallery"
 
 type DesignPageViewProps = {
@@ -66,6 +72,8 @@ function DesignPageInner({
   const t = useTranslations("a11y")
   const tNav = useTranslations("navigation")
   const shouldReduceMotion = useReducedMotion() ?? false
+  const coarsePointer = useCoarsePointer()
+  const sharedLayout = !shouldReduceMotion && !coarsePointer
   const lenis = useLenis()
   const router = useRouter()
   const pathname = usePathname()
@@ -97,10 +105,14 @@ function DesignPageInner({
     const lastDelay = Math.max(0, (album?.images.length ?? 1) - 1) * STAGGER_EACH
     const timeout = window.setTimeout(
       () => setClosingSlug(null),
-      shouldReduceMotion ? 0 : Math.round((0.4 + lastDelay) * 1000)
+      shouldReduceMotion
+        ? 0
+        : Math.round(
+            (sharedLayout ? 0.4 + lastDelay : CHEAP_MOTION_DURATION) * 1000
+          )
     )
     return () => window.clearTimeout(timeout)
-  }, [expandedSlug, closingSlug, shouldReduceMotion, designs])
+  }, [expandedSlug, closingSlug, shouldReduceMotion, sharedLayout, designs])
 
   const layoutTransition = useMemo<Transition>(
     () =>
@@ -201,7 +213,9 @@ function DesignPageInner({
           transition={
             shouldReduceMotion
               ? { duration: 0 }
-              : { ...layoutTransition, delay: isExpanded ? 0 : 0.1 }
+              : sharedLayout
+                ? { ...layoutTransition, delay: isExpanded ? 0 : 0.1 }
+                : { duration: CHEAP_MOTION_DURATION }
           }
           className="lg:grid lg:grid-cols-2 sm:space-y-4 lg:relative p-5"
         >
@@ -221,6 +235,7 @@ function DesignPageInner({
             returningSlug={closingSlug}
             openAlbumLabel={(title) => t("openAlbum", { title })}
             shouldReduceMotion={shouldReduceMotion}
+            sharedLayout={sharedLayout}
             layoutTransition={layoutTransition}
             onExpand={expand}
             registerCard={registerCard}
@@ -234,12 +249,21 @@ function DesignPageInner({
           aria-modal="true"
           aria-label={overlayAlbum.title}
           className="fixed inset-0 z-50"
-          layoutRoot
+          layoutRoot={sharedLayout}
+          initial={sharedLayout ? false : { opacity: 0 }}
+          animate={{ opacity: sharedLayout || isExpanded ? 1 : 0 }}
+          transition={{
+            duration:
+              sharedLayout || shouldReduceMotion ? 0 : CHEAP_MOTION_DURATION,
+          }}
           onClick={isExpanded ? collapse : undefined}
         >
+          {sharedLayout ? null : (
+            <div className="bg-surface-canvas absolute inset-0" />
+          )}
           <motion.div
             className="relative z-10 h-full overflow-y-auto overscroll-contain"
-            layoutScroll
+            layoutScroll={sharedLayout}
             data-lenis-prevent
           >
             <div className="p-5">
@@ -247,7 +271,7 @@ function DesignPageInner({
                 ref={backRef}
                 type="button"
                 aria-label={t("backToAlbums")}
-                className="group hover:text-content-ink outline-none focus:outline-none focus-visible:outline-none"
+                className="group hover:text-content-ink select-none outline-none focus:outline-none focus-visible:outline-none"
                 onClick={(event) => {
                   event.stopPropagation()
                   if (!isExpanded) return
@@ -262,10 +286,12 @@ function DesignPageInner({
               </button>
             </div>
             <div className="p-5 pb-50">
-              {expandedAlbum ? (
+              {expandedAlbum || !sharedLayout ? (
                 <AlbumOverlayGrid
-                  album={expandedAlbum}
+                  album={overlayAlbum}
                   layoutTransition={layoutTransition}
+                  shouldReduceMotion={shouldReduceMotion}
+                  sharedLayout={sharedLayout}
                 />
               ) : null}
             </div>
