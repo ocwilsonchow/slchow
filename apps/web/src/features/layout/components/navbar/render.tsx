@@ -136,13 +136,13 @@ function NavbarTriggerLabel() {
   const pathLabel = pathTitleKey ? t(pathTitleKey) : pathname.replace(/^\//, "")
 
   return (
-    <div className="flex items-center justify-center gap-4">
+    <div className="flex items-center justify-center gap-3">
       <Image
         src={profilePicture}
         alt={tA11y("profileAlt")}
-        width={26}
-        height={26}
-        sizes="26px"
+        width={28}
+        height={28}
+        sizes="28px"
         priority
         className="rounded-full"
       />

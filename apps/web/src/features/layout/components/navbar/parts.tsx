@@ -196,7 +196,7 @@ function Frame({
         <nav
           ref={navRef}
           aria-label={t("menu")}
-          className="bg-surface-popover border border-stroke-soft/75 text-content-body-on-popover rounded-2xl sm:max-w-sm [&_a]:outline-none [&_a]:focus:outline-none [&_a]:focus-visible:outline-none [&_button]:outline-none [&_button]:focus:outline-none [&_button]:focus-visible:outline-none"
+          className="bg-surface-popover border border-stroke-soft/75 text-content-body-on-popover rounded-3xl sm:max-w-sm [&_a]:outline-none [&_a]:focus:outline-none [&_a]:focus-visible:outline-none [&_button]:outline-none [&_button]:focus:outline-none [&_button]:focus-visible:outline-none"
         >
           {children}
         </nav>
@@ -251,7 +251,7 @@ function Trigger({
         onClick?.(event)
       }}
       className={cn(
-        "px-1.25 w-full h-9 font-medium leading-none rounded-full flex items-center justify-between text-content-ink-on-popover",
+        "px-2 w-full h-9.5 font-medium leading-none rounded-full flex items-center justify-between text-content-ink-on-popover",
         className
       )}
     >
