@@ -1,1 +1,15 @@
-{}
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "lib": ["ESNext"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "types": ["node"]
+  },
+  "include": ["sst.config.ts", "scripts/**/*.mts"],
+  "exclude": ["node_modules", ".sst"]
+}
