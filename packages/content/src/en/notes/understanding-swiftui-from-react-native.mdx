@@ -903,7 +903,7 @@ Read the pair as one mapping, not two tutorials:
 - **Ownership:** `useState` on the screen vs `@State` owning an `@Observable` store.
 - **Load + cancel:** `useEffect` + `AbortController` vs `.task` / `.task(id:)`.
 - **Refresh:** `RefreshControl` vs `.refreshable`.
-- **Push:** `router.push(\`/notes/${id}\`)` vs `NavigationLink(value:)` + `navigationDestination`.
+- **Push:** `router.push("/notes/" + id)` vs `NavigationLink(value:)` + `navigationDestination`.
 
 The SwiftUI detail still fetches, even though the list already had a `Note`. That is deliberate. A list row is not a full document. The RN detail does the same. Passing the whole `Note` as the navigation value is convenience for `title`, not a cache policy.
 

@@ -903,7 +903,7 @@ struct NoteDetailView: View {
 - **Ownership：** screen 上の `useState` vs `@Observable` store を所有する `@State`。
 - **Load + cancel：** `useEffect` + `AbortController` vs `.task` / `.task(id:)`。
 - **Refresh：** `RefreshControl` vs `.refreshable`。
-- **Push：** `router.push(\`/notes/${id}\`)` vs `NavigationLink(value:)` + `navigationDestination`。
+- **Push：** `router.push("/notes/" + id)` vs `NavigationLink(value:)` + `navigationDestination`。
 
 SwiftUI の detail は、list がすでに `Note` を持っていても、依然として fetch します。それは意図的です。list row は完全な document ではありません。RN の detail も同じです。navigation value として `Note` 全体を渡すのは `title` のための convenience であり、cache policy ではありません。
 

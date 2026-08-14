@@ -903,7 +903,7 @@ struct NoteDetailView: View {
 - **Ownership：** screen 上的 `useState` vs 用 `@State` 持有 `@Observable` store。
 - **Load + cancel：** `useEffect` + `AbortController` vs `.task` / `.task(id:)`。
 - **Refresh：** `RefreshControl` vs `.refreshable`。
-- **Push：** `router.push(\`/notes/${id}\`)` vs `NavigationLink(value:)` + `navigationDestination`。
+- **Push：** `router.push("/notes/" + id)` vs `NavigationLink(value:)` + `navigationDestination`。
 
 SwiftUI 的 detail 仍然会 fetch，即使 list 里已经有一份 `Note`。这是故意的。List row 不是完整 document。RN 的 detail 也一样。把整份 `Note` 当作 navigation value 传过去，是为了 `title` 的方便，不是 cache policy。
 
