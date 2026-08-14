@@ -1,11 +1,11 @@
 ---
-title: What I Have Learnt as a Frontend Engineer
+title: What Production Teaches a Frontend Engineer
 description: Four lessons from building and operating production web and mobile products
 date: 2026-08-12
 category: frontend
 ---
 
-Four years ago, I thought frontend engineering meant turning designs into polished interfaces. Production taught me to look beyond the component: architecture, data freshness, reliability, delivery, and measurable user outcomes are all part of the job.
+Four years ago, frontend engineering looked like turning designs into polished interfaces. Production taught a different lesson: architecture, data freshness, reliability, delivery, and measurable user outcomes are all part of the job.
 
 <br />
 
@@ -36,7 +36,7 @@ The metrics below are project outcomes, not universal benchmarks. What matters i
     <AccordionTrigger>1. Fix the real bottleneck</AccordionTrigger>
     <AccordionContent>
       A legacy WordPress stack had become the bottleneck for page delivery and
-      search. We separated its responsibilities:
+      search. Its responsibilities were separated:
 
       - **Strapi / Sanity** managed structured content and editorial workflows
       - **Meilisearch / Algolia** handled indexing and retrieval
@@ -71,7 +71,7 @@ The metrics below are project outcomes, not universal benchmarks. What matters i
   <AccordionItem value="reliability">
     <AccordionTrigger>3. Remove work users cannot see</AccordionTrigger>
     <AccordionContent>
-      For an image-heavy React Native membership app, we:
+      For an image-heavy React Native membership app, the team:
 
       - recycled long lists with **FlashList**
       - tuned rendering windows instead of mounting everything eagerly
@@ -80,7 +80,7 @@ The metrics below are project outcomes, not universal benchmarks. What matters i
       - used **Reanimated** only where native-thread execution helped
 
       Device profiling and **Sentry** monitoring continued after release. The app
-      maintained more than **99.5% crash-free sessions**, giving us a concrete
+      maintained more than **99.5% crash-free sessions**, establishing a concrete
       reliability baseline rather than a launch-day opinion.
     </AccordionContent>
   </AccordionItem>
@@ -89,7 +89,7 @@ The metrics below are project outcomes, not universal benchmarks. What matters i
     <AccordionTrigger>4. Improve how the frontend ships</AccordionTrigger>
     <AccordionContent>
       Across **15+ React and React Native applications**, repeated friction became
-      delivery risk. We invested in:
+      delivery risk. The team invested in:
 
       - shared primitives with **Radix**, **Tailwind CSS**, and reusable hooks
       - examples and guidance in **Storybook**, **Fumadocs**, and MDX
@@ -110,7 +110,7 @@ The metrics below are project outcomes, not universal benchmarks. What matters i
 
 <br />
 
-## What “Senior” Means to Me Now
+## What "Senior" Means Now
 
 - Measure the **user journey**, not only component render time.
 - Match the **architecture to the bottleneck**, even when it sits outside the frontend repository.

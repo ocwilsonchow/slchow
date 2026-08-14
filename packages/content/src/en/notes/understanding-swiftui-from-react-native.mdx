@@ -1,0 +1,930 @@
+---
+title: Understanding SwiftUI from React Native
+description: How View, identity, state, layout, lists, navigation, and Swift concurrency map onto the React Native concepts you already have — and where the analogy breaks
+date: 2026-08-15
+category: frontend
+---
+
+SwiftUI is often introduced as "React, but the views are written in Swift." That description is not wrong, but it is too compressed to explain why a `View` struct is recreated on every update without losing `@State`, why `ForEach` without a stable id shuffles rows the way a missing `key` does, why `.onAppear` is not `useEffect([])`, or why `async`/`await` in Swift can data-race when the same pattern in JavaScript cannot.
+
+This stack ships React Native **through Expo**. This note is the mapping used when reading SwiftUI. It is not a shipping diary. It does not assume a native App Store app. It assumes you already understand React Native as a **host renderer for React**: Fibers, commit, Fabric, Yoga, and a JS thread that is too late for gestures. That model is [Understanding React Native in Depth](/notes/understanding-react-native-in-depth). This note starts where that one ends. You already understand the native view tree. Now write it without React.
+
+<br />
+
+```text
+RN:  setState → React render (Fibers) → commit → Fabric → UIView
+SwiftUI: state mutation → invalidate body → value tree → diff by identity → UIView
+```
+
+<br />
+
+The samples target **iOS 17+** Observation (`@Observable`, `@State`, `@Binding`, `@Environment`) and **Swift 6** isolation (`MainActor`, `Task` cancellation). React Native samples match the Expo SDK 57 line in the sibling note: function components, hooks, `expo-router`. Combine's `ObservableObject` / `@ObservedObject` appears once, as the older path you will still see in tutorials.
+
+It distinguishes four kinds of statements:
+
+- A **React Native contract**, such as `<View>` and `<Text>` being different host components, or `key` identity on a Fiber.
+- A **SwiftUI contract**, such as `View` being a value description, or `@State` living in the framework's identity slot rather than on the struct.
+- A **Swift language rule**, such as structs copying on assignment, or `async` functions running on whatever executor they inherit until you hop.
+- An **implementation observation**, such as `List` wrapping `UICollectionView`. Observations help you read stack traces. Application code must not depend on them.
+
+The throughline is a small **notes list → detail** screen: fetch, pull to refresh, push a detail route. Snippets in the middle sections are the smallest pair that proves the mapping. Section 13 puts both stacks in one place.
+
+<br />
+
+---
+
+## 1. What This Note Is
+
+A React Native engineer already has the right abstractions: a tree of views, state that invalidates that tree, layout, lazy lists, a native stack, gestures that cannot wait for JavaScript, and async work with cancellation. SwiftUI remaps each of those onto a different runtime.
+
+What transfers:
+
+- **Describe, then let the framework update the host.** JSX returns elements. `body` returns `some View`. Neither is the `UIView` on screen.
+- **Identity decides what state survives.** React uses type + `key` on a Fiber. SwiftUI uses structural position, plus explicit `id:` / `ForEach` ids.
+- **Lists are lazy, navigation is native, layout is a separate pass.** FlashList, `expo-router`'s native stack, and Yoga have SwiftUI counterparts. They are not the same algorithms.
+
+What does not transfer is the **runtime**. There is no Hermes, no Fabric shadow tree, no Yoga, no Metro bundle you can replace over the air. SwiftUI is compiled into the IPA. The update loop is a value-tree diff the framework owns, not a React render/commit.
+
+This note will not walk Xcode, signing, or the App Store. It will not teach UIKit wrapping, The Composable Architecture, SwiftData, or Combine as the default state path. Those are later notes, or different jobs.
+
+<br />
+
+---
+
+## 2. The Runtime Is Not React
+
+React Native's loop is [React's render and commit](/notes/understanding-react-in-depth) plus a host renderer. A setter schedules work. React reconciles Fibers. Fabric mounts or updates `UIView` instances. Yoga has already sized the shadow tree. Gestures that must not drop frames leave that loop and run on the UI thread through Reanimated or Gesture Handler.
+
+SwiftUI's loop has no Fiber, no JS thread, and no Yoga. A `View` is a **value**. When state that the view reads changes, SwiftUI invalidates that view, asks for a new `body`, diffs the new value tree against the previous one **by identity**, and updates the underlying UIKit attributes. The `View` struct you wrote is not the object on screen. Recreating it is expected and cheap.
+
+<br />
+
+```mermaid
+flowchart TD
+  subgraph rnFlow [React Native]
+    RNState["useState setter"] --> RNRender["React render Fibers"]
+    RNRender --> RNCommit["Commit"]
+    RNCommit --> RNFabric["Fabric mount"]
+    RNFabric --> RNHost["UIView"]
+  end
+  subgraph swiftFlow [SwiftUI]
+    SwiftState["State or Observable mutation"] --> SwiftInvalidate["Invalidate views"]
+    SwiftInvalidate --> SwiftBody["Recompute body"]
+    SwiftBody --> SwiftDiff["Diff by identity"]
+    SwiftDiff --> SwiftHost["Update UIView"]
+  end
+```
+
+<br />
+
+The same-looking lie is that `body` is `render()`. Both are descriptions. The difference is ownership. React owns a Fiber for each component instance and stores Hooks on it. SwiftUI owns an identity map and stores `@State` there. Your struct is an input to that map, not the instance.
+
+An implementation observation: SwiftUI still sits on UIKit (`UIView`, `UICollectionView`, `UINavigationController`). You do not get a different pixels pipeline by writing `VStack`. You get a different **description language** and a different **identity/state** model. Thinking "no UIKit" will not help you read a stack trace.
+
+<br />
+
+---
+
+## 3. Swift Traps React Native Engineers Hit
+
+JavaScript values are references unless they are primitives. Mutating a field of an object is visible to every alias. Swift's default for data you put in a `View` is the opposite: **`struct` is a value**. Assignment copies. Mutation of a copy does not change the original.
+
+That is a Swift language rule. It matters because `View` is a protocol adopted by structs. The framework is built on cheap copies, not on long-lived component instances.
+
+<br />
+
+```ts
+type Note = { id: string; title: string }
+
+const a: Note = { id: "1", title: "Draft" }
+const b = a
+b.title = "Published"
+// a.title === "Published"
+```
+
+<br />
+
+```swift
+struct Note {
+  var id: String
+  var title: String
+}
+
+var a = Note(id: "1", title: "Draft")
+var b = a
+b.title = "Published"
+// a.title == "Draft"
+```
+
+<br />
+
+`class` is the reference type. Two variables can point at the same instance. `@Observable` models are classes because the store must be shared and mutated in place. The view that **reads** the store is still a struct.
+
+`let` vs `var` is not `const` vs `let` in TypeScript. `let` binds a name that cannot be reassigned. A `let` struct cannot have its properties mutated. A `let` class reference cannot be pointed at a different instance, but the instance's `var` properties still can.
+
+Optionals (`String?`, `Note?`) are a type, not a runtime `undefined`. You unwrap them (`if let`, `guard let`, `??`) instead of checking `== null`. SwiftUI uses optionals heavily for presentation: `.sheet(item:)` takes a `Binding<Item?>` and presents when it is non-nil.
+
+None of this is UI. Skip it and `@State` looks like magic mutation of an immutable struct. It is not. The property wrapper talks to SwiftUI's identity slot. The struct you see in `body` is a fresh value that **projects** that slot.
+
+<br />
+
+---
+
+## 4. View Is a Description, Not a Component Instance
+
+A function component is a function from props (and Hook state) to a React element. A SwiftUI view is a **struct that conforms to `View`** and exposes `body`.
+
+<br />
+
+```tsx
+function NoteRow({ title }: { title: string }) {
+  return (
+    <View>
+      <Text>{title}</Text>
+    </View>
+  )
+}
+```
+
+<br />
+
+```swift
+struct NoteRow: View {
+  let title: String
+
+  var body: some View {
+    Text(title)
+  }
+}
+```
+
+<br />
+
+What is the same: both are **pure descriptions**. Calling `NoteRow` / constructing `NoteRow(title:)` does not mount a `UIView`. It produces a value the framework will reconcile.
+
+What lies:
+
+- **`body` is a computed property, not a function you call.** SwiftUI calls it. Side effects in `body` are in the same class of bug as side effects during React render.
+- **`some View` is an opaque type.** The compiler knows the concrete nested type (`Text`, or `VStack<Text>`, or whatever you composed). Callers do not. It is not `ReactElement`. It is not `any View` (type erasure). `AnyView` exists and costs identity and performance. Prefer `some View`.
+- **`ViewBuilder` is a result builder**, the compiler feature that lets you write `VStack { Text("A"); Text("B") }` without returning an array. JSX is syntax for `jsx()`. The list of children is a different mechanism. `if` / `switch` inside a builder **change structural identity**. That is section 5.
+
+Recreating the struct on every invalidation is the point. There is no equivalent of "the component instance that survived this setState." Cheap value, persistent identity slot.
+
+Xcode Previews are not Fast Refresh. Fast Refresh replaces a JS function and tries to keep Hook state. A preview re-instantiates the view tree in a canvas. Useful. Different delivery path.
+
+<br />
+
+---
+
+## 5. Identity Is Not Fiber Identity
+
+React's public identity rule is type + position, overridden by `key`. [Understanding React in Depth](/notes/understanding-react-in-depth) is the Fiber version. State lives on the Fiber. Change the key, and React treats it as a new instance: state resets.
+
+SwiftUI's public identity rule is **structural identity** (where the view sits in the `body` tree), overridden by explicit identity: `ForEach`'s `id`, `.id(_:)`, and identifiable navigation values.
+
+`@State` is **not stored on the struct**. The struct is copied. SwiftUI stores the state in a slot keyed by that view's identity. If identity is stable, the slot survives a new `body`. If identity changes, the slot is new and state resets. If two rows share an identity, they share a slot and state looks "sticky" on the wrong row — the same bug as a duplicate `key`.
+
+<br />
+
+```tsx
+notes.map((note) => (
+  <NoteRow key={note.id} title={note.title} />
+))
+```
+
+<br />
+
+```swift
+ForEach(notes) { note in
+  NoteRow(title: note.title)
+}
+
+// Note: Identifiable, or:
+ForEach(notes, id: \.id) { note in
+  NoteRow(title: note.title)
+}
+```
+
+<br />
+
+What is the same: **stable ids keep state and animations on the right row.** Index-as-id is the same trap as `key={index}`.
+
+What lies:
+
+- **`if` / `else` in a `ViewBuilder` is a type-level branch.** SwiftUI sees two different structural positions, not one view whose props changed. Each branch has its own identity. Conditional `return` in React is still the same component type if you rendered the same function. Conditional `if` in SwiftUI is closer to swapping `{condition ? <A /> : <B />}` **without keys**, except the framework is stricter about it.
+- **`.id(newValue)` forces a new identity.** Use it when you mean remount. Do not use it to "reset a form" by accident on every keystroke.
+- **`ForEach` with a range** (`ForEach(0..<count)`) is index identity. Prefer data with ids.
+
+The notes list depends on this. A row's `@State` (a swipe offset, an expanded flag) must follow `note.id`, not the row's current index in the array.
+
+<br />
+
+---
+
+## 6. State
+
+React state is a Hook slot on a Fiber. SwiftUI state is a slot on an identity. The mappings that hold:
+
+| Role | React Native | SwiftUI (iOS 17+) |
+| --- | --- | --- |
+| Local UI state | `useState` | `@State` |
+| Controlled child | `value` + `onChange` | `@Binding` (`$state`) |
+| Shared screen model | module store, Context, Zustand | `@Observable` class, often owned with `@State`, passed or put in `Environment` |
+| Read-only dependency | Context | `@Environment` / `@Environment(\.dismiss)` |
+
+<br />
+
+```tsx
+function NoteEditor() {
+  const [title, setTitle] = useState("")
+
+  return (
+    <TextInput value={title} onChangeText={setTitle} />
+  )
+}
+```
+
+<br />
+
+```swift
+struct NoteEditor: View {
+  @State private var title = ""
+
+  var body: some View {
+    TextField("Title", text: $title)
+  }
+}
+```
+
+<br />
+
+What is the same: a local value, a way to write it, a rebuild when it changes. `$title` is a `Binding<String>` — the SwiftUI name for "value plus setter." Passing `$title` into a child is lifting in reverse: the parent owns, the child writes through.
+
+<br />
+
+```tsx
+function TitleField({
+  value,
+  onChange,
+}: {
+  value: string
+  onChange: (next: string) => void
+}) {
+  return <TextInput value={value} onChangeText={onChange} />
+}
+```
+
+<br />
+
+```swift
+struct TitleField: View {
+  @Binding var title: String
+
+  var body: some View {
+    TextField("Title", text: $title)
+  }
+}
+```
+
+<br />
+
+A screen's notes array does not belong in `@State` on every row. It belongs in a model the list and the detail both read. That model is a **class** marked `@Observable`. The view **owns** it with `@State` (iOS 17's rule for Observable instances) or receives it.
+
+<br />
+
+```swift
+import Observation
+import SwiftUI
+
+@Observable
+final class NotesStore {
+  var notes: [Note] = []
+  var isLoading = false
+}
+
+struct NotesListView: View {
+  @State private var store = NotesStore()
+
+  var body: some View {
+    List(store.notes) { note in
+      Text(note.title)
+    }
+  }
+}
+```
+
+<br />
+
+SwiftUI tracks which properties `body` **read**. Mutating `isLoading` does not invalidate a view that only read `notes`. That is finer than a typical React context value, where any store tick re-renders every consumer unless you split contexts or select.
+
+`@Environment(NotesStore.self)` is how you pass the store down without props. It is Context, not Redux. There is no reducer requirement. There is no time-travel. Do not import a JS Flux vocabulary that the framework does not have.
+
+**Older path, one paragraph.** Pre-Observation code uses `ObservableObject`, `@Published`, `@StateObject` (owner), and `@ObservedObject` (child). Those types sit on Combine's `objectWillChange`. You will still see them in samples. New code on iOS 17+ should not start there. `@StateObject` is not `@State`. `@ObservedObject` does not own the object; if a parent recreates it, you reset. That ownership distinction is why Observation + `@State` is the teaching default here.
+
+<br />
+
+---
+
+## 7. Layout Is Not Yoga
+
+Yoga is flexbox: `flexDirection`, `justifyContent`, `alignItems`, `flex: 1`, margins. React Native has no CSSOM, but the **algorithm** is still Yoga on the shadow tree.
+
+SwiftUI layout is a **proposal protocol**. The parent proposes a size. The child chooses a size (at most the proposal, unless it ignores it). The parent places the child. `HStack`, `VStack`, and `ZStack` are the three composition axes. They are not `flexDirection: 'row' | 'column'` with z-index. `ZStack` is overlay, not a third flex direction.
+
+<br />
+
+```tsx
+function NoteCard({
+  title,
+  excerpt,
+}: {
+  title: string
+  excerpt: string
+}) {
+  return (
+    <View style={styles.card}>
+      <View style={styles.text}>
+        <Text style={styles.title}>{title}</Text>
+        <Text style={styles.excerpt}>{excerpt}</Text>
+      </View>
+    </View>
+  )
+}
+
+const styles = StyleSheet.create({
+  card: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 12,
+    padding: 16,
+  },
+  text: {
+    flex: 1,
+    gap: 4,
+  },
+  title: { fontWeight: "600" },
+  excerpt: { opacity: 0.7 },
+})
+```
+
+<br />
+
+```swift
+struct NoteCard: View {
+  let title: String
+  let excerpt: String
+
+  var body: some View {
+    HStack(alignment: .top, spacing: 12) {
+      VStack(alignment: .leading, spacing: 4) {
+        Text(title).font(.headline)
+        Text(excerpt).foregroundStyle(.secondary)
+      }
+      Spacer()
+    }
+    .padding(16)
+  }
+}
+```
+
+<br />
+
+What is the same: a row, leading alignment, inner column, padding.
+
+What lies:
+
+- **`Spacer()` is not `flex: 1` on a sibling in general.** It is a view that expands along the stack's axis and eats remaining proposed space. In an `HStack` it pushes. In a `VStack` it pushes vertically. Putting `flex: 1` on the text container in RN is "this column takes leftover width." In SwiftUI that is often `.frame(maxWidth: .infinity, alignment: .leading)` on the `VStack`, not a spacer after it. The snippet uses `Spacer()` to match the visual of leftover space on the trailing edge.
+- **`.frame(width:height:)` is a proposal, then a size.** It is not always `width` / `height` in Yoga. `maxWidth: .infinity` means "take whatever the parent proposed."
+- **Safe area is on by default.** SwiftUI lays out inside it. `.ignoresSafeArea()` opts out. RN's default `View` does **not** inset; you add `SafeAreaView` or `useSafeAreaInsets()`. The defaults are inverted.
+- **There is no `StyleSheet`.** Modifiers (`.padding`, `.background`, `.clipShape`) wrap the value. Order matters: `.padding().background()` is not `.background().padding()`. That is closer to nested Views than to a flat style object.
+
+Do not animate `height` every frame in either stack. In RN that fights Yoga and Fabric. In SwiftUI that fights the layout pass. Prefer transforms and opacity, same as on native.
+
+<br />
+
+---
+
+## 8. Lists
+
+`FlatList` / FlashList recycle cells. `ScrollView` + `map` does not. The RN contract is: long data goes through a virtualized list, and `keyExtractor` is identity.
+
+SwiftUI's `List` is lazy. `ForEach` inside `List` is lazy. `ForEach` inside a plain `ScrollView` is **not**, unless you switch to `LazyVStack` / `LazyHStack`. That last sentence is the FlashList-versus-`map` conversation with different names.
+
+<br />
+
+```tsx
+<FlatList
+  data={notes}
+  keyExtractor={(item) => item.id}
+  renderItem={({ item }) => <NoteRow title={item.title} />}
+/>
+```
+
+<br />
+
+```swift
+List(notes) { note in
+  NoteRow(title: note.title)
+}
+
+// Or:
+ScrollView {
+  LazyVStack {
+    ForEach(notes) { note in
+      NoteRow(title: note.title)
+    }
+  }
+}
+```
+
+<br />
+
+What is the same: data in, identity per row, a row renderer, recycling.
+
+What lies:
+
+- **`List` brings platform styling** (inset grouped, separators, swipe actions). FlashList is a blank recycling surface. If you want a custom feed, `ScrollView` + `LazyVStack` is closer to FlashList than `List` is.
+- **`onAppear` on a row fires when the row is realized**, not when the screen mounts. That is viewability, not `useEffect` on the list screen. Section 12.
+- **Identity bugs show up as the wrong row animating.** Fix the `id`, not the animation.
+
+Pull to refresh is `.refreshable` on the list, versus `RefreshControl` on `FlatList`. Both are UI-thread, platform controls. Neither should fetch on the JS/main thread in a way that blocks frames — in Swift there is no JS thread, but a synchronous load on the main actor still blocks UI.
+
+<br />
+
+---
+
+## 9. Navigation
+
+`expo-router` maps files under `app/` to a **native** stack (`@react-navigation/native-stack`). URLs, deep links, and layouts are the Expo contract. The transition still runs on `UINavigationController`.
+
+SwiftUI's `NavigationStack` is also a native stack. It is not a URL tree unless you build one. The value you push is the route. `navigationDestination(for:)` is the registrar.
+
+<br />
+
+```tsx
+// app/notes/_layout.tsx
+import { Stack } from "expo-router"
+
+export default function NotesLayout() {
+  return <Stack />
+}
+
+// app/notes/index.tsx
+import { useRouter } from "expo-router"
+import { Pressable, Text } from "react-native"
+
+function NoteLink({ id, title }: { id: string; title: string }) {
+  const router = useRouter()
+  return (
+    <Pressable onPress={() => router.push(`/notes/${id}`)}>
+      <Text>{title}</Text>
+    </Pressable>
+  )
+}
+```
+
+<br />
+
+```swift
+NavigationStack {
+  List(notes) { note in
+    NavigationLink(value: note) {
+      Text(note.title)
+    }
+  }
+  .navigationDestination(for: Note.self) { note in
+    NoteDetailView(note: note)
+  }
+}
+```
+
+<br />
+
+`Note` must be `Hashable` (and usually `Identifiable`) to live on the path.
+
+| Job | expo-router | SwiftUI |
+| --- | --- | --- |
+| Stack | `app/**/_layout.tsx` + `<Stack />` | `NavigationStack` |
+| Push | `router.push('/notes/1')` | `NavigationLink(value:)` or `path.append` |
+| Typed screen | `app/notes/[id].tsx` | `.navigationDestination(for: Note.self)` |
+| Modal | `presentation: 'modal'` | `.sheet(item:)` / `.fullScreenCover` |
+| Dismiss | `router.back()` | `@Environment(\.dismiss)` |
+
+<br />
+
+What is the same: a native stack, a detail pushed on top, a sheet that is not a stack push.
+
+What lies: **there is no file-system router.** You will not get typed routes from a folder. `NavigationPath` is an untyped stack you can encode. Deep linking is `onOpenURL` plus your own parsing, or a library. Do not expect `href` to be the architecture.
+
+This is not a routing tutorial. The point is that both stacks, used correctly, keep the transition off your update loop. A JS stack navigator in RN re-enters React every frame. A custom SwiftUI transition that ticks `@State` every frame re-enters `body` every frame. Prefer the platform stack.
+
+<br />
+
+---
+
+## 10. Gestures and Animation
+
+React Native's JS thread is too late for a 60fps pan. The New Architecture does not change that. Work that cannot wait for JS belongs in Reanimated worklets or Gesture Handler, which run on the UI thread and write into C++ / native animated nodes. That is section 14 of [Understanding React Native in Depth](/notes/understanding-react-native-in-depth).
+
+SwiftUI has **no JS thread**. `DragGesture`, `MagnifyGesture`, and `withAnimation` already run in the UI process. You do not need a worklet compiler to move a view with a finger.
+
+That does not make SwiftUI animation equivalent to a Reanimated worklet.
+
+<br />
+
+```tsx
+import { Gesture, GestureDetector } from "react-native-gesture-handler"
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+} from "react-native-reanimated"
+
+function SwipeRow() {
+  const x = useSharedValue(0)
+  const pan = Gesture.Pan()
+    .onChange((event) => {
+      x.value = event.translationX
+    })
+    .onEnd(() => {
+      x.value = withSpring(0)
+    })
+  const style = useAnimatedStyle(() => ({
+    transform: [{ translateX: x.value }],
+  }))
+
+  return (
+    <GestureDetector gesture={pan}>
+      <Animated.View style={style}>
+        <Text>Note</Text>
+      </Animated.View>
+    </GestureDetector>
+  )
+}
+```
+
+<br />
+
+```swift
+struct SwipeRow: View {
+  @State private var x: CGFloat = 0
+
+  var body: some View {
+    Text("Note")
+      .offset(x: x)
+      .gesture(
+        DragGesture()
+          .onChanged { value in
+            x = value.translation.width
+          }
+          .onEnded { _ in
+            withAnimation(.spring) { x = 0 }
+          }
+      )
+  }
+}
+```
+
+<br />
+
+What is the same: a translation driven by a pan, a spring home.
+
+What lies:
+
+- **Reanimated's `x.value` can update without React render.** Shared values are native-thread state. SwiftUI's `x` is `@State`. Each `onChanged` invalidates the view and recomputes `body`. For a one-row offset that is fine. For a graph of views that do real work in `body`, it is not free. The analog of a worklet is not `withAnimation`. It is still "keep this off the description pass" — UIKit, or a `Canvas`, or a gesture that writes a transaction SwiftUI can interpolate without re-running your whole tree.
+- **`withAnimation` interpolates values SwiftUI already knows how to animatable-diff** (frame, opacity, offset, some layout). It is not `useAnimatedStyle`. Arbitrary work in `body` does not become a worklet because you wrapped the setter.
+
+The mapping that survives: **if the gesture must not wait for a JS bundle, you already left React Native's render loop.** In SwiftUI you start in that world. You can still lose frames. You lose them by doing too much in `body`, not by waiting for Hermes.
+
+<br />
+
+---
+
+## 11. Swift Concurrency vs the JavaScript Event Loop
+
+JavaScript is single-threaded. Promises and `async`/`await` are scheduling on [the event loop](/notes/javascript-event-loop-in-depth): one call stack, a microtask queue, a task queue. You cannot data-race a JS object from two threads. You can still have stale closures, missed cleanups, and a JS thread that is busy while the UI waits.
+
+Swift is concurrent. `async`/`await` is not the event loop. An `async` function suspends. When it resumes, it may be on a **different executor**. UIKit and SwiftUI state belong on the **main actor**. Hopping off it to fetch, then mutating the store without returning to `MainActor`, is a data race. Swift 6's compiler will often refuse that. Treat the refusal as a feature.
+
+<br />
+
+```tsx
+useEffect(() => {
+  const controller = new AbortController()
+
+  async function load() {
+    const next = await fetchNotes({ signal: controller.signal })
+    setNotes(next)
+  }
+
+  void load()
+  return () => controller.abort()
+}, [])
+```
+
+<br />
+
+```swift
+.task {
+  await store.load()
+}
+
+// Restart when the selected note changes — the dependency array:
+.task(id: selectedId) {
+  await store.loadDetail(id: selectedId)
+}
+```
+
+<br />
+
+```swift
+@Observable
+@MainActor
+final class NotesStore {
+  var notes: [Note] = []
+
+  func load() async {
+    let next = try? await fetchNotes()
+    notes = next ?? []
+  }
+}
+```
+
+<br />
+
+What is the same: start async work when the view is active, cancel when it is not, put results into screen state.
+
+What lies:
+
+- **`.task` cancellation is cooperative**, like `AbortController`. `URLSession` honors it. A tight `for` loop does not unless you check `Task.isCancelled`. Leaving a `useEffect` without aborting is the same class of leak.
+- **`.task(id:)` is the dependency array.** `.task { }` without an id is closer to `useEffect(() => { ... }, [])` **plus** cancel-on-unmount, but "unmount" means SwiftUI identity disappearing, not a Fiber unmounting. If identity flickers, you will refetch. That is correct cancellation, not a mysterious double fetch.
+- **`actor` isolates mutable state** onto a serial mailbox. It is not `Mutex` and it is not "JavaScript is single-threaded so we are fine." If a background task mutates a class that `body` reads, you need isolation (`@MainActor` on the store is the usual UI choice) or you have a race the JS mental model cannot see.
+
+`setTimeout(0)` is not `Task { }`. `Task { }` schedules work. It does not wait for a microtask checkpoint that does not exist. `MainActor.run { }` is "hop to the UI actor," not `queueMicrotask`.
+
+<br />
+
+---
+
+## 12. Lifecycle Is Not Mount
+
+`useEffect` runs after commit. `useEffect(() => { ... }, [])` runs after mount. The cleanup runs before unmount, or before the next effect when deps change. That is a React rule. Fabric makes the commit real on a device; it does not change when the effect runs.
+
+SwiftUI's `.onAppear` / `.onDisappear` follow **identity in the rendered tree**, not Fiber mount. A `List` row's `onAppear` fires when the cell is realized — scroll it off, `onDisappear`; scroll it back, `onAppear` again. That is closer to `onViewableItemsChanged` than to a screen-level `useEffect([])`.
+
+`.task` is the better loading primitive: it starts when the view appears, cancels when the view's identity goes away, and can restart with `.task(id:)`. Prefer it over `onAppear { Task { ... } }`, which is easy to leak.
+
+<br />
+
+```tsx
+useEffect(() => {
+  void load()
+}, [id])
+```
+
+<br />
+
+```swift
+.task(id: id) {
+  await load(id: id)
+}
+```
+
+<br />
+
+What is the same: "when this screen's inputs are active, load; when they are not, stop."
+
+What lies: **`onAppear` is not `componentDidMount`.** A sheet covering a view has historically produced appear/disappear sequences that do not match "still mounted underneath." Do not put "run once for the lifetime of the app session" logic in `onAppear`. For the notes list, load in `.task` on the list identity, and load the detail in `.task(id: note.id)` on the detail identity.
+
+`onDisappear` is not a reliable "save draft" hook if you meant "the Fiber is gone." Save from an explicit action, or from `.task` cancellation (`defer` / `try await` teardown), after you have decided what identity you are tying it to.
+
+<br />
+
+---
+
+## 13. Notes List, Both Stacks
+
+Same product surface. Fetch a list, pull to refresh, push a detail, load the body. Invented. The RN side is Expo. The SwiftUI side is Observation + `NavigationStack`.
+
+**React Native (expo-router)**
+
+```tsx
+// app/notes/_layout.tsx
+import { Stack } from "expo-router"
+
+export default function NotesLayout() {
+  return <Stack />
+}
+```
+
+<br />
+
+```tsx
+// app/notes/index.tsx
+import { useCallback, useEffect, useState } from "react"
+import {
+  ActivityIndicator,
+  FlatList,
+  Pressable,
+  RefreshControl,
+  Text,
+} from "react-native"
+import { useRouter } from "expo-router"
+
+type Note = { id: string; title: string }
+
+async function fetchNotes(): Promise<Note[]> {
+  const response = await fetch("https://example.com/notes")
+  return response.json()
+}
+
+export default function NotesListScreen() {
+  const router = useRouter()
+  const [notes, setNotes] = useState<Note[]>([])
+  const [refreshing, setRefreshing] = useState(false)
+  const [loading, setLoading] = useState(true)
+
+  const load = useCallback(async () => {
+    const next = await fetchNotes()
+    setNotes(next)
+  }, [])
+
+  useEffect(() => {
+    void load().finally(() => setLoading(false))
+  }, [load])
+
+  if (loading) {
+    return <ActivityIndicator />
+  }
+
+  return (
+    <FlatList
+      data={notes}
+      keyExtractor={(item) => item.id}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={async () => {
+            setRefreshing(true)
+            await load()
+            setRefreshing(false)
+          }}
+        />
+      }
+      renderItem={({ item }) => (
+        <Pressable onPress={() => router.push(`/notes/${item.id}`)}>
+          <Text>{item.title}</Text>
+        </Pressable>
+      )}
+    />
+  )
+}
+```
+
+<br />
+
+```tsx
+// app/notes/[id].tsx
+import { useEffect, useState } from "react"
+import { ActivityIndicator, Text } from "react-native"
+import { useLocalSearchParams } from "expo-router"
+
+type Note = { id: string; title: string; body: string }
+
+async function fetchNote(id: string, signal: AbortSignal): Promise<Note> {
+  const response = await fetch(`https://example.com/notes/${id}`, { signal })
+  return response.json()
+}
+
+export default function NoteDetailScreen() {
+  const { id } = useLocalSearchParams<{ id: string }>()
+  const [note, setNote] = useState<Note | null>(null)
+
+  useEffect(() => {
+    const controller = new AbortController()
+    void fetchNote(id, controller.signal)
+      .then(setNote)
+      .catch(() => {})
+    return () => controller.abort()
+  }, [id])
+
+  if (!note) {
+    return <ActivityIndicator />
+  }
+
+  return <Text>{note.body}</Text>
+}
+```
+
+<br />
+
+**SwiftUI**
+
+<br />
+
+```swift
+import Observation
+import SwiftUI
+
+struct Note: Identifiable, Hashable {
+  let id: String
+  var title: String
+  var body: String
+}
+
+@Observable
+@MainActor
+final class NotesStore {
+  var notes: [Note] = []
+  var isLoading = false
+
+  func load() async {
+    isLoading = true
+    defer { isLoading = false }
+    notes = (try? await fetchNotes()) ?? []
+  }
+
+  func loadDetail(id: String) async -> Note? {
+    try? await fetchNote(id: id)
+  }
+}
+
+struct NotesListView: View {
+  @State private var store = NotesStore()
+
+  var body: some View {
+    NavigationStack {
+      Group {
+        if store.isLoading && store.notes.isEmpty {
+          ProgressView()
+        } else {
+          List(store.notes) { note in
+            NavigationLink(value: note) {
+              Text(note.title)
+            }
+          }
+          .refreshable { await store.load() }
+        }
+      }
+      .navigationDestination(for: Note.self) { note in
+        NoteDetailView(note: note, store: store)
+      }
+      .task { await store.load() }
+    }
+  }
+}
+
+struct NoteDetailView: View {
+  let note: Note
+  var store: NotesStore
+  @State private var bodyText: String?
+
+  var body: some View {
+    Group {
+      if let bodyText {
+        Text(bodyText)
+      } else {
+        ProgressView()
+      }
+    }
+    .navigationTitle(note.title)
+    .task(id: note.id) {
+      bodyText = await store.loadDetail(id: note.id)?.body
+    }
+  }
+}
+```
+
+<br />
+
+Read the pair as one mapping, not two tutorials:
+
+- **Identity:** `keyExtractor` / `note.id` vs `Identifiable` / `Hashable` on the path.
+- **Ownership:** `useState` on the screen vs `@State` owning an `@Observable` store.
+- **Load + cancel:** `useEffect` + `AbortController` vs `.task` / `.task(id:)`.
+- **Refresh:** `RefreshControl` vs `.refreshable`.
+- **Push:** `router.push(\`/notes/${id}\`)` vs `NavigationLink(value:)` + `navigationDestination`.
+
+The SwiftUI detail still fetches, even though the list already had a `Note`. That is deliberate. A list row is not a full document. The RN detail does the same. Passing the whole `Note` as the navigation value is convenience for `title`, not a cache policy.
+
+<br />
+
+---
+
+## 14. Where the Analogy Breaks
+
+The mappings above are useful until they are treated as equalities.
+
+**A `View` is a value. A function component is a function over a Fiber.** Recreating the struct is not remounting. `@State` survives because of identity, not because the struct is long-lived. If you think "component instance," you will fight copies and misread `body`.
+
+**There is no Yoga and no `StyleSheet`.** Proposed sizes and modifier order replace flexbox and style objects. `Spacer` is not `flex: 1`. Safe area defaults are inverted.
+
+**There is no JS thread, and also no OTA JavaScript.** Reanimated exists because Hermes is too late. SwiftUI gestures start on the UI process; you can still stall `body`. A new SwiftUI screen is a new binary. EAS Update cannot replace `NotesListView`. The store build **is** the tree. That is the inverse of Expo's JS-shaped updates inside a fixed native contract.
+
+**Navigation is not a URL tree.** `expo-router` makes file routes a product feature. `NavigationStack` makes a value path a product feature. You can build URLs on top. The framework does not start there.
+
+**`async`/`await` is not the event loop.** Single-threaded JS cannot race two mutations of the same object. Swift can. `@MainActor` on the store is not pedantry. `.task` cancellation is identity-shaped, not Fiber-shaped.
+
+**`.onAppear` is not mount.** Lazy lists, sheets, and identity changes will call it more often than `useEffect([])` on a screen component.
+
+Keep the analogy for the first read of a sample. Drop it when a view resets state, refetches twice, or animates the wrong row. The question is then the SwiftUI one: **what is the identity, what did `body` read, and which actor owns the mutation?** Not "which Fiber committed."

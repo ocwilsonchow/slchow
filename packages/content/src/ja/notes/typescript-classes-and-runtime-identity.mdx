@@ -1,0 +1,386 @@
+---
+title: TypeScript の class と Runtime Identity
+description: class は constructor に prototype を足したもの。instanceof や mutable lifetime が必要なときに書く価値がある。それ以外は types と functions
+date: 2026-08-15
+category: frontend
+---
+
+TypeScript は毎日書ける——React components、Hono handlers、typed API payloads——一方で `class` という語を一度も打たない、ということはあり得る。それは偶然ではない。Production の React、Next、Hono code では、class は application code を組織する方法ではない。それは **runtime identity** である：constructor、prototype、そして `instanceof` が認識できる object。
+
+この note は [JavaScript コア概念](/notes/core-javascript-concepts) が扱わない object model である。あちらは code がいつ走るか。こちらは `class` とは何か、そしていつ書く価値があるかである。
+
+主張は小さい。`instanceof`、共有される mutable lifetime、あるいは一つの object である client が必要なとき、class は書く価値がある。それ以外は types と functions。Application code が consume する classes の方が、書く classes より多い。
+
+<br />
+
+---
+
+## 1. Runtime
+
+TypeScript の `class` は別種の object ではない。constructor function、その constructor にぶら下がる prototype object、そして `new` が作る instances である。class body で宣言した methods は prototype に載る。constructor 内で代入した fields、あるいは instance fields は、各 instance 上にある。`static` members は constructor 自身にあり、instances にも prototype にもない。
+
+<br />
+
+`new` は四つのことをする。普通の object を作り、その `[[Prototype]]` を `Class.prototype` にセットし、新しい object を `this` として constructor を走らせ、その object を返す（constructor が別の object を返した場合を除く）。`new` なしで class constructor を呼ぶと throw する。Class bodies は常に strict mode である。
+
+<br />
+
+```ts
+class Counter {
+  count = 0
+
+  inc(): number {
+    this.count += 1
+    return this.count
+  }
+}
+
+const a = new Counter()
+const b = new Counter()
+
+a.inc() // 1
+b.inc() // 1 — separate instance fields
+
+a.inc === b.inc // true — one shared method on Counter.prototype
+a.inc === Counter.prototype.inc // true
+```
+
+<br />
+
+```mermaid
+flowchart LR
+  newCall["new Counter()"] --> inst[instance]
+  inst -->|"[[Prototype]]"| proto["Counter.prototype"]
+  proto -->|"[[Prototype]]"| objProto["Object.prototype"]
+```
+
+<br />
+
+`a` と `b` はそれぞれ自分の `count` を持つ。`inc` は共有する。この分割が runtime model の全体である。Closure は prototype なしで同じ mutable な `count` を隠せる——[JavaScript コア概念](/notes/core-javascript-concepts) はそのように counter を作っている——しかし `instanceof` は提供せず、instances 間で methods も共有しない。
+
+<br />
+
+---
+
+## 2. Chain
+
+`extends` は二つの prototype chains を繋ぐ。child の instances は methods を `Child.prototype`、次に `Parent.prototype`、次に `Object.prototype` で見つける。Constructors も同じようにリンクされるので、`Child` は `Parent` の `static` members を見られる。`instanceof` は instance chain を歩き、正しい `.prototype` を見つけたら true を返す。
+
+<br />
+
+その walk があるから、`instanceof` は runtime test であり、TypeScript の test ではない。同じ fields をたまたま持つ plain object は通らない。Subclass は通る。
+
+<br />
+
+```ts
+class Animal {
+  move(): string {
+    return "moved"
+  }
+}
+
+class Bird extends Animal {
+  fly(): string {
+    return "flew"
+  }
+}
+
+const bird = new Bird()
+
+bird instanceof Bird // true
+bird instanceof Animal // true
+bird instanceof Object // true
+
+bird.move() // "moved" — found on Animal.prototype
+bird.fly() // "flew"
+
+const lookalike = { move: () => "moved", fly: () => "flew" }
+lookalike instanceof Bird // false
+```
+
+<br />
+
+`super()` は child が `this` に触れる前に parent constructor を走らせる。derived class で忘れるのは syntax error であり、runtime の驚きではない。有用な帰結は section 5 にある。`instanceof` が chain を下って動き続けるのは、compilation の後もその chain が残っている場合だけである。Target は ES2015 以降。
+
+<br />
+
+---
+
+## 3. `this`
+
+Prototype method の中の `this` は、method が **呼ばれた** object であり、function が **定義された** object ではない。method を取り出すと binding は消える。Class bodies は strict なので、失われた `this` は `undefined` であり、global object ではない。
+
+<br />
+
+Arrow fields は construction 時の instance の `this` を close over する。prototype には載らない。instance ごとに自分の function を持つ。method が callback として渡されるなら正しい trade である。prototype 上の一つの共有 function が目的なら間違った trade である。
+
+<br />
+
+```ts
+class Button {
+  label = "save"
+
+  onClick(): string {
+    return this.label
+  }
+
+  onClickBound = (): string => this.label
+}
+
+const button = new Button()
+
+button.onClick() // "save"
+button.onClickBound() // "save"
+
+const { onClick, onClickBound } = button
+onClickBound() // "save" — arrow captured the instance
+onClick() // TypeError: Cannot read properties of undefined
+```
+
+<br />
+
+`button.onClick` を `addEventListener` や React の `onClick` prop に渡すときも、同じ喪失が起きる。`.bind(button)`、arrow field、wrapper `() => button.onClick()` のどれでも直せる。Prototype method は共有する方が安い。Arrow field は持ち回る方が安い。選択は function の呼ばれ方に従う。
+
+<br />
+
+---
+
+## 4. Types vs Values
+
+`class` 宣言は二つのものを作る。`new` と `instanceof` に使える **value**、そして annotations に使える **type**。`interface` や `type` alias が作るのは type だけである。erased される。constructor もなく、prototype もなく、`instanceof Interface` もない。
+
+<br />
+
+`implements` は instance shape が一致することを確かめる compile-time check である。runtime object は変わらない。TypeScript の `private` と `protected` も同じ種類の check である。compiler は `obj.secret` を拒否し、その keyword を erase する。`#` fields は違う。JavaScript の feature である。compilation の後も private のままである。
+
+<br />
+
+```ts
+interface Clock {
+  now(): number
+}
+
+class SystemClock implements Clock {
+  now(): number {
+    return Date.now()
+  }
+}
+
+class Secret {
+  private compileTime = "visible after emit"
+  #runtime = "hidden"
+
+  reveal(): string {
+    return this.#runtime
+  }
+}
+
+const clock: Clock = new SystemClock()
+clock instanceof SystemClock // true
+// clock instanceof Clock // not a value; does not exist at runtime
+
+const secret = new Secret()
+secret.reveal() // "hidden"
+// secret.compileTime // type error; still a property on the object at runtime
+// secret.#runtime    // syntax error in JavaScript too
+```
+
+<br />
+
+実務上のルール：check が `catch` block の中、`JSON.parse` の後、あるいは bundle boundary を越えて動かなければならないなら、それは value でなければならない。`instanceof`、discriminant field（`type: "error"`）、branded function。TypeScript の `private` field と `interface` はその場にいない。
+
+<br />
+
+---
+
+## 5. `Error` Subclasses
+
+Application code に現れる class は、ほとんど常に `Error` subclass である。`catch` が渡すのは `unknown` である。`instanceof` は domain failure と programmer error を分け、二つの domain failures を分ける。余分な fields——`code`、HTTP status、`cause`——は instance に乗る。plain object `{ message, code }` は throw された後、その test ができない。
+
+<br />
+
+```ts
+class AppError extends Error {
+  readonly code: string
+
+  constructor(code: string, message: string, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "AppError"
+    this.code = code
+  }
+}
+
+class NotFoundError extends AppError {
+  constructor(resource: string, id: string) {
+    super("not_found", `${resource} ${id} not found`)
+    this.name = "NotFoundError"
+  }
+}
+
+function readUser(id: string): never {
+  throw new NotFoundError("user", id)
+}
+
+try {
+  readUser("missing")
+} catch (error) {
+  if (error instanceof NotFoundError) {
+    error.code // "not_found"
+  } else if (error instanceof AppError) {
+    // other domain failures
+  } else {
+    throw error
+  }
+}
+```
+
+<br />
+
+ここでの `instanceof` が、この class がある理由である。Failure が return value なら、result type 上の string union の方がしばしば良い。一度 `throw` されたら、生き残る test は prototype chain である。
+
+<br />
+
+---
+
+## 6. Stateful Clients and Stores
+
+Class を書くもう一つの場面は、**一つの object** が mutable lifetime を持たなければならないときである。token、abort controller、connection、in-memory cache。Methods はその state を共有する。Callers はその object を共有する。Identity が重要である——client は一つであり、呼び出しのたびに新しい functions の袋ではない。
+
+<br />
+
+これは React tree ではない。Client は render しない。SDK client と同じ shape である。一度 construct し、渡し、methods を呼び、fields を in place で変える。
+
+<br />
+
+```ts
+class ApiClient {
+  private token: string | null = null
+  private readonly baseUrl: string
+
+  constructor(baseUrl: string) {
+    this.baseUrl = baseUrl
+  }
+
+  setToken(token: string): void {
+    this.token = token
+  }
+
+  async get<T>(path: string): Promise<T> {
+    const headers: HeadersInit = {}
+    if (this.token) headers.Authorization = `Bearer ${this.token}`
+
+    const response = await fetch(`${this.baseUrl}${path}`, { headers })
+    if (!response.ok) {
+      throw new AppError("http", `${response.status} ${path}`)
+    }
+    return response.json() as Promise<T>
+  }
+}
+
+const api = new ApiClient("https://api.example.com")
+api.setToken("secret")
+// const profile = await api.get<{ id: string }>("/me")
+```
+
+<br />
+
+Module-level の closure も `token` を持てる。Callers が **二つ以上** を construct する必要があるとき——第二の base URL、test double、tenant ごとの client——あるいは `instanceof ApiClient` が必要なときは class が合う。一つしか存在せず、prototype も要らないなら closure が合う。
+
+<br />
+
+---
+
+## 7. Classes Are Consumed More Than They Are Written
+
+TypeScript プログラムの中の classes の大半は、そのプログラムでは書かれていない。`Error`、`TypeError`、`SyntaxError`。`Map`、`Set`、`Date`、`Response`、`URL`。`EventTarget` とすべての DOM node。SDK clients。それらの types に対する `instanceof` は普通の control flow である。それに合わせた class を書くことは普通ではない。
+
+<br />
+
+```ts
+function parseBody(body: string): unknown {
+  try {
+    return JSON.parse(body)
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      throw new AppError("invalid_json", "body is not JSON", { cause: error })
+    }
+    throw error
+  }
+}
+
+function disableButton(event: Event): void {
+  if (event.currentTarget instanceof HTMLButtonElement) {
+    event.currentTarget.disabled = true
+  }
+}
+
+const cache = new Map<string, Response>()
+cache.set("/me", new Response("{}"))
+```
+
+<br />
+
+Host と standard library は、identity と `instanceof` が重要な場所ではすでに classes を選んでいる。Application code はその選択を boundary で継承する——`catch`、DOM events、`fetch`——そして明日 JSON になる data のために平行な hierarchy を発明すべきではない。
+
+<br />
+
+---
+
+## 8. What Not to Class
+
+React components、API payloads、Hono handlers に runtime identity は要らない。type と function が要る。
+
+<br />
+
+React の class components は state を `this` に置き、event handlers を手で rebind した。Hooks はその state を Fiber に移した。Function components がデフォルトである。class 形式は古い tree の読み方であり、libraries が wrap するまでは error boundary の書き方だった。この stack の新しい UI は function である。Rendering model は [React を深く理解する](/notes/understanding-react-in-depth)。
+
+<br />
+
+Network を越える DTO は type である。`JSON.parse` は plain object を返す。`class User` にぶら下げた methods はそこにおらず、`instanceof User` は false である。Behavior は、その type を取る functions に属する。
+
+<br />
+
+```ts
+type User = {
+  id: string
+  name: string
+}
+
+function displayName(user: User): string {
+  return user.name
+}
+
+// After the wire, this is what arrives — not `new User(...)`
+const user = JSON.parse('{"id":"1","name":"Ada"}') as User
+displayName(user) // "Ada"
+```
+
+<br />
+
+Hono handler も同じ shape である。context から response への function。[Hono による Backend API](/notes/backend-apis-hono-sst) は routes を functions のままにする。Nest 風の controller classes は別の stack のものである。`instanceof` がテストするものはなく、共有する mutable lifetime もない。
+
+<br />
+
+```ts
+import { Hono } from "hono"
+
+const app = new Hono()
+
+app.get("/users/:id", async (c) => {
+  const user = await getUser(c.req.param("id"))
+  if (!user) return c.json({ error: "not found" }, 404)
+  return c.json(user)
+})
+```
+
+<br />
+
+---
+
+## Takeaway
+
+<br />
+
+TypeScript の `class` は constructor に prototype を足したものである。Instance fields は object 上にある。Methods は prototype 上にある。`interface` と TypeScript の `private` は erased される。`#` と `instanceof` はされない。
+
+書くかどうかを問うとき、三つのチェックでほとんどの場合が決まる。**`throw` の後や boundary を越えて `instanceof` が必要か。一つの object が callers の共有する mutable lifetime を必要とするか。それとも data と function か。** 第三の場合、class は要らない。それが普通の使い方である。

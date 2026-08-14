@@ -5,7 +5,7 @@ date: 2026-08-12
 category: backend
 ---
 
-当我建立 backend API 时，希望从 request 到 database 的路径很短，也希望 **validation**、**documentation** 与 **infrastructure** 都来自同一份代码。这套 stack 是 **Hono**、**Better Auth**、**Drizzle**、**PostgreSQL**、**Zod OpenAPI**、**Scalar**，以及跑在 **AWS Lambda** 或 **ECS Fargate** 上的 **SST**。
+Backend API 需要一条从 request 到 database 的短路径，validation、documentation 与 infrastructure 来自同一份代码。这套 stack 是 **Hono**、**Better Auth**、**Drizzle**、**PostgreSQL**、**Zod OpenAPI**、**Scalar**，以及跑在 **AWS Lambda** 或 **ECS Fargate** 上的 **SST**。
 
 Stages 与 deploy loop 见 [用 SST 管理 AWS 基础设施与 DevOps](/notes/using-sst-for-aws-infra-and-devops)。Tenant isolation 见 [用 Hono、Better Auth、Drizzle 与 Postgres RLS 打造 Multi-Tenant 后端](/notes/multi-tenant-backend-drizzle-hono-better-auth)。这篇笔记涵盖 typed API，一路到 production 的 protect、monitor 与 recover。
 
@@ -613,7 +613,7 @@ Multi-AZ 是同一 region 内的 high availability，不是 cross-region disaste
 
 测试多半放在 Lambda adapter **之下**，用 `app.request` 与 mock authorizer context。Queries 与 migrations 用真实可丢弃的 Postgres。把 deployed tests 留给 authorizer decisions、CORS、linked secrets 与 domains。
 
-我接受的 trade-offs：OpenAPI response 重复、cold starts、刻意的 connection limits，以及 TypeScript 在 runtime 消失——Zod 与 Postgres constraints 仍然重要。每一层都保持可替换。
+接受的 trade-offs：OpenAPI response 重复、cold starts、刻意的 connection limits，以及 TypeScript 在 runtime 消失——Zod 与 Postgres constraints 仍然重要。每一层都保持可替换。
 
 <br />
 

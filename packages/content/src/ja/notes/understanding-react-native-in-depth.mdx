@@ -7,7 +7,7 @@ category: frontend
 
 React Native はしばしば「React だが、出力が DOM ではなく native views になる」と紹介されます。その説明は間違いではありませんが、`View` 内の string が crash する理由、scroll offset を `useState` に置くと frame が落ちる理由、Expo config plugin が OTA で届かない理由、`useLayoutEffect` が device 上で同一 commit 内に view を measure できても毎 frame `height` を animate すると失敗する理由を説明するには、圧縮されすぎています。
 
-私は **Expo 経由で** React Native を ship します。このサイトが Next.js 経由で React を ship するのと同じです。より有用なモデルは、**Expo が React Native 周辺の orchestrator** であり、React Native が **React の host renderer** である、ということです。Expo は native modules を分類し、iOS と Android のプロジェクトを生成し、Metro で JavaScript を bundle し、artifacts を devices に載せます。React Native は React tree を C++ shadow tree に変え、Yoga を走らせ、`UIView` / `android.view.View` instances を mount します。React は依然として elements、Fibers、lanes、render、commit を所有します。
+この stack は **Expo 経由で** React Native を ship します。このサイトが Next.js 経由で React を ship するのと同じです。より有用なモデルは、**Expo が React Native 周辺の orchestrator** であり、React Native が **React の host renderer** である、ということです。Expo は native modules を分類し、iOS と Android のプロジェクトを生成し、Metro で JavaScript を bundle し、artifacts を devices に載せます。React Native は React tree を C++ shadow tree に変え、Yoga を走らせ、`UIView` / `android.view.View` instances を mount します。React は依然として elements、Fibers、lanes、render、commit を所有します。
 
 <br />
 
@@ -72,7 +72,7 @@ boundaries が重要なのは、React が変わらなくても同じ screens が
 
 Expo を「managed workflow」と呼ぶのは compiler を underspecify します。React Native を「JS bridge 付き native app」と呼ぶのは renderer を underspecify します。durable な mental model は **native project generator plus bundler plus React renderer** で、host-specific adapter 経由で deploy される、というものです。
 
-Expo を [Next.js を深く理解する](/notes/understanding-next-js-in-depth) が Next.js を扱うように扱います：React core 周辺の policy と infrastructure。Next.js は browser 向けに URLs を React trees に map します。Expo は `app/` files と native modules を device 向け React trees に map します。
+Expo は React Native にとって、Next.js が browser にとってそうであるものです：React core 周辺の policy と infrastructure。Next.js は browser 向けに URLs を React trees に map します。Expo は `app/` files と native modules を device 向け React trees に map します。
 
 <br />
 
@@ -214,7 +214,7 @@ JSI は React API でもありません。application code は documented module
 
 ## 6. Threading
 
-Fabric は renderer structures を immutable に保つことで thread-safe になるよう設計されています：updates は mutate せず clone します。私が実際に chase する almost every bug では二 thread が重要です：
+Fabric は renderer structures を immutable に保つことで thread-safe になるよう設計されています：updates は mutate せず clone します。almost every production bug では二 thread が重要です：
 
 - **JS thread** は Hermes、React の render phase、大部分の Yoga work を走らせます。
 - **UI thread**（main thread）は host views を create、update、destroy できる唯一の thread です。
@@ -686,7 +686,7 @@ path は：
 
 ---
 
-## 16. 私が使う Debugging Questions
+## 16. デバッグ時の問題
 
 Expo screen が surprise したら、次を順に辿ります：
 
@@ -733,7 +733,7 @@ Expo screen が surprise したら、次を順に辿ります：
 
 ## 最終的なメンタルモデル
 
-私が使う shortest accurate model：
+最短で accurate なモデル：
 
 <br />
 

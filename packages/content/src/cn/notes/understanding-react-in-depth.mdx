@@ -6,7 +6,7 @@ category: frontend
 
 React 的公开模型常被概括成 `UI = f(state)`：你描述界面在给定 state 下应长什么样子，当 state 改变时，React 决定如何更新已渲染的输出。
 
-当我不再把一次 render 想成「React 调用我的 component 然后更新 DOM」时，React 变得比较好推理。那个描述跳过了能解释多数意外行为的机制：event handler 里的 stale state、state 在 list items 之间移动、开发时 Effect 跑两次，或 transition 做到一半被放弃。
+一旦不再把一次 render 想成「React 调用 component 然后更新 DOM」，React 就比较好推理。那个描述跳过了能解释多数意外行为的机制：event handler 里的 stale state、state 在 list items 之间移动、开发时 Effect 跑两次，或 transition 做到一半被放弃。
 
 更有用的模型是：React 维护自己的界面表示。一次 update 被 **scheduled**，React 在 **render phase** 计算可能的下一棵树，然后才在 **commit phase** 发布结果。
 
@@ -540,7 +540,7 @@ const visibleTodos = useMemo(
 
 父级 render 而子级不 render，或 component render 但其 DOM 不变，也都可能发生。Rendering 表示 React 要求一份描述。只有当 reconciliation 找到必须到达 host tree 的差异时，才会 commit host mutation。
 
-调查性能时，我会分开三个问题：
+调查性能时，分开三个问题：
 
 1. 是否有 update 被 scheduled？
 2. 哪些 components 做了 render work？
@@ -718,9 +718,9 @@ function StoryTray({ stories }: { stories: string[] }) {
 
 ---
 
-## 14. 我用来调试的问题
+## 14. 调试时的问题
 
-当 React 行为让我意外时，我会依序想这些问题：
+当 React 行为意外时，依序想这些问题：
 
 1. **哪个 render 建立了这个 callback？** 它的 closure 包含那次 render 的 props 与 state。
 2. **Setter 拿到的是 replacement 还是 updater？** 重复的 replacements 可能都用同一个 snapshot。
@@ -757,7 +757,7 @@ function StoryTray({ stories }: { stories: string[] }) {
 
 ## 最终心智模型
 
-我用的最短且准确的模型是：
+最短且准确的模型是：
 
 <br />
 
@@ -780,6 +780,6 @@ Concurrent React 不是叠在上面的另一套 rendering model。它是当 rend
 
 公开规则来自那个架构。保持 rendering pure，因为它是 speculative。使用稳定的 keys，因为 identity 控制 state。当工作依赖 queued state 时使用 updater functions。把 Effects 当同步，因为它们在 commit 之后执行。不要依赖 render 次数，因为尝试可能被放弃。
 
-至于建立在这个模型上的较新 APIs，见 [What's New in React 19](./react-19-new-features)。主要参考，我会回到 Andrew Clark 的 [React Fiber architecture notes](https://github.com/acdlite/react-fiber-architecture)，以及 React 文档关于 [render and commit](https://react.dev/learn/render-and-commit)、[state snapshots](https://react.dev/learn/state-as-a-snapshot)、[state update queues](https://react.dev/learn/queueing-a-series-of-state-updates)、[preserving state](https://react.dev/learn/preserving-and-resetting-state)、[Effects](https://react.dev/learn/synchronizing-with-effects)、[transitions](https://react.dev/reference/react/useTransition)、[Suspense](https://react.dev/reference/react/Suspense) 与 [hydration](https://react.dev/reference/react-dom/client/hydrateRoot)。
+至于建立在这个模型上的较新 APIs，见 [What's New in React 19](./react-19-new-features)。主要参考：Andrew Clark 的 [React Fiber architecture notes](https://github.com/acdlite/react-fiber-architecture)，以及 React 文档关于 [render and commit](https://react.dev/learn/render-and-commit)、[state snapshots](https://react.dev/learn/state-as-a-snapshot)、[state update queues](https://react.dev/learn/queueing-a-series-of-state-updates)、[preserving state](https://react.dev/learn/preserving-and-resetting-state)、[Effects](https://react.dev/learn/synchronizing-with-effects)、[transitions](https://react.dev/reference/react/useTransition)、[Suspense](https://react.dev/reference/react/Suspense) 与 [hydration](https://react.dev/reference/react-dom/client/hydrateRoot)。
 
 这篇文章中的实现细节对应 React 19.2.7。相关源码在 [`ReactFiber.js`](https://github.com/facebook/react/blob/v19.2.7/packages/react-reconciler/src/ReactFiber.js)、[`ReactFiberWorkLoop.js`](https://github.com/facebook/react/blob/v19.2.7/packages/react-reconciler/src/ReactFiberWorkLoop.js)、[`ReactFiberBeginWork.js`](https://github.com/facebook/react/blob/v19.2.7/packages/react-reconciler/src/ReactFiberBeginWork.js)、[`ReactFiberCompleteWork.js`](https://github.com/facebook/react/blob/v19.2.7/packages/react-reconciler/src/ReactFiberCompleteWork.js)、[`ReactChildFiber.js`](https://github.com/facebook/react/blob/v19.2.7/packages/react-reconciler/src/ReactChildFiber.js)、[`ReactFiberHooks.js`](https://github.com/facebook/react/blob/v19.2.7/packages/react-reconciler/src/ReactFiberHooks.js) 与 [`ReactFiberLane.js`](https://github.com/facebook/react/blob/v19.2.7/packages/react-reconciler/src/ReactFiberLane.js)。那些文件解释今天的机制，不是 API 契约。

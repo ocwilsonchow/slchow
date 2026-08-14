@@ -7,7 +7,7 @@ category: frontend
 
 React Native 常被介绍成「React，但输出是 native views 而不是 DOM」。这个描述并没有错，但压缩得太厉害，解释不了为什么 `View` 里的 string 会 crash、为什么 scroll offset 上的 `useState` 会掉帧、为什么 Expo config plugin 不能 OTA 下发，或为什么 `useLayoutEffect` 可以在 device 上一次 commit 量到 view，但若你每帧 animate `height` 仍会失败。
 
-我通过 **Expo** 交付 React Native，就像这个网站通过 Next.js 交付 React 一样。更有用的模型是：**Expo 是围绕 React Native 的 orchestrator**，而 React Native 是 **React 的 host renderer**。Expo 分类 native modules、产生 iOS 与 Android 项目、用 Metro bundle JavaScript，并把 artifacts 对应到 devices。React Native 把 React tree 转成 C++ shadow tree、跑 Yoga，并 mount `UIView` / `android.view.View` instances。React 仍拥有 elements、Fibers、lanes、render 与 commit。
+这个技术栈通过 **Expo** 交付 React Native，就像这个网站通过 Next.js 交付 React 一样。更有用的模型是：**Expo 是围绕 React Native 的 orchestrator**，而 React Native 是 **React 的 host renderer**。Expo 分类 native modules、产生 iOS 与 Android 项目、用 Metro bundle JavaScript，并把 artifacts 对应到 devices。React Native 把 React tree 转成 C++ shadow tree、跑 Yoga，并 mount `UIView` / `android.view.View` instances。React 仍拥有 elements、Fibers、lanes、render 与 commit。
 
 <br />
 
@@ -72,7 +72,7 @@ flowchart TD
 
 把 Expo 叫做「managed workflow」低估了 compiler。把 React Native 叫做「带 JS bridge 的 native 应用」低估了 renderer。比较耐用的心智模型是 **native project generator 加上 bundler 加上 React renderer**，通过 host-specific adapter 部署。
 
-我把 Expo 想成 [深入理解 Next.js](/notes/understanding-next-js-in-depth) 对待 Next.js 的方式：围绕 React core 的 policy 与基础设施。Next.js 把 URLs 对应到 browser 的 React trees。Expo 把 `app/` files 与 native modules 对应到 device 的 React trees。
+Expo 之于 React Native，就像 Next.js 之于 browser：围绕 React core 的 policy 与基础设施。Next.js 把 URLs 对应到 browser 的 React trees。Expo 把 `app/` files 与 native modules 对应到 device 的 React trees。
 
 <br />
 
@@ -214,7 +214,7 @@ JSI 也不是 React API。应用代码应继续调用已文档化的 modules（`
 
 ## 6. Threading
 
-Fabric 被设计成 thread-safe，方式是保持 renderer structures immutable：updates clone 而不是 mutate。我几乎每次真正追查的 bug 里，有两条 thread 很重要：
+Fabric 被设计成 thread-safe，方式是保持 renderer structures immutable：updates clone 而不是 mutate。几乎每条 production bug 里，有两条 thread 很重要：
 
 - **JS thread** 跑 Hermes、React 的 render phase，以及大部分 Yoga 工作。
 - **UI thread**（main thread）是唯一可以 create、update 或 destroy host views 的 thread。
@@ -394,7 +394,7 @@ Shadow trees 是 immutable 的。React state update 从 changed node 到 root �
 
 Shadow tree 里大部分信息起源于 React 并向下流。 **C++ state** 是例外。有些 host components 保持 JavaScript 不拥有的 state。`ScrollView` offset 是 usual example：platform view scrolls，C++ 记录 offset，`measure` 这类 API 可以读它。React 没有 render 那次 update。
 
-若我把那个 offset 放进 `useState`，我就发明了第二个 source of truth，并在每个 scroll event 上 schedule React render：
+把那个 offset 放进 `useState` 会发明第二个 source of truth，并在每个 scroll event 上 schedule React render：
 
 <br />
 
@@ -686,15 +686,15 @@ LegendList 是同一想法。契约是「不要 mount 用户看不到的东西�
 
 ---
 
-## 16. 我用来调试的问题
+## 16. 调试时的问题
 
-当 Expo screen 让我意外时，我会依序想这些：
+当 Expo screen 意外时，依序想这些：
 
 1. **哪条 thread 忙？** JS freeze 对 UI freeze 对两者都 freeze。
 2. **这是 Expo Go、dev client，还是 release binary？** Go 不能长出新的 native modules。
 3. **是 React render、Fabric commit，还是 mount？** Component 里的 `console.log` 不能证明 `UIView` 改变了。
 4. **这是 C++ state 还是 React state？** Scroll offset、text selection 与某些 gesture state 从未进入 `useState`。
-5. **Flattening 是否移除了我在 native inspector 里找的那个 view？**
+5. **Flattening 是否移除了 native inspector 里正在检查的那个 view？**
 6. **这个 change 需要 native rebuild，还是 JS 就够？** Config plugins、permissions、fonts 与新的 Expo Modules 需要新 binary。EAS Update 不能发明它们。
 7. **Autolinking 是否在查 app package？** 只在 workspace library 里的 native dep 是 missing link，不是 Metro cache issue。
 8. **这是 host-component 契约吗？** `Text` 外的 strings、`0 && <Text />`、Gesture Handler list 里的 `TouchableOpacity`。
@@ -733,7 +733,7 @@ LegendList 是同一想法。契约是「不要 mount 用户看不到的东西�
 
 ## 最终心智模型
 
-我用的最短且准确的模型是：
+最短且准确的模型是：
 
 <br />
 

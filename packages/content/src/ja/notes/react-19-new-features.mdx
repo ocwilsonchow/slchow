@@ -1,12 +1,12 @@
 ---
 title: React 19 の新機能
-description: フォーム構築、非同期処理、components 構成のやり方を変える React 19 機能についてのメモ
+description: forms、async work、component structure を変える React 19 機能
 category: frontend
 ---
 
 React 19 は、ばらばらの API というより、アプリケーションコードが手動で埋めていたいくつかの穴を React が埋めた感じがします。Forms で非同期 Actions を走らせ、optimistic updates 専用 Hook があり、components が `use` で promises を読め、refs、context、document metadata 周りの定番 pattern が簡潔になります。
 
-React 19.2 はその上に `Activity`、`useEffectEvent`、より良い性能ツールを載せています。以下は特に有用だと感じる機能と、どこで使うか判断するときに覚えておきたい注意点です。
+React 19.2 はその上に `Activity`、`useEffectEvent`、より良い性能ツールを載せています。以下は特に有用な機能と、どこで使うか判断するときに覚えておくべき注意点です。
 
 <br />
 
@@ -109,7 +109,7 @@ function NewsletterForm() {
 
 `useFormStatus` は parent form の status を読むため、その form **の内側** に render された component から呼ぶ必要があります。form を作る同じ component 内で呼んでも、その form の submission は観測できません。
 
-server 結果を UI state にしたいときは `useActionState`、周囲 form が pending かだけ知ればよい controls には `useFormStatus` を使います。
+server 結果を UI state にしたいときは `useActionState` が向き、周囲 form が pending かだけ知ればよい controls には `useFormStatus` を使います。
 
 <br />
 
@@ -231,7 +231,7 @@ function Heading({ muted }: { muted: boolean }) {
 }
 ```
 
-`use` は、すべての data-fetching library の代替ではなく、render とまだ ready でない resource の橋渡しだと考えています。
+`use` は、すべての data-fetching library の代替ではなく、render とまだ ready でない resource の橋渡しです。
 
 <br />
 
@@ -502,8 +502,8 @@ npm install --save-dev @types/react@^19 @types/react-dom@^19
 
 ## まとめ
 
-React 19 で感じるテーマは coordination です。Actions は async mutations と pending、optimistic UI を調整します。`use` は rendering と resources を調整します。Document APIs は metadata、styles、scripts を調整します。`Activity` は visible と background work を、`useEffectEvent` は synchronization と event-like behavior を分けます。
+React 19 のテーマは coordination です。Actions は async mutations と pending、optimistic UI を調整します。`use` は rendering と resources を調整します。Document APIs は metadata、styles、scripts を調整します。`Activity` は visible と background work を、`useEffectEvent` は synchronization と event-like behavior を分けます。
 
-最も使うのは form Actions、`useActionState`、`useOptimistic`、ref as a prop、`useEffectEvent` だと思います。`use`、`Activity`、server rendering APIs は framework サポートと architecture 依存度が高いですが、loading、mutations、rendering が一体で設計される React model を示しています。
+最も keep されやすい機能は form Actions、`useActionState`、`useOptimistic`、ref as a prop、`useEffectEvent` です。`use`、`Activity`、server rendering APIs は framework サポートと architecture 依存度が高いですが、loading、mutations、rendering が一体で設計される React model を示しています。
 
-詳細は公式 [React 19 release notes](https://react.dev/blog/2024/12/05/react-19)、[React 19.2 release notes](https://react.dev/blog/2025/10/01/react-19-2)、[React 19 upgrade guide](https://react.dev/blog/2024/04/25/react-19-upgrade-guide) に戻ります。
+公式の説明は [React 19 release notes](https://react.dev/blog/2024/12/05/react-19)、[React 19.2 release notes](https://react.dev/blog/2025/10/01/react-19-2)、[React 19 upgrade guide](https://react.dev/blog/2024/04/25/react-19-upgrade-guide) です。

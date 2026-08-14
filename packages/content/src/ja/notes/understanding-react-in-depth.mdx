@@ -6,7 +6,7 @@ category: frontend
 
 React の公開モデルはしばしば `UI = f(state)` と要約されます。与えられた state に対して UI がどうあるべきかを記述し、state が変わると React が rendered output をどう更新するか決めます。
 
-render を「React が component を呼んで DOM を更新する」と考えるのをやめたとき、React は reasoning しやすくなりました。その説明は、event handler の stale state、list items 間の state 移動、開発時 Effect の二重実行、transition の途中放棄など、多くの意外な挙動を説明する機構を飛ばします。
+render を「React が component を呼んで DOM を更新する」と見なさなくなったとき、React は reasoning しやすくなります。その説明は、event handler の stale state、list items 間の state 移動、開発時 Effect の二重実行、transition の途中放棄など、多くの意外な挙動を説明する機構を飛ばします。
 
 より有用なモデルは、React が UI の独自表現を保持することです。update が **scheduled** され、React は **render phase** で possible next tree を計算し、**commit phase** でだけ結果を公開します。
 
@@ -718,7 +718,7 @@ Strict Mode は concurrent rendering、navigation、state preservation、将来 
 
 ---
 
-## 14. 私が使う Debugging Questions
+## 14. デバッグ時の問題
 
 React の挙動に驚いたら、次の問いを順に辿ります：
 
@@ -757,7 +757,7 @@ Fiber について十分よく出る考えを直接訂正します。
 
 ## 最終的なメンタルモデル
 
-私が使う最短で accurate なモデル：
+最短で accurate なモデル：
 
 <br />
 

@@ -5,7 +5,7 @@ date: 2026-08-12
 category: backend
 ---
 
-Backend API を構築するとき、request から database までの経路は短く、**validation**、**documentation**、**infrastructure** が同じコードから生まれることを望む。この stack は **Hono**、**Better Auth**、**Drizzle**、**PostgreSQL**、**Zod OpenAPI**、**Scalar**、そして **AWS Lambda** または **ECS Fargate** 上の **SST** である。
+Backend API には request から database までの短い経路が必要であり、**validation**、**documentation**、**infrastructure** は同じコードから生まれる。この stack は **Hono**、**Better Auth**、**Drizzle**、**PostgreSQL**、**Zod OpenAPI**、**Scalar**、そして **AWS Lambda** または **ECS Fargate** 上の **SST** である。
 
 Stages と deploy loop は [SST による AWS インフラと DevOps](/notes/using-sst-for-aws-infra-and-devops) を参照。Tenant isolation は [Hono、Better Auth、Drizzle、Postgres RLS による Multi-Tenant Backend](/notes/multi-tenant-backend-drizzle-hono-better-auth) を参照。このノートでは typed API から production の protect、monitor、recover までを扱う。
 

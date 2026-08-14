@@ -1,0 +1,386 @@
+---
+title: TypeScript Class 与 Runtime Identity
+description: class 是 constructor 加上 prototype。需要 instanceof 或可变 lifetime 时才值得写；否则用 types 与 functions
+date: 2026-08-15
+category: frontend
+---
+
+TypeScript 可以每天写——React components、Hono handlers、typed API payloads——却从不打出 `class` 这个词。这不是意外。在 production 的 React、Next 与 Hono code 里，class 不是组织 application code 的方式。它是一种 **runtime identity**：一个 constructor、一个 prototype，以及一个 `instanceof` 能认出来的 object。
+
+这篇 note 是 [JavaScript 核心概念](/notes/core-javascript-concepts) 没有覆盖的 object model。那篇讲的是 code 何时运行。这篇讲的是 `class` 是什么，以及它何时值得写。
+
+主张很小。需要 `instanceof`、一份被共享的可变 lifetime、或一个作为单一 object 的 client 时，class 才值得写。否则用 types 与 functions。Application code consume 的 classes 比它写的多。
+
+<br />
+
+---
+
+## 1. Runtime
+
+TypeScript `class` 并不是另一种 object。它是一个 constructor function、挂在该 constructor 上的 prototype object，以及 `new` 创建出来的 instances。写在 class body 里的 methods 装在 prototype 上。在 constructor 里赋值的 fields，或 instance fields，活在每个 instance 上。`static` members 活在 constructor 本身，不在 instances 上，也不在 prototype 上。
+
+<br />
+
+`new` 做四件事：创建一个普通 object、把该 object 的 `[[Prototype]]` 设为 `Class.prototype`、以新 object 为 `this` 跑 constructor、然后返回这个 object（除非 constructor 返回了另一个 object）。不带 `new` 调用 class constructor 会 throw。Class bodies 永远是 strict mode。
+
+<br />
+
+```ts
+class Counter {
+  count = 0
+
+  inc(): number {
+    this.count += 1
+    return this.count
+  }
+}
+
+const a = new Counter()
+const b = new Counter()
+
+a.inc() // 1
+b.inc() // 1 — separate instance fields
+
+a.inc === b.inc // true — one shared method on Counter.prototype
+a.inc === Counter.prototype.inc // true
+```
+
+<br />
+
+```mermaid
+flowchart LR
+  newCall["new Counter()"] --> inst[instance]
+  inst -->|"[[Prototype]]"| proto["Counter.prototype"]
+  proto -->|"[[Prototype]]"| objProto["Object.prototype"]
+```
+
+<br />
+
+`a` 与 `b` 各自有自己的 `count`。它们共享 `inc`。这个切分就是整个 runtime model。Closure 可以在没有 prototype 的情况下藏起同一份可变的 `count`——[JavaScript 核心概念](/notes/core-javascript-concepts) 就是那样做 counter——但它不提供 `instanceof`，也不会跨 instances 共享 methods。
+
+<br />
+
+---
+
+## 2. Chain
+
+`extends` 接上两条 prototype chains：child 的 instances 先在 `Child.prototype` 上找 methods，然后 `Parent.prototype`，然后 `Object.prototype`。Constructors 也按同样方式链接，所以 `Child` 能看见 `Parent` 的 `static` members。`instanceof` 沿着 instance chain 走，找到对的 `.prototype` 就返回 true。
+
+<br />
+
+正因为是这一趟 walk，`instanceof` 才是 runtime test，不是 TypeScript test。一个碰巧有相同 fields 的 plain object 过不了。Subclass 可以。
+
+<br />
+
+```ts
+class Animal {
+  move(): string {
+    return "moved"
+  }
+}
+
+class Bird extends Animal {
+  fly(): string {
+    return "flew"
+  }
+}
+
+const bird = new Bird()
+
+bird instanceof Bird // true
+bird instanceof Animal // true
+bird instanceof Object // true
+
+bird.move() // "moved" — found on Animal.prototype
+bird.fly() // "flew"
+
+const lookalike = { move: () => "moved", fly: () => "flew" }
+lookalike instanceof Bird // false
+```
+
+<br />
+
+`super()` 在 child 碰 `this` 之前跑 parent constructor。在 derived class 里忘了写它是 syntax error，不是 runtime 意外。有用的后果在第 5 节：`instanceof` 只有在 compilation 之后这条 chain 还在，才能沿链继续工作。Target ES2015 或更新。
+
+<br />
+
+---
+
+## 3. `this`
+
+Prototype method 里的 `this` 是 method **被调用时所在** 的 object，不是 function **被定义时所在** 的 object。把 method 抽出来，binding 就没了。Class bodies 是 strict，所以丢失的 `this` 是 `undefined`，不是 global object。
+
+<br />
+
+Arrow fields 在 construction 时闭包住 instance 的 `this`。它们不在 prototype 上。每个 instance 拿到自己的 function。Method 将被当作 callback 传出时，这是对的 trade；目标是 prototype 上那一个共享 function 时，这是错的 trade。
+
+<br />
+
+```ts
+class Button {
+  label = "save"
+
+  onClick(): string {
+    return this.label
+  }
+
+  onClickBound = (): string => this.label
+}
+
+const button = new Button()
+
+button.onClick() // "save"
+button.onClickBound() // "save"
+
+const { onClick, onClickBound } = button
+onClickBound() // "save" — arrow captured the instance
+onClick() // TypeError: Cannot read properties of undefined
+```
+
+<br />
+
+把 `button.onClick` 传给 `addEventListener` 或 React `onClick` prop 时，会发生同样的丢失。`.bind(button)`、arrow field、或 wrapper `() => button.onClick()` 都能修。Prototype method 更便宜地共享。Arrow field 更便宜地传来传去。选择跟 function 将被如何调用相匹配。
+
+<br />
+
+---
+
+## 4. Types vs Values
+
+`class` 声明创建两样东西：一个可供 `new` 与 `instanceof` 的 **value**，以及一个可供 annotations 使用的 **type**。`interface` 或 `type` alias 只创建 type。它会被 erased。没有 constructor、没有 prototype、也没有 `instanceof Interface`。
+
+<br />
+
+`implements` 是 compile-time check，确认 instance shape 匹配。它不改变 runtime object。TypeScript `private` 与 `protected` 是同一类 check：compiler 拒绝 `obj.secret`，然后把这个 keyword erase 掉。`#` fields 不同。它们是 JavaScript feature。Compilation 之后仍然 private。
+
+<br />
+
+```ts
+interface Clock {
+  now(): number
+}
+
+class SystemClock implements Clock {
+  now(): number {
+    return Date.now()
+  }
+}
+
+class Secret {
+  private compileTime = "visible after emit"
+  #runtime = "hidden"
+
+  reveal(): string {
+    return this.#runtime
+  }
+}
+
+const clock: Clock = new SystemClock()
+clock instanceof SystemClock // true
+// clock instanceof Clock // not a value; does not exist at runtime
+
+const secret = new Secret()
+secret.reveal() // "hidden"
+// secret.compileTime // type error; still a property on the object at runtime
+// secret.#runtime    // syntax error in JavaScript too
+```
+
+<br />
+
+实务规则：如果一个 check 必须在 `catch` block 里、`JSON.parse` 之后、或跨 bundle boundary 仍然成立，它必须是一个 value。`instanceof`、discriminant field（`type: "error"`）、或 branded function。TypeScript `private` field 与 `interface` 到时候都不在。
+
+<br />
+
+---
+
+## 5. `Error` Subclasses
+
+Application code 里真正出现的 class，几乎总是 `Error` subclass。`catch` 给出的是 `unknown`。`instanceof` 用来区分 domain failure 与 programmer error，以及区分两种 domain failures。额外的 fields——`code`、HTTP status、`cause`——骑在 instance 上。一个 plain object `{ message, code }` 被 throw 之后做不了这个 test。
+
+<br />
+
+```ts
+class AppError extends Error {
+  readonly code: string
+
+  constructor(code: string, message: string, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "AppError"
+    this.code = code
+  }
+}
+
+class NotFoundError extends AppError {
+  constructor(resource: string, id: string) {
+    super("not_found", `${resource} ${id} not found`)
+    this.name = "NotFoundError"
+  }
+}
+
+function readUser(id: string): never {
+  throw new NotFoundError("user", id)
+}
+
+try {
+  readUser("missing")
+} catch (error) {
+  if (error instanceof NotFoundError) {
+    error.code // "not_found"
+  } else if (error instanceof AppError) {
+    // other domain failures
+  } else {
+    throw error
+  }
+}
+```
+
+<br />
+
+这里的 `instanceof` 就是这个 class 存在的理由。Failure 是 return value 时，result type 上的 string union 往往更好。一旦被 `throw`，能活下来的 test 是 prototype chain。
+
+<br />
+
+---
+
+## 6. Stateful Clients and Stores
+
+Class 值得写的另一种情况，是 **一个 object** 必须持有可变 lifetime：token、abort controller、connection、in-memory cache。Methods 共享那份 state。Callers 共享那个 object。Identity 要紧——只有一个 client，不是每次调用都新做一袋 functions。
+
+<br />
+
+这不是 React tree。Client 不 render。它与 SDK client 是同一个 shape：construct 一次、传来传去、调 methods、让 fields 原地改变。
+
+<br />
+
+```ts
+class ApiClient {
+  private token: string | null = null
+  private readonly baseUrl: string
+
+  constructor(baseUrl: string) {
+    this.baseUrl = baseUrl
+  }
+
+  setToken(token: string): void {
+    this.token = token
+  }
+
+  async get<T>(path: string): Promise<T> {
+    const headers: HeadersInit = {}
+    if (this.token) headers.Authorization = `Bearer ${this.token}`
+
+    const response = await fetch(`${this.baseUrl}${path}`, { headers })
+    if (!response.ok) {
+      throw new AppError("http", `${response.status} ${path}`)
+    }
+    return response.json() as Promise<T>
+  }
+}
+
+const api = new ApiClient("https://api.example.com")
+api.setToken("secret")
+// const profile = await api.get<{ id: string }>("/me")
+```
+
+<br />
+
+Module-level closure 也能持有 `token`。当 callers 需要 construct **不止一个**——第二个 base URL、test double、每个 tenant 一个 client——或当需要 `instanceof ApiClient` 时，class 合适。当永远只会有一个、而且不需要 prototype 时，closure 合适。
+
+<br />
+
+---
+
+## 7. Classes Are Consumed More Than They Are Written
+
+TypeScript 程序里的大多数 classes 并不是在那个程序里写的。`Error`、`TypeError`、`SyntaxError`。`Map`、`Set`、`Date`、`Response`、`URL`。`EventTarget` 与每一个 DOM node。SDK clients。对着这些 types 做 `instanceof` 是普通 control flow。写一个与之匹配的 class 则不是。
+
+<br />
+
+```ts
+function parseBody(body: string): unknown {
+  try {
+    return JSON.parse(body)
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      throw new AppError("invalid_json", "body is not JSON", { cause: error })
+    }
+    throw error
+  }
+}
+
+function disableButton(event: Event): void {
+  if (event.currentTarget instanceof HTMLButtonElement) {
+    event.currentTarget.disabled = true
+  }
+}
+
+const cache = new Map<string, Response>()
+cache.set("/me", new Response("{}"))
+```
+
+<br />
+
+Host 与 standard library 已经在 identity 与 `instanceof` 要紧的地方选了 classes。Application code 在 boundary 继承这个选择——`catch`、DOM events、`fetch`——不该为明天就会变成 JSON 的 data 发明一套平行的 hierarchy。
+
+<br />
+
+---
+
+## 8. What Not to Class
+
+React components、API payloads、与 Hono handlers 不需要 runtime identity。它们需要一个 type 与一个 function。
+
+<br />
+
+React class components 把 state 存在 `this` 上，并亲手给 event handlers rebind。Hooks 把那份 state 挪到 Fiber 上。Function components 是默认；class 形式是阅读旧 tree 的方式，以及在 libraries wrap 它之前，写 error boundary 的方式。这个 stack 里的新 UI 是 function。Rendering model 见 [深入理解 React](/notes/understanding-react-in-depth)。
+
+<br />
+
+穿过 network 的 DTO 是 type。`JSON.parse` 返回 plain object。挂在 `class User` 上的 methods 不会在，`instanceof User` 会是 false。Behavior 属于接收该 type 的 functions。
+
+<br />
+
+```ts
+type User = {
+  id: string
+  name: string
+}
+
+function displayName(user: User): string {
+  return user.name
+}
+
+// After the wire, this is what arrives — not `new User(...)`
+const user = JSON.parse('{"id":"1","name":"Ada"}') as User
+displayName(user) // "Ada"
+```
+
+<br />
+
+Hono handler 是同一个 shape：从 context 到 response 的 function。Nest 风格的 controller classes 属于另一套 stack。[用 Hono 打造 Backend APIs](/notes/backend-apis-hono-sst) 把 routes 留作 functions。没有东西给 `instanceof` 测，也没有可变 lifetime 可共享。
+
+<br />
+
+```ts
+import { Hono } from "hono"
+
+const app = new Hono()
+
+app.get("/users/:id", async (c) => {
+  const user = await getUser(c.req.param("id"))
+  if (!user) return c.json({ error: "not found" }, 404)
+  return c.json(user)
+})
+```
+
+<br />
+
+---
+
+## Takeaway
+
+<br />
+
+TypeScript `class` 是 constructor 加上 prototype。Instance fields 活在 object 上。Methods 活在 prototype 上。`interface` 与 TypeScript `private` 会被 erased。`#` 与 `instanceof` 不会。
+
+当问题是要不要写一个时，三个检查能解决大多数情况：**这是否需要在 `throw` 之后或跨 boundary 做 `instanceof`？是否有一个 object 需要 callers 共享的可变 lifetime？还是这只是 data 与一个 function？** 第三种情况不需要 class。这就是它通常被使用的方式。

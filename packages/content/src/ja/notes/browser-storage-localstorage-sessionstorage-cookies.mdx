@@ -49,15 +49,15 @@ const parsed = stored ? JSON.parse(stored) : null
 
 <br />
 
-便利さには限界があります。値は文字列、access は同期的で、read や write のたびに main thread をブロックします。容量や eviction の挙動もブラウザによって異なります。database ではなく、小さな persistence 機構として扱っています。
+便利さには限界があります。値は文字列、access は同期的で、read や write のたびに main thread をブロックします。容量や eviction の挙動もブラウザによって異なります。database ではなく、小さな persistence 機構である。
 
 <br />
 
-その origin 上で動く JavaScript はすべて読み取れます。XSS 脆弱性経由で混入した悪意あるコードも含まれます。そのため session tokens、passwords、機微な個人データは `localStorage` に保存しません。長寿命の bearer tokens は特に危険で、値を盗むだけで他の場所で再利用できます。
+その origin 上で動く JavaScript はすべて読み取れます。XSS 脆弱性経由で混入した悪意あるコードも含まれます。そのため session tokens、passwords、機微な個人データは `localStorage` に保存しない。長寿命の bearer tokens は特に危険で、値を盗むだけで他の場所で再利用できる。
 
 <br />
 
-stored keys に version を付け、parsed data を検証します。デプロイ済みのアプリは変わりますが、古い browser data は残ります：
+stored keys に version を付け、parsed data を検証する。デプロイ済みのアプリは変わるが、古い browser data は残る：
 
 <br />
 
@@ -104,7 +104,7 @@ sessionStorage.setItem(
 
 <br />
 
-セキュリティ境界ではありません。ページ上の scripts からも読めますし、ユーザーがタブを複製・復元する方法によって lifecycle の前提が崩れることもあります。`sessionStorage` を使う理由は **product lifetime** がデータと一致するからであり、`localStorage` より安全だからではありません。
+セキュリティ境界ではありません。ページ上の scripts からも読めますし、ユーザーがタブを複製・復元する方法によって lifecycle の前提が崩れることもあります。`sessionStorage` は **product lifetime** がデータと一致する場合に使う。`localStorage` より安全だからではない。
 
 <br />
 
@@ -147,15 +147,15 @@ await cookieStore.set({
 
 <br />
 
-Client-side code は `cookieStore` 経由でも `HttpOnly` cookie を読めません。その制限が意図です。一般的な application state を cookies に入れることも避けます。サイズが小さく、domain と path のルールが微妙で、リクエストに含まれる cookies は毎回ネットワーク overhead を増やします。
+Client-side code は `cookieStore` 経由でも `HttpOnly` cookie を読めない。その制限が意図である。一般的な application state を cookies に入れることも避ける。サイズが小さく、domain と path のルールが微妙で、リクエストに含まれる cookies は毎回ネットワーク overhead を増やす。
 
 <br />
 
 ---
 
-## 私が使う判断基準
+## デフォルト
 
-デフォルトの選択は次のとおりです：
+デフォルトの選択は次のとおりである：
 
 - データが現在開いているページの間だけ必要なら **in-memory state**
 - 一時 state が単一タブ内の reload に耐えるべきなら **sessionStorage**

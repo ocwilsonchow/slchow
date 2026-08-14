@@ -6,7 +6,7 @@ import {
 import { publicResumeSlug } from "@/features/resume/variants"
 import { fumadocsI18n } from "@/lib/fumadocs-i18n"
 import { createSearchTokenizer } from "@/lib/search-tokenizer"
-import { content } from "@/lib/source"
+import { content, isHiddenSourcePage } from "@/lib/source"
 
 type LocalizedSearchIndex = AdvancedIndex & {
   locale: string
@@ -77,6 +77,7 @@ async function buildSearchIndexes(): Promise<LocalizedSearchIndex[]> {
 
   for (const { language, pages } of content.getLanguages()) {
     for (const page of pages) {
+      if (isHiddenSourcePage(page.path)) continue
       const target = getSearchTarget(page.slugs, page.url, language)
       if (!target) continue
 

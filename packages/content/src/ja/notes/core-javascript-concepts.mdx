@@ -8,6 +8,8 @@ promises や `async`/`await` を毎日使いながら、runtime が下で何を�
 
 概念は一つのシステムを成します。同期コードは **call stack** 上で実行され、host environment が stack 外の処理を担当し、**event loop** がキューに入った callbacks をいつ実行するか調整します。Closures は functions が state をどう保持するかを説明し、promises、`async`/`await`、generators は処理を一時停止・再開する別の方法を提供します。
 
+この note は code がいつ走るかです。`class`、prototype、`this` は [TypeScript の class と Runtime Identity](/notes/typescript-classes-and-runtime-identity) にあります。
+
 <br />
 
 ![JavaScript Event Loop in the browser](./images/javascript-event-loop-browser.png)

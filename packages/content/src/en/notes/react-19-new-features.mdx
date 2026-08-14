@@ -1,12 +1,12 @@
 ---
 title: React 19 New Features
-description: My notes on the React 19 features that change how I build forms, handle async work, and structure components
+description: The React 19 features that change forms, async work, and component structure
 category: frontend
 ---
 
 React 19 feels less like a collection of isolated APIs and more like React filling in several gaps that application code used to handle manually. Forms can now run asynchronous Actions, optimistic updates have a dedicated Hook, components can read promises with `use`, and common patterns around refs, context, and document metadata need less ceremony.
 
-React 19.2 builds on that foundation with `Activity`, `useEffectEvent`, and better performance tooling. These are the features I find most useful, along with the caveats I want to remember when deciding where to use them.
+React 19.2 builds on that foundation with `Activity`, `useEffectEvent`, and better performance tooling. These are the most useful features, along with the caveats worth remembering when deciding where to use them.
 
 <br />
 
@@ -16,7 +16,7 @@ React 19.2 builds on that foundation with `Activity`, `useEffectEvent`, and bett
 
 An **Action** is a function that runs inside a **Transition**. It can perform asynchronous work while React manages the **pending state**, errors, and the final state update around it.
 
-The most visible use of Actions is the new `action` prop on `<form>`. Instead of intercepting `onSubmit`, reading the form, tracking a loading flag, and resetting the form manually, I can pass a function directly to it.
+The most visible use of Actions is the new `action` prop on `<form>`. Instead of intercepting `onSubmit`, reading the form, tracking a loading flag, and resetting the form manually, a function can be passed directly to it.
 
 <br />
 
@@ -109,7 +109,7 @@ function NewsletterForm() {
 
 `useFormStatus` reads the status of its parent form, so it must be called from a component rendered **inside** that form. Calling it in the same component that creates the form will not observe that form's submission.
 
-I use `useActionState` when the server result should become UI state, and `useFormStatus` for controls that only need to know whether the surrounding form is pending.
+`useActionState` fits when the server result should become UI state, and `useFormStatus` for controls that only need to know whether the surrounding form is pending.
 
 <br />
 
@@ -170,7 +170,7 @@ function MessageThread({ initialMessages }: { initialMessages: Message[] }) {
 
 The optimistic value is temporary. When the Action finishes, React returns to the value supplied by the component's real state or props. That means the **source of truth** still needs to be updated outside the optimistic reducer.
 
-Optimistic updates work best when the expected result is obvious and failure can be explained or reversed. I would be more cautious with destructive operations or anything where pretending success could mislead the user.
+Optimistic updates work best when the expected result is obvious and failure can be explained or reversed. Destructive operations warrant more caution, as does anything where pretending success could mislead the user.
 
 <br />
 
@@ -231,7 +231,7 @@ function Heading({ muted }: { muted: boolean }) {
 }
 ```
 
-I think of `use` as a bridge between rendering and a resource that may not be ready yet, rather than as a replacement for every data-fetching library.
+`use` is a bridge between rendering and a resource that may not be ready yet, rather than a replacement for every data-fetching library.
 
 <br />
 
@@ -343,7 +343,7 @@ function ProductImage({ src, alt }: { src: string; alt: string }) {
 }
 ```
 
-Frameworks already handle much of this work, so I would check the framework's conventions before calling these APIs directly.
+Frameworks already handle much of this work, so check the framework's conventions before calling these APIs directly.
 
 <br />
 
@@ -462,7 +462,7 @@ Using this API also requires a recent `eslint-plugin-react-hooks`, because the l
 
 React 19.2 adds **React Performance Tracks** to Chrome DevTools performance profiles. The Scheduler tracks show update priorities and when work was scheduled, blocked, rendered, or painted. The Components tracks show when components render and when their effects mount.
 
-This provides a lower-level view than the React DevTools Profiler. I would use it when a slow interaction involves scheduling, browser work, and React rendering rather than one obviously expensive component.
+This provides a lower-level view than the React DevTools Profiler. It fits when a slow interaction involves scheduling, browser work, and React rendering rather than one obviously expensive component.
 
 There are also two additions that most application developers will encounter through a framework:
 
@@ -477,7 +477,7 @@ React 19.2 also improves streaming SSR by batching nearby Suspense boundary reve
 
 ## 11. Upgrading to React 19
 
-I would upgrade React, React DOM, and their TypeScript definitions together, using the latest patched React 19 release supported by the framework.
+Upgrade React, React DOM, and their TypeScript definitions together, using the latest patched React 19 release supported by the framework.
 
 <br />
 
@@ -494,7 +494,7 @@ The official upgrade guide includes codemods for common migrations. The breaking
 - Legacy Context APIs and function component `propTypes` are removed.
 - Ref callback TypeScript rules are stricter because callbacks can now return cleanup functions.
 
-I would treat the **upgrade and feature adoption as separate steps**. First make the existing application work on React 19, then introduce Actions, `use`, or `Activity` where they simplify a real pattern. A major upgrade is easier to debug when it is not mixed with a large rewrite.
+Treat the **upgrade and feature adoption as separate steps**. First make the existing application work on React 19, then introduce Actions, `use`, or `Activity` where they simplify a real pattern. A major upgrade is easier to debug when it is not mixed with a large rewrite.
 
 <br />
 
@@ -502,8 +502,8 @@ I would treat the **upgrade and feature adoption as separate steps**. First make
 
 ## Takeaway
 
-The theme I see in React 19 is coordination. Actions coordinate async mutations with pending and optimistic UI. `use` coordinates rendering with resources. Document APIs coordinate metadata, styles, and scripts. `Activity` coordinates visible and background work, while `useEffectEvent` separates synchronization from event-like behavior.
+The theme in React 19 is coordination. Actions coordinate async mutations with pending and optimistic UI. `use` coordinates rendering with resources. Document APIs coordinate metadata, styles, and scripts. `Activity` coordinates visible and background work, while `useEffectEvent` separates synchronization from event-like behavior.
 
-The features I expect to use most often are form Actions, `useActionState`, `useOptimistic`, ref as a prop, and `useEffectEvent`. `use`, `Activity`, and the server rendering APIs are more dependent on framework support and application architecture, but they point toward a React model where loading, mutations, and rendering are designed to work together.
+The features that earn a keep most often are form Actions, `useActionState`, `useOptimistic`, ref as a prop, and `useEffectEvent`. `use`, `Activity`, and the server rendering APIs are more dependent on framework support and application architecture, but they point toward a React model where loading, mutations, and rendering are designed to work together.
 
-For the complete details, I refer back to the official [React 19 release notes](https://react.dev/blog/2024/12/05/react-19), [React 19.2 release notes](https://react.dev/blog/2025/10/01/react-19-2), and [React 19 upgrade guide](https://react.dev/blog/2024/04/25/react-19-upgrade-guide).
+The official notes are the [React 19 release notes](https://react.dev/blog/2024/12/05/react-19), [React 19.2 release notes](https://react.dev/blog/2025/10/01/react-19-2), and [React 19 upgrade guide](https://react.dev/blog/2024/04/25/react-19-upgrade-guide).
