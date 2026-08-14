@@ -151,8 +151,6 @@ function DesignPageInner({
     previousSlugRef.current = expandedSlug
 
     if (expandedSlug) {
-      const card = cardRefs.current.get(expandedSlug)
-      card?.scrollIntoView({ block: "center", behavior: "auto" })
       const frame = requestAnimationFrame(() => {
         backRef.current?.focus({ preventScroll: true })
       })
