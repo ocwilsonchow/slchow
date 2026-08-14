@@ -1,0 +1,110 @@
+---
+title: 履歴書 — フロントエンド
+---
+
+## Wilson Chow
+
+5 年の経験を持つフロントエンドソフトウェアエンジニア。消費者向け React / React Native 製品を Figma から本番まで届けてきた——ゼロイチの立ち上げと **15+** アプリの多年にわたる進化、およびそれらが依存する型付き API を含む。クリティカルパスの読み込み時間を最大 **80%**、検索レイテンシを **90%** 削減。現在はマルチチャネル agent プラットフォームのクライアント面を主導：チャット、ツール呼び出し、ファイルメンション UI を、中断可能な持続的 agent runs の上に載せる。日常開発に **Cursor** / AI 支援ツールを使用。**AWS Solutions Architect Associate**。
+
+強み：フロントエンドエンジニアリング · パフォーマンス · 複雑なフロー · 型付き API · Agent UI
+
+---
+
+## 職歴
+
+### フルスタックエンジニア、Vioo Company Limited、2022 年 5 月〜現在
+
+並行する複数のクライアント製品の主要エンジニア — Figma から本番 UI とその背後の API まで。ステークホルダーと連携して UX を定義し、リリースを届けた。
+
+- ゼロイチから多年にわたり **15+** の本番 React / React Native アプリを開発・保守。高忠実度 Figma デザインと、クライアント間で再利用する共有デザインシステムを含む。
+- サードパーティの WordPress を自前の headless CMS（Strapi / Sanity）と検索（Meilisearch / Algolia）に置き換え、移行中も公開を継続：読み込み時間 **80%** 削減、検索レイテンシ **90%** 削減、PageSpeed Insights **>90**。
+- Radix / Tailwind の共有コンポーネント・hook ライブラリを Storybook、Fumadocs、MDX ドキュメント付きで整備し、複数クライアントアプリで再利用。フロントエンドレビューを主導。重要フローに Vitest / Cypress。
+- Next.js を isomorphic UI 兼 BFF として構築：SSR / ISR、Shopify GraphQL・CMS・検索 API の集約とキャッシュ。Node ランタイムの問題と本番ボトルネックを独立して切り分け（Lighthouse、Sentry）。
+- アイデンティティを型付き API に対する再利用可能なクライアント状態としてモデル化：Better Auth sessions と組織メンバーシップ、OAuth 2.0 / OIDC、JWT / session ライフサイクル、RBAC——ネストした条件分岐ではない。Session は **HttpOnly / Secure / SameSite** cookies に置き、`localStorage` tokens には置かない。
+- Hono、Drizzle、OpenAPI、tRPC で AWS Lambda / API Gateway 上に型付き API を構築（Postgres / DynamoDB / S3）。エッジを硬化：**厳格な CORS**、trusted origins、auth ルートの WAF レート制限。アイデンティティは authorizer cookie から——クライアント供給の user header は使わない。API keys、tokens、資格情報は **SST Secret** に置き、`.env` には置かない。GitHub Actions + SST で CI/CD——デプロイ前に lint、typecheck、tests、build——デプロイ時間 **50%+** 短縮。
+
+<br />
+
+---
+
+## 主なプロジェクト
+
+### マルチチャネル Agent プラットフォーム、2026 年 4 月〜現在
+
+クライアント向け agent UI（Web + Discord）——持続的なマルチチャネルアシスタントのプロダクト面。
+
+- 各 agent run を**ステートフル・中断可能・再開可能**な持続ストリームとしてモデル化：クライアントは切断・再接続し、実行途中から進捗を失わず再開できる——ネストしたチャット条件ではない。
+- 組み合わせ可能なチャット、ツール呼び出し、多段階クライアントフロー、およびワークスペースファイルを prompts に付ける TipTap @mention ファイルタグ付けコンポーネントをリリース。
+- 失敗を一等でテスト可能な UI として扱う：見える run 状態、リトライ、再開——完了バブルだけではない。
+- クライアント契約を所有。あわせて ECS 上で Hono + Better Auth を運用し、Postgres / S3 と Mastra / RAG / evals がこの面を支える。
+
+---
+
+### 高性能マーケティングサイト、2025 年 11 月
+
+コンテンツ＋検索型マーケティングサイトのフロントエンドリード — パフォーマンス、CMS ページ、公開 UX。
+
+- Next.js + Strapi + Meilisearch で **LCP &lt; 0.5s**、**CLS &lt; 0.1**、PageSpeed Insights **>90**。
+- フル SSG でもオンデマンドのみでもなくハイブリッド ISR：主要ページと最新 100 記事をビルド時に生成、残りはオンデマンド。Strapi webhook の tag revalidation でフルリビルドなしに公開を反映。
+- アクセシビリティと SEO を納品基準に：セマンティック構造、キーボード対応のナビ／フォーム、Lighthouse + axe；CMS 由来の metadata/OG、canonicals、sitemap、robots.txt、Article JSON-LD。
+- TanStack Query の prefetch/hydration と TanStack Form + Zod で対話的・多段階フローを編成。クライアント向けコンテンツサイトで locale-aware なルーティング、コピー、日付／数値フォーマット。
+
+---
+
+### React Native 会員プラットフォーム、2024 年 4 月リリース
+
+- Figma デザインと iOS / Android 会員アプリ（デジタルカード、ポイント、オファー）を主導。App Store と Play Store にリリース。Express API と Next.js 管理画面も保守。
+- Sentry で本番クラッシュ、端末互換、パフォーマンスボトルネックを独立診断。ローンチ後 **>99.5%** の crash-free sessions を維持。
+- FlashList でリストのジャンクを削減。react-native-screens freeze と遅延マウントで非アクティブタブを軽量化。Reanimated はネイティブスレッド遷移に限定。
+- リモート画像をキャッシュし、長いリストでフル解像度アセットを避けてフィードの画像読み込みを短縮。
+- Firebase Cloud Messaging でプッシュとディープリンク（プロモとマイルストーン）。
+
+<br />
+
+---
+
+## その他の仕事
+
+レストランのロイヤリティアプリ（React Native）、キャンペーン／EC ストアフロント（Next.js、Shopify GraphQL）、CMS コンテンツサイト、フォトブースイベントアプリ（React Native、Skia）も納品。
+
+<br />
+
+---
+
+## スキル
+
+- **言語**：TypeScript、Node.js
+- **フロントエンド**：React、Next.js、React Native、Expo、TanStack Query、TanStack Form、Framer Motion、Tailwind CSS、shadcn/ui、Storybook、Figma、MDX、TipTap
+- **バックエンド**：Hono、Drizzle、OpenAPI、tRPC、Postgres、DynamoDB、Better Auth
+- **Auth と i18n**：OAuth 2.0 / OIDC、JWT、HttpOnly cookies、CORS、RBAC、next-intl
+- **テストと監視**：Cypress、Vitest、React Testing Library、Lighthouse、axe、Sentry、PostHog
+- **ワークフロー**：Cursor、Claude Code
+- **DevOps**：SST、SST Secret、Docker、GitHub Actions、AWS
+- **その他**：Strapi、Sanity、Meilisearch
+
+<br />
+
+---
+
+## 資格
+
+- AWS Solutions Architect Associate、2026
+- AWS Cloud Practitioner、2025
+
+<br />
+
+---
+
+## 学歴
+
+### University College London
+
+- MPharm Pharmacy、2016 – 2020 — First Class Honours
+- 登録薬剤師、GPhC、2021 年〜現在
+- 同等の実務経験：5 年で 15+ の本番プロダクトを納品。AWS Solutions Architect Associate。薬剤師実務は規制の厳しい領域であり、コンプライアンスが製品判断に課す制約に慣れている。
+
+<br />
+
+---
+
+履歴書は[こちら](/resume.pdf)からもダウンロードできます。

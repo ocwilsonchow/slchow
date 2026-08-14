@@ -1,0 +1,94 @@
+---
+title: 履歷 — 應用 AI
+---
+
+## Wilson Chow
+
+專注生產級 AI 系統的軟件工程師。五年全端產品交付經驗；目前主導一個具備持久化 workflows、memory、RAG、scorers 與 evals 的多渠道 agent 平台。建構這些 agents 所運行的型別安全 API 與 UI——而不是一層 chat-completion 包裝。已取得 **AWS Solutions Architect Associate** 認證。
+
+優勢：生產級 agents · 持久化 workflows · RAG · Evals · Observability
+
+---
+
+## 工作經驗
+
+### 全端工程師，Vioo Company Limited，2022 年 5 月至今
+
+擔任多個並行客戶產品的主要工程師。近期工作是生產級 agents——workflows、memory、tools 與品質門控——建立在型別安全 API 與 AWS 之上。
+
+- 使用 Mastra、Vercel AI SDK 與 Langchain 交付生產級 AI agents（workflows、memory、tool calls、observability），包括可組合的聊天與工具調用 UI。
+- 加入帶評分的 eval suites（golden prompts + LLM-as-judge）與 run／tool traces，使 prompt 或 tool 變更在類似 CI 的檢查中失敗，而不是在客戶面前失敗。
+- 使用 Hono、Drizzle、OpenAPI 與 tRPC 在 AWS Lambda／API Gateway 上建構型別安全 API，資料層為 Postgres／DynamoDB／S3。
+- 以 Meilisearch／Algolia 取代舊有 WordPress 搜尋：搜尋延遲降低 **90%**——這段檢索工作後來影響了 RAG 排序選擇。
+- 導入 SST 管理應用部署與基礎設施，部署時間縮短 **50%+**。GitHub Actions 在 `sst deploy` 前跑 lint、typecheck、tests 與 build。
+- 已交付 15+ 個正式上線的 Web 與流動應用；agent 平台是當前系統，而非旁路 demo。
+
+<br />
+
+---
+
+## 精選專案
+
+### 多渠道 Agent 平台，2026 年 4 月至今
+
+面向客戶的持久化助手平台（Web + Discord），具備生產級可靠性與品質控制。
+
+- 選擇持久化串流而非 request／response 聊天，使長 tool loops 能在斷線後存活；客戶端可在執行途中恢復而不遺失進度。
+- 基於 Mastra 與 AI SDK 建構 workflow、memory、scheduling 和 workspace 原語：pause／resume、retries、檔案儲存、沙盒工具與 skills。
+- 端到端交付 RAG：ingest／parse、chunking，以及 Pinecone retrieval（query／rerank，必要時 graph query）。
+- 在 ClickHouse 中加入 run／tool traces 與成本／延遲指標；prompt 或 tool 變更後以帶評分的 evals 作為發布門控。
+- 在 ECS 上運行 Hono + Better Auth，Postgres 存核心資料、S3 存檔案——使 agent 狀態與產物跨過單次請求繼續存在。
+- 交付 TipTap @mention 檔案標記元件，使 workspace 檔案作為一等上下文進入 prompts，而非貼上的文字塊。
+
+---
+
+### 高效能行銷網站，2025 年 11 月
+
+- 使用 AI SDK 建構用於生成式 AI 內容創作的自訂 Strapi plugin——生成發生在發布流程內，而不是一個獨立的聊天玩具。
+- 混合 ISR + webhook revalidation，使 AI 輔助的發布無需完整重建即可上線。
+- 站點仍須是產品：**LCP &lt; 0.5s**、**CLS &lt; 0.1**，PageSpeed Insights **>90**。
+
+---
+
+### 其他應用 AI
+
+健康與保健 RAG agent（Next.js、Langchain、Shopify API）：攝入店鋪／內容上下文、檢索，並在真實 storefront 內作答——當前平台之前的 RAG 工作。
+
+<br />
+
+---
+
+## 技能
+
+- **程式語言**：TypeScript、Python
+- **AI**：Mastra、Vercel AI SDK、Langchain、Pinecone、evals（golden prompts、LLM-as-judge）、ClickHouse traces
+- **後端**：Hono、Drizzle、OpenAPI、tRPC、Postgres、DynamoDB、S3、Better Auth
+- **前端（agent UI）**：React、Next.js、TipTap
+- **DevOps**：SST、Docker、AWS（Lambda、API Gateway、ECS）、GitHub Actions
+
+<br />
+
+---
+
+## 認證
+
+- AWS Solutions Architect Associate，2026
+- AWS Cloud Practitioner，2025
+
+<br />
+
+---
+
+## 教育背景
+
+### University College London
+
+- MPharm 藥學，2016 至 2020 年，一等榮譽學位
+- 註冊藥劑師（GPhC），2021 年至今
+- 從藥劑轉行投身軟件；習慣處理嚴謹、注重細節的問題空間——有助於 eval 設計與失敗案例
+
+<br />
+
+---
+
+你亦可以在[這裡](/resume.pdf)下載我的履歷。

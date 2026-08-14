@@ -26,7 +26,8 @@
     "previous": "前の曲",
     "nowPlaying": "再生中",
     "socials": "ソーシャル",
-    "tableOfContents": "目次"
+    "tableOfContents": "目次",
+    "shortcutHint": "<modifier>⌘</modifier> <key>M</key>"
   },
   "search": {
     "title": "検索",
@@ -103,14 +104,19 @@
   },
   "notes": {
     "intro": "興味のあるテーマについてのノートです。Grok 4.5、GPT-5.6 Sol、Kimi K3 Max と共同執筆・共同監査しています。",
-    "readNext": "次のノートを読む"
+    "readNext": "次のノートを読む",
+    "categories": {
+      "frontend": "フロントエンド",
+      "backend": "バックエンド",
+      "ai": "AI",
+      "computer-science": "コンピュータサイエンス",
+      "personal": "個人"
+    }
   },
   "designs": {
     "intro": "ユーザーインターフェースを作るのが好きです。以前は Figma に多くの時間を費やしていました。"
   },
   "code": {
-    "showMore": "もっと見る",
-    "showLess": "閉じる",
     "copy": "コードをコピー",
     "copied": "コピーしました"
   }

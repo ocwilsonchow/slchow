@@ -14,6 +14,7 @@ type DocsEntry = DocData &
     author?: string
     date?: string | Date
     pinned?: boolean
+    category?: "frontend" | "backend" | "ai" | "computer-science" | "personal"
   }
 
 export const content = loader({

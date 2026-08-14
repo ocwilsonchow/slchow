@@ -3,6 +3,7 @@ import {
   type AdvancedIndex,
   createI18nSearchAPI,
 } from "fumadocs-core/search/server"
+import { publicResumeSlug } from "@/features/resume/variants"
 import { fumadocsI18n } from "@/lib/fumadocs-i18n"
 import { createSearchTokenizer } from "@/lib/search-tokenizer"
 import { content } from "@/lib/source"
@@ -12,7 +13,6 @@ type LocalizedSearchIndex = AdvancedIndex & {
 }
 
 const SEARCHABLE_CATEGORIES = new Set(["notes", "works"])
-const RESUME_SLUG = "resume-v2"
 const FRONTMATTER = /^---\r?\n[\s\S]*?\r?\n---\r?\n?/
 
 function getSearchTarget(slugs: string[], pageUrl: string, locale: string) {
@@ -25,7 +25,7 @@ function getSearchTarget(slugs: string[], pageUrl: string, locale: string) {
     }
   }
 
-  if (category === "blocks" && slug === RESUME_SLUG) {
+  if (category === "blocks" && slug === publicResumeSlug) {
     return {
       category: "resume",
       url: `/${locale}/resume`,

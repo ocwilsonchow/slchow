@@ -41,11 +41,11 @@ const Page = async ({ params }: Props) => {
           <h1 className="font-semibold tracking-tight text-content-ink">
             {t("notes.title")}
           </h1>
-          <p className="leading-snug">{tNotes("intro")}</p>
+          <p className="leading-snug text-content-subdued">{tNotes("intro")}</p>
         </Header.Column>
       </Header.Root>
-      <div className="p-5 pb-40">
-        <ListNotes locale={locale} limit={Infinity} showHeading={false} />
+      <div className="p-5 pb-50">
+        <ListNotes locale={locale} showHeading={false} />
       </div>
     </PageLayout>
   )

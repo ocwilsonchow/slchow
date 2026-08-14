@@ -2,6 +2,7 @@
 title: Hono、Drizzle、Zod OpenAPI、SST による Backend API
 description: Lambda または Fargate 上の typed Hono stack——Zod OpenAPI、Better Auth、Drizzle、SST デプロイ、WAF、アラーム、バックアップドリル
 date: 2026-08-12
+category: backend
 ---
 
 Backend API を構築するとき、request から database までの経路は短く、**validation**、**documentation**、**infrastructure** が同じコードから生まれることを望む。この stack は **Hono**、**Better Auth**、**Drizzle**、**PostgreSQL**、**Zod OpenAPI**、**Scalar**、そして **AWS Lambda** または **ECS Fargate** 上の **SST** である。
@@ -99,7 +100,11 @@ const CreateUserSchema = z
     name: z.string().min(1).max(100),
   })
   .openapi("CreateUser")
+```
 
+<br />
+
+```ts
 const createUserRoute = createRoute({
   method: "post",
   path: "/users",
@@ -148,7 +153,11 @@ const createUserRoute = createRoute({
     },
   },
 })
+```
 
+<br />
+
+```ts
 app.openapi(createUserRoute, async (c) => {
   const input = c.req.valid("json")
   const user = await createUser(input)

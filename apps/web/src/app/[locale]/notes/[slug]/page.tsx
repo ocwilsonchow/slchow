@@ -1,3 +1,4 @@
+import { ArrowLeftIcon } from "lucide-react"
 import type { Metadata } from "next"
 import type { Locale } from "next-intl"
 import { setRequestLocale } from "next-intl/server"
@@ -50,8 +51,8 @@ const Page = async ({ params }: Props) => {
           className="grid gap-5 max-h-screen overflow-y-auto lg:pb-20"
           data-lenis-prevent
         >
-          <div className="mt-8 lg:mt-0 space-y-1">
-            <h1 className="text-lg lg:text-sm font-semibold tracking-tight text-content-ink">
+          <div className="mt-8 lg:mt-0 space-y-2">
+            <h1 className="text-lg lg:text-sm font-semibold tracking-tight text-content-ink leading-tight">
               {page?.data.title}
             </h1>
             {page?.data.description && (
@@ -63,7 +64,7 @@ const Page = async ({ params }: Props) => {
           <CollapsibleToc toc={toc} />
         </Header.Column>
       </Header.Root>
-      <article className="p-5">
+      <article className="min-w-0 p-5">
         <RenderMdxBlockByPath category="notes" slug={slug} locale={locale} />
         <NextNoteLink slug={slug} locale={locale} />
       </article>

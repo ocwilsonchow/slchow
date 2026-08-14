@@ -25,7 +25,7 @@ export const RenderMdxBlockByPath = ({
     <div
       {...props}
       className={cn(
-        "space-y-3 grid max-w-prose text-content-body",
+        "grid w-full min-w-0 max-w-prose space-y-3 text-content-body",
         props.className
       )}
     >

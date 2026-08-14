@@ -26,7 +26,8 @@
     "previous": "上一首",
     "nowPlaying": "正在播放",
     "socials": "社交链接",
-    "tableOfContents": "目录"
+    "tableOfContents": "目录",
+    "shortcutHint": "<modifier>⌘</modifier> <key>M</key>"
   },
   "search": {
     "title": "搜索",
@@ -103,14 +104,19 @@
   },
   "notes": {
     "intro": "一些关于我感兴趣主题的笔记。与 Grok 4.5、GPT-5.6 Sol 及 Kimi K3 Max 共同撰写与审核。",
-    "readNext": "阅读下一篇笔记"
+    "readNext": "阅读下一篇笔记",
+    "categories": {
+      "frontend": "前端",
+      "backend": "后端",
+      "ai": "AI",
+      "computer-science": "计算机科学",
+      "personal": "个人"
+    }
   },
   "designs": {
     "intro": "我喜欢打造用户界面。以前我花很多时间在 Figma 上。"
   },
   "code": {
-    "showMore": "显示更多",
-    "showLess": "显示较少",
     "copy": "复制代码",
     "copied": "已复制"
   }

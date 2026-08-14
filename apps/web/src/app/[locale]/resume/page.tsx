@@ -6,6 +6,7 @@ import { Header } from "@/features/layout/components/header"
 import { PageLayout } from "@/features/layout/components/page"
 import { RenderMdxBlockByPath } from "@/features/mdx/components/render-mdx-block"
 import { Toc } from "@/features/mdx/components/toc"
+import { publicResumeSlug } from "@/features/resume/variants"
 import { buildPageMetadata } from "@/lib/metadata"
 import { getMdxContent } from "@/lib/source"
 
@@ -25,7 +26,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   })
 }
 
-const resumeSlug = "resume-v2"
+const resumeSlug = publicResumeSlug
 
 const Page = async ({ params }: Props) => {
   const { locale } = await params

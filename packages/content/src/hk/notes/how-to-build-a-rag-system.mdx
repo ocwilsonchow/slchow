@@ -1,0 +1,772 @@
+---
+title: 如何搭建一套 RAG 系統
+description: 一份教學：用 Mastra workflows、Pinecone namespaces 與 tool-called retrieval，做 organization-scoped 的 document RAG
+date: 2026-08-13
+category: ai
+---
+
+能用的 RAG stack 不是「embed 文字然後祈禱」。它是兩條共用 embedding space 的 pipelines：一條寫入 vectors 的 **deterministic ingest workflow**，以及一條讀取它們的 **tool-called retriever**。難的是 tenant boundary。若 model 可以選搜*誰的* index，你就沒有 RAG。你有的是洩漏。
+
+這個設計用 Mastra workflows、`MDocument` chunking、OpenAI `text-embedding-3-small`（1536-d），以及以 **namespace = `organizationId`** 分割的 Pinecone serverless index。Identity 與 membership 留在它們本來就在的地方：Better Auth organizations 與 Hono request context，見 [用 Hono、Better Auth、Drizzle 與 Postgres RLS 打造 Multi-Tenant 後端](/notes/multi-tenant-backend-drizzle-hono-better-auth)。`userId` 是 actor。`organizationId` 是圖書館。同一個 org 的 members 共用一份 corpus。
+
+<br />
+
+---
+
+## 1. System shape
+
+Files 是 source of truth。Vectors 是衍生的 index。Ingest status 是該 org 與 path 最新的 workflow run，不是 documents table。
+
+從 filesystem prefix 列出 files。問「這個 file 已經可搜尋了嗎？」的方法，是列出 `resourceId = organizationId` 的 workflow runs，並對上該 run 的 input `path`。失敗的 snapshot 就是失敗的 ingest。你不需要一列 `documents` row 才能知道這兩件事；而一列可能跟 S3 與 Pinecone 漂移的 row，會變成你必須對帳的第三個 source of truth。
+
+Mastra Workspace search（`Workspace` + `PineconeVector` + embedder）為一個 agent sandbox 建立 index。對 coding agent 的 local files，這是正確的 primitive。對 HTTP upload API、org-scoped library，以及經過 membership 檢查的 `requestContext`，這是錯誤的 primitive。把 Workspace 留給 agent 的 working set。把這個 workflow 留給產品 corpus。
+
+<br />
+
+```text
+Write
+  POST /documents
+  → S3 orgs/organizationId/docs/filename
+  → workflow pinecone-document-ingestion
+  → extract text
+  → MDocument.chunk (token)
+  → embedMany text-embedding-3-small
+  → deleteVectors namespace + path
+  → upsert namespace=organizationId
+  → Pinecone index document-chunks
+
+Read (later turn)
+  chat → agent
+  → tool search-pinecone-documents
+  → embed query (same model)
+  → pinecone.query namespace=organizationId
+  → relevantContext + sources
+  → agent
+```
+
+<br />
+
+Upload 那個 turn 仍然把 file parts 內嵌在 chat message 上。Indexing 是 async。Retrieval 是後續 turns 對 org corpus 的查詢。這個切割是刻意的：用戶可以在 *這個 turn* 問剛附上的 PDF，那時 Pinecone 還沒有 chunks。之後的 turns 不該再送整份 file。它們搜 index。
+
+<br />
+
+---
+
+## 2. Why a workflow for ingest, a tool for retrieve
+
+<br />
+
+| Concern | Primitive | Reason |
+| --- | --- | --- |
+| Load → extract → chunk → embed → upsert | `createWorkflow` | 固定 DAG、retries、run snapshots、skip vs fail |
+| 「User asked about the handbook」 | `createTool` on an agent | Open-ended；「hi」時跳過 retrieval |
+| Tenant key | `requestContext`, never tool args | LLM 絕不能自己選 namespace |
+
+<br />
+
+Mastra 的經驗法則對上這個切割：workflows 處理已定義的 multi-step processes，agents 處理要用 tools 的決策。
+
+Upload 與 chat 用同一套方式填 `requestContext`：session → 驗證 route 的 `organizationId` membership → `requestContext.set("organizationId", organizationId)` 與 `requestContext.set("userId", userId)`。絕不要從 client header、tool argument，或 model 能影響的 `databaseConfig` 複製 org。
+
+<br />
+
+---
+
+## 3. Embedding contract
+
+Ingest 與 query 必須用**同一個 model 與 dimension**。跨兩個 embedding spaces 做 cosine similarity 是噪音。Mastra 文件裡的路徑是帶 `provider/model` id 的 `ModelRouterEmbeddingModel`。
+
+<br />
+
+```ts
+import { ModelRouterEmbeddingModel } from "@mastra/core/llm"
+import { embedMany } from "ai"
+
+export const EMBEDDING_MODEL_ID = "openai/text-embedding-3-small"
+export const EMBEDDING_DIMENSION = 1536
+
+const embeddingModel = new ModelRouterEmbeddingModel(EMBEDDING_MODEL_ID)
+
+export async function embedTexts(values: string[]): Promise<number[][]> {
+  if (values.length === 0) return []
+  const { embeddings } = await embedMany({
+    model: embeddingModel,
+    values,
+  })
+  return embeddings
+}
+```
+
+<br />
+
+Pinecone index metric 是 `cosine`。Dimension 在 `createIndex` 時凍結。之後改 model 意味著新 index 與完整 re-ingest。
+
+`text-embedding-3-small` 把 input 上限設在 8191 tokens。先 chunk，再 embed。不要一次 `embedMany` 一份沒上限的 PDF。Batch embeddings 與 upserts（Pinecone 實務上限大約是每次 request 1000 個 vectors 或 2 MB；在 1536-d 且 metadata 帶 `text` 時，靠近 100 比較穩）。
+
+<br />
+
+---
+
+## 4. Vector layout: one index, many namespaces
+
+Pinecone 提供三種 tenant 策略。對 org-scoped library，只有一種可接受。
+
+<br />
+
+```text
+Per-org indexes (no)
+  document-chunks-org-a
+  document-chunks-org-b
+
+Shared index + metadata filter (no)
+  document-chunks
+    filter organizationId=a | organizationId=b
+
+Shared index + namespace (yes)
+  document-chunks
+    ns=org-a | ns=org-b
+```
+
+<br />
+
+- **Index per org：** isolation 是真的；`createIndex` 很慢；index 數量上限會殺了你。
+- **Metadata `filter: { organizationId }`：** 漏一個 filter 就洩漏整個 corpus。Query cost 也隨*整個* index 放大。這是 pgvector 模式。若 namespaces 存在，不要把它搬到 Pinecone。
+- **Namespace = `organizationId`：** query、upsert 與 delete 一律帶 `namespace`。Namespaces 在第一次 upsert 時建立。Pinecone 分開存放它們，所以漏掉 metadata filter 也看不到另一個 tenant。Query cost 是目標 namespace 每 GB 1 RU，不是整個 index。
+
+省略 `namespace` **不會**搜所有 tenants。它查的是 default namespace。Isolation 只有在你從不寫那個 default namespace 時才成立。一律傳 `namespace: organizationId`。
+
+Index names：1–45 字元、小寫英數字與 hyphens、開頭與結尾必須是英數字。不要 underscores、不要 dots。用 `document-chunks`，不要用 `mastra_document_chunks`。
+
+<br />
+
+```ts
+import { PineconeVector } from "@mastra/pinecone"
+
+export const PINECONE_INDEX_NAME = "document-chunks"
+
+export const pinecone = new PineconeVector({
+  id: "pinecone",
+  apiKey: process.env.PINECONE_API_KEY!,
+  cloud: "aws",
+  region: "us-east-1",
+})
+
+let indexReady: Promise<void> | undefined
+
+export async function ensurePineconeIndex() {
+  if (!indexReady) {
+    indexReady = pinecone
+      .createIndex({
+        indexName: PINECONE_INDEX_NAME,
+        dimension: EMBEDDING_DIMENSION,
+        metric: "cosine",
+      })
+      .catch((error: unknown) => {
+        indexReady = undefined
+        throw error
+      })
+  }
+  await indexReady
+}
+```
+
+<br />
+
+`@mastra/pinecone` 的 `createIndex` 把 409 當成「already exists」，然後檢查 dimension。上面的 latch 避免重複那趟 round trip。
+
+每個 vector 的 metadata 必須是**扁平的**。Pinecone 不支援 nested objects（它不會幫你 flatten）。把 `text` 放進 metadata，否則 retrieval 只回 scores、沒有正文。`maxSize: 512` 的 token chunks 會低於 40 KB metadata 上限。
+
+<br />
+
+```ts
+type ChunkMetadata = {
+  path: string
+  filename: string
+  chunkIndex: number
+  text: string
+  mediaType: string
+}
+```
+
+<br />
+
+`organizationId` 不該作為 isolation key 放進 metadata。Namespace *就是* tenant。Metadata filters 是給該 tenant *內部* 的 relevance（之後的 `path`）。
+
+Document identity 是 org prefix 下的 `path`，通常是 `docs/filename`。同一個 path 再 upload 會覆寫。Rename 是一份新 document。兩個 files 在 `docs/` 下檔名碰撞，就是同一份 document。
+
+<br />
+
+---
+
+## 5. Ingest workflow
+
+Input 對齊 upload route，讓 Studio 與 HTTP 共用一份 contract：
+
+<br />
+
+```ts
+import { z } from "zod"
+
+const ingestionInputSchema = z.object({
+  path: z.string(), // "docs/handbook.pdf"
+  filename: z.string(),
+  mediaType: z.string(),
+})
+```
+
+<br />
+
+```text
+POST /documents
+  → writeFile(docs/filename)
+  → createRun resourceId=organizationId
+  → startAsync → runId
+  → list runs by resourceId, match input path
+
+Background run
+  → exists(path) → readFile(path)
+  → extractText → MDocument.chunk
+  → deleteVectors namespace + filter path
+  → upsert ids + vectors + metadata (if chunks)
+```
+
+<br />
+
+`startAsync` 是 fire-and-forget。它立刻回 `{ runId }`。Route 不等 `status` 或 `chunkCount`。之後再 poll 或 list。
+
+<br />
+
+### Load, extract, and chunk
+
+跳過 images。PDFs 走 text extractor。其餘都當 UTF-8。空的 extract 是 `skipped`，不是 throw。Skip 仍然**刪除**該 path 既有的 vectors：用同名 image 取代 PDF，絕不能讓舊 handbook 仍可搜尋。
+
+`MDocument.chunk` 的 `maxSize` 是字元數，除非你用 `strategy: "token"`。用 tokens，讓 size 對上 embedding model。
+
+<br />
+
+不要把 file bytes 經 step output 傳遞。Workflow snapshots 會把那些資料 JSON-serialize。每個 step 從已經以 org 為根的 filesystem，依 `path` 讀取。
+
+若 server 忘了設 org，`getWorkspaceOrganizationId` 會 throw。那就是 upload route 放進 `requestContext`、經過 membership 檢查的同一個值。
+
+<br />
+
+```ts
+import { RequestContext } from "@mastra/core/request-context"
+import { createStep } from "@mastra/core/workflows"
+import { MDocument } from "@mastra/rag"
+import { z } from "zod"
+
+function getWorkspaceOrganizationId(requestContext: RequestContext): string {
+  const organizationId = requestContext.get("organizationId")
+  if (typeof organizationId !== "string" || !organizationId) {
+    throw new Error("organizationId missing from requestContext")
+  }
+  return organizationId
+}
+
+const loadOutputSchema = ingestionInputSchema.extend({
+  skipped: z.boolean().optional(),
+  skipReason: z.string().optional(),
+})
+
+const loadFile = createStep({
+  id: "load-file",
+  inputSchema: ingestionInputSchema,
+  outputSchema: loadOutputSchema,
+  execute: async ({ inputData }) => {
+    const exists = await filesystem.exists(inputData.path)
+    if (!exists) {
+      return {
+        ...inputData,
+        skipped: true,
+        skipReason: "File not found",
+      }
+    }
+    return inputData
+  },
+})
+```
+
+<br />
+
+接著 extract。Images、空 text，以及缺失的 files 都變成 `skipped`。Index step 仍會刪該 path。
+
+<br />
+
+```ts
+const extractOutputSchema = loadOutputSchema.extend({
+  text: z.string().optional(),
+})
+
+const extractTextStep = createStep({
+  id: "extract-text",
+  inputSchema: loadOutputSchema,
+  outputSchema: extractOutputSchema,
+  execute: async ({ inputData }) => {
+    if (inputData.skipped) {
+      return inputData
+    }
+
+    if (inputData.mediaType.startsWith("image/")) {
+      return {
+        ...inputData,
+        skipped: true,
+        skipReason: "Images are not indexed",
+      }
+    }
+
+    const bytes = await filesystem.readFile(inputData.path)
+    const text =
+      inputData.mediaType === "application/pdf"
+        ? await extractPdfText(bytes)
+        : new TextDecoder("utf-8").decode(bytes)
+
+    if (!text.trim()) {
+      return {
+        ...inputData,
+        skipped: true,
+        skipReason: "Empty extract",
+      }
+    }
+
+    return { ...inputData, text }
+  },
+})
+```
+
+<br />
+
+最後 chunk。`chunkIndex` 是 array index。`MDocument` chunks 是 `{ text, metadata }` — 它們不會幫你帶 `chunkIndex`。
+
+<br />
+
+```ts
+const chunkOutputSchema = ingestionInputSchema.extend({
+  chunks: z.array(
+    z.object({
+      text: z.string(),
+      chunkIndex: z.number(),
+    }),
+  ),
+  skipped: z.boolean().optional(),
+  skipReason: z.string().optional(),
+})
+```
+
+<br />
+
+```ts
+const chunkDocument = createStep({
+  id: "chunk-document",
+  inputSchema: extractOutputSchema,
+  outputSchema: chunkOutputSchema,
+  execute: async ({ inputData }) => {
+    if (inputData.skipped || !inputData.text) {
+      return {
+        path: inputData.path,
+        filename: inputData.filename,
+        mediaType: inputData.mediaType,
+        chunks: [],
+        skipped: true,
+        skipReason: inputData.skipReason ?? "No text to chunk",
+      }
+    }
+
+    const doc =
+      inputData.mediaType === "text/markdown"
+        ? MDocument.fromMarkdown(inputData.text)
+        : inputData.mediaType === "text/html"
+          ? MDocument.fromHTML(inputData.text)
+          : inputData.mediaType === "application/json"
+            ? MDocument.fromJSON(inputData.text)
+            : MDocument.fromText(inputData.text)
+
+    const nodes = await doc.chunk({
+      strategy: "token",
+      maxSize: 512,
+      overlap: 50,
+      encodingName: "cl100k_base",
+    })
+
+    return {
+      path: inputData.path,
+      filename: inputData.filename,
+      mediaType: inputData.mediaType,
+      chunks: nodes.map((node, chunkIndex) => ({
+        text: node.text,
+        chunkIndex,
+      })),
+    }
+  },
+})
+```
+
+<br />
+
+當 media type 對得上時，用 `fromMarkdown` / `fromHTML` / `fromJSON`，讓 separators 跟結構走，而不是原始字元。
+
+<br />
+
+### Index step: Pinecone has no `deleteFilter` on upsert
+
+pgvector 可以一次 call 取代一份 document：
+
+<br />
+
+```ts
+await pgVector.upsert({
+  indexName,
+  vectors: embeddings,
+  deleteFilter: { organizationId, path },
+  metadata,
+})
+```
+
+<br />
+
+Pinecone 不行。若 re-upload 產生較少 chunks，殘留的 neighbors 會留下來。在 namespace 裡**先**依 path 刪除——包括 skip 的情況——然後若有東西可寫再 upsert。
+
+Deterministic ids（`${path}:${chunkIndex}`）會原地覆寫。它們仍不會移除已經不存在的 `chunkIndex` 值。先刪再寫才是正確的 overwrite。傳 `ids`，讓 snippet 對上正文。
+
+<br />
+
+```ts
+const UPSERT_BATCH_SIZE = 100
+
+const indexOutputSchema = z.object({
+  status: z.enum(["indexed", "skipped"]),
+  path: z.string(),
+  chunkCount: z.number(),
+  reason: z.string().optional(),
+})
+
+const indexChunks = createStep({
+  id: "index-chunks",
+  inputSchema: chunkOutputSchema,
+  outputSchema: indexOutputSchema,
+  execute: async ({ inputData, requestContext }) => {
+    const organizationId = getWorkspaceOrganizationId(requestContext)
+
+    await ensurePineconeIndex()
+
+    await pinecone.deleteVectors({
+      indexName: PINECONE_INDEX_NAME,
+      namespace: organizationId,
+      filter: { path: inputData.path },
+    })
+
+    if (inputData.skipped || inputData.chunks.length === 0) {
+      return {
+        status: "skipped" as const,
+        path: inputData.path,
+        chunkCount: 0,
+        reason: inputData.skipReason ?? "No chunks to index",
+      }
+    }
+
+    await upsertChunkBatches(organizationId, inputData)
+
+    return {
+      status: "indexed" as const,
+      path: inputData.path,
+      chunkCount: inputData.chunks.length,
+    }
+  },
+})
+```
+
+<br />
+
+Batch embed 與 upsert。Pinecone 實務上限大約是 1000 個 vectors 或 2 MB；在 1536-d 且 metadata 帶 `text` 時，100 比較穩。
+
+<br />
+
+```ts
+async function upsertChunkBatches(
+  organizationId: string,
+  inputData: z.infer<typeof chunkOutputSchema>,
+) {
+  for (let i = 0; i < inputData.chunks.length; i += UPSERT_BATCH_SIZE) {
+    const batch = inputData.chunks.slice(i, i + UPSERT_BATCH_SIZE)
+    const embeddings = await embedTexts(batch.map((chunk) => chunk.text))
+
+    await pinecone.upsert({
+      indexName: PINECONE_INDEX_NAME,
+      namespace: organizationId,
+      ids: batch.map((chunk) => `${inputData.path}:${chunk.chunkIndex}`),
+      vectors: embeddings,
+      metadata: batch.map((chunk) => ({
+        path: inputData.path,
+        filename: inputData.filename,
+        chunkIndex: chunk.chunkIndex,
+        text: chunk.text,
+        mediaType: inputData.mediaType,
+      })),
+    })
+  }
+}
+```
+
+<br />
+
+Delete then upsert 不是 atomic。同一個 `path` 的兩次 concurrent re-uploads 可能交錯（delete A、delete B、upsert A、upsert B——或更糟，B 刪完之後才 upsert A）。若這很重要，在 upload handler 裡依 `{ organizationId, path }` serialize ingest。Serverless search 也是 eventually consistent：與 `startAsync` 同一個 turn 的 query 可能錯過新 chunks。這是 retrieval 留給後續 turns、當前 turn 用 inline file parts 的另一個原因。
+
+<br />
+
+### Wiring the DAG
+
+<br />
+
+```ts
+import { createWorkflow } from "@mastra/core/workflows"
+
+export const pineconeDocumentIngestion = createWorkflow({
+  id: "pinecone-document-ingestion",
+  inputSchema: ingestionInputSchema,
+  outputSchema: indexOutputSchema,
+})
+  .then(loadFile)
+  .then(extractTextStep)
+  .then(chunkDocument)
+  .then(indexChunks)
+
+pineconeDocumentIngestion.commit()
+```
+
+<br />
+
+在 Mastra instance 上註冊 store、workflow，以及帶 search tool 的 agent：
+
+<br />
+
+```ts
+import { Mastra } from "@mastra/core/mastra"
+
+export const mastra = new Mastra({
+  vectors: { pinecone },
+  workflows: { pineconeDocumentIngestion },
+  agents: { workspaceAgent },
+})
+```
+
+<br />
+
+從 upload handler fire-and-forget，把 `resourceId` 設成 **organization**，不是 user。`resourceId` 把 run 範圍限在 tenant。它不依 path join。要找某個 file 最新的 ingest，列出該 `resourceId` 的 runs，再對上 `input.path`。
+
+<br />
+
+```ts
+const run = await pineconeDocumentIngestion.createRun({
+  resourceId: organizationId,
+})
+const { runId } = await run.startAsync({
+  inputData: { path, filename, mediaType },
+  requestContext,
+})
+```
+
+<br />
+
+---
+
+## 6. Retrieval
+
+Retrieval **不是**「把每則 user message 都 embed，再把 hits 接到前面」。它是 agent 呼叫的 tool。Isolation 套在 `execute` 裡，不是 tool schema。
+
+<br />
+
+```text
+User question
+  → agent (query, optional topK)
+  → tool execute
+      namespace = organizationId   (server)
+      embedTexts(query)
+      pinecone.query cosine ANN
+      keep text and score ≥ 0.2
+  → relevantContext + sources
+  → agent
+```
+
+<br />
+
+```ts
+import { createTool } from "@mastra/core/tools"
+import { z } from "zod"
+
+export const searchPineconeDocuments = createTool({
+  id: "search-pinecone-documents",
+  description:
+    "Search this organization's uploaded documents for relevant excerpts.",
+  inputSchema: z.object({
+    query: z.string().describe("The search query"),
+    topK: z.number().int().min(1).max(20).optional(),
+  }),
+  outputSchema: z.object({
+    relevantContext: z.string(),
+    sources: z.array(
+      z.object({
+        path: z.string(),
+        filename: z.string(),
+        score: z.number(),
+        text: z.string(),
+      }),
+    ),
+  }),
+  execute: async (inputData, { requestContext }) => {
+    return searchOrgDocuments(inputData, requestContext)
+  },
+})
+```
+
+<br />
+
+`execute` 從 `requestContext` 取 `organizationId`。Tool schema 不能指名另一個 tenant。
+
+<br />
+
+```ts
+async function searchOrgDocuments(
+  inputData: { query: string; topK?: number },
+  requestContext: RequestContext,
+) {
+  const organizationId = getWorkspaceOrganizationId(requestContext)
+  const topK = inputData.topK ?? 8
+
+  await ensurePineconeIndex()
+
+  const [queryVector] = await embedTexts([inputData.query])
+  if (!queryVector) {
+    return { relevantContext: "", sources: [] }
+  }
+
+  const results = await pinecone.query({
+    indexName: PINECONE_INDEX_NAME,
+    queryVector,
+    namespace: organizationId,
+    topK,
+    includeVector: false,
+  })
+
+  const minScore = 0.2
+  const sources = results.flatMap((result) => {
+    const text =
+      typeof result.metadata?.text === "string" ? result.metadata.text : ""
+    if (!text || result.score < minScore) return []
+    return [
+      {
+        path: String(result.metadata?.path ?? ""),
+        filename: String(result.metadata?.filename ?? ""),
+        score: result.score,
+        text,
+      },
+    ]
+  })
+
+  return {
+    relevantContext: sources.map((s) => s.text).join("\n\n"),
+    sources,
+  }
+}
+```
+
+<br />
+
+### Isolation vs relevance are different APIs
+
+<br />
+
+| Knob | Pinecone mechanism | Controlled by |
+| --- | --- | --- |
+| Tenant | `namespace: organizationId` | Server，一律 |
+| Which file | `filter: { path }` | Optional；v1 省略 |
+| Neighbor count | `topK` | Agent，上限 1–20 |
+| Weak matches | `minScore` 0.2 | Server constant |
+
+<br />
+
+v1 搜尋**該 organization 的全部 docs**。Path filters 是之後的 mention 功能。不要為了「跟 Postgres 保持一致」把 tenancy 做成 metadata filter。
+
+`0.2` 是 noise floor，不是校正過的 confidence。對這個 model，不相關的 pairs 常常落在附近；不要把它當「典型範圍」。`topK: 8` 是 context budget：8 × ~512-token overlapping chunks。Pinecone search 是 ANN；你可能錯過在 exact kNN 會排第 9 的 chunk。對 org library 來說，這可以接受。
+
+<br />
+
+### Why not `createVectorQueryTool`
+
+Mastra 可以這樣綁 Pinecone：
+
+<br />
+
+```ts
+import { createVectorQueryTool } from "@mastra/rag"
+import { ModelRouterEmbeddingModel } from "@mastra/core/llm"
+
+const pineconeQueryTool = createVectorQueryTool({
+  vectorStoreName: "pinecone",
+  indexName: "document-chunks",
+  model: new ModelRouterEmbeddingModel("openai/text-embedding-3-small"),
+  databaseConfig: {
+    pinecone: { namespace: "production" },
+  },
+})
+```
+
+<br />
+
+若 server 在 agent 跑**之前**，從已驗證的 org 設定 `databaseConfig.pinecone.namespace`（或 `VectorStoreResolver`），且 tool input schema 從不包含 namespace，這個 helper 可以用。預設例子用靜態 namespace 或 `requestContext.set("databaseConfig", …)`，很容易接錯，也很容易經 `PINECONE_PROMPT` filter syntax 暴露給 model。
+
+對 org-scoped 的 user data，在 `execute` 裡從已驗證的 principal 推出 namespace，並且**不要把它放上 tool input schema**。Custom tool 讓這成為唯一路徑。
+
+保持 output shape `{ relevantContext, sources }`，讓之後從 pgvector 切過來只是換 tool，不是重寫 agent。不要把 `PINECONE_PROMPT` 倒進 instructions，讓 model 為 tenancy 發明 `$and` / `$in` filters。
+
+<br />
+
+---
+
+## 7. Delete, overwrite, and failure modes
+
+Document identity 是 `path`。Re-upload 取代 object，並取代 `{ namespace, path }` 的 vectors。Delete 必須打到兩邊 stores，**先打 vectors**：
+
+<br />
+
+```ts
+await pinecone.deleteVectors({
+  indexName: PINECONE_INDEX_NAME,
+  namespace: organizationId,
+  filter: { path },
+})
+await filesystem.deleteFile(path, { force: true })
+```
+
+<br />
+
+若只刪 object，retrieval 會繼續端出鬼魂。若只刪 vectors，file 還在，之後的 ingest 可以重建。寧可留下 orphaned file，也不要洩漏或過期的 excerpt。
+
+Skip-with-delete（空 extract、images、缺失 file）是同一條規則：當前 object 是 source of truth，所以 index 不能留下該 path 的舊版本。
+
+<br />
+
+---
+
+## 8. What to leave out until it hurts
+
+**Hybrid sparse + dense。** 需要 `metric: "dotproduct"`，以及 upsert *與* query 都帶 sparse vectors。對精確 tokens（SKUs、error codes）有幫助。散文用 dense cosine 就夠。之後的 hybrid index 是新 index，不是你在 `document-chunks` 上翻的設定。
+
+**Re-rank。** 先取 `topK=30`，再用 `rerankWithScorer` 收到 8。當 ANN 回「同一個 topic、錯的段落」時有幫助。多一跳 cross-encoder（或 agent scorer）。
+
+**GraphRAG。** 跟著 chunks 之間的 edges 走。對 wiki，也許。對扁平的 `docs/` prefix，不要。
+
+**Always-on injection。** 把每則 user message 都 embed。你會在打招呼時做 retrieve，燒掉 tokens。Tool-calling 讓 retrieval 離開預設路徑。
+
+<br />
+
+---
+
+## 9. Invariants
+
+1. Write 與 read 用同一個 embedding model 與 dimension。
+2. Namespace 是 organization。`userId` 是 actor。Metadata filters 是給該 tenant 內部的 relevance。
+3. Overwrite 與 skip 都以 `deleteVectors(path)` 起手。Pinecone 不會幫你做這件事。
+4. Agent 選*何時*搜尋。Server 選*哪個 org* 可見。
+5. Files 仍是 source of truth。Vectors 是衍生的。Workflow runs 是 ingest status。`resourceId` 是 org；path 對的是 run input。
+
+整套系統就是這樣：四步 ingest DAG、依 organization 分割的 cosine index，以及一份 tool schema 不能指名另一個 tenant 的 retriever。

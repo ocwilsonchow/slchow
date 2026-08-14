@@ -5,7 +5,7 @@ import { motion, type Transition } from "motion/react"
 import type { DesignImage } from "../get-designs"
 import { DesignAsset } from "./design-asset"
 
-export const ALBUM_PHOTO_RADIUS = 12
+export const ALBUM_PHOTO_RADIUS = 8
 
 type AlbumPhotoProps = {
   src: string
@@ -38,10 +38,7 @@ export function AlbumPhoto({
   return (
     <motion.div
       layoutId={layoutId}
-      className={cn(
-        className,
-        kind === "video" && "bg-accent-surface-canvas"
-      )}
+      className={cn(className, kind === "video" && "bg-[#D0CFCF]")}
       style={{ borderRadius: ALBUM_PHOTO_RADIUS }}
       transition={{ layout: layoutTransition }}
     >

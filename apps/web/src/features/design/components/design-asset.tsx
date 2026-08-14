@@ -44,7 +44,7 @@ export function DesignAsset({
         src={src}
         poster={poster}
         alt={alt}
-        className={cn(className, "p-8")}
+        className={cn(className, "p-2 sm:p-4 lg:p-8")}
       />
     )
   }

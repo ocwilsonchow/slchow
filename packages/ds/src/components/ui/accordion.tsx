@@ -1,7 +1,7 @@
 "use client"
 
-import { Accordion as AccordionPrimitive } from "radix-ui"
 import { ChevronDown } from "lucide-react"
+import { Accordion as AccordionPrimitive } from "radix-ui"
 import type { ComponentProps } from "react"
 
 import { cn } from "../../lib/utils"
@@ -13,7 +13,7 @@ function Accordion({
   return (
     <AccordionPrimitive.Root
       data-slot="accordion"
-      className={cn("w-full", className)}
+      className={cn("w-full overflow-x-hidden", className)}
       {...props}
     />
   )

@@ -164,8 +164,11 @@ export function DesignPageView({
               className="bg-surface-canvas absolute inset-0"
               initial={{ opacity: shouldReduceMotion ? 1 : 0 }}
               animate={{ opacity: 1 }}
-              exit={{ opacity: shouldReduceMotion ? 1 : 0 }}
-              transition={{ duration: shouldReduceMotion ? 0 : 0.28 }}
+              exit={{
+                opacity: shouldReduceMotion ? 1 : 0,
+                transition: { delay: 0.2 },
+              }}
+              transition={{ duration: shouldReduceMotion ? 0 : 0.3 }}
             />
             <motion.div
               className="relative z-10 h-full overflow-y-auto overscroll-contain"
