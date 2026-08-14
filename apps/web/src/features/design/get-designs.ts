@@ -43,13 +43,19 @@ function stemOf(name: string) {
   return name.slice(0, -ext.length)
 }
 
+/** Stem used to pair videos with posters; ignores a leading `*` pin. */
+function pairingStem(name: string) {
+  const stem = stemOf(name)
+  return stem.startsWith("*") ? stem.slice(1) : stem
+}
+
 function listImages(slug: string): DesignImage[] {
   const dir = join(designsDir, slug)
   const files = readdirSync(dir)
   const videoStems = new Set(
     files
       .filter((file) => extname(file).toLowerCase() === ".mp4")
-      .map((file) => stemOf(file))
+      .map((file) => pairingStem(file))
   )
 
   return files
@@ -57,19 +63,21 @@ function listImages(slug: string): DesignImage[] {
       const ext = extname(file).toLowerCase()
       if (ext === ".mp4") return true
       if (!IMAGE_EXTENSIONS.has(ext)) return false
-      return !videoStems.has(stemOf(file))
+      return !videoStems.has(pairingStem(file))
     })
     .map((name) => {
       const ext = extname(name).toLowerCase()
       if (ext === ".mp4") {
-        const posterName = `${stemOf(name)}.webp`
+        const posterName = files.find(
+          (file) =>
+            IMAGE_EXTENSIONS.has(extname(file).toLowerCase()) &&
+            pairingStem(file) === pairingStem(name)
+        )
         return {
           name,
           src: publicSrc(slug, name),
           kind: "video" as const,
-          poster: files.includes(posterName)
-            ? publicSrc(slug, posterName)
-            : undefined,
+          poster: posterName ? publicSrc(slug, posterName) : undefined,
         }
       }
 
@@ -80,6 +88,9 @@ function listImages(slug: string): DesignImage[] {
       }
     })
     .sort((a, b) => {
+      const aPinned = a.name.startsWith("*")
+      const bPinned = b.name.startsWith("*")
+      if (aPinned !== bPinned) return aPinned ? -1 : 1
       if (a.kind !== b.kind) return a.kind === "video" ? -1 : 1
       return a.name.localeCompare(b.name, undefined, { numeric: true })
     })
