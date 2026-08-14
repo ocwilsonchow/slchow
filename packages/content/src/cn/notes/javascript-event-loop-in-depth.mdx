@@ -13,25 +13,7 @@ JavaScript 是 single-threaded。这不代表 timer 在走、或 network respons
 
 <br />
 
-```mermaid
-flowchart TB
-  subgraph engine [JS engine]
-    Stack[Call stack]
-  end
-  subgraph host [Browser host]
-    WebAPIs["Web APIs: timers, DOM, fetch"]
-    MicroQ[Microtask queue]
-    TaskQ[Task queue]
-  end
-  EventLoop[Event loop]
-  Stack -->|"offload"| WebAPIs
-  WebAPIs -->|"Promise settle / queueMicrotask"| MicroQ
-  WebAPIs -->|"callback-based APIs"| TaskQ
-  EventLoop -->|"stack empty: drain all"| MicroQ
-  EventLoop -->|"then one task"| TaskQ
-  MicroQ -->|"push callback"| Stack
-  TaskQ -->|"push callback"| Stack
-```
+![JavaScript event loop in the browser: call stack, Web APIs, microtask queue, task queue, and event loop](./images/event-loop-architecture.png)
 
 <br />
 
@@ -75,18 +57,7 @@ while (Date.now() - start < 3000) {
 
 <br />
 
-```mermaid
-flowchart LR
-  subgraph blocked [Blocking]
-    Loop["while for 3s"] --> Frozen[Stack never empty]
-    Frozen --> Missed["Timers, input, paint wait"]
-  end
-  subgraph offloaded [Offloaded]
-    Call["setTimeout / fetch"] --> Host[Host runs the wait]
-    Host --> Queue[Callback queued]
-    Queue --> Later[Runs after stack empties]
-  end
-```
+![Blocking while-loop versus offloaded setTimeout and fetch](./images/event-loop-blocking-vs-offload.png)
 
 <br />
 
@@ -173,15 +144,7 @@ Delay 为 `0` 的意思是「一旦你被允许跑 timer task 就尽快」，不
 
 <br />
 
-```mermaid
-flowchart TD
-  Call["Call stack: setTimeout(fn, 0)"] --> Host["Web API: timer starts"]
-  Call --> Rest["Script continues, then stack empties"]
-  Host --> TaskQ["Task queue: fn enqueued"]
-  Rest --> Pick["Event loop picks one task"]
-  TaskQ --> Pick
-  Pick --> Run["Call stack: fn runs"]
-```
+![setTimeout path from the call stack through a Web API timer and the task queue](./images/event-loop-settimeout-path.png)
 
 <br />
 
@@ -208,15 +171,7 @@ Callback 必须等 **以下全部**：
 
 <br />
 
-```mermaid
-flowchart TD
-  Settle["Promise settles or queueMicrotask is called"] --> Enqueue[Enqueue microtask]
-  Enqueue --> Wait["Wait until the stack is empty"]
-  Wait --> Drain["Checkpoint: drain until empty"]
-  Drain --> Nested{"Did that microtask enqueue another?"}
-  Nested -->|Yes| Drain
-  Nested -->|No| Next["Only now: next task or rendering"]
-```
+![Microtask checkpoint draining until the queue is empty, including nested microtasks](./images/event-loop-microtask-drain.png)
 
 <br />
 
@@ -358,20 +313,7 @@ Script task 结束。Stack 为空。
 
 <br />
 
-```mermaid
-flowchart TD
-  Script["Script task still running"] --> Log5["console.log 5"]
-  Script --> MicroQueued["Microtasks queued: then1, qm3"]
-  Script --> TimerHost["Host timer for log 2"]
-  Log5 --> EmptyStack[Stack empty]
-  TimerHost --> TaskQueued["Task queued: log 2"]
-  EmptyStack --> M1["Microtask: log 1"]
-  M1 --> M3["Microtask: log 3"]
-  M3 --> M4["Nested microtask: log 4"]
-  M4 --> Drained[Microtask queue empty]
-  TaskQueued --> T2["Task: log 2"]
-  Drained --> T2
-```
+![Walkthrough of the 5 1 3 4 2 log order across the script task, microtask checkpoint, and timer task](./images/event-loop-challenge-51342.png)
 
 <br />
 
@@ -387,20 +329,7 @@ flowchart TD
 
 <br />
 
-```mermaid
-flowchart TD
-  Select[Select the next runnable task] --> Run[Run that task to completion]
-  Run --> Checkpoint[Perform a microtask checkpoint]
-  Checkpoint --> Render{"Should we update the rendering?"}
-  Render -->|No| Select
-  Render -->|Yes| RAF[Run requestAnimationFrame callbacks]
-  RAF --> Resize[Resize / intersection / animation work]
-  Resize --> Style[Style]
-  Style --> Layout[Layout]
-  Layout --> Paint[Paint]
-  Paint --> Composite[Composite]
-  Composite --> Select
-```
+![HTML event-loop turn: one task, microtask checkpoint, optional rendering, then the next task](./images/event-loop-html-algorithm.png)
 
 <br />
 
@@ -426,21 +355,7 @@ flowchart TD
 
 <br />
 
-```mermaid
-flowchart TD
-  subgraph nodeIter [Node.js loop iteration]
-    Timers[timers: setTimeout / setInterval] --> Pending[pending callbacks]
-    Pending --> Poll[poll: I/O]
-    Poll --> Check["check: setImmediate"]
-    Check --> Close[close callbacks]
-  end
-  Drain["After each phase: process.nextTick, then Promise microtasks"]
-  Timers -.-> Drain
-  Pending -.-> Drain
-  Poll -.-> Drain
-  Check -.-> Drain
-  Close -.-> Drain
-```
+![Node.js libuv phases compared with a browser event-loop turn](./images/event-loop-nodejs-phases.png)
 
 <br />
 
