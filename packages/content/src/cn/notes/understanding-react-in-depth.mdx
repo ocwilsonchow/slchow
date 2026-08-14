@@ -88,7 +88,7 @@ Host tree        DOM nodes, native views, or another renderer's output
 
 <br />
 
-Host tree 取决于 renderer：`react-dom` 产生 DOM nodes，React Native 产生 native views，React Three Fiber 建立 Three.js scene graph。React 本身对 renderer 无关——element 与 Fiber 层对每个 target 都以同样方式运作。
+Host tree 取决于 renderer：`react-dom` 产生 DOM nodes，React Native 产生 native views，React Three Fiber 建立 Three.js scene graph。React 本身对 renderer 无关——element 与 Fiber 层对每个 target 都以同样方式运作。React Native 如何通过 Expo 做这件事，见 [深入理解 React Native](/notes/understanding-react-native-in-depth)。
 
 混淆这些层会导致错误假设。新的 element object 不一定代表新的 DOM node，而一次 component render 也不一定代表可见的浏览器更新。
 

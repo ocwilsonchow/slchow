@@ -88,7 +88,7 @@ Host tree        DOM nodes, native views, or another renderer's output
 
 <br />
 
-Host tree は renderer 依存です。`react-dom` は DOM nodes、React Native は native views、React Three Fiber は Three.js scene graph を作ります。React 自体は renderer 非依存——element と Fiber 層はすべての target で同じです。
+Host tree は renderer 依存です。`react-dom` は DOM nodes、React Native は native views、React Three Fiber は Three.js scene graph を作ります。React 自体は renderer 非依存——element と Fiber 層はすべての target で同じです。React Native が Expo 経由でそれをどう行うかは [React Native を深く理解する](/notes/understanding-react-native-in-depth) を参照。
 
 これらを混同すると誤った前提になります。新しい element object が必ず新しい DOM node を意味せず、component render が必ず可視ブラウザ更新を意味しません。
 
