@@ -32,7 +32,7 @@ const Page = async ({ params }: Props) => {
   const tDesigns = await getTranslations({ locale, namespace: "designs" })
 
   return (
-    <PageLayout className="">
+    <PageLayout className="hide-webkit-scrollbar">
       <DesignPageView
         designs={getDesigns()}
         designsTitle={t("designs.title")}

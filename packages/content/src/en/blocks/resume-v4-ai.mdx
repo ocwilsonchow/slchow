@@ -1,0 +1,92 @@
+---
+title: Resume — Applied AI
+---
+
+## Wilson, Chow Sin Long
+
+**Software engineer** with **5 years** shipping full-stack Node.js in a multi-client environment. Currently leading a multi-channel **Generative AI** agent platform with durable workflows, memory, RAG, and evals. Builds the typed APIs and UIs those agents run through. **AWS Solutions Architect Associate**.
+
+---
+
+## Experience
+
+### Software Developer, Vioo Company Limited, May 2022 – Present
+
+Primary engineer for concurrent client products. Recent work is production **Generative AI** agents — workflows, memory, tools, and evals — on top of typed APIs and AWS.
+
+- Shipped production AI agents (workflows, memory, tool calls, observability) with Mastra, Vercel AI SDK, and Langchain, including chat and tool-invocation UIs.
+- Added eval suites (golden prompts + LLM-as-judge) and run/tool traces so prompt or tool changes fail before clients see them.
+- Built typed Node.js APIs with Hono, Drizzle / Prisma, OpenAPI, and tRPC in a **Turborepo**, deployed with **SST**. APIs on **ECS Fargate**; other workloads on Lambda / API Gateway.
+- Replaced legacy WordPress search with Meilisearch / Algolia: **90%** lower search latency — retrieval work that later informed RAG ranking choices.
+- Adopted SST for app deploy and infra, cutting deploy time by **50%+**. GitHub Actions runs lint, typecheck, tests, and build before `sst deploy`.
+- Shipped **15+** production web and mobile apps; the agent platform is the current system.
+- Mentored summer interns and junior developers through pairing, code reviews, and shipping production work.
+
+<br />
+
+---
+
+## Selected Projects
+
+### Multi-Channel Agentic Platform, Apr 2026 – Present
+
+Client-facing agent platform for durable assistants (web + Discord) with production reliability and quality controls.
+
+- Chose durable streaming over request/response chat so long tool loops survive disconnects; clients resume mid-run without losing progress.
+- Built workflows, memory, schedules, and tools on Mastra and AI SDK: pause/resume, retries, file storage, sandboxed tools, and skills.
+- Shipped end-to-end RAG: ingest/parse, chunking, Pinecone retrieval with query/rerank. Retrieval is **org-scoped** so the model cannot search another tenant.
+- Added ClickHouse run/tool traces and cost/latency metrics; gated releases on evals after prompt or tool changes.
+- Ran Hono + Better Auth on **ECS Fargate**, Postgres for core data, S3 for files — so agent state and artifacts outlive a single request.
+- Shipped a TipTap @mention file-tagging component so workspace files enter prompts as context.
+
+---
+
+### High-Performance Marketing Site, Nov 2025
+
+- Built a custom Strapi plugin for generative AI content creation with AI SDK — generation inside the publish workflow.
+- Hybrid ISR + webhook revalidation so AI-assisted publishes go live without a full rebuild.
+- **LCP &lt; 0.5s**, **CLS &lt; 0.1**, PageSpeed Insights **>90**.
+
+---
+
+### Other applied AI
+
+Health and wellness RAG agent (Next.js, Langchain, Shopify API): ingest store/content context, retrieve, and answer inside a real storefront — earlier RAG work before the current platform.
+
+<br />
+
+---
+
+## Skills
+
+- **Languages**: TypeScript, Node.js, Python
+- **AI**: Mastra, Vercel AI SDK, Langchain, Pinecone, Strands, AWS Bedrock, evals (golden prompts, LLM-as-judge), ClickHouse traces
+- **Backend**: Hono, Drizzle, Prisma, OpenAPI, tRPC, Postgres, DynamoDB, S3, Better Auth
+- **Frontend (agent UI)**: React, Next.js, TipTap
+- **DevOps**: SST, Docker, ECS Fargate, GitHub Actions, AWS (Lambda, API Gateway)
+
+<br />
+
+---
+
+## Qualifications
+
+- AWS Solutions Architect Associate, 2026
+- AWS Cloud Practitioner, 2025
+
+<br />
+
+---
+
+## Education
+
+### University College London
+
+- MPharm Pharmacy, 2016 – 2020 — First Class Honours
+- Passion for building things. Career switch from pharmacy to software development.
+
+<br />
+
+---
+
+You can also download my resume [here](/resume.pdf).

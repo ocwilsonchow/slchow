@@ -49,15 +49,15 @@ const parsed = stored ? JSON.parse(stored) : null
 
 <br />
 
-便利也伴隨限制。Values 是字串，access 是同步的，每次 read 或 write 都會阻塞 main thread。Capacity 與 eviction 行為也因瀏覽器而異。我把它當成小型 persistence 機制，而不是 database。
+便利也伴隨限制。Values 是字串，access 是同步的，每次 read 或 write 都會阻塞 main thread。Capacity 與 eviction 行為也因瀏覽器而異。它是小型 persistence 機制，而不是 database。
 
 <br />
 
-任何在該 origin 上執行的 JavaScript 都能讀取它。這包括透過 XSS 漏洞引入的惡意程式碼，所以我不會把 session tokens、passwords，或敏感個人資料存在 `localStorage`。長壽命的 bearer tokens 特別危險，因為竊取該值就足以在別處重用。
+任何在該 origin 上執行的 JavaScript 都能讀取它。這包括透過 XSS 漏洞引入的惡意程式碼，因此 session tokens、passwords 或敏感個人資料不應存在 `localStorage`。長壽命的 bearer tokens 特別危險，因為竊取該值就足以在別處重用。
 
 <br />
 
-我也會為 stored keys 做 version，並驗證 parsed data。已部署的應用會變，而舊的 browser data 仍在：
+stored keys 會做 version，parsed data 會驗證。已部署的應用會變，而舊的 browser data 仍在：
 
 <br />
 
@@ -104,7 +104,7 @@ sessionStorage.setItem(
 
 <br />
 
-它不是安全邊界。頁面上的 scripts 仍然可以讀取它，用戶也能以讓 lifecycle 假設變得不那麼明顯的方式複製或還原 tabs。我使用 `sessionStorage`，是因為它的 **product lifetime** 匹配資料，而不是因為它比 `localStorage` 更安全。
+它不是安全邊界。頁面上的 scripts 仍然可以讀取它，用戶也能以讓 lifecycle 假設變得不那麼明顯的方式複製或還原 tabs。`sessionStorage` 適用於 **product lifetime** 與資料匹配的場景，而不是因為它比 `localStorage` 更安全。
 
 <br />
 
@@ -147,15 +147,15 @@ await cookieStore.set({
 
 <br />
 
-Client-side code 仍然無法透過 `cookieStore` 讀取 `HttpOnly` cookie。這正是限制的意義。我也避免把一般 application state 放進 cookies：它們很小，domain 與 path 規則很微妙，而且隨 requests 帶上的 cookies 每次都會增加網路開銷。
+Client-side code 仍然無法透過 `cookieStore` 讀取 `HttpOnly` cookie。這正是限制的意義。一般 application state 也不應放進 cookies：它們很小，domain 與 path 規則很微妙，而且隨 requests 帶上的 cookies 每次都會增加網路開銷。
 
 <br />
 
 ---
 
-## 我使用的決策
+## 預設選擇
 
-我的預設選擇是：
+預設選擇是：
 
 - 當資料只需在當前頁面開啟期間存活時，使用 **in-memory state**。
 - 當臨時 state 應在單一 tab 中撐過 reloads 時，使用 **sessionStorage**。

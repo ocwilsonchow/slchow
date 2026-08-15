@@ -39,6 +39,12 @@ export type NotesFolderNode = {
 
 export type NotesNode = NotesPostNode | NotesFolderNode
 
+/** Drafts: MDX files whose basename starts with `_` are on disk but unpublished. */
+export function isHiddenSourcePage(path: string) {
+  const file = path.split("/").pop() ?? ""
+  return file.startsWith("_")
+}
+
 function isNotesFolder(node: Node): node is Folder {
   return node.type === "folder" && node.$ref?.folder === NOTES_CATEGORY
 }
@@ -53,7 +59,7 @@ function mapNotesNodes(
   for (const node of nodes) {
     if (node.type === "page") {
       const page = content.getNodePage(node as Item, locale)
-      if (!page) continue
+      if (!page || isHiddenSourcePage(page.path)) continue
       result.push({ type: "post", page })
       continue
     }
@@ -91,7 +97,12 @@ export function getNotes(locale: string): NotesNode[] {
 export function getCategoryPages(category: string, locale: string) {
   return content
     .getPages(locale)
-    .filter((page) => page.slugs[0] === category && page.slugs.length > 1)
+    .filter(
+      (page) =>
+        page.slugs[0] === category &&
+        page.slugs.length > 1 &&
+        !isHiddenSourcePage(page.path)
+    )
 }
 
 function getSourceLocale(path: string) {
@@ -114,13 +125,20 @@ export function getPageLocales(category: string, slug: string) {
 }
 
 export function getNotesPage(slug: string[], locale: string) {
-  return content.getPage([NOTES_CATEGORY, ...slug], locale)
+  const page = content.getPage([NOTES_CATEGORY, ...slug], locale)
+  if (!page || isHiddenSourcePage(page.path)) return
+  return page
 }
 
 export function getCategoryStaticParams(category: string) {
   return content
     .generateParams("slug", "locale")
-    .filter((param) => param.slug[0] === category && param.slug.length > 1)
+    .filter(
+      (param) =>
+        param.slug[0] === category &&
+        param.slug.length > 1 &&
+        !param.slug.at(-1)?.startsWith("_")
+    )
     .map((param) => ({
       locale: param.locale,
       // `[slug]` is a single segment; nested paths use `/` in the segment
@@ -133,7 +151,9 @@ export function getNotesStaticParams() {
 }
 
 export function getMdxContent(category: string, slug: string, locale: string) {
-  return content.getPage([category, slug], locale)
+  const page = content.getPage([category, slug], locale)
+  if (!page || isHiddenSourcePage(page.path)) return
+  return page
 }
 
 const getPageDate = (date?: string | Date) => {

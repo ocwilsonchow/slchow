@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useRef } from "react"
-import { DESIGN_MASTER_WIDTH, designResponsiveSrcSet } from "../asset-urls"
+import { DESIGN_MASTER_WIDTH, designResponsiveSrcSet, designThumbSrc } from "../asset-urls"
 import { cn } from "@repo/ds/lib/utils"
 
 type DesignAssetProps = {
@@ -11,6 +11,7 @@ type DesignAssetProps = {
   className?: string
   loading?: "lazy" | "eager"
   fetchPriority?: "high" | "low" | "auto"
+  decoding?: "async" | "sync" | "auto"
   /** Skip thumbnail srcset and load the 2048 master (lightbox). */
   fullResolution?: boolean
   kind?: "image" | "video"
@@ -30,24 +31,13 @@ export function DesignAsset({
   className,
   loading = "lazy",
   fetchPriority,
+  decoding = "async",
   fullResolution = false,
   kind = "image",
   poster,
   playing = false,
 }: DesignAssetProps) {
   const stillSrc = kind === "video" ? poster : src
-  const showVideo = kind === "video" && playing
-
-  if (showVideo) {
-    return (
-      <LoopingVideo
-        src={src}
-        poster={poster}
-        alt={alt}
-        className={cn(className, "p-2 sm:p-4")}
-      />
-    )
-  }
 
   if (!stillSrc) {
     return (
@@ -63,13 +53,18 @@ export function DesignAsset({
     )
   }
 
-  return (
+  const displaySrc = fullResolution
+    ? stillSrc
+    : designThumbSrc(stillSrc, 800)
+  const displayWidth = fullResolution ? DESIGN_MASTER_WIDTH : 800
+
+  const still = (
     // biome-ignore lint/performance/noImgElement: design assets skip the image optimizer
     <img
-      src={stillSrc}
+      src={displaySrc}
       alt={alt}
-      width={DESIGN_MASTER_WIDTH}
-      height={DESIGN_MASTER_WIDTH}
+      width={displayWidth}
+      height={displayWidth}
       sizes={sizes}
       srcSet={
         fullResolution
@@ -77,11 +72,33 @@ export function DesignAsset({
           : designResponsiveSrcSet(stillSrc)
       }
       loading={loading}
-      decoding="async"
+      decoding={decoding}
       fetchPriority={fetchPriority}
       draggable={false}
-      className={className}
+      className={
+        kind === "video"
+          ? "hidden"
+          : className
+      }
     />
+  )
+
+  if (kind !== "video") {
+    return still
+  }
+
+  return (
+    <div className={cn("relative", className)}>
+      {still}
+      {playing ? (
+        <LoopingVideo
+          src={src}
+          poster={poster}
+          alt={alt}
+          className="absolute inset-0 h-full w-full object-contain p-2 sm:p-4"
+        />
+      ) : null}
+    </div>
   )
 }
 

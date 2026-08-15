@@ -49,15 +49,15 @@ const parsed = stored ? JSON.parse(stored) : null
 
 <br />
 
-The convenience comes with limits. Values are strings, access is synchronous, and every read or write blocks the main thread. Capacity and eviction behavior also vary by browser. I treat it as a small persistence mechanism, not a database.
+The convenience comes with limits. Values are strings, access is synchronous, and every read or write blocks the main thread. Capacity and eviction behavior also vary by browser. It is a small persistence mechanism, not a database.
 
 <br />
 
-Any JavaScript running on the origin can read it. That includes malicious code introduced through an XSS vulnerability, so I do not store session tokens, passwords, or sensitive personal data in `localStorage`. Long-lived bearer tokens are especially risky because stealing the value is enough to reuse it elsewhere.
+Any JavaScript running on the origin can read it. That includes malicious code introduced through an XSS vulnerability, so session tokens, passwords, or sensitive personal data do not belong in `localStorage`. Long-lived bearer tokens are especially risky because stealing the value is enough to reuse it elsewhere.
 
 <br />
 
-I also version stored keys and validate parsed data. Deployed applications change while old browser data remains:
+Stored keys are versioned and parsed data is validated. Deployed applications change while old browser data remains:
 
 <br />
 
@@ -104,7 +104,7 @@ sessionStorage.setItem(
 
 <br />
 
-It is not a security boundary. Scripts on the page can still read it, and users can duplicate or restore tabs in ways that make lifecycle assumptions less obvious. I use `sessionStorage` because its **product lifetime** matches the data, not because it is safer than `localStorage`.
+It is not a security boundary. Scripts on the page can still read it, and users can duplicate or restore tabs in ways that make lifecycle assumptions less obvious. `sessionStorage` fits when its **product lifetime** matches the data, not because it is safer than `localStorage`.
 
 <br />
 
@@ -147,15 +147,15 @@ await cookieStore.set({
 
 <br />
 
-Client-side code still cannot read an `HttpOnly` cookie through `cookieStore`. That restriction is the point. I also avoid putting general application state in cookies: they are small, domain and path rules are subtle, and cookies included with requests add network overhead every time.
+Client-side code still cannot read an `HttpOnly` cookie through `cookieStore`. That restriction is the point. General application state also does not belong in cookies: they are small, domain and path rules are subtle, and cookies included with requests add network overhead every time.
 
 <br />
 
 ---
 
-## The Decision I Use
+## Defaults
 
-My default choices are:
+Default choices:
 
 - Use **in-memory state** when the data only needs to live while the current page is open.
 - Use **sessionStorage** when temporary state should survive reloads in one tab.

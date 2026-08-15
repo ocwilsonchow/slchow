@@ -9,7 +9,7 @@ Personal site — notes, works, designs, resume, and contact — plus a Hono / M
 ## Stack
 
 - [Next.js](https://nextjs.org/) 16 (App Router) + React 19 + Tailwind CSS 4
-- [next-intl](https://next-intl.dev/) for `en` / `hk` / `cn` / `ja`
+- [next-intl](https://next-intl.dev/) for `en` / `hk` / `cn`
 - [Fumadocs](https://www.fumadocs.dev/) MDX for notes, works, and content blocks
 - [Orama](https://orama.com/) (via Fumadocs) for client-side full-text search
 - [Mermaid](https://mermaid.js.org/) for diagrams in MDX
@@ -31,7 +31,7 @@ apps/
   web/          Next.js site (localhost:3003)
   api/          Hono + Mastra API (localhost:4111)
 packages/
-  content/      MDX + design assets (en / hk / cn / ja)
+  content/      MDX + design assets (en / hk / cn)
   ds/           Shared design system (@repo/ds)
   intl/         next-intl message catalogs (@repo/intl)
   auth/         Better Auth server + client (@repo/auth)
@@ -54,7 +54,7 @@ sst.config.ts   App entry — currently wires @repo/infra/nextjs
 | Search  | ⌘/Ctrl+K; indexes notes, works, and current resume                                                                         |
 | Designs | Album stacks (stills + in-view MP4); synced from `packages/content/design` → `public/design-assets` with 400/800w variants |
 | Motion  | Lenis smooth scroll + Motion / GSAP-friendly layout                                                                        |
-| i18n    | `en`, `hk`, `cn`, `ja` via next-intl + Fumadocs                                                                            |
+| i18n    | `en`, `hk`, `cn` via next-intl + Fumadocs                                                                            |
 
 ## Requirements
 
@@ -121,7 +121,7 @@ bun run auth:generate   # regenerate Better Auth tables into @repo/db
 
 ## Content & locales
 
-MDX lives in `packages/content/src/{en,hk,cn,ja}/` under `notes/`, `works/`, and `blocks/`. Design source stills and videos live in `packages/content/design/`. UI copy is in `packages/intl/messages/{en,hk,cn,ja}.json`. The web app loads content through Fumadocs (`apps/web/source.config.ts`).
+MDX lives in `packages/content/src/{en,hk,cn}/` under `notes/`, `works/`, and `blocks/`. Design source stills and videos live in `packages/content/design/`. UI copy is in `packages/intl/messages/{en,hk,cn}.json`. The web app loads content through Fumadocs (`apps/web/source.config.ts`).
 
 ## Designs
 
@@ -146,7 +146,7 @@ Instant full-text search over **notes**, **works**, and the current resume (`blo
 Indexes are built at compile time (`apps/web/scripts/build-search-index.ts`) and served as static files:
 
 ```text
-public/search-index/{en,hk,cn,ja}.json   →   /search-index/{locale}.json
+public/search-index/{en,hk,cn}.json   →   /search-index/{locale}.json
 ```
 
 The client loads the locale file from the CDN (OpenNext assets behind the shared Router). This avoids shipping the Orama dump through a Lambda route handler — large JSON responses exceed AWS Lambda’s sync payload limit and break `/api/search` on OpenNext.

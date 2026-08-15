@@ -1,7 +1,7 @@
 "use client"
 
-import { motion, type Transition, useReducedMotion } from "motion/react"
-import { PHOTO_SIZES, STAGGER_EACH } from "../album"
+import { motion, type Transition } from "motion/react"
+import { OVERLAY_PHOTO_SIZES, PHOTO_SIZES, STAGGER_EACH } from "../album"
 import type { Design, DesignImage } from "../get-designs"
 import { designImageLayoutId } from "../layout-ids"
 import { useInView } from "../use-in-view"
@@ -14,6 +14,7 @@ type DesignGalleryProps = {
   returningSlug: string | null
   openAlbumLabel: (title: string) => string
   shouldReduceMotion: boolean
+  sharedLayout: boolean
   layoutTransition: Transition
   onExpand: (slug: string) => void
   registerCard: (slug: string, el: HTMLButtonElement | null) => void
@@ -25,6 +26,7 @@ export function DesignGallery({
   returningSlug,
   openAlbumLabel,
   shouldReduceMotion,
+  sharedLayout,
   layoutTransition,
   onExpand,
   registerCard,
@@ -45,6 +47,7 @@ export function DesignGallery({
           isLcp={index === 0}
           openAlbumLabel={openAlbumLabel(design.title)}
           shouldReduceMotion={shouldReduceMotion}
+          sharedLayout={sharedLayout}
           layoutTransition={layoutTransition}
           onExpand={onExpand}
           registerCard={registerCard}
@@ -57,14 +60,18 @@ export function DesignGallery({
 type AlbumOverlayGridProps = {
   album: Design
   layoutTransition: Transition
+  shouldReduceMotion: boolean
+  sharedLayout: boolean
 }
 
 export function AlbumOverlayGrid({
   album,
   layoutTransition,
+  shouldReduceMotion,
+  sharedLayout,
 }: AlbumOverlayGridProps) {
   return (
-    <ul className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+    <ul className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-5 gap-4">
       {album.images.map((image, imageIndex) => (
         <AlbumOverlayTile
           key={image.src}
@@ -72,6 +79,8 @@ export function AlbumOverlayGrid({
           image={image}
           imageIndex={imageIndex}
           layoutTransition={layoutTransition}
+          shouldReduceMotion={shouldReduceMotion}
+          sharedLayout={sharedLayout}
         />
       ))}
     </ul>
@@ -83,6 +92,8 @@ type AlbumOverlayTileProps = {
   image: DesignImage
   imageIndex: number
   layoutTransition: Transition
+  shouldReduceMotion: boolean
+  sharedLayout: boolean
 }
 
 function AlbumOverlayTile({
@@ -90,23 +101,31 @@ function AlbumOverlayTile({
   image,
   imageIndex,
   layoutTransition,
+  shouldReduceMotion,
+  sharedLayout,
 }: AlbumOverlayTileProps) {
   const { ref, inView } = useInView<HTMLLIElement>()
-  const shouldReduceMotion = useReducedMotion() ?? false
   const playing = image.kind === "video" && inView && !shouldReduceMotion
   const alt = `${album.title} — ${image.name}`
+  const inFirstRows = imageIndex < 6
 
   return (
     <li ref={ref} className="aspect-square">
       <AlbumPhoto
-        layoutId={designImageLayoutId(album.slug, image.name)}
+        layoutId={
+          sharedLayout
+            ? designImageLayoutId(album.slug, image.name)
+            : undefined
+        }
         src={image.src}
         alt={alt}
-        sizes={PHOTO_SIZES}
+        sizes={sharedLayout ? PHOTO_SIZES : OVERLAY_PHOTO_SIZES}
         layoutTransition={{
           ...layoutTransition,
           delay: shouldReduceMotion ? 0 : imageIndex * STAGGER_EACH,
         }}
+        loading={sharedLayout || inFirstRows ? "eager" : "lazy"}
+        decoding={sharedLayout ? "sync" : "async"}
         kind={image.kind}
         poster={image.poster}
         playing={playing}

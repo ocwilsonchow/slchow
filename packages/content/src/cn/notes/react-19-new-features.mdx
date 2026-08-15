@@ -1,12 +1,12 @@
 ---
 title: React 19 新功能
-description: 我对 React 19 功能的笔记——它们如何改变我构建表单、处理异步工作，以及组织 components 的方式
+description: 改变 forms、async work 与 component structure 的 React 19 功能
 category: frontend
 ---
 
 React 19 感觉比较不像一堆互不相干的 API，而更像 React 补上了以往应用代码要自己处理的几个缺口。Forms 现在可以跑异步 Actions，optimistic updates 有专用的 Hook，components 可以用 `use` 读取 promises，而 refs、context 与 document metadata 等常见 pattern 也少了很多繁琐写法。
 
-React 19.2 在这个基础上加入了 `Activity`、`useEffectEvent`，以及更好的性能工具。以下是我觉得最实用的功能，以及决定何时使用时想记住的注意事项。
+React 19.2 在这个基础上加入了 `Activity`、`useEffectEvent`，以及更好的性能工具。以下是最实用的功能，以及决定何时使用时值得记住的注意事项。
 
 <br />
 
@@ -16,7 +16,7 @@ React 19.2 在这个基础上加入了 `Activity`、`useEffectEvent`，以及更
 
 **Action** 是在 **Transition** 里执行的函数。它可以做异步工作，同时由 React 管理周围的 **pending state**、errors，以及最终的 state update。
 
-Actions 最显眼的用途是 `<form>` 上新的 `action` prop。不用再拦截 `onSubmit`、读取表单、追踪 loading flag，再手动重置表单——我可以直接把函数传给它。
+Actions 最显眼的用途是 `<form>` 上新的 `action` prop。不用再拦截 `onSubmit`、读取表单、追踪 loading flag，再手动重置表单——可以直接把函数传给它。
 
 <br />
 
@@ -109,7 +109,7 @@ function NewsletterForm() {
 
 `useFormStatus` 读取其 parent form 的 status，所以必须从渲染在该 form **里面** 的 component 调用。若在创建 form 的同一个 component 里调用，就观察不到该 form 的 submission。
 
-当 server 结果应该变成 UI state 时，我会用 `useActionState`；若 controls 只需要知道周围 form 是否 pending，则用 `useFormStatus`。
+当 server 结果应该变成 UI state 时，适合用 `useActionState`；若 controls 只需要知道周围 form 是否 pending，则用 `useFormStatus`。
 
 <br />
 
@@ -170,7 +170,7 @@ function MessageThread({ initialMessages }: { initialMessages: Message[] }) {
 
 Optimistic value 是暂时的。Action 结束后，React 会回到 component 真实 state 或 props 提供的值。也就是说，**source of truth** 仍需要在 optimistic reducer 之外更新。
 
-Optimistic updates 最适合预期结果很明显、失败可以解释或还原的情况。对 destructive operations，或假装成功会误导用户的情况，我会更谨慎。
+Optimistic updates 最适合预期结果很明显、失败可以解释或还原的情况。destructive operations 值得更谨慎，假装成功会误导用户的情况也一样。
 
 <br />
 
@@ -231,7 +231,7 @@ function Heading({ muted }: { muted: boolean }) {
 }
 ```
 
-我把 `use` 想成 render 与可能尚未就绪的 resource 之间的桥梁，而不是取代每个 data-fetching library。
+`use` 是 render 与可能尚未就绪的 resource 之间的桥梁，而不是取代每个 data-fetching library。
 
 <br />
 
@@ -343,7 +343,7 @@ function ProductImage({ src, alt }: { src: string; alt: string }) {
 }
 ```
 
-Frameworks 已经处理了其中不少工作，所以在直接调用这些 API 之前，我会先查看 framework 的惯例。
+Frameworks 已经处理了其中不少工作，所以在直接调用这些 API 之前，先查看 framework 的惯例。
 
 <br />
 
@@ -462,7 +462,7 @@ function ChatRoom({
 
 React 19.2 在 Chrome DevTools performance profiles 加入了 **React Performance Tracks**。Scheduler tracks 显示 update priorities，以及 work 何时被 scheduled、blocked、rendered 或 painted。Components tracks 显示 components 何时 render，以及它们的 effects 何时 mount。
 
-这提供比 React DevTools Profiler 更底层的视角。当缓慢的互动牵涉 scheduling、浏览器工作与 React rendering，而不是某个明显昂贵的 component 时，我会用它。
+这提供比 React DevTools Profiler 更底层的视角。当缓慢的互动牵涉 scheduling、浏览器工作与 React rendering，而不是某个明显昂贵的 component 时，它很合适。
 
 还有两项多数应用开发者会通过 framework 接触到的新增：
 
@@ -477,7 +477,7 @@ React 19.2 也通过批次附近的 Suspense boundary reveals 改善了 streamin
 
 ## 11. 升级到 React 19
 
-我会把 React、React DOM，以及它们的 TypeScript definitions 一起升级，使用 framework 支持的最新 patched React 19 release。
+React、React DOM，以及它们的 TypeScript definitions 应一起升级，使用 framework 支持的最新 patched React 19 release。
 
 <br />
 
@@ -494,7 +494,7 @@ npm install --save-dev @types/react@^19 @types/react-dom@^19
 - Legacy Context APIs 与 function component `propTypes` 已移除。
 - Ref callback 的 TypeScript 规则更严格，因为 callbacks 现在可以返回 cleanup functions。
 
-我会把 **升级与功能采用当成分开的步骤**。先让既有应用在 React 19 上运作，再在 Actions、`use` 或 `Activity` 真正简化某个 pattern 的地方引入它们。Major upgrade 若没有与大规模 rewrite 混在一起，会更容易 debug。
+**升级与功能采用应分成两个步骤**。先让既有应用在 React 19 上运作，再在 Actions、`use` 或 `Activity` 真正简化某个 pattern 的地方引入它们。Major upgrade 若没有与大规模 rewrite 混在一起，会更容易 debug。
 
 <br />
 
@@ -502,8 +502,8 @@ npm install --save-dev @types/react@^19 @types/react-dom@^19
 
 ## 要点
 
-我在 React 19 看到的主题是 coordination。Actions 协调 async mutations 与 pending 及 optimistic UI。`use` 协调 rendering 与 resources。Document APIs 协调 metadata、styles 与 scripts。`Activity` 协调可见与背景工作，而 `useEffectEvent` 把 synchronization 与 event-like behavior 分开。
+React 19 的主题是 coordination。Actions 协调 async mutations 与 pending 及 optimistic UI。`use` 协调 rendering 与 resources。Document APIs 协调 metadata、styles 与 scripts。`Activity` 协调可见与背景工作，而 `useEffectEvent` 把 synchronization 与 event-like behavior 分开。
 
-我预期最常使用的功能是 form Actions、`useActionState`、`useOptimistic`、ref as a prop，以及 `useEffectEvent`。`use`、`Activity` 与 server rendering APIs 更依赖 framework 支持与应用架构，但它们指向一种 loading、mutations 与 rendering 被设计成一起运作的 React model。
+最常保留的功能是 form Actions、`useActionState`、`useOptimistic`、ref as a prop，以及 `useEffectEvent`。`use`、`Activity` 与 server rendering APIs 更依赖 framework 支持与应用架构，但它们指向一种 loading、mutations 与 rendering 被设计成一起运作的 React model。
 
-完整细节我会回头参考官方 [React 19 release notes](https://react.dev/blog/2024/12/05/react-19)、[React 19.2 release notes](https://react.dev/blog/2025/10/01/react-19-2)，以及 [React 19 upgrade guide](https://react.dev/blog/2024/04/25/react-19-upgrade-guide)。
+官方说明见 [React 19 release notes](https://react.dev/blog/2024/12/05/react-19)、[React 19.2 release notes](https://react.dev/blog/2025/10/01/react-19-2)，以及 [React 19 upgrade guide](https://react.dev/blog/2024/04/25/react-19-upgrade-guide)。

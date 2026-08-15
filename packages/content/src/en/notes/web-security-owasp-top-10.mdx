@@ -13,11 +13,11 @@ Three boundaries show up again and again:
 - The **cookie jar** — which requests automatically carry a session
 - The **server authorization check** — which rows and actions a verified identity may actually touch
 
-The [OWASP Top 10:2025](https://owasp.org/Top10/2025/) is a map of how those boundaries fail, not a checklist to memorize. This note walks each category as *what fails*, *what an attacker is trying to achieve*, and *how I defend it* in a **Next.js**, **Hono**, **Better Auth**, **Drizzle**, and **PostgreSQL** stack.
+The [OWASP Top 10:2025](https://owasp.org/Top10/2025/) is a map of how those boundaries fail, not a checklist to memorize. This note walks each category as *what fails*, *what an attacker is trying to achieve*, and *how it is defended* in a **Next.js**, **Hono**, **Better Auth**, **Drizzle**, and **PostgreSQL** stack.
 
 <br />
 
-It is a defensive reading. I describe failure modes and attacker goals. I do not reproduce exploits.
+It is a defensive reading. This note describes failure modes and attacker goals. It does not reproduce exploits.
 
 <br />
 
@@ -43,7 +43,7 @@ The origin is the browser's isolation unit. Scripts from `https://app.example.co
 
 Authentication answers **who** is making the request. Authorization answers **what they may do**. Logging in is not permission to read another organization's project, another user's invoice, or an internal URL the server can reach.
 
-Nothing the client sends is a source of truth: object IDs in the URL, roles in JSON, `X-Organization-Id` headers, hidden form fields. The server must derive identity from a verified session and decide access from membership and policy. I wrote that isolation path in [Building a Multi-Tenant Backend with Hono, Better Auth, Drizzle, and Postgres RLS](/notes/multi-tenant-backend-drizzle-hono-better-auth). Cookie lifetime and `HttpOnly` belong with [Local Storage, Session Storage, and Cookies](/notes/browser-storage-localstorage-sessionstorage-cookies).
+Nothing the client sends is a source of truth: object IDs in the URL, roles in JSON, `X-Organization-Id` headers, hidden form fields. The server must derive identity from a verified session and decide access from membership and policy. That isolation path is [Building a Multi-Tenant Backend with Hono, Better Auth, Drizzle, and Postgres RLS](/notes/multi-tenant-backend-drizzle-hono-better-auth). Cookie lifetime and `HttpOnly` belong with [Local Storage, Session Storage, and Cookies](/notes/browser-storage-localstorage-sessionstorage-cookies).
 
 The rest of this note is those three sentences applied to each Top 10 category.
 
@@ -221,7 +221,7 @@ cors: {
 
 `allowCredentials: true` only makes sense with an explicit origin. A wildcard origin with cookies is a misconfiguration, not a convenience.
 
-I also stage-gate OpenAPI and Scalar in production. A public reference is free reconnaissance. Cloud buckets, database security groups, and leftover `/debug` routes are the same review: if it is reachable and not required, it is open.
+OpenAPI and Scalar are also stage-gated in production. A public reference is free reconnaissance. Cloud buckets, database security groups, and leftover `/debug` routes are the same review: if it is reachable and not required, it is open.
 
 <br />
 
@@ -267,9 +267,9 @@ Defense is boring on purpose:
 - TLS everywhere, including between the app and Postgres, Redis, and object storage. Internal networks are not a cryptographic boundary.
 - Let Better Auth (or the platform) hash passwords. Do not store reversible credentials.
 - Put secrets in **SST Secrets** / Parameter Store, not in git, `.env` committed by accident, or `NEXT_PUBLIC_*` variables. Anything prefixed for the browser is public.
-- I do not put access tokens in `localStorage`. An XSS on the origin can read it, and unlike an `HttpOnly` cookie the value is easy to replay from another client. Opaque session cookies with `HttpOnly; Secure; SameSite` are the default. The storage note covers why.
+- Access tokens do not belong in `localStorage`. An XSS on the origin can read it, and unlike an `HttpOnly` cookie the value is easy to replay from another client. Opaque session cookies with `HttpOnly; Secure; SameSite` are the default. The storage note covers why.
 
-I also do not invent crypto. Token binding, envelope encryption, and key rotation are library problems. Application code should call a maintained primitive and keep the key out of the repo.
+Application code does not invent crypto. Token binding, envelope encryption, and key rotation are library problems. Application code should call a maintained primitive and keep the key out of the repo.
 
 <br />
 
@@ -296,9 +296,9 @@ const [user] = await db
 
 <br />
 
-String-built SQL is the failure mode. I do not show it. If a raw fragment is unavoidable, it is a constant owned by the codebase, never a request field.
+String-built SQL is the failure mode. It is not shown here. If a raw fragment is unavoidable, it is a constant owned by the codebase, never a request field.
 
-On the HTML side, React already escapes text children. The remaining holes are `dangerouslySetInnerHTML`, `href` values that can become a script URL, and Markdown or rich-text pipelines that emit raw HTML. I keep user content as data, sanitize HTML through a maintained library if the product truly needs markup, and put CSP behind it.
+On the HTML side, React already escapes text children. The remaining holes are `dangerouslySetInnerHTML`, `href` values that can become a script URL, and Markdown or rich-text pipelines that emit raw HTML. User content stays as data, HTML is sanitized through a maintained library if the product truly needs markup, and CSP sits behind it.
 
 Every Hono route still validates shape before the handler thinks:
 
@@ -348,7 +348,7 @@ The attacker goal is **to become the user**. Stolen cookies, reused passwords, a
 
 Defense is a maintained auth library and a tight session cookie.
 
-Better Auth already owns password hashing, session records, and cookie issuance. I keep the session in a cookie the page script cannot read:
+Better Auth already owns password hashing, session records, and cookie issuance. The session stays in a cookie the page script cannot read:
 
 <br />
 
@@ -358,9 +358,9 @@ Set-Cookie: session=opaque-value; Path=/; HttpOnly; Secure; SameSite=Lax
 
 <br />
 
-`HttpOnly` keeps XSS from trivially exporting the session. `Secure` keeps it off HTTP. `SameSite=Lax` is the default I start from for cookie-based CSRF reduction on ordinary navigations; mutating cross-site POSTs need a stricter analysis (SameSite, origin checks, or anti-CSRF tokens) depending on the cookie and the API layout.
+`HttpOnly` keeps XSS from trivially exporting the session. `Secure` keeps it off HTTP. `SameSite=Lax` is the default starting point for cookie-based CSRF reduction on ordinary navigations; mutating cross-site POSTs need a stricter analysis (SameSite, origin checks, or anti-CSRF tokens) depending on the cookie and the API layout.
 
-I also:
+Also:
 
 - Rotate the session on login and on privilege change.
 - Expire idle and absolute sessions. "Logged in forever" is a stolen-laptop feature.
@@ -400,7 +400,7 @@ const event = WebhookEvent.parse(JSON.parse(rawBody))
 
 Read the raw body, check the signature against a secret that never ships to the client, then parse. Do not `JSON.parse` first and sign the object you already trusted.
 
-I do not `eval`, `new Function`, or deserialize into objects that can carry behavior. Pin container image digests in deploy config. Treat CI outputs as untrusted until the same pipeline that signed them produced them.
+Application code does not `eval`, `new Function`, or deserialize into objects that can carry behavior. Pin container image digests in deploy config. Treat CI outputs as untrusted until the same pipeline that signed them produced them.
 
 <br />
 
@@ -412,7 +412,7 @@ Logging failure is **not knowing you were attacked until a customer says so**. M
 
 The attacker goal is **time**. Quiet enumeration, a slow drain of another tenant's export endpoint, or a burst of 403s on admin routes should be visible while it is cheap to stop.
 
-I log security-relevant events, not request bodies:
+Security-relevant events are logged, not request bodies:
 
 <br />
 
@@ -468,7 +468,7 @@ app.onError((error, c) => {
 
 If `getActiveMemberRole` throws a 5xx-class error, the middleware must not skip ahead as an anonymous member. Deny or fail the request. The 403 branch in the A01 middleware is the 4xx case — unknown or non-member. Anything else rethrows into this handler. A timeout that becomes "no membership, continue" is fail-open.
 
-I never return ORM messages, Postgres error codes, or stack traces to the client. Those are logs. The user-facing body is a stable `code` plus a generic message.
+ORM messages, Postgres error codes, and stack traces are never returned to the client. Those are logs. The user-facing body is a stable `code` plus a generic message.
 
 Idempotency keys on payments and webhook handlers belong here too. An exceptional retry should not become a second side effect. Unique constraints in Postgres are a better duplicate detector than a comment that says "should only run once."
 
@@ -476,13 +476,13 @@ Idempotency keys on payments and webhook handlers belong here too. An exceptiona
 
 ---
 
-## 13. Defaults I Use
+## 13. Defaults
 
 These are working defaults, not a certification:
 
 - **Session cookies**, not bearer tokens in JavaScript. `HttpOnly; Secure; SameSite`. Identity comes from Better Auth's session, never from a client-supplied header.
 - **Authorize on the server**, every time. Membership for this organization, permission for this action, row loaded inside the tenant transaction. RLS as the second gate.
-- **Parameterized queries and Zod**. Untrusted input is data. HTML is data unless a sanitizer I trust says otherwise.
+- **Parameterized queries and Zod**. Untrusted input is data. HTML is data unless a trusted sanitizer says otherwise.
 - **CSP and tight CORS** in production. No debug pages, no public OpenAPI, no wildcard origins with credentials.
 - **Pin the supply chain.** Lockfile in git, frozen installs, Actions pinned to SHAs, secrets in SST not in the repo.
 - **Fail closed.** Timeouts and thrown errors are denials, not anonymous access. Clients get a generic 4xx/5xx; logs get the detail.

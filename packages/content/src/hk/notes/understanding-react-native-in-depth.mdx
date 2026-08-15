@@ -7,7 +7,7 @@ category: frontend
 
 React Native 常被介紹成「React，但輸出是 native views 而不是 DOM」。這個描述並沒有錯，但壓縮得太厲害，解釋不了為什麼 `View` 裡的字串會 crash、為什麼 scroll offset 用 `useState` 會掉 frame、為什麼 Expo config plugin 不能 over the air 送達，或為什麼 `useLayoutEffect` 可以在 device 上一次 commit 量到 view，但若你每 frame 都 animate `height` 仍然會失敗。
 
-我透過 **Expo** 交付 React Native，就像這個網站透過 Next.js 交付 React 一樣。更有用的模型是：**Expo 是圍繞 React Native 的 orchestrator**，而 React Native 是 **React 的 host renderer**。Expo 分類 native modules、產生 iOS 與 Android 專案、用 Metro bundle JavaScript，並把 artifacts 對應到 devices。React Native 把 React tree 轉成 C++ shadow tree、跑 Yoga，並 mount `UIView` / `android.view.View` instances。React 仍擁有 elements、Fibers、lanes、render 與 commit。
+這個技術棧透過 **Expo** 交付 React Native，就像這個網站透過 Next.js 交付 React 一樣。更有用的模型是：**Expo 是圍繞 React Native 的 orchestrator**，而 React Native 是 **React 的 host renderer**。Expo 分類 native modules、產生 iOS 與 Android 專案、用 Metro bundle JavaScript，並把 artifacts 對應到 devices。React Native 把 React tree 轉成 C++ shadow tree、跑 Yoga，並 mount `UIView` / `android.view.View` instances。React 仍擁有 elements、Fibers、lanes、render 與 commit。
 
 <br />
 
@@ -72,7 +72,7 @@ flowchart TD
 
 把 Expo 叫做「managed workflow」低估了 compiler。把 React Native 叫做「帶 JS bridge 的 native app」低估了 renderer。比較耐用的心智模型是 **native project generator 加上 bundler 加上 React renderer**，再透過 host-specific adapter 部署。
 
-我把 Expo 想成 [深入理解 Next.js](/notes/understanding-next-js-in-depth) 對 Next.js 的做法：圍繞 React core 的 policy 與基礎設施。Next.js 把 URLs 對應到 browser 的 React trees。Expo 把 `app/` 檔案與 native modules 對應到 device 的 React trees。
+Expo 之於 React Native，就像 Next.js 之於 browser：圍繞 React core 的 policy 與基礎設施。Next.js 把 URLs 對應到 browser 的 React trees。Expo 把 `app/` 檔案與 native modules 對應到 device 的 React trees。
 
 <br />
 
@@ -214,7 +214,7 @@ JSI 也不是 React API。應用程式碼應繼續呼叫已文件化的 modules�
 
 ## 6. Threading
 
-Fabric 的設計透過讓 renderer structures 保持 immutable 而 thread-safe：updates clone 而不是 mutate。幾乎每個我實際追查的 bug 都牽涉兩條 thread：
+Fabric 的設計透過讓 renderer structures 保持 immutable 而 thread-safe：updates clone 而不是 mutate。幾乎每條 production bug 都牽涉兩條 thread：
 
 - **JS thread** 跑 Hermes、React 的 render phase，以及大部分 Yoga 工作。
 - **UI thread**（main thread）是唯一可以 create、update 或 destroy host views 的 thread。
@@ -394,7 +394,7 @@ Shadow trees 是 immutable 的。React state update 會 clone 從 changed node �
 
 Shadow tree 裡大部分資訊源自 React 並往下流。**C++ state** 是例外。有些 host components 保留 JavaScript 不擁有的 state。`ScrollView` offset 是常見例子：platform view 滾動，C++ 記錄 offset，而 `measure` 這類 API 可以讀它。React 沒有 render 那次 update。
 
-若我把 offset 放進 `useState`，我就發明第二個 source of truth，並在每次 scroll event schedule React render：
+把 offset 放進 `useState` 會發明第二個 source of truth，並在每次 scroll event schedule React render：
 
 <br />
 
@@ -464,7 +464,7 @@ Expo 的 **Expo Modules API** 坐在同一層 JSI 上。`expo-secure-store`、`e
 
 <br />
 
-```json
+```json title="app.json"
 {
   "expo": {
     "plugins": [
@@ -542,7 +542,7 @@ Hermes 也解釋某些 debugging 形狀。React Native DevTools 與 engine 對�
 
 <br />
 
-```tsx
+```tsx title="app/_layout.tsx"
 import { Stack } from "expo-router"
 
 export default function Layout() {
@@ -556,7 +556,7 @@ export default function Layout() {
 
 <br />
 
-```tsx
+```tsx title="app/(tabs)/_layout.tsx"
 import { NativeTabs } from "expo-router/unstable-native-tabs"
 
 export default function TabLayout() {
@@ -686,15 +686,15 @@ LegendList 是同一個 idea。契約是「不要 mount 用戶看不到的東西
 
 ---
 
-## 16. 我用來除錯的問題
+## 16. 調試時的問題
 
-當 Expo screen 讓我意外時，我會依序想這些：
+當 Expo screen 意外時，依序想這些：
 
 1. **哪條 thread 忙？** JS freeze 對 UI freeze 對兩者都忙。
 2. **這是 Expo Go、dev client，還是 release binary？** Go 不能長出新的 native modules。
 3. **是 React render、Fabric commit，還是 mount？** Component 裡的 `console.log` 不能證明 `UIView` 改變了。
 4. **這是 C++ state 還是 React state？** Scroll offset、text selection，與某些 gesture state 從未進入 `useState`。
-5. **Flattening 是否移除了我在 native inspector 裡找的那個 view？**
+5. **Flattening 是否移除了 native inspector 裡正在檢查的那個 view？**
 6. **這個 change 需要 native rebuild，還是 JS 就夠？** Config plugins、permissions、fonts 與新的 Expo Modules 需要新 binary。EAS Update 不能發明它們。
 7. **Autolinking 是否在看 app package？** 只在 workspace library 的 native dep 是 missing link，不是 Metro cache issue。
 8. **這是 host-component 契約嗎？** `Text` 外的 strings、`0 && <Text />`、Gesture Handler list 裡的 `TouchableOpacity`。
@@ -733,7 +733,7 @@ LegendList 是同一個 idea。契約是「不要 mount 用戶看不到的東西
 
 ## 最終心智模型
 
-我用的最短且準確的模型是：
+最短且準確的模型是：
 
 <br />
 

@@ -19,7 +19,9 @@ export const PageLayout = (props: HTMLMotionProps<"main">) => {
       animate="animate"
       exit="exit"
       transition={{
-        duration: shouldReduceMotion ? 0 : 0.3,
+        type: "spring",
+        stiffness: 400,
+        damping: 40,
         ease: "easeInOut",
       }}
       className={cn("", props.className)}

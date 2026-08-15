@@ -5,7 +5,7 @@ date: 2026-08-12
 category: backend
 ---
 
-當我建立 backend API 時，希望從 request 到 database 的路徑很短，也希望 **validation**、**documentation** 與 **infrastructure** 都來自同一份程式碼。這套 stack 是 **Hono**、**Better Auth**、**Drizzle**、**PostgreSQL**、**Zod OpenAPI**、**Scalar**，以及跑在 **AWS Lambda** 或 **ECS Fargate** 上的 **SST**。
+Backend API 需要一條從 request 到 database 的短路徑，validation、documentation 與 infrastructure 來自同一份程式碼。這套 stack 是 **Hono**、**Better Auth**、**Drizzle**、**PostgreSQL**、**Zod OpenAPI**、**Scalar**，以及跑在 **AWS Lambda** 或 **ECS Fargate** 上的 **SST**。
 
 Stages 與 deploy loop 見 [用 SST 管理 AWS 基礎設施與 DevOps](/notes/using-sst-for-aws-infra-and-devops)。Tenant isolation 見 [用 Hono、Better Auth、Drizzle 與 Postgres RLS 打造 Multi-Tenant 後端](/notes/multi-tenant-backend-drizzle-hono-better-auth)。這篇筆記涵蓋 typed API，一路到 production 的 protect、monitor 與 recover。
 
@@ -48,7 +48,7 @@ Client
 
 <br />
 
-```ts
+```ts title="src/index.ts"
 import { OpenAPIHono } from "@hono/zod-openapi"
 import { handle } from "hono/aws-lambda"
 
@@ -223,7 +223,7 @@ const app = new OpenAPIHono({
 
 ## 4. Drizzle 與 PostgreSQL
 
-PostgreSQL 是持久化的權威來源。Drizzle 讓 schema 與 queries 保持 typed，又不隱藏 SQL。在 concurrency 下，優先用 database constraints，而不是 check-then-insert。
+PostgreSQL 是持久化的權威來源。Drizzle 讓 schema 與 queries 保持 typed，又不隱藏 SQL。Statement 模型見 [SQL 核心概念](/notes/core-sql-concepts)。在 concurrency 下，優先用 database constraints，而不是 check-then-insert。
 
 <br />
 
@@ -287,7 +287,7 @@ Better Auth 跑在 API 裡：sign-up、sign-in、sessions、accounts 透過 Driz
 
 <br />
 
-```ts
+```ts title="src/auth.ts"
 import { betterAuth } from "better-auth"
 import { drizzleAdapter } from "better-auth/adapters/drizzle"
 import { Resource } from "sst"
@@ -318,7 +318,7 @@ Lambda authorizer 在 API function 執行前驗證 session：
 
 <br />
 
-```ts
+```ts title="src/authorizer.ts"
 import type { APIGatewayRequestSimpleAuthorizerHandlerV2WithContext } from "aws-lambda"
 import { auth } from "./auth"
 
@@ -424,7 +424,7 @@ app.get(
 
 <br />
 
-```ts
+```ts title="packages/infra/api.ts"
 const databaseUrl = new sst.Secret("DatabaseUrl")
 const betterAuthSecret = new sst.Secret("BetterAuthSecret")
 
@@ -613,7 +613,7 @@ Multi-AZ 是同一 region 內的 high availability，不是 cross-region disaste
 
 測試多半放在 Lambda adapter **之下**，用 `app.request` 與 mock authorizer context。Queries 與 migrations 用真實可丟棄的 Postgres。把 deployed tests 留給 authorizer decisions、CORS、linked secrets 與 domains。
 
-我接受的 trade-offs：OpenAPI response 重複、cold starts、刻意的 connection limits，以及 TypeScript 在 runtime 消失——Zod 與 Postgres constraints 仍然重要。每一層都保持可替換。
+接受的 trade-offs：OpenAPI response 重複、cold starts、刻意的 connection limits，以及 TypeScript 在 runtime 消失——Zod 與 Postgres constraints 仍然重要。每一層都保持可替換。
 
 <br />
 

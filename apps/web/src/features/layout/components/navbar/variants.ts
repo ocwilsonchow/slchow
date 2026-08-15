@@ -49,18 +49,18 @@ export const contentVariants: Variants = {
       staggerChildren: 0,
       staggerDirection: -1,
       type: "spring",
-      stiffness: 380,
-      damping: 40,
+      stiffness: 800,
+      damping: 60,
     },
   },
   visible: {
     height: "auto",
 
     transition: {
-      delayChildren: 0.2,
+      delayChildren: 0.125,
       type: "spring",
-      stiffness: 250,
-      damping: 30,
+      stiffness: 600,
+      damping: 50,
     },
   },
 }

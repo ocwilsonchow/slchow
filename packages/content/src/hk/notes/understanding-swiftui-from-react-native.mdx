@@ -1,0 +1,930 @@
+---
+title: 從 React Native 理解 SwiftUI
+description: View、identity、state、layout、lists、navigation 與 Swift concurrency 如何對應你已有的 React Native 概念——以及 analogy 在哪裡破裂
+date: 2026-08-15
+category: frontend
+---
+
+SwiftUI 常被介紹成「React，但 views 是用 Swift 寫的」。這個描述並沒有錯，但壓縮得太厲害，解釋不了為什麼 `View` struct 每次 update 都會被重建卻不會丟失 `@State`、為什麼沒有穩定 id 的 `ForEach` 會像缺了 `key` 一樣把 rows 洗亂、為什麼 `.onAppear` 不是 `useEffect([])`，或為什麼 Swift 裡的 `async`/`await` 可以 data-race，而同一套 pattern 在 JavaScript 卻不會。
+
+這個技術棧透過 **Expo** 交付 React Native。這篇筆記是閱讀 SwiftUI 時用的 mapping。它不是一份出貨日記。它不假設你有一個 native App Store app。它假設你已經把 React Native 理解成 **React 的 host renderer**：Fibers、commit、Fabric、Yoga，以及一條對 gestures 來說太遲的 JS thread。那個模型是 [深入理解 React Native](/notes/understanding-react-native-in-depth)。這篇筆記從那一篇結束的地方開始。你已經理解 native view tree。現在不靠 React 來寫它。
+
+<br />
+
+```text
+RN:  setState → React render (Fibers) → commit → Fabric → UIView
+SwiftUI: state mutation → invalidate body → value tree → diff by identity → UIView
+```
+
+<br />
+
+Samples 針對 **iOS 17+** Observation（`@Observable`、`@State`、`@Binding`、`@Environment`）以及 **Swift 6** isolation（`MainActor`、`Task` cancellation）。React Native samples 對齊 sibling note 裡的 Expo SDK 57 路線：function components、hooks、`expo-router`。Combine 的 `ObservableObject` / `@ObservedObject` 只出現一次，作為你在 tutorials 裡仍會見到的舊路徑。
+
+它區分四種陳述：
+
+- 一份 **React Native 契約**，例如 `<View>` 與 `<Text>` 是不同的 host components，或 Fiber 上的 `key` identity。
+- 一份 **SwiftUI 契約**，例如 `View` 是一份 value description，或 `@State` 活在 framework 的 identity slot 裡而不是 struct 上。
+- 一條 **Swift 語言規則**，例如 structs 在 assignment 時會 copy，或 `async` functions 會跑在它們繼承的 executor 上，直到你 hop。
+- 一項 **實作觀察**，例如 `List` 包著 `UICollectionView`。觀察有助於讀 stack traces。應用程式碼不得依賴它們。
+
+貫穿全文的是一個小的 **notes list → detail** screen：fetch、pull to refresh、push 一條 detail route。中間各節的 snippets 是能證明 mapping 的最小 pair。第 13 節把兩套 stacks 放在同一處。
+
+<br />
+
+---
+
+## 1. 這篇筆記在做什麼
+
+一個 React Native engineer 已經有正確的 abstractions：一棵 views 的 tree、會 invalidate 那棵 tree 的 state、layout、lazy lists、一條 native stack、不能等 JavaScript 的 gestures，以及帶 cancellation 的 async 工作。SwiftUI 把每一項 remap 到不同的 runtime。
+
+會轉移的：
+
+- **先描述，再讓 framework 更新 host。** JSX 回傳 elements。`body` 回傳 `some View`。兩者都不是畫面上的 `UIView`。
+- **Identity 決定什麼 state 能存活。** React 用 Fiber 上的 type + `key`。SwiftUI 用 structural position，加上明確的 `id:` / `ForEach` ids。
+- **Lists 是 lazy 的，navigation 是 native 的，layout 是另一次 pass。** FlashList、`expo-router` 的 native stack，以及 Yoga，都有 SwiftUI counterparts。它們不是同一套 algorithms。
+
+不會轉移的是 **runtime**。沒有 Hermes、沒有 Fabric shadow tree、沒有 Yoga、也沒有可以 over the air 替換的 Metro bundle。SwiftUI 被 compile 進 IPA。Update loop 是 framework 擁有的 value-tree diff，不是 React 的 render/commit。
+
+這篇筆記不會走 Xcode、signing，或 App Store。它不會教 UIKit wrapping、The Composable Architecture、SwiftData，或把 Combine 當預設的 state path。那些是之後的筆記，或不同的工作。
+
+<br />
+
+---
+
+## 2. Runtime 不是 React
+
+React Native 的 loop 是 [React 的 render 與 commit](/notes/understanding-react-in-depth) 加上一個 host renderer。Setter 會 schedule 工作。React 會 reconcile Fibers。Fabric 會 mount 或 update `UIView` instances。Yoga 已經 size 過 shadow tree。不能掉 frame 的 gestures 會離開那條 loop，透過 Reanimated 或 Gesture Handler 跑在 UI thread 上。
+
+SwiftUI 的 loop 沒有 Fiber、沒有 JS thread、也沒有 Yoga。一個 `View` 是一個 **value**。當 view 讀到的 state 改變時，SwiftUI 會 invalidate 那個 view、要一份新的 `body`、把新的 value tree **按 identity** 跟上一份 diff，然後更新底層的 UIKit attributes。你寫的 `View` struct 不是畫面上的 object。重建它是預期而且便宜的。
+
+<br />
+
+```mermaid
+flowchart TD
+  subgraph rnFlow [React Native]
+    RNState["useState setter"] --> RNRender["React render Fibers"]
+    RNRender --> RNCommit["Commit"]
+    RNCommit --> RNFabric["Fabric mount"]
+    RNFabric --> RNHost["UIView"]
+  end
+  subgraph swiftFlow [SwiftUI]
+    SwiftState["State or Observable mutation"] --> SwiftInvalidate["Invalidate views"]
+    SwiftInvalidate --> SwiftBody["Recompute body"]
+    SwiftBody --> SwiftDiff["Diff by identity"]
+    SwiftDiff --> SwiftHost["Update UIView"]
+  end
+```
+
+<br />
+
+看起來一樣的謊言是：`body` 就是 `render()`。兩者都是描述。差別在 ownership。React 為每個 component instance 擁有一個 Fiber，並把 Hooks 存在上面。SwiftUI 擁有一份 identity map，並把 `@State` 存在那裡。你的 struct 是那份 map 的 input，不是 instance。
+
+一項實作觀察：SwiftUI 仍然坐在 UIKit 上（`UIView`、`UICollectionView`、`UINavigationController`）。寫 `VStack` 不會給你另一條 pixels pipeline。你得到的是另一套 **description language** 和另一套 **identity/state** 模型。想著「沒有 UIKit」幫不了你讀 stack trace。
+
+<br />
+
+---
+
+## 3. React Native Engineers 會踩到的 Swift Traps
+
+JavaScript values 除非是 primitives，否則都是 references。突變一個 object 的 field，每個 alias 都看得見。Swift 對你放進 `View` 的資料預設剛好相反：**`struct` 是 value**。Assignment 會 copy。突變一份 copy 不會改到原本。
+
+這是一條 Swift 語言規則。它重要，因為 `View` 是 structs 採用的 protocol。Framework 建立在便宜的 copies 上，不是長命的 component instances。
+
+<br />
+
+```ts
+type Note = { id: string; title: string }
+
+const a: Note = { id: "1", title: "Draft" }
+const b = a
+b.title = "Published"
+// a.title === "Published"
+```
+
+<br />
+
+```swift
+struct Note {
+  var id: String
+  var title: String
+}
+
+var a = Note(id: "1", title: "Draft")
+var b = a
+b.title = "Published"
+// a.title == "Draft"
+```
+
+<br />
+
+`class` 是 reference type。兩個 variables 可以指向同一個 instance。`@Observable` models 是 classes，因為 store 必須被共享並 in place 突變。**讀** store 的 view 仍然是 struct。
+
+`let` vs `var` 不是 TypeScript 裡的 `const` vs `let`。`let` 綁定一個不能被 reassign 的名字。一個 `let` struct 不能突變它的 properties。一個 `let` class reference 不能被指向另一個 instance，但那個 instance 的 `var` properties 仍然可以。
+
+Optionals（`String?`、`Note?`）是一種 type，不是 runtime 的 `undefined`。你 unwrap 它們（`if let`、`guard let`、`??`），而不是檢查 `== null`。SwiftUI 大量用 optionals 做 presentation：`.sheet(item:)` 接受 `Binding<Item?>`，在它非 nil 時 present。
+
+這些都不是 UI。跳過它們，`@State` 看起來就像對一個 immutable struct 做魔法突變。它不是。Property wrapper 跟 SwiftUI 的 identity slot 說話。你在 `body` 裡看到的 struct 是一份新鮮的 value，它 **project** 那個 slot。
+
+<br />
+
+---
+
+## 4. View 是描述，不是 Component Instance
+
+Function component 是從 props（以及 Hook state）到 React element 的 function。SwiftUI view 是一個 **conform 到 `View` 的 struct**，並暴露 `body`。
+
+<br />
+
+```tsx
+function NoteRow({ title }: { title: string }) {
+  return (
+    <View>
+      <Text>{title}</Text>
+    </View>
+  )
+}
+```
+
+<br />
+
+```swift
+struct NoteRow: View {
+  let title: String
+
+  var body: some View {
+    Text(title)
+  }
+}
+```
+
+<br />
+
+相同的地方：兩者都是 **pure descriptions**。呼叫 `NoteRow` / 建構 `NoteRow(title:)` 不會 mount 一個 `UIView`。它產生一份 framework 會 reconcile 的 value。
+
+哪裡在說謊：
+
+- **`body` 是 computed property，不是你呼叫的 function。** SwiftUI 呼叫它。在 `body` 裡做 side effects，跟在 React render 期間做 side effects 是同一類 bug。
+- **`some View` 是 opaque type。** Compiler 知道具體的 nested type（`Text`，或 `VStack<Text>`，或你 compose 出來的任何東西）。Callers 不知道。它不是 `ReactElement`。它不是 `any View`（type erasure）。`AnyView` 存在，而且會付出 identity 與 performance 的代價。Prefer `some View`。
+- **`ViewBuilder` 是 result builder**，這個 compiler feature 讓你可以寫 `VStack { Text("A"); Text("B") }` 而不用回傳 array。JSX 是 `jsx()` 的 syntax。Children 的 list 是另一套機制。Builder 裡的 `if` / `switch` **會改變 structural identity**。那是第 5 節。
+
+每次 invalidation 都重建 struct 才是重點。沒有「活過這次 setState 的 component instance」這種對等物。便宜的 value，持久的 identity slot。
+
+Xcode Previews 不是 Fast Refresh。Fast Refresh 替換一個 JS function 並嘗試保留 Hook state。Preview 在 canvas 裡重新 instantiate view tree。有用。不同的 delivery path。
+
+<br />
+
+---
+
+## 5. Identity 不是 Fiber Identity
+
+React 公開的 identity 規則是 type + position，被 `key` override。[深入理解 React](/notes/understanding-react-in-depth) 是 Fiber 版本。State 活在 Fiber 上。改 key，React 就把它當成新 instance：state 重置。
+
+SwiftUI 公開的 identity 規則是 **structural identity**（view 在 `body` tree 裡坐在哪），被明確的 identity override：`ForEach` 的 `id`、`.id(_:)`，以及 identifiable navigation values。
+
+`@State` **不是存在 struct 上**。Struct 會被 copy。SwiftUI 把 state 存在一個以該 view 的 identity 為 key 的 slot。若 identity 穩定，slot 會活過新的 `body`。若 identity 改變，slot 是新的，state 重置。若兩行共享同一個 identity，它們共享一個 slot，state 看起來「黏」在錯的 row 上——跟 duplicate `key` 是同一類 bug。
+
+<br />
+
+```tsx
+notes.map((note) => (
+  <NoteRow key={note.id} title={note.title} />
+))
+```
+
+<br />
+
+```swift
+ForEach(notes) { note in
+  NoteRow(title: note.title)
+}
+
+// Note: Identifiable, or:
+ForEach(notes, id: \.id) { note in
+  NoteRow(title: note.title)
+}
+```
+
+<br />
+
+相同的地方：**穩定的 ids 讓 state 與 animations 留在正確的 row。** Index-as-id 跟 `key={index}` 是同一個陷阱。
+
+哪裡在說謊：
+
+- **`ViewBuilder` 裡的 `if` / `else` 是 type-level 的 branch。** SwiftUI 看到兩個不同的 structural positions，不是一個 props 改變了的 view。每個 branch 有自己的 identity。React 裡的條件 `return` 若 render 同一個 function，仍是同一個 component type。SwiftUI 裡的條件 `if` 更接近交換 `{condition ? <A /> : <B />}` **而且沒有 keys**，只是 framework 對這件事更嚴格。
+- **`.id(newValue)` 強制一個新 identity。** 在你意思是 remount 時才用。不要用它來「reset 一個 form」，結果每次 keystroke 都意外 reset。
+- **帶 range 的 `ForEach`**（`ForEach(0..<count)`）是 index identity。Prefer 帶 ids 的 data。
+
+Notes list 依賴這一點。一行的 `@State`（swipe offset、expanded flag）必須跟著 `note.id`，而不是 row 目前在 array 裡的 index。
+
+<br />
+
+---
+
+## 6. State
+
+React state 是 Fiber 上的 Hook slot。SwiftUI state 是 identity 上的 slot。站得住的 mappings：
+
+| 角色 | React Native | SwiftUI (iOS 17+) |
+| --- | --- | --- |
+| 本地 UI state | `useState` | `@State` |
+| 受控的 child | `value` + `onChange` | `@Binding` (`$state`) |
+| 共享的 screen model | module store, Context, Zustand | `@Observable` class, often owned with `@State`, passed or put in `Environment` |
+| 唯讀 dependency | Context | `@Environment` / `@Environment(\.dismiss)` |
+
+<br />
+
+```tsx
+function NoteEditor() {
+  const [title, setTitle] = useState("")
+
+  return (
+    <TextInput value={title} onChangeText={setTitle} />
+  )
+}
+```
+
+<br />
+
+```swift
+struct NoteEditor: View {
+  @State private var title = ""
+
+  var body: some View {
+    TextField("Title", text: $title)
+  }
+}
+```
+
+<br />
+
+相同的地方：一個本地 value、一種寫它的方式、改變時 rebuild。`$title` 是 `Binding<String>`——SwiftUI 對「value 加上 setter」的名字。把 `$title` 傳進 child 是反向的 lifting：parent 擁有，child 透過它寫。
+
+<br />
+
+```tsx
+function TitleField({
+  value,
+  onChange,
+}: {
+  value: string
+  onChange: (next: string) => void
+}) {
+  return <TextInput value={value} onChangeText={onChange} />
+}
+```
+
+<br />
+
+```swift
+struct TitleField: View {
+  @Binding var title: String
+
+  var body: some View {
+    TextField("Title", text: $title)
+  }
+}
+```
+
+<br />
+
+Screen 的 notes array 不屬於每一行上的 `@State`。它屬於 list 與 detail 都會讀的 model。那個 model 是標了 `@Observable` 的 **class**。View 用 `@State` **擁有** 它（iOS 17 對 Observable instances 的規則），或接收它。
+
+<br />
+
+```swift
+import Observation
+import SwiftUI
+
+@Observable
+final class NotesStore {
+  var notes: [Note] = []
+  var isLoading = false
+}
+
+struct NotesListView: View {
+  @State private var store = NotesStore()
+
+  var body: some View {
+    List(store.notes) { note in
+      Text(note.title)
+    }
+  }
+}
+```
+
+<br />
+
+SwiftUI 追蹤 `body` **讀了** 哪些 properties。突變 `isLoading` 不會 invalidate 一個只讀了 `notes` 的 view。這比典型的 React context value 更細——後者任何 store tick 都會 re-render 每個 consumer，除非你拆 contexts 或 select。
+
+`@Environment(NotesStore.self)` 是你不靠 props 把 store 往下傳的方式。它是 Context，不是 Redux。沒有 reducer 要求。沒有 time-travel。不要 import 一套 framework 沒有的 JS Flux vocabulary。
+
+**舊路徑，一段。** Observation 之前的程式碼用 `ObservableObject`、`@Published`、`@StateObject`（owner），以及 `@ObservedObject`（child）。那些 types 坐在 Combine 的 `objectWillChange` 上。你在 samples 裡仍會見到它們。iOS 17+ 的新程式碼不應從那裡開始。`@StateObject` 不是 `@State`。`@ObservedObject` 不擁有 object；若 parent 重建它，你就 reset。那個 ownership 區別，正是這裡把 Observation + `@State` 當教學預設的原因。
+
+<br />
+
+---
+
+## 7. Layout 不是 Yoga
+
+Yoga 是 flexbox：`flexDirection`、`justifyContent`、`alignItems`、`flex: 1`、margins。React Native 沒有 CSSOM，但 **algorithm** 仍然是 shadow tree 上的 Yoga。
+
+SwiftUI layout 是一份 **proposal protocol**。Parent 提出一個 size。Child 選擇一個 size（最多是 proposal，除非它忽略它）。Parent 放置 child。`HStack`、`VStack` 與 `ZStack` 是三條 composition axes。它們不是帶 z-index 的 `flexDirection: 'row' | 'column'`。`ZStack` 是 overlay，不是第三個 flex direction。
+
+<br />
+
+```tsx
+function NoteCard({
+  title,
+  excerpt,
+}: {
+  title: string
+  excerpt: string
+}) {
+  return (
+    <View style={styles.card}>
+      <View style={styles.text}>
+        <Text style={styles.title}>{title}</Text>
+        <Text style={styles.excerpt}>{excerpt}</Text>
+      </View>
+    </View>
+  )
+}
+
+const styles = StyleSheet.create({
+  card: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 12,
+    padding: 16,
+  },
+  text: {
+    flex: 1,
+    gap: 4,
+  },
+  title: { fontWeight: "600" },
+  excerpt: { opacity: 0.7 },
+})
+```
+
+<br />
+
+```swift
+struct NoteCard: View {
+  let title: String
+  let excerpt: String
+
+  var body: some View {
+    HStack(alignment: .top, spacing: 12) {
+      VStack(alignment: .leading, spacing: 4) {
+        Text(title).font(.headline)
+        Text(excerpt).foregroundStyle(.secondary)
+      }
+      Spacer()
+    }
+    .padding(16)
+  }
+}
+```
+
+<br />
+
+相同的地方：一行、leading alignment、內層 column、padding。
+
+哪裡在說謊：
+
+- **`Spacer()` 一般不是 sibling 上的 `flex: 1`。** 它是一個會沿 stack 的 axis 膨脹、吃掉剩餘 proposed space 的 view。在 `HStack` 裡它會推。在 `VStack` 裡它垂直推。RN 裡在 text container 上放 `flex: 1` 是「這個 column 拿走剩餘 width。」在 SwiftUI 這常常是在 `VStack` 上用 `.frame(maxWidth: .infinity, alignment: .leading)`，而不是在它後面放 spacer。Snippet 用 `Spacer()` 來對上 trailing edge 剩餘空間的視覺。
+- **`.frame(width:height:)` 是一份 proposal，然後才是 size。** 它不總是 Yoga 裡的 `width` / `height`。`maxWidth: .infinity` 意思是「拿走 parent 提出的任何東西。」
+- **Safe area 預設是開的。** SwiftUI 在它裡面 layout。`.ignoresSafeArea()` 選擇退出。RN 預設的 `View` **不會** inset；你要加 `SafeAreaView` 或 `useSafeAreaInsets()`。Defaults 是反過來的。
+- **沒有 `StyleSheet`。** Modifiers（`.padding`、`.background`、`.clipShape`）包住 value。順序有差：`.padding().background()` 不是 `.background().padding()`。那更接近 nested Views，而不是一個扁平的 style object。
+
+不要在任何一套 stack 裡每 frame 都 animate `height`。在 RN 那是跟 Yoga 與 Fabric 打架。在 SwiftUI 那是跟 layout pass 打架。Prefer transforms 與 opacity，跟 native 上一樣。
+
+<br />
+
+---
+
+## 8. Lists
+
+`FlatList` / FlashList 會 recycle cells。`ScrollView` + `map` 不會。RN 契約是：長 data 走 virtualized list，而 `keyExtractor` 是 identity。
+
+SwiftUI 的 `List` 是 lazy 的。`List` 裡的 `ForEach` 是 lazy 的。普通 `ScrollView` 裡的 `ForEach` **不是**，除非你改成 `LazyVStack` / `LazyHStack`。最後那句就是 FlashList-versus-`map` 的對話，只是名字不同。
+
+<br />
+
+```tsx
+<FlatList
+  data={notes}
+  keyExtractor={(item) => item.id}
+  renderItem={({ item }) => <NoteRow title={item.title} />}
+/>
+```
+
+<br />
+
+```swift
+List(notes) { note in
+  NoteRow(title: note.title)
+}
+
+// Or:
+ScrollView {
+  LazyVStack {
+    ForEach(notes) { note in
+      NoteRow(title: note.title)
+    }
+  }
+}
+```
+
+<br />
+
+相同的地方：data 進去、每行有 identity、一個 row renderer、recycling。
+
+哪裡在說謊：
+
+- **`List` 帶來 platform styling**（inset grouped、separators、swipe actions）。FlashList 是一塊空白的 recycling surface。若你要 custom feed，`ScrollView` + `LazyVStack` 比 `List` 更接近 FlashList。
+- **一行上的 `onAppear` 在 row 被 realize 時觸發**，不是 screen mount 時。那是 viewability，不是 list screen 上的 `useEffect`。第 12 節。
+- **Identity bugs 會表現成錯的 row 在 animate。** 修 `id`，不是修 animation。
+
+Pull to refresh 是 list 上的 `.refreshable`，對上 `FlatList` 上的 `RefreshControl`。兩者都是 UI-thread 上的 platform controls。兩者都不該用會擋 frames 的方式在 JS/main thread 上 fetch——Swift 沒有 JS thread，但 main actor 上的 synchronous load 仍然會擋 UI。
+
+<br />
+
+---
+
+## 9. Navigation
+
+`expo-router` 把 `app/` 底下的檔案對應到一條 **native** stack（`@react-navigation/native-stack`）。URLs、deep links 與 layouts 是 Expo 契約。Transition 仍然跑在 `UINavigationController` 上。
+
+SwiftUI 的 `NavigationStack` 也是一條 native stack。除非你自己建，否則它不是一棵 URL tree。你 push 的 value 就是 route。`navigationDestination(for:)` 是 registrar。
+
+<br />
+
+```tsx
+// app/notes/_layout.tsx
+import { Stack } from "expo-router"
+
+export default function NotesLayout() {
+  return <Stack />
+}
+
+// app/notes/index.tsx
+import { useRouter } from "expo-router"
+import { Pressable, Text } from "react-native"
+
+function NoteLink({ id, title }: { id: string; title: string }) {
+  const router = useRouter()
+  return (
+    <Pressable onPress={() => router.push(`/notes/${id}`)}>
+      <Text>{title}</Text>
+    </Pressable>
+  )
+}
+```
+
+<br />
+
+```swift
+NavigationStack {
+  List(notes) { note in
+    NavigationLink(value: note) {
+      Text(note.title)
+    }
+  }
+  .navigationDestination(for: Note.self) { note in
+    NoteDetailView(note: note)
+  }
+}
+```
+
+<br />
+
+`Note` 必須是 `Hashable`（通常也是 `Identifiable`）才能活在 path 上。
+
+| 工作 | expo-router | SwiftUI |
+| --- | --- | --- |
+| Stack | `app/**/_layout.tsx` + `<Stack />` | `NavigationStack` |
+| Push | `router.push('/notes/1')` | `NavigationLink(value:)` or `path.append` |
+| 有型別的 screen | `app/notes/[id].tsx` | `.navigationDestination(for: Note.self)` |
+| Modal | `presentation: 'modal'` | `.sheet(item:)` / `.fullScreenCover` |
+| Dismiss | `router.back()` | `@Environment(\.dismiss)` |
+
+<br />
+
+相同的地方：一條 native stack、detail 被 push 上去、一個不是 stack push 的 sheet。
+
+哪裡在說謊：**沒有 file-system router。** 你不會從一個 folder 得到 typed routes。`NavigationPath` 是你可以 encode 的 untyped stack。Deep linking 是 `onOpenURL` 加上你自己的 parsing，或一個 library。不要期望 `href` 就是 architecture。
+
+這不是一篇 routing tutorial。重點是兩套 stacks 用對了，都會把 transition 留在你的 update loop 之外。RN 裡的 JS stack navigator 每 frame 都會重新進入 React。自訂的 SwiftUI transition 若每 frame 都 tick `@State`，每 frame 都會重新進入 `body`。Prefer platform stack。
+
+<br />
+
+---
+
+## 10. Gestures 與 Animation
+
+React Native 的 JS thread 對 60fps pan 來說太遲。New Architecture 不會改變這一點。不能等 JS 的工作屬於 Reanimated worklets 或 Gesture Handler，它們跑在 UI thread 上，寫進 C++ / native animated nodes。那是 [深入理解 React Native](/notes/understanding-react-native-in-depth) 的第 14 節。
+
+SwiftUI **沒有 JS thread**。`DragGesture`、`MagnifyGesture` 與 `withAnimation` 已經跑在 UI process。你不需要 worklet compiler 才能用手指移動一個 view。
+
+這並不讓 SwiftUI animation 等同於 Reanimated worklet。
+
+<br />
+
+```tsx
+import { Gesture, GestureDetector } from "react-native-gesture-handler"
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+} from "react-native-reanimated"
+
+function SwipeRow() {
+  const x = useSharedValue(0)
+  const pan = Gesture.Pan()
+    .onChange((event) => {
+      x.value = event.translationX
+    })
+    .onEnd(() => {
+      x.value = withSpring(0)
+    })
+  const style = useAnimatedStyle(() => ({
+    transform: [{ translateX: x.value }],
+  }))
+
+  return (
+    <GestureDetector gesture={pan}>
+      <Animated.View style={style}>
+        <Text>Note</Text>
+      </Animated.View>
+    </GestureDetector>
+  )
+}
+```
+
+<br />
+
+```swift
+struct SwipeRow: View {
+  @State private var x: CGFloat = 0
+
+  var body: some View {
+    Text("Note")
+      .offset(x: x)
+      .gesture(
+        DragGesture()
+          .onChanged { value in
+            x = value.translation.width
+          }
+          .onEnded { _ in
+            withAnimation(.spring) { x = 0 }
+          }
+      )
+  }
+}
+```
+
+<br />
+
+相同的地方：由 pan 驅動的 translation、一個 spring home。
+
+哪裡在說謊：
+
+- **Reanimated 的 `x.value` 可以在沒有 React render 的情況下 update。** Shared values 是 native-thread state。SwiftUI 的 `x` 是 `@State`。每次 `onChanged` 都會 invalidate view 並 recompute `body`。對一行 offset 這沒問題。對一棵在 `body` 裡做真工作的 views graph，這不是免費的。Worklet 的 analog 不是 `withAnimation`。它仍然是「把這件事留在 description pass 之外」——UIKit，或一個 `Canvas`，或一個 gesture 寫入 SwiftUI 可以 interpolate 的 transaction，而不用重跑你整棵 tree。
+- **`withAnimation` interpolate 的是 SwiftUI 已經知道如何 animatable-diff 的 values**（frame、opacity、offset、部分 layout）。它不是 `useAnimatedStyle`。在 `body` 裡做任意工作，不會因為你包了 setter 就變成 worklet。
+
+站得住的 mapping：**若 gesture 不能等 JS bundle，你已經離開 React Native 的 render loop。** 在 SwiftUI 你從那個世界開始。你仍然可以掉 frames。你掉它們是因為在 `body` 裡做太多，不是因為等 Hermes。
+
+<br />
+
+---
+
+## 11. Swift Concurrency vs JavaScript Event Loop
+
+JavaScript 是 single-threaded。Promises 與 `async`/`await` 是在 [event loop](/notes/javascript-event-loop-in-depth) 上 scheduling：一個 call stack、一條 microtask queue、一條 task queue。你不能從兩條 threads data-race 同一個 JS object。你仍然可以有 stale closures、missed cleanups，以及一條在 UI 等待時忙碌的 JS thread。
+
+Swift 是 concurrent 的。`async`/`await` 不是 event loop。一個 `async` function 會 suspend。當它 resume 時，它可能在一個 **不同的 executor** 上。UIKit 與 SwiftUI state 屬於 **main actor**。Hop 出去 fetch，然後在沒有回到 `MainActor` 的情況下突變 store，就是 data race。Swift 6 的 compiler 常常會拒絕。把拒絕當成 feature。
+
+<br />
+
+```tsx
+useEffect(() => {
+  const controller = new AbortController()
+
+  async function load() {
+    const next = await fetchNotes({ signal: controller.signal })
+    setNotes(next)
+  }
+
+  void load()
+  return () => controller.abort()
+}, [])
+```
+
+<br />
+
+```swift
+.task {
+  await store.load()
+}
+
+// Restart when the selected note changes — the dependency array:
+.task(id: selectedId) {
+  await store.loadDetail(id: selectedId)
+}
+```
+
+<br />
+
+```swift
+@Observable
+@MainActor
+final class NotesStore {
+  var notes: [Note] = []
+
+  func load() async {
+    let next = try? await fetchNotes()
+    notes = next ?? []
+  }
+}
+```
+
+<br />
+
+相同的地方：view 活躍時開始 async 工作，不活躍時 cancel，把結果放進 screen state。
+
+哪裡在說謊：
+
+- **`.task` 的 cancellation 是 cooperative 的**，像 `AbortController`。`URLSession` 會尊重它。緊密的 `for` loop 不會，除非你檢查 `Task.isCancelled`。離開 `useEffect` 卻不 abort，是同一類 leak。
+- **`.task(id:)` 就是 dependency array。** 沒有 id 的 `.task { }` 更接近 `useEffect(() => { ... }, [])` **加上** unmount 時 cancel，但「unmount」意思是 SwiftUI identity 消失，不是 Fiber unmounting。若 identity 閃爍，你會 refetch。那是正確的 cancellation，不是神秘的 double fetch。
+- **`actor` 把 mutable state isolate** 到一個 serial mailbox。它不是 `Mutex`，也不是「JavaScript 是 single-threaded 所以我們沒問題。」若一個 background task 突變 `body` 會讀的 class，你需要 isolation（store 上的 `@MainActor` 是常見的 UI 選擇），否則你有一個 JS mental model 看不見的 race。
+
+`setTimeout(0)` 不是 `Task { }`。`Task { }` 會 schedule 工作。它不會等一個不存在的 microtask checkpoint。`MainActor.run { }` 是「hop 到 UI actor」，不是 `queueMicrotask`。
+
+<br />
+
+---
+
+## 12. Lifecycle 不是 Mount
+
+`useEffect` 在 commit 之後跑。`useEffect(() => { ... }, [])` 在 mount 之後跑。Cleanup 在 unmount 前跑，或在 deps 改變時下一次 effect 之前跑。那是 React 規則。Fabric 讓 commit 在 device 上成真；它不改變 effect 何時跑。
+
+SwiftUI 的 `.onAppear` / `.onDisappear` 跟隨 **rendered tree 裡的 identity**，不是 Fiber mount。`List` 一行的 `onAppear` 在 cell 被 realize 時觸發——scroll 出去，`onDisappear`；scroll 回來，`onAppear` 再來一次。那更接近 `onViewableItemsChanged`，而不是 screen-level 的 `useEffect([])`。
+
+`.task` 是更好的 loading primitive：view appear 時開始，view 的 identity 消失時 cancel，並且可以用 `.task(id:)` restart。Prefer 它，而不是 `onAppear { Task { ... } }`，後者很容易 leak。
+
+<br />
+
+```tsx
+useEffect(() => {
+  void load()
+}, [id])
+```
+
+<br />
+
+```swift
+.task(id: id) {
+  await load(id: id)
+}
+```
+
+<br />
+
+相同的地方：「當這個 screen 的 inputs 活躍時，load；當它們不活躍時，stop。」
+
+哪裡在說謊：**`onAppear` 不是 `componentDidMount`。** 一個蓋住 view 的 sheet，歷史上會產生不符合「底下仍然 mounted」的 appear/disappear sequences。不要把「整個 app session 只跑一次」的邏輯放在 `onAppear`。對 notes list，在 list identity 上用 `.task` load，在 detail identity 上用 `.task(id: note.id)` load detail。
+
+若你的意思是「Fiber 沒了」，`onDisappear` 不是可靠的「save draft」hook。從明確的 action save，或從 `.task` cancellation（`defer` / `try await` teardown）save，在你決定把它綁到哪個 identity 之後。
+
+<br />
+
+---
+
+## 13. Notes List，兩套 Stacks
+
+同一個 product surface。Fetch 一份 list、pull to refresh、push 一個 detail、load body。虛構的。RN 一側是 Expo。SwiftUI 一側是 Observation + `NavigationStack`。
+
+**React Native（expo-router）**
+
+```tsx title="app/notes/_layout.tsx"
+// app/notes/_layout.tsx
+import { Stack } from "expo-router"
+
+export default function NotesLayout() {
+  return <Stack />
+}
+```
+
+<br />
+
+```tsx title="app/notes/index.tsx"
+// app/notes/index.tsx
+import { useCallback, useEffect, useState } from "react"
+import {
+  ActivityIndicator,
+  FlatList,
+  Pressable,
+  RefreshControl,
+  Text,
+} from "react-native"
+import { useRouter } from "expo-router"
+
+type Note = { id: string; title: string }
+
+async function fetchNotes(): Promise<Note[]> {
+  const response = await fetch("https://example.com/notes")
+  return response.json()
+}
+
+export default function NotesListScreen() {
+  const router = useRouter()
+  const [notes, setNotes] = useState<Note[]>([])
+  const [refreshing, setRefreshing] = useState(false)
+  const [loading, setLoading] = useState(true)
+
+  const load = useCallback(async () => {
+    const next = await fetchNotes()
+    setNotes(next)
+  }, [])
+
+  useEffect(() => {
+    void load().finally(() => setLoading(false))
+  }, [load])
+
+  if (loading) {
+    return <ActivityIndicator />
+  }
+
+  return (
+    <FlatList
+      data={notes}
+      keyExtractor={(item) => item.id}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={async () => {
+            setRefreshing(true)
+            await load()
+            setRefreshing(false)
+          }}
+        />
+      }
+      renderItem={({ item }) => (
+        <Pressable onPress={() => router.push(`/notes/${item.id}`)}>
+          <Text>{item.title}</Text>
+        </Pressable>
+      )}
+    />
+  )
+}
+```
+
+<br />
+
+```tsx title="app/notes/[id].tsx"
+// app/notes/[id].tsx
+import { useEffect, useState } from "react"
+import { ActivityIndicator, Text } from "react-native"
+import { useLocalSearchParams } from "expo-router"
+
+type Note = { id: string; title: string; body: string }
+
+async function fetchNote(id: string, signal: AbortSignal): Promise<Note> {
+  const response = await fetch(`https://example.com/notes/${id}`, { signal })
+  return response.json()
+}
+
+export default function NoteDetailScreen() {
+  const { id } = useLocalSearchParams<{ id: string }>()
+  const [note, setNote] = useState<Note | null>(null)
+
+  useEffect(() => {
+    const controller = new AbortController()
+    void fetchNote(id, controller.signal)
+      .then(setNote)
+      .catch(() => {})
+    return () => controller.abort()
+  }, [id])
+
+  if (!note) {
+    return <ActivityIndicator />
+  }
+
+  return <Text>{note.body}</Text>
+}
+```
+
+<br />
+
+**SwiftUI**
+
+<br />
+
+```swift
+import Observation
+import SwiftUI
+
+struct Note: Identifiable, Hashable {
+  let id: String
+  var title: String
+  var body: String
+}
+
+@Observable
+@MainActor
+final class NotesStore {
+  var notes: [Note] = []
+  var isLoading = false
+
+  func load() async {
+    isLoading = true
+    defer { isLoading = false }
+    notes = (try? await fetchNotes()) ?? []
+  }
+
+  func loadDetail(id: String) async -> Note? {
+    try? await fetchNote(id: id)
+  }
+}
+
+struct NotesListView: View {
+  @State private var store = NotesStore()
+
+  var body: some View {
+    NavigationStack {
+      Group {
+        if store.isLoading && store.notes.isEmpty {
+          ProgressView()
+        } else {
+          List(store.notes) { note in
+            NavigationLink(value: note) {
+              Text(note.title)
+            }
+          }
+          .refreshable { await store.load() }
+        }
+      }
+      .navigationDestination(for: Note.self) { note in
+        NoteDetailView(note: note, store: store)
+      }
+      .task { await store.load() }
+    }
+  }
+}
+
+struct NoteDetailView: View {
+  let note: Note
+  var store: NotesStore
+  @State private var bodyText: String?
+
+  var body: some View {
+    Group {
+      if let bodyText {
+        Text(bodyText)
+      } else {
+        ProgressView()
+      }
+    }
+    .navigationTitle(note.title)
+    .task(id: note.id) {
+      bodyText = await store.loadDetail(id: note.id)?.body
+    }
+  }
+}
+```
+
+<br />
+
+把這對當成一份 mapping 來讀，不是兩份 tutorials：
+
+- **Identity：** `keyExtractor` / `note.id` vs path 上的 `Identifiable` / `Hashable`。
+- **Ownership：** screen 上的 `useState` vs `@State` 擁有一個 `@Observable` store。
+- **Load + cancel：** `useEffect` + `AbortController` vs `.task` / `.task(id:)`。
+- **Refresh：** `RefreshControl` vs `.refreshable`。
+- **Push：** `router.push("/notes/" + id)` vs `NavigationLink(value:)` + `navigationDestination`。
+
+SwiftUI detail 仍然會 fetch，即使 list 已經有一個 `Note`。這是故意的。List row 不是一份完整 document。RN detail 也一樣。把整個 `Note` 當 navigation value 傳過去，是為了 `title` 的方便，不是 cache policy。
+
+<br />
+
+---
+
+## 14. Analogy 在哪裡破裂
+
+上面的 mappings 有用，直到它們被當成等式。
+
+**一個 `View` 是一個 value。一個 function component 是一個 Fiber 上的 function。** 重建 struct 不是 remounting。`@State` 能存活是因為 identity，不是因為 struct 長命。若你想著「component instance」，你會跟 copies 打架，並誤讀 `body`。
+
+**沒有 Yoga，也沒有 `StyleSheet`。** Proposed sizes 與 modifier order 取代 flexbox 與 style objects。`Spacer` 不是 `flex: 1`。Safe area 的 defaults 是反過來的。
+
+**沒有 JS thread，也沒有 OTA JavaScript。** Reanimated 存在是因為 Hermes 太遲。SwiftUI gestures 從 UI process 開始；你仍然可以 stall `body`。一個新的 SwiftUI screen 是一個新的 binary。EAS Update 不能替換 `NotesListView`。Store build **就是** tree。那是 Expo 在固定 native 契約裡做 JS-shaped updates 的反面。
+
+**Navigation 不是一棵 URL tree。** `expo-router` 讓 file routes 成為產品功能。`NavigationStack` 讓 value path 成為產品功能。你可以在上面建 URLs。Framework 不是從那裡開始。
+
+**`async`/`await` 不是 event loop。** Single-threaded JS 不能 race 同一個 object 的兩次突變。Swift 可以。Store 上的 `@MainActor` 不是迂腐。`.task` cancellation 是 identity-shaped，不是 Fiber-shaped。
+
+**`.onAppear` 不是 mount。** Lazy lists、sheets，以及 identity 改變，會比 screen component 上的 `useEffect([])` 更常呼叫它。
+
+第一次讀 sample 時保留 analogy。當一個 view 重置 state、refetch 兩次，或 animate 錯的 row 時，丟掉它。那時的問題是 SwiftUI 的問題：**identity 是什麼、`body` 讀了什麼，以及哪個 actor 擁有這次突變？** 不是「哪個 Fiber commit 了。」

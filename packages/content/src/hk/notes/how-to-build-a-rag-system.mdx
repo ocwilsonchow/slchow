@@ -517,7 +517,7 @@ Delete then upsert 不是 atomic。同一個 `path` 的兩次 concurrent re-uplo
 
 <br />
 
-```ts
+```ts title="src/mastra/workflows/pinecone-document-ingestion.ts"
 import { createWorkflow } from "@mastra/core/workflows"
 
 export const pineconeDocumentIngestion = createWorkflow({
@@ -539,7 +539,7 @@ pineconeDocumentIngestion.commit()
 
 <br />
 
-```ts
+```ts title="src/mastra/index.ts"
 import { Mastra } from "@mastra/core/mastra"
 
 export const mastra = new Mastra({
@@ -589,7 +589,7 @@ User question
 
 <br />
 
-```ts
+```ts title="src/mastra/tools/search-pinecone-documents.ts"
 import { createTool } from "@mastra/core/tools"
 import { z } from "zod"
 

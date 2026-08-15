@@ -1,17 +1,17 @@
 ---
 title: Frontend Security in Next.js and React Native
-description: How Next.js App Router and React Native / Expo fail as two different hosts — origin vs device, cookies vs Keychain, RSC vs the extractable bundle — and the defenses I actually ship
+description: How Next.js App Router and React Native / Expo fail as two different hosts — origin vs device, cookies vs Keychain, RSC vs the extractable bundle — and the defenses this stack ships
 date: 2026-08-14
 category: frontend
 ---
 
 "Frontend security" is not one threat model. A **Next.js** document lives in a browser **origin**. A **React Native** screen lives in a **device**, behind a JavaScript bundle that anyone with the IPA or APK can read. Both UIs are untrusted. Both still talk to the same Hono / Better Auth API. Authorization does not move into the component tree because the renderer changed.
 
-The category map is [Web Security and the OWASP Top 10](/notes/web-security-owasp-top-10). This note is how those failures look in the two clients I actually ship: **Next.js 16 App Router** and **React Native / Expo**.
+The category map is [Web Security and the OWASP Top 10](/notes/web-security-owasp-top-10). This note is how those failures look in the two clients this stack ships: **Next.js 16 App Router** and **React Native / Expo**.
 
 <br />
 
-It is a defensive reading. I describe failure modes and attacker goals. I do not reproduce exploits.
+It is a defensive reading. This note describes failure modes and attacker goals. It does not reproduce exploits.
 
 <br />
 
@@ -83,7 +83,7 @@ export async function getBillingAccount(organizationId: string) {
 
 RSC props serialize across the same boundary. A Server Component that passes a privileged object into a Client Component has published it to the browser, Flight payload included. Pass the **public view** the UI needs: a display name, not a session, a Stripe customer id the client should not hold, or a role the client will "enforce."
 
-React's `experimental_taintUniqueValue` and `experimental_taintObjectReference` can fail the render if a tainted secret would otherwise serialize. I treat them as a belt. They do not replace refusing to pass the value. If the Client Component does not need it, it should not be in the props.
+React's `experimental_taintUniqueValue` and `experimental_taintObjectReference` can fail the render if a tainted secret would otherwise serialize. They serve as a belt. They do not replace refusing to pass the value. If the Client Component does not need it, it should not be in the props.
 
 `'use client'` too high in the tree also widens XSS blast radius: more JavaScript on the origin, more chance a later Markdown renderer or analytics snippet runs in a fatter graph. Keep client islands small because of hydration and because of the origin.
 
@@ -93,7 +93,7 @@ React's `experimental_taintUniqueValue` and `experimental_taintObjectReference` 
 
 ## 3. Server Actions Are Public POSTs
 
-`'use server'` does not mean "only my form can call this." The build creates a server reference. The browser POSTs that reference plus serialized arguments. From a security perspective the action is an HTTP endpoint that happens to refresh UI.
+`'use server'` does not mean "only this form can call this." The build creates a server reference. The browser POSTs that reference plus serialized arguments. From a security perspective the action is an HTTP endpoint that happens to refresh UI.
 
 Next.js adds transport defenses: same-origin checks, encrypted closed-over values, `serverActions.allowedOrigins`, body-size limits. Those reduce CSRF and confused-proxy cases. They do **not** decide whether this session may rename this product. Bound arguments and closed-over IDs are not capabilities. An opaque action id is not a secret.
 
@@ -135,7 +135,7 @@ Allowed origins belong in `next.config` when the app sits behind a reverse proxy
 
 <br />
 
-```ts
+```ts title="next.config.ts"
 const nextConfig = {
   serverActions: {
     allowedOrigins: ["app.example.com"],
@@ -160,7 +160,7 @@ Matchers miss paths. Rewrites change what the app thinks the URL is. Edge/proxy 
 
 <br />
 
-```ts
+```ts title="proxy.ts"
 import { NextResponse } from "next/server"
 import type { NextRequest } from "next/server"
 
@@ -182,7 +182,7 @@ export const proxyConfig = {
 
 <br />
 
-A missing matcher on `/app/export` or a Route Handler under `/api` is not a theoretical gap. I still authorize in the handler. Proxy is a gate on the sidewalk, not the lock on the vault.
+A missing matcher on `/app/export` or a Route Handler under `/api` is not a theoretical gap. Authorization still happens in the handler. Proxy is a gate on the sidewalk, not the lock on the vault.
 
 Do not copy identity into a request header here and then trust that header in a Server Component. The session cookie is the identity. Anything `proxy.ts` adds is still just a header.
 
@@ -238,7 +238,7 @@ Source maps follow the same audience rule. Error tracking may need them. A publi
 
 ## 6. XSS in React and Next.js
 
-React escapes text children. `{user.name}` in a `<p>` is data. That default is why most React apps are not a constant XSS fire drill. The remaining holes are the places we opt out:
+React escapes text children. `{user.name}` in a `<p>` is data. That default is why most React apps are not a constant XSS fire drill. The remaining holes are the places the app opts out:
 
 - `dangerouslySetInnerHTML` — the name is the warning. CMS HTML, Markdown pipelines, and "rich text from the API" are the usual sources. If the product truly needs markup, sanitize with a maintained library on the **server** before it reaches the client, then still assume a miss:
 
@@ -264,9 +264,9 @@ The Client Component then renders a string the server already reduced. Sanitizat
 - User-controlled `href`, `src`, and `router.push` — a non-http(s) scheme in a destination is an injection into the page context. Do not concatenate `searchParams` into those APIs.
 - Hydration is not a sanitizer. Markup that is unsafe on the server is unsafe after hydrate.
 
-CSP is a **backup**, not a substitute for not rendering untrusted HTML. The header set I start from is in the OWASP note's misconfiguration section. Next.js can emit those headers from `next.config` or `proxy.ts`; the policy still has to match the scripts you actually load.
+CSP is a **backup**, not a substitute for not rendering untrusted HTML. The header set in the OWASP note's misconfiguration section is the starting point. Next.js can emit those headers from `next.config` or `proxy.ts`; the policy still has to match the scripts you actually load.
 
-Trusted Types, where the browser supports them, shrink the remaining `innerHTML` sinks. I do not treat them as required for every marketing site. I do treat `dangerouslySetInnerHTML` as a review comment every time.
+Trusted Types, where the browser supports them, shrink the remaining `innerHTML` sinks. They are not required for every marketing site. `dangerouslySetInnerHTML` should be a review comment every time.
 
 <br />
 
@@ -300,7 +300,7 @@ export function safeNextPath(value: string | undefined) {
 
 <br />
 
-```ts
+```ts title="next.config.ts"
 images: {
   remotePatterns: [
     {
@@ -329,11 +329,11 @@ Defense is the same sentence as `NEXT_PUBLIC_*`, applied to the whole binary: **
 
 Public by design, and fine in the binary: a Mapbox public token with URL restrictions, a Firebase *client* config, an OAuth client id for a public native client. Not fine: a database URL, an HMAC that mints sessions, a "debug admin" compile-time flag that skips auth, a Stripe secret key. Expo's `extra` in `app.json` is still in the bundle. EAS secrets that are baked into the client at build time are `NEXT_PUBLIC_*` again.
 
-I also assume release JS can be pretty-printed. Hermes bytecode slows casual reading; it is not encryption. Treat minification as size, not secrecy.
+Release JS should also be assumed pretty-printable. Hermes bytecode slows casual reading; it is not encryption. Treat minification as size, not secrecy.
 
-Identity on mobile is a **short-lived access token in memory** plus a **refresh token in the OS secret store**, issued by the same Better Auth (or OAuth) server the web app uses. I do not put session material in AsyncStorage, Redux Persist, or unencrypted MMKV. Those are `localStorage` with a native accent: any JS in the app, and often the backup disk, can read them.
+Identity on mobile is a **short-lived access token in memory** plus a **refresh token in the OS secret store**, issued by the same Better Auth (or OAuth) server the web app uses. Session material does not belong in AsyncStorage, Redux Persist, or unencrypted MMKV. Those are `localStorage` with a native accent: any JS in the app, and often the backup disk, can read them.
 
-Jailbreak / root detection is not a boundary. It is a weak signal. I do not build product security on it.
+Jailbreak / root detection is not a boundary. It is a weak signal. Product security is not built on it.
 
 <br />
 
@@ -371,7 +371,7 @@ export async function clearSession() {
 
 SecureStore is not magic. A compromised device, a malicious keyboard, or a backup you opted into can still expose it. It is the right **app-side** store for refresh tokens the way `HttpOnly` is the right browser-side store for session ids. The server still rotates, expires, and revokes.
 
-Screenshot and recents protection (`FLAG_SECURE`, iOS screen-capture notifications) is policy for banking-shaped screens. It is not cryptography. I use it where a flash of a membership barcode or a health record in the app switcher is the actual harm.
+Screenshot and recents protection (`FLAG_SECURE`, iOS screen-capture notifications) is policy for banking-shaped screens. It is not cryptography. It applies where a flash of a membership barcode or a health record in the app switcher is the actual harm.
 
 <br />
 
@@ -379,13 +379,13 @@ Screenshot and recents protection (`FLAG_SECURE`, iOS screen-capture notificatio
 
 ## 10. TLS and Pinning
 
-On the web, the browser and Let's Encrypt did most of this for you. On mobile, the OS still verifies the public PKI: **App Transport Security** on iOS, **Network Security Config** on Android. Cleartext HTTP is off unless you explicitly punch a hole. I do not punch holes for production API hosts.
+On the web, the browser and Let's Encrypt did most of this for you. On mobile, the OS still verifies the public PKI: **App Transport Security** on iOS, **Network Security Config** on Android. Cleartext HTTP is off unless you explicitly punch a hole. Production API hosts do not get cleartext exceptions.
 
 A typical Android baseline is: system CAs only, no cleartext:
 
 <br />
 
-```xml
+```xml title="network_security_config.xml"
 <network-security-config>
   <base-config cleartextTrafficPermitted="false">
     <trust-anchors>
@@ -397,9 +397,9 @@ A typical Android baseline is: system CAs only, no cleartext:
 
 <br />
 
-Certificate pinning is defense in depth for high-risk apps: the client additionally requires a known key or SPKI for `api.example.com`. It raises the cost of a rogue CA or a corporate TLS-intercept box. It also means **you need a rotation story** before the pin expires, or you ship a brick. I pin only when the threat model includes hostile networks and the team can rotate pins with an app update or a backup pin.
+Certificate pinning is defense in depth for high-risk apps: the client additionally requires a known key or SPKI for `api.example.com`. It raises the cost of a rogue CA or a corporate TLS-intercept box. It also means **you need a rotation story** before the pin expires, or you ship a brick. Pinning applies only when the threat model includes hostile networks and the team can rotate pins with an app update or a backup pin.
 
-I am not going to discuss bypassing pins. The defensive bar is: ATS / NSC on, no user-installed CAs trusted for the API if the OS lets you say so, pinning only with rotation, and the API still requires a real user session. Transport security does not replace authorization.
+Bypassing pins is out of scope for this note. The defensive bar is: ATS / NSC on, no user-installed CAs trusted for the API if the OS lets you say so, pinning only with rotation, and the API still requires a real user session. Transport security does not replace authorization.
 
 <br />
 
@@ -407,7 +407,7 @@ I am not going to discuss bypassing pins. The defensive bar is: ATS / NSC on, no
 
 ## 11. Deep Links
 
-A custom URL scheme (`myapp://`) is not an origin. Other apps on the device can often register the same scheme. A verified **universal link** (iOS) or **App Link** (Android) is associated with an HTTPS domain you control. That is the mobile equivalent of "this navigation came from a host we proved."
+A custom URL scheme (`myapp://`) is not an origin. Other apps on the device can often register the same scheme. A verified **universal link** (iOS) or **App Link** (Android) is associated with an HTTPS domain you control. That is the mobile equivalent of "this navigation came from a host the app proved."
 
 The attacker goal is **to open the app on a chosen path with chosen query params**: an OAuth redirect, a password-reset token, a campaign URL that sets `organizationId`, a promo code that the app trusts because it arrived in-app.
 
@@ -416,7 +416,7 @@ Defense:
 - Prefer associated domains over raw schemes for anything that carries a token or chooses an account.
 - Treat every incoming URL as untrusted input. Parse it. Allowlist paths. Do not execute whatever query string arrived.
 - OAuth on mobile goes through the **system browser (or in-app browser tab) plus PKCE**, not an embedded WebView that the app can script. The app never sees the user's password; it sees an authorization code that the OS delivered to the claimed redirect.
-- FCM (and other push) payloads are the same class. A campaign deep link that opens a membership offer is marketing. A push that the client interprets as "mark this invoice paid" is an unsigned RPC. The membership apps I shipped used Firebase Cloud Messaging for promos and milestones — the URL was a hint to navigate, not a command to mutate.
+- FCM (and other push) payloads are the same class. A campaign deep link that opens a membership offer is marketing. A push that the client interprets as "mark this invoice paid" is an unsigned RPC. Membership apps in this stack used Firebase Cloud Messaging for promos and milestones — the URL was a hint to navigate, not a command to mutate.
 
 <br />
 
@@ -485,7 +485,7 @@ A membership card rendered in React Native views does not need a WebView. A part
 
 Third-party native code is supply chain with a second compiler. An npm package that also ships an Android Gradle plugin or a CocoaPod can do anything the OS grants the app: network, keychain access you configured, camera. The OWASP supply-chain category applies; the extra fact is that **JS review does not see the native half**.
 
-I pin versions, read what `autolinking` pulled in, and treat a new native module as a permissions review: what entitlements does this add? Does a camera SDK need Bluetooth? Does an analytics SDK need the advertising identifier?
+Versions are pinned, `autolinking` output is reviewed, and a new native module is treated as a permissions review: what entitlements does this add? Does a camera SDK need Bluetooth? Does an analytics SDK need the advertising identifier?
 
 A **device push token** identifies a device to APNs or FCM. It does not identify a user. Binding a token to an account happens on the server after a verified session. Losing the token, or accepting a token the client posted for someone else, is how notifications leak to the wrong person.
 
@@ -512,7 +512,7 @@ The JS thread can be paused; native work continues. That is a correctness issue 
 
 ---
 
-## 14. Defaults I Use
+## 14. Defaults
 
 **Next.js**
 

@@ -1,0 +1,386 @@
+---
+title: TypeScript Classes and Runtime Identity
+description: A class is a constructor plus a prototype. A class earns a keep when instanceof or a mutable lifetime is required; otherwise types and functions
+date: 2026-08-15
+category: frontend
+---
+
+TypeScript can be written every day — React components, Hono handlers, typed API payloads — without ever typing the word `class`. That is not an accident. In production React, Next, and Hono code, a class is not how application code is organized. It is a **runtime identity**: a constructor, a prototype, and an object that `instanceof` can recognize.
+
+This note is the object model that [Core JavaScript Concepts](/notes/core-javascript-concepts) does not cover. That note is about when code runs. This one is about what a `class` is, and when it earns a keep.
+
+The claim is small. A class earns a keep when `instanceof`, a shared mutable lifetime, or a client that is one object is required. Otherwise types and functions. Application code consumes classes more than it writes them.
+
+<br />
+
+---
+
+## 1. Runtime
+
+A TypeScript `class` is not a separate kind of object. It is a constructor function, a prototype object hanging off that constructor, and the instances `new` creates. Methods declared in the class body are installed on the prototype. Fields assigned in the constructor, or as instance fields, live on each instance. `static` members live on the constructor itself, not on instances and not on the prototype.
+
+<br />
+
+`new` does four things: create an ordinary object, set that object's `[[Prototype]]` to `Class.prototype`, run the constructor with `this` bound to the new object, and return the object (unless the constructor returns a different object). Calling a class constructor without `new` throws. Class bodies are always strict mode.
+
+<br />
+
+```ts
+class Counter {
+  count = 0
+
+  inc(): number {
+    this.count += 1
+    return this.count
+  }
+}
+
+const a = new Counter()
+const b = new Counter()
+
+a.inc() // 1
+b.inc() // 1 — separate instance fields
+
+a.inc === b.inc // true — one shared method on Counter.prototype
+a.inc === Counter.prototype.inc // true
+```
+
+<br />
+
+```mermaid
+flowchart LR
+  newCall["new Counter()"] --> inst[instance]
+  inst -->|"[[Prototype]]"| proto["Counter.prototype"]
+  proto -->|"[[Prototype]]"| objProto["Object.prototype"]
+```
+
+<br />
+
+`a` and `b` each have their own `count`. They share `inc`. That split is the whole runtime model. A closure can hide the same mutable `count` without a prototype — [Core JavaScript Concepts](/notes/core-javascript-concepts) builds a counter that way — but it does not provide `instanceof`, and it does not share methods across instances.
+
+<br />
+
+---
+
+## 2. Chain
+
+`extends` wires two prototype chains: instances of the child find methods on `Child.prototype`, then `Parent.prototype`, then `Object.prototype`. The constructors are linked the same way, so `Child` can see `Parent`'s `static` members. `instanceof` walks the instance chain and returns true when it finds the right `.prototype`.
+
+<br />
+
+That walk is why `instanceof` is a runtime test, not a TypeScript one. A plain object that happens to have the same fields will not pass it. A subclass will.
+
+<br />
+
+```ts
+class Animal {
+  move(): string {
+    return "moved"
+  }
+}
+
+class Bird extends Animal {
+  fly(): string {
+    return "flew"
+  }
+}
+
+const bird = new Bird()
+
+bird instanceof Bird // true
+bird instanceof Animal // true
+bird instanceof Object // true
+
+bird.move() // "moved" — found on Animal.prototype
+bird.fly() // "flew"
+
+const lookalike = { move: () => "moved", fly: () => "flew" }
+lookalike instanceof Bird // false
+```
+
+<br />
+
+`super()` runs the parent constructor before the child touches `this`. Forgetting it is a syntax error in a derived class, not a runtime surprise. The useful consequence is the one in section 5: `instanceof` keeps working down the chain only if that chain is still there after compilation. Target ES2015 or later.
+
+<br />
+
+---
+
+## 3. `this`
+
+`this` inside a prototype method is the object the method was called on, not the object where the function was defined. Extract the method, and the binding is gone. Class bodies are strict, so a lost `this` is `undefined`, not the global object.
+
+<br />
+
+Arrow fields close over the `this` of the instance at construction time. They do not go on the prototype. Each instance gets its own function. That is the right trade when the method will be passed as a callback; it is the wrong trade when one shared function on the prototype was the goal.
+
+<br />
+
+```ts
+class Button {
+  label = "save"
+
+  onClick(): string {
+    return this.label
+  }
+
+  onClickBound = (): string => this.label
+}
+
+const button = new Button()
+
+button.onClick() // "save"
+button.onClickBound() // "save"
+
+const { onClick, onClickBound } = button
+onClickBound() // "save" — arrow captured the instance
+onClick() // TypeError: Cannot read properties of undefined
+```
+
+<br />
+
+The same loss happens when `button.onClick` is passed to `addEventListener` or to a React `onClick` prop. `.bind(button)`, an arrow field, or a wrapper `() => button.onClick()` all fix it. The prototype method is cheaper to share. The arrow field is cheaper to pass around. The choice follows how the function will be called.
+
+<br />
+
+---
+
+## 4. Types vs Values
+
+A `class` declaration creates two things: a **value** available to `new` and `instanceof`, and a **type** available in annotations. An `interface` or a `type` alias creates only the type. It is erased. There is no constructor, no prototype, and no `instanceof Interface`.
+
+<br />
+
+`implements` is a compile-time check that the instance shape matches. It does not change the runtime object. TypeScript `private` and `protected` are the same kind of check: the compiler refuses `obj.secret`, then erases the keyword. `#` fields are different. They are a JavaScript feature. They stay private after compilation.
+
+<br />
+
+```ts
+interface Clock {
+  now(): number
+}
+
+class SystemClock implements Clock {
+  now(): number {
+    return Date.now()
+  }
+}
+
+class Secret {
+  private compileTime = "visible after emit"
+  #runtime = "hidden"
+
+  reveal(): string {
+    return this.#runtime
+  }
+}
+
+const clock: Clock = new SystemClock()
+clock instanceof SystemClock // true
+// clock instanceof Clock // not a value; does not exist at runtime
+
+const secret = new Secret()
+secret.reveal() // "hidden"
+// secret.compileTime // type error; still a property on the object at runtime
+// secret.#runtime    // syntax error in JavaScript too
+```
+
+<br />
+
+The practical rule: if a check must work in a `catch` block, after `JSON.parse`, or across a bundle boundary, it has to be a value. `instanceof`, a discriminant field (`type: "error"`), or a branded function. A TypeScript `private` field and an `interface` will not be there.
+
+<br />
+
+---
+
+## 5. `Error` Subclasses
+
+The class that shows up in application code is almost always an `Error` subclass. `catch` yields `unknown`. `instanceof` distinguishes a domain failure from a programmer error, and one domain failure from another. Extra fields — a `code`, an HTTP status, a `cause` — ride on the instance. A plain object `{ message, code }` cannot do that test after it has been thrown.
+
+<br />
+
+```ts
+class AppError extends Error {
+  readonly code: string
+
+  constructor(code: string, message: string, options?: ErrorOptions) {
+    super(message, options)
+    this.name = "AppError"
+    this.code = code
+  }
+}
+
+class NotFoundError extends AppError {
+  constructor(resource: string, id: string) {
+    super("not_found", `${resource} ${id} not found`)
+    this.name = "NotFoundError"
+  }
+}
+
+function readUser(id: string): never {
+  throw new NotFoundError("user", id)
+}
+
+try {
+  readUser("missing")
+} catch (error) {
+  if (error instanceof NotFoundError) {
+    error.code // "not_found"
+  } else if (error instanceof AppError) {
+    // other domain failures
+  } else {
+    throw error
+  }
+}
+```
+
+<br />
+
+`instanceof` here is the reason the class exists. A string union on a result type is often better when the failure is a return value. Once something is `throw`n, the prototype chain is the test that survives.
+
+<br />
+
+---
+
+## 6. Stateful Clients and Stores
+
+The other time a class earns a keep is when **one object** must hold mutable lifetime: a token, an abort controller, a connection, an in-memory cache. Methods share that state. Callers share the object. Identity matters — there is one client, not a new bag of functions on every call.
+
+<br />
+
+This is not a React tree. The client does not render. It is the same shape as an SDK client: construct once, pass around, call methods, let fields change in place.
+
+<br />
+
+```ts
+class ApiClient {
+  private token: string | null = null
+  private readonly baseUrl: string
+
+  constructor(baseUrl: string) {
+    this.baseUrl = baseUrl
+  }
+
+  setToken(token: string): void {
+    this.token = token
+  }
+
+  async get<T>(path: string): Promise<T> {
+    const headers: HeadersInit = {}
+    if (this.token) headers.Authorization = `Bearer ${this.token}`
+
+    const response = await fetch(`${this.baseUrl}${path}`, { headers })
+    if (!response.ok) {
+      throw new AppError("http", `${response.status} ${path}`)
+    }
+    return response.json() as Promise<T>
+  }
+}
+
+const api = new ApiClient("https://api.example.com")
+api.setToken("secret")
+// const profile = await api.get<{ id: string }>("/me")
+```
+
+<br />
+
+A module-level closure can hold `token` too. A class fits when callers need to construct **more than one** — a second base URL, a test double, a client per tenant — or when `instanceof ApiClient` is required. A closure fits when there will only ever be one, and the prototype is unused.
+
+<br />
+
+---
+
+## 7. Classes Are Consumed More Than They Are Written
+
+Most of the classes in a TypeScript program were not written in that program. `Error`, `TypeError`, `SyntaxError`. `Map`, `Set`, `Date`, `Response`, `URL`. `EventTarget` and every DOM node. SDK clients. `instanceof` against those types is ordinary control flow. Writing a matching class is not.
+
+<br />
+
+```ts
+function parseBody(body: string): unknown {
+  try {
+    return JSON.parse(body)
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      throw new AppError("invalid_json", "body is not JSON", { cause: error })
+    }
+    throw error
+  }
+}
+
+function disableButton(event: Event): void {
+  if (event.currentTarget instanceof HTMLButtonElement) {
+    event.currentTarget.disabled = true
+  }
+}
+
+const cache = new Map<string, Response>()
+cache.set("/me", new Response("{}"))
+```
+
+<br />
+
+The host and the standard library already chose classes where identity and `instanceof` matter. Application code inherits that choice at the boundary — `catch`, DOM events, `fetch` — and should not invent a parallel hierarchy for data that will be JSON tomorrow.
+
+<br />
+
+---
+
+## 8. What Not to Class
+
+React components, API payloads, and Hono handlers do not need a runtime identity. They need a type and a function.
+
+<br />
+
+React class components stored state on `this` and rebound event handlers by hand. Hooks moved that state onto the Fiber. Function components are the default; the class form is how older trees are read and, until libraries wrapped it, how an error boundary was written. New UI in this stack is a function. The rendering model is [Understanding React in Depth](/notes/understanding-react-in-depth).
+
+<br />
+
+A DTO that crosses the network is a type. `JSON.parse` returns a plain object. Methods hung on a `class User` will not be there, and `instanceof User` will be false. Behavior belongs in functions that take the type.
+
+<br />
+
+```ts
+type User = {
+  id: string
+  name: string
+}
+
+function displayName(user: User): string {
+  return user.name
+}
+
+// After the wire, this is what arrives — not `new User(...)`
+const user = JSON.parse('{"id":"1","name":"Ada"}') as User
+displayName(user) // "Ada"
+```
+
+<br />
+
+A Hono handler is the same shape: a function from context to response. Nest-style controller classes belong to a different stack. [Backend APIs with Hono](/notes/backend-apis-hono-sst) keeps routes as functions. There is nothing for `instanceof` to test, and no mutable lifetime to share.
+
+<br />
+
+```ts
+import { Hono } from "hono"
+
+const app = new Hono()
+
+app.get("/users/:id", async (c) => {
+  const user = await getUser(c.req.param("id"))
+  if (!user) return c.json({ error: "not found" }, 404)
+  return c.json(user)
+})
+```
+
+<br />
+
+---
+
+## Takeaway
+
+<br />
+
+A TypeScript `class` is a constructor plus a prototype. Instance fields live on the object. Methods live on the prototype. `interface` and TypeScript `private` are erased. `#` and `instanceof` are not.
+
+When the question is whether to write one, three checks resolve most cases: **Does this need `instanceof` after a `throw` or across a boundary? Does a single object need a mutable lifetime that callers share? Or is this data and a function?** The third case does not need a class. That is how it is normally used.

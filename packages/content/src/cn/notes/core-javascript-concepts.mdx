@@ -8,6 +8,8 @@ category: frontend
 
 这些概念构成一个系统：同步代码在 **call stack** 上执行，host environment 处理 stack 之外的工作，而 **event loop** 协调何时可以跑队列中的 callbacks。Closures 解释 functions 如何保留 state；promises、`async`/`await` 与 generators 则提供不同方式来暂停与恢复工作。
 
+这篇 note 讲的是 code 何时运行。`class`、prototype 与 `this` 在 [TypeScript Class 与 Runtime Identity](/notes/typescript-classes-and-runtime-identity)。
+
 <br />
 
 ![JavaScript Event Loop in the browser](./images/javascript-event-loop-browser.png)
@@ -18,7 +20,7 @@ category: frontend
 
 ## 1. Event Loop
 
-常见的第一印象是：event loop 只是检查异步工作有没有做完。更有用的模型是：浏览器每次 event-loop iteration 通常会跑 **一个 task**、排空 **所有 microtasks**、给浏览器一次 render 机会，然后再进入另一个 task。
+常见的第一印象是：event loop 只是检查异步工作有没有做完。更有用的模型是：浏览器每次 event-loop iteration 通常会跑 **一个 task**、排空 **所有 microtasks**、给浏览器一次 render 机会，然后再进入另一个 task。Stack、host APIs、两条 queues，以及 `5 1 3 4 2` 排序谜题的完整 walkthrough 在 [深入理解 JavaScript Event Loop](/notes/javascript-event-loop-in-depth)。
 
 <br />
 

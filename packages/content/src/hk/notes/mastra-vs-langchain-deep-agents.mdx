@@ -10,7 +10,7 @@ Mastra 是一套整合式 TypeScript framework，面向 AI applications。Agents
 
 Deep Agents 是建立在 **LangChain** 與 **LangGraph** 之上、帶有明確意見的 autonomous-agent harness。它提供 files、context offloading、subagents、memory 與 middleware，然後依賴 LangChain 做 retrieval、LangGraph 做 explicit workflows 與 persistence，以及 LangSmith 做 operations。
 
-我的簡短結論：
+簡短結論：
 
 - 當 agents 是更廣泛應用裡、deterministic workflows 的一部分時，選 **Mastra**。
 - 當你做的是圍繞 files、subagents 與 context management 的 autonomous research、coding 或 operations agents 時，選 **Deep Agents**。
@@ -54,7 +54,7 @@ Mastra 在 package 層面更廣。若把周邊 LangChain ecosystem 算進去，D
 
 ### Mastra
 
-```ts
+```ts title="src/mastra/agents/support-agent.ts"
 import { Agent } from "@mastra/core/agent"
 import { createTool } from "@mastra/core/tools"
 import { z } from "zod"
@@ -357,7 +357,7 @@ Application hosting 會把更多責任交給團隊：
 
 ---
 
-## How I Would Choose
+## How to Choose
 
 <Accordion type="multiple">
   <AccordionItem value="mastra">
@@ -385,7 +385,7 @@ Application hosting 會把更多責任交給團隊：
 
 ---
 
-我的實務預設：
+實務預設：
 
 | Need                            | Default                                         |
 | ------------------------------- | ----------------------------------------------- |

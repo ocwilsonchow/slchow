@@ -7,6 +7,12 @@ const nextConfig: NextConfig = {
   devIndicators: false,
   // PostHog ingest paths must not get a trailing-slash redirect.
   skipTrailingSlashRedirect: true,
+  async redirects() {
+    return [
+      { source: "/ja", destination: "/en", permanent: true },
+      { source: "/ja/:path*", destination: "/en/:path*", permanent: true },
+    ]
+  },
   async rewrites() {
     return [
       {

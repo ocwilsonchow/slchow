@@ -1,0 +1,24 @@
+{
+  "js/ts.tsdk.path": "node_modules/typescript/lib",
+  "js/ts.tsdk.promptToUseWorkspaceVersion": true,
+  "js/ts.tsserver.automaticTypeAcquisition.enabled": false,
+  "js/ts.tsserver.maxMemory": 8192,
+  "files.exclude": {
+    "**/.sst": true,
+    "**/.next": true,
+    "**/.open-next": true,
+    "**/.turbo": true
+  },
+  "files.watcherExclude": {
+    "**/.sst/**": true,
+    "**/.next/**": true,
+    "**/.open-next/**": true,
+    "**/.turbo/**": true
+  },
+  "search.exclude": {
+    "**/.sst": true,
+    "**/.next": true,
+    "**/.open-next": true,
+    "**/.turbo": true
+  }
+}

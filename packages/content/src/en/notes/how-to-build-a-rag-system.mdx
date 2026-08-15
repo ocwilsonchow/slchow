@@ -517,7 +517,7 @@ Delete then upsert is not atomic. Two concurrent re-uploads of the same `path` c
 
 <br />
 
-```ts
+```ts title="src/mastra/workflows/pinecone-document-ingestion.ts"
 import { createWorkflow } from "@mastra/core/workflows"
 
 export const pineconeDocumentIngestion = createWorkflow({
@@ -539,7 +539,7 @@ Register the store, the workflow, and the agent (with the search tool) on the Ma
 
 <br />
 
-```ts
+```ts title="src/mastra/index.ts"
 import { Mastra } from "@mastra/core/mastra"
 
 export const mastra = new Mastra({
@@ -589,7 +589,7 @@ User question
 
 <br />
 
-```ts
+```ts title="src/mastra/tools/search-pinecone-documents.ts"
 import { createTool } from "@mastra/core/tools"
 import { z } from "zod"
 

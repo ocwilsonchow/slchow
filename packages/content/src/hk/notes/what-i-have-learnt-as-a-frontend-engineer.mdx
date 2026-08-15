@@ -1,11 +1,11 @@
 ---
-title: 作為 Frontend Engineer 的所學
+title: 生產環境教會 Frontend Engineer 的事
 description: 從建構與營運生產級 web 與 mobile 產品中學到的四堂課
 date: 2026-08-12
 category: frontend
 ---
 
-四年前，我以為 frontend engineering 就是把設計變成精緻的介面。Production 教會我要把目光放在 component 之外：架構、資料新鮮度、可靠性、交付，以及可衡量的用戶結果，都是這份工作的一部分。
+四年前，frontend engineering 看起來就是把設計變成精緻的介面。Production 教會了不同的功課：架構、資料新鮮度、可靠性、交付，以及可衡量的用戶結果，都是這份工作的一部分。
 
 <br />
 
@@ -36,7 +36,7 @@ category: frontend
     <AccordionTrigger>1. 修好真正的瓶頸</AccordionTrigger>
     <AccordionContent>
       一套遺留的 WordPress stack 已成為 page delivery 與
-      search 的瓶頸。我們拆分了它的職責：
+      search 的瓶頸。其職責被拆分：
 
       - **Strapi / Sanity** 管理結構化內容與編輯工作流
       - **Meilisearch / Algolia** 負責 indexing 與 retrieval
@@ -71,7 +71,7 @@ category: frontend
   <AccordionItem value="reliability">
     <AccordionTrigger>3. 拿掉用戶看不見的工作</AccordionTrigger>
     <AccordionContent>
-      對於一個圖片密集的 React Native membership app，我們：
+      對於一個圖片密集的 React Native membership app，團隊：
 
       - 用 **FlashList** 回收長列表
       - 調整 rendering windows，而不是急於 mount 全部內容
@@ -80,7 +80,7 @@ category: frontend
       - 只在 native-thread execution 有幫助時使用 **Reanimated**
 
       發佈後仍持續進行 device profiling 與 **Sentry** monitoring。應用
-      維持超過 **99.5% crash-free sessions**，給了我們具體的
+      維持超過 **99.5% crash-free sessions**，建立了具體的
       reliability baseline，而不是上線當天的主觀感覺。
     </AccordionContent>
   </AccordionItem>
@@ -89,7 +89,7 @@ category: frontend
     <AccordionTrigger>4. 改善 frontend 如何交付</AccordionTrigger>
     <AccordionContent>
       橫跨 **15+ React 與 React Native applications**，重複的摩擦變成了
-      delivery risk。我們投入於：
+      delivery risk。團隊投入於：
 
       - 用 **Radix**、**Tailwind CSS** 與可重用 hooks 建立共用 primitives
       - 在 **Storybook**、**Fumadocs** 與 MDX 中提供範例與指引
@@ -110,7 +110,7 @@ category: frontend
 
 <br />
 
-## 「Senior」對我現在的意義
+## 「Senior」現在的意義
 
 - 衡量 **用戶旅程**，而不只是 component render time。
 - 讓 **架構對準瓶頸**，即使它落在 frontend repository 之外。

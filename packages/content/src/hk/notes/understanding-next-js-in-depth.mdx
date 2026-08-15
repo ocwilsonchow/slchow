@@ -393,7 +393,7 @@ network edge or host
 
 在 Next.js 16，明確啟用這個模型：
 
-```ts
+```ts title="next.config.ts"
 import type { NextConfig } from 'next'
 
 const nextConfig: NextConfig = {
@@ -616,7 +616,7 @@ Server Components、Server Actions、Route Handlers 與 Proxy 都在 server side
 
 用 `route.ts` 做明確的 HTTP resource：webhooks、公開 APIs、file responses、feeds、callbacks，或非 React clients 消費的 endpoints。
 
-```ts
+```ts title="route.ts"
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -1033,7 +1033,7 @@ Production 調查應確認：
 
 ## 20. 除錯問題與常見誤解
 
-當 Next.js 行為讓我意外時，我會依序問這些：
+當 Next.js 行為意外時，依序問這些：
 
 1. **這是哪條 pipeline？** Document request、Flight navigation、prefetch、Server Action、Route Handler，還是 proxy？
 2. **哪個 graph 擁有這個 module？** Server、client，還是 edge？有沒有 directive 把 boundary 移得比預期更高？
@@ -1068,7 +1068,7 @@ Production 調查應確認：
 
 ## 21. 最終心智模型
 
-我用的最短且準確的模型是：
+最短且準確的模型是：
 
 ```text
 Folders define a route tree.

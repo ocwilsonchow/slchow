@@ -1,0 +1,106 @@
+---
+title: Resume — Full-Stack
+---
+
+## Wilson, Chow Sin Long
+
+Full-stack **software engineer** with **5 years** delivering production apps in a multi-client environment — Figma through React / React Native, Node.js, typed APIs, and AWS. Built **15+** apps from scratch and over multiple years, including App Store / Play Store releases. Cut load times by up to **80%** and search latency by **90%**. Currently leading a multi-channel **Generative AI** agent platform with durable workflows, memory, RAG, and evals. **AWS Solutions Architect Associate**.
+
+---
+
+## Experience
+
+### Software Developer, Vioo Company Limited, May 2022 – Present
+
+Primary engineer for concurrent client products — scoping UX with technical and non-technical stakeholders, then shipping from design through cloud deployment.
+
+- Shipped and maintained **15+** production React / React Native apps from scratch and over multiple years, including high-fidelity Figma design, shared design systems, and App Store / Play Store releases.
+- Replaced a WordPress stack with an in-house headless CMS (Strapi / Sanity) and search (Meilisearch / Algolia) in a **Turborepo**, deployed with **SST**, so publishing continued through the transition: cut load time by **80%**, search latency by **90%**, and hit PageSpeed Insights **>90**.
+- Built typed Node.js APIs on Lambda / API Gateway and **ECS Fargate** (Hono, OpenAPI, tRPC): org-scoped Postgres with Drizzle / Prisma, Better Auth, OAuth 2.0 / OIDC, and RBAC in the data model.
+- Established shared Radix / Tailwind component and hook libraries with Storybook, Fumadocs, and MDX docs, reused across client apps. Vitest / Cypress on critical flows.
+- GitHub Actions + SST for CI/CD — lint, typecheck, tests, and build before deploy — cutting deploy time by **50%+**.
+- Mentored summer interns and junior developers through pairing, code reviews, and shipping production work.
+
+<br />
+
+---
+
+## Selected Projects
+
+### Multi-Channel Agentic Platform, Apr 2026 – Present
+
+Client-facing agent platform for durable, multi-channel assistants (web + Discord).
+
+- Each agent run is a durable stream across web and Discord: clients disconnect, reconnect, and resume mid-run without losing progress.
+- Built workflows, memory, schedules, and tools on Mastra and AI SDK: pause/resume, retries, sandboxed tools, and skills.
+- Shipped end-to-end RAG (ingest, chunk, Pinecone query/rerank) and gated releases on evals.
+- Ran Hono + Better Auth on **ECS Fargate**. Postgres for core data, S3 for files, ClickHouse for run/tool traces and cost/latency — a slow trace write cannot stall an agent run.
+- Shipped chat, tool-invocation, and multi-step client flows, plus a TipTap @mention file-tagging component for attaching workspace files into prompts.
+
+---
+
+### High-Performance Marketing Site, Nov 2025
+
+Lead engineer for a content + search marketing site — performance, CMS, and publish workflow.
+
+- Next.js + Strapi + Meilisearch with **LCP &lt; 0.5s**, **CLS &lt; 0.1**, and PageSpeed Insights **>90**.
+- Chose hybrid ISR (build the main pages and latest 100 articles; rest on demand) plus Strapi webhook revalidation so publishes skip a full rebuild.
+- Accessibility and SEO as ship criteria; custom Strapi plugin for generative AI content via AI SDK.
+- Built interactive and multi-step flows with TanStack Query prefetch/hydration and TanStack Form + Zod; locale-aware routing, copy, and date/number formatting on client content sites.
+
+---
+
+### React Native Membership Platform, shipped Apr 2024
+
+- Led Figma design and the membership app; shipped iOS and Android to the App Store and Play Store. Also maintained the Express API and Next.js admin.
+- Diagnosed production crashes, device compatibility, and performance bottlenecks independently via Sentry across app and API; maintained **99%** crash-free sessions post-launch.
+- Cut list jank with FlashList, tab freeze, and cached feed images. Push + deep links via Firebase Cloud Messaging for promos and milestones.
+
+<br />
+
+---
+
+## Other Work
+
+Loyalty and membership apps, CMS content sites, Shopify storefronts, a health/wellness RAG agent, and an RBAC resource system — mostly Next.js / React Native.
+
+<br />
+
+---
+
+## Skills
+
+- **Languages**: TypeScript, Node.js, SQL
+- **Frontend**: React, Next.js, React Native, Expo, TanStack Query, TanStack Form, TanStack Table, Tailwind CSS, shadcn/ui, Chakra UI, Framer Motion, Storybook, Figma, TipTap, D3
+- **Backend**: Hono, Drizzle, Prisma, OpenAPI, tRPC, GraphQL, Postgres, DynamoDB, Better Auth
+- **Auth & i18n**: OAuth 2.0 / OIDC, JWT, HttpOnly cookies, CORS, RBAC, next-intl
+- **AI**: Mastra, Vercel AI SDK, Langchain, Pinecone, Strands, AWS Bedrock
+- **Testing & monitoring**: Cypress, Vitest, React Testing Library, Lighthouse, axe, Sentry, PostHog
+- **Workflow**: Cursor, Claude Code
+- **DevOps**: SST, Docker, ECS Fargate, GitHub Actions, AWS, Turborepo
+
+<br />
+
+---
+
+## Qualifications
+
+- AWS Solutions Architect Associate, 2026
+- AWS Cloud Practitioner, 2025
+
+<br />
+
+---
+
+## Education
+
+### University College London
+
+- MPharm Pharmacy, 2016 – 2020 — First Class Honours
+- Passion for building things. Career switch from pharmacy to software development.
+
+<br />
+
+---
+
+You can also download my resume [here](/resume.pdf).

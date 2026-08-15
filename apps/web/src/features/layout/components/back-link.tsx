@@ -14,7 +14,7 @@ export const BackLink = async ({ href }: Props) => {
     <div className="space-y-0.5">
       <Link
         href={href}
-        className="block group hover:text-content-ink outline-none focus:outline-none focus-visible:outline-none"
+        className="block group hover:text-content-ink select-none outline-none focus:outline-none focus-visible:outline-none"
       >
         <CornerDownLeftIcon
           size={10}

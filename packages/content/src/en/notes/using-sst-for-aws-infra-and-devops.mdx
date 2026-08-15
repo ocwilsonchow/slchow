@@ -73,7 +73,7 @@ The config file defines app identity and safety rules. The `run` function loads 
 
 <br />
 
-```ts
+```ts title="sst.config.ts"
 export default $config({
   app(input) {
     return {
@@ -118,7 +118,7 @@ The site deploys with [`sst.aws.Nextjs`](https://sst.dev/docs/component/aws/next
 
 <br />
 
-```ts
+```ts title="packages/infra/nextjs.ts"
 const isProd = $app.stage === "production"
 const domain = "example.com"
 
@@ -152,7 +152,7 @@ Secrets are first-class resources, not loose `.env` files that never make it int
 
 <br />
 
-```ts
+```ts title="packages/infra/secrets.ts"
 export const username = new sst.Secret("Username")
 export const password = new sst.Secret("Password")
 export const databaseUrl = new sst.Secret("DatabaseUrl")

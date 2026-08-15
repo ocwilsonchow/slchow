@@ -84,7 +84,7 @@ The **organization** plugin is the membership and workspace layer. Install `@bet
 
 <br />
 
-```ts
+```ts title="src/auth.ts"
 import { drizzleAdapter } from "@better-auth/drizzle-adapter"
 import { betterAuth } from "better-auth"
 import { organization } from "better-auth/plugins"
@@ -120,7 +120,7 @@ export const auth = betterAuth({
 
 <br />
 
-```ts
+```ts title="src/auth-client.ts"
 import { createAuthClient } from "better-auth/client"
 import { organizationClient } from "better-auth/client/plugins"
 import { ac, owner, admin, member } from "./permissions"
@@ -205,7 +205,7 @@ Default roles are **owner**, **admin**, and **member**. For domain actions, defi
 
 <br />
 
-```ts
+```ts title="src/permissions.ts"
 import { createAccessControl } from "better-auth/plugins/access"
 import {
   defaultStatements,
@@ -280,7 +280,7 @@ Better Auth organization IDs are strings, so domain foreign keys should be `text
 
 <br />
 
-```ts
+```ts title="src/db/schema.ts"
 import { sql } from "drizzle-orm"
 import {
   index,
@@ -300,7 +300,7 @@ export const appUser = pgRole("app_user").existing()
 
 <br />
 
-```ts
+```ts title="src/db/schema.ts"
 export const projects = pgTable(
   "projects",
   {
@@ -390,7 +390,7 @@ The wrapper sets the tenant in a **transaction-local** setting and runs every te
 
 <br />
 
-```ts
+```ts title="src/db/rls.ts"
 import { sql } from "drizzle-orm"
 import { db } from "./client"
 
@@ -464,7 +464,7 @@ Typed context keeps handlers honest:
 
 <br />
 
-```ts
+```ts title="src/middleware/tenant.ts"
 import { APIError } from "better-auth/api"
 import { createMiddleware } from "hono/factory"
 import type { Context } from "hono"
@@ -508,7 +508,7 @@ export const requireTenant = createMiddleware<{ Variables: Variables }>(
 
 <br />
 
-```ts
+```ts title="src/middleware/tenant.ts"
 async function bindTenant(
   c: Context<{ Variables: Variables }>,
   userId: string,
@@ -550,7 +550,7 @@ The Zod OpenAPI route validates both the organization path parameter and JSON bo
 
 <br />
 
-```ts
+```ts title="src/routes/projects.ts"
 import { APIError } from "better-auth/api"
 import { createRoute, z } from "@hono/zod-openapi"
 
@@ -589,7 +589,7 @@ const createProjectRoute = createRoute({
 
 <br />
 
-```ts
+```ts title="src/routes/projects.ts"
 app.openapi(createProjectRoute, async (c) => {
   const { organizationId } = c.req.valid("param")
   const body = c.req.valid("json")

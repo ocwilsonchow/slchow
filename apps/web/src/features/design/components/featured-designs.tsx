@@ -1,12 +1,9 @@
 "use client"
 
 import { cn } from "@repo/ds"
+import { ChevronBadge } from "@repo/ds/components/ui/chevron-badge"
 import { useLenis } from "lenis/react"
-import {
-  ArrowRightIcon,
-  ChevronRightIcon,
-  CornerDownLeftIcon,
-} from "lucide-react"
+import { ArrowRightIcon, CornerDownLeftIcon } from "lucide-react"
 import {
   AnimatePresence,
   LayoutGroup,
@@ -17,6 +14,7 @@ import {
 import { useTranslations } from "next-intl"
 import {
   createContext,
+  type FocusEvent,
   type ReactNode,
   type RefObject,
   use,
@@ -29,9 +27,17 @@ import {
 import { useHideNavbarForOverlay } from "@/features/layout/components/navbar"
 import { Link } from "@/i18n/navigation"
 import { playClickSound } from "@/lib/click-sound"
-import { designAlbumHref, PHOTO_SIZES, STAGGER_EACH } from "../album"
+import {
+  CHEAP_MOTION_DURATION,
+  designAlbumHref,
+  OVERLAY_PHOTO_SIZES,
+  PHOTO_SIZES,
+  STAGGER_EACH,
+} from "../album"
 import type { DesignImage } from "../get-designs"
 import { featuredImageLayoutId } from "../layout-ids"
+import { prefetchAlbumThumbs } from "../prefetch"
+import { useCoarsePointer } from "../use-coarse-pointer"
 import { useInView } from "../use-in-view"
 import { AlbumPhoto } from "./album-photo"
 
@@ -66,9 +72,10 @@ type FeaturedDesignsContextValue = {
   assetCount: number
   isExpanded: boolean
   shouldReduceMotion: boolean
+  sharedLayout: boolean
   layoutTransition: Transition
   expand: () => void
-  stackRef: RefObject<HTMLButtonElement | null>
+  previewRef: RefObject<HTMLButtonElement | null>
 }
 
 const FeaturedDesignsContext =
@@ -97,10 +104,12 @@ export function FeaturedDesigns({
   const tNav = useTranslations("navigation")
   const tDesigns = useTranslations("designs")
   const shouldReduceMotion = useReducedMotion() ?? false
+  const coarsePointer = useCoarsePointer()
+  const sharedLayout = !shouldReduceMotion && !coarsePointer
   const lenis = useLenis()
   const [isExpanded, setIsExpanded] = useState(false)
   const backRef = useRef<HTMLButtonElement>(null)
-  const stackRef = useRef<HTMLButtonElement>(null)
+  const previewRef = useRef<HTMLButtonElement>(null)
   const wasExpandedRef = useRef(false)
   useHideNavbarForOverlay(isExpanded)
 
@@ -123,8 +132,9 @@ export function FeaturedDesigns({
 
   const expand = useCallback(() => {
     playClickSound()
+    prefetchAlbumThumbs(images)
     setIsExpanded(true)
-  }, [])
+  }, [images])
 
   useEffect(() => {
     if (!isExpanded) return
@@ -148,7 +158,7 @@ export function FeaturedDesigns({
 
     if (wasExpandedRef.current) {
       const frame = requestAnimationFrame(() => {
-        stackRef.current?.focus({ preventScroll: true })
+        previewRef.current?.focus({ preventScroll: true })
       })
       return () => cancelAnimationFrame(frame)
     }
@@ -169,15 +179,17 @@ export function FeaturedDesigns({
       assetCount,
       isExpanded,
       shouldReduceMotion,
+      sharedLayout,
       layoutTransition,
       expand,
-      stackRef,
+      previewRef,
     }),
     [
       images,
       assetCount,
       isExpanded,
       shouldReduceMotion,
+      sharedLayout,
       layoutTransition,
       expand,
     ]
@@ -205,10 +217,16 @@ export function FeaturedDesigns({
               aria-modal="true"
               aria-label={t("featuredDesigns")}
               className="fixed inset-0 z-50"
-              layoutRoot
+              layoutRoot={sharedLayout}
               initial={false}
-              exit={{ opacity: 1 }}
-              transition={{ duration: shouldReduceMotion ? 0 : 0.4 }}
+              exit={{ opacity: sharedLayout ? 1 : 0 }}
+              transition={{
+                duration: shouldReduceMotion
+                  ? 0
+                  : sharedLayout
+                    ? 0.4
+                    : CHEAP_MOTION_DURATION,
+              }}
               onClick={(event) => {
                 if (
                   event.target instanceof Element &&
@@ -225,13 +243,20 @@ export function FeaturedDesigns({
                 animate={{ opacity: 1 }}
                 exit={{
                   opacity: shouldReduceMotion ? 1 : 0,
-                  transition: { delay: 0.2 },
+                  transition: {
+                    delay: sharedLayout ? 0.2 : 0,
+                    duration: shouldReduceMotion
+                      ? 0
+                      : sharedLayout
+                        ? 0.3
+                        : CHEAP_MOTION_DURATION,
+                  },
                 }}
                 transition={{ duration: shouldReduceMotion ? 0 : 0.3 }}
               />
               <motion.div
                 className="relative z-10 h-full overflow-y-auto overscroll-contain"
-                layoutScroll
+                layoutScroll={sharedLayout}
                 data-lenis-prevent
               >
                 <motion.div
@@ -246,7 +271,7 @@ export function FeaturedDesigns({
                     ref={backRef}
                     type="button"
                     aria-label={t("backToFeatured")}
-                    className="group hover:text-content-ink outline-none focus:outline-none focus-visible:outline-none"
+                    className="group hover:text-content-ink select-none outline-none focus:outline-none focus-visible:outline-none"
                     onClick={(event) => {
                       event.stopPropagation()
                       collapse()
@@ -275,6 +300,7 @@ export function FeaturedDesigns({
                     images={images}
                     layoutTransition={layoutTransition}
                     shouldReduceMotion={shouldReduceMotion}
+                    sharedLayout={sharedLayout}
                   />
                 </div>
               </motion.div>
@@ -292,15 +318,37 @@ export function FeaturedStack() {
     assetCount,
     isExpanded,
     shouldReduceMotion,
+    sharedLayout,
     layoutTransition,
     expand,
-    stackRef,
+    previewRef,
   } = useFeaturedDesigns()
-  const t = useTranslations("a11y")
   const tNav = useTranslations("navigation")
+  const tDesigns = useTranslations("designs")
   const [isPeeking, setIsPeeking] = useState(false)
   const peek = isPeeking && !shouldReduceMotion
   const { ref: inViewRef, inView } = useInView<HTMLDivElement>()
+
+  const peekOn = useCallback(() => {
+    prefetchAlbumThumbs(images)
+    setIsPeeking(true)
+  }, [images])
+
+  const peekOff = useCallback(() => {
+    setIsPeeking(false)
+  }, [])
+
+  const peekOnKeyboard = useCallback(
+    (event: FocusEvent<HTMLElement>) => {
+      if (
+        event.target instanceof Element &&
+        event.target.matches(":focus-visible")
+      ) {
+        peekOn()
+      }
+    },
+    [peekOn]
+  )
 
   return (
     <div ref={inViewRef} className="mt-8 space-y-3">
@@ -308,85 +356,97 @@ export function FeaturedStack() {
         <h2 className="text-content-ink font-semibold text-sm flex items-center gap-2">
           {tNav("designs")}{" "}
           <sup className="text-content-subdued">{assetCount}</sup>
-          <div className="bg-surface-alpha rounded-full text-content-subdued p-0.5 group-hover:translate-x-1 transition-transform duration-200">
-            <ChevronRightIcon size={12} strokeWidth={4} />
-          </div>
+          <ChevronBadge />
         </h2>
       </Link>
-      <button
-        ref={stackRef}
-        type="button"
-        aria-label={t("openFeatured")}
-        className="w-32 text-left outline-none focus:outline-none focus-visible:outline-none"
-        onClick={expand}
-        onPointerEnter={() => setIsPeeking(true)}
-        onPointerLeave={() => setIsPeeking(false)}
-        onFocus={(event) => {
-          if (event.currentTarget.matches(":focus-visible")) {
-            setIsPeeking(true)
-          }
-        }}
-        onBlur={() => setIsPeeking(false)}
-      >
-        <div className="relative aspect-square w-full overflow-visible p-2">
-          {isExpanded
-            ? null
-            : images.map((image, imageIndex) => {
-                const restRotate = REST_ROTATE[imageIndex] ?? 0
-                const restOffset = REST_OFFSET[imageIndex] ?? { x: 0, y: 0 }
-                const unfanRotate = UNFAN_ROTATE[imageIndex] ?? restRotate
-                const unfanOffset = UNFAN_OFFSET[imageIndex] ?? restOffset
+      <div className="w-32">
+        <Link
+          href="/design"
+          aria-label={tNav("designs")}
+          className="block outline-none focus:outline-none focus-visible:outline-none"
+          onPointerEnter={peekOn}
+          onPointerLeave={peekOff}
+          onFocus={peekOnKeyboard}
+          onBlur={peekOff}
+        >
+          <div className="relative aspect-square w-full overflow-visible p-2">
+            {isExpanded
+              ? null
+              : images.map((image, imageIndex) => {
+                  const restRotate = REST_ROTATE[imageIndex] ?? 0
+                  const restOffset = REST_OFFSET[imageIndex] ?? { x: 0, y: 0 }
+                  const unfanRotate = UNFAN_ROTATE[imageIndex] ?? restRotate
+                  const unfanOffset = UNFAN_OFFSET[imageIndex] ?? restOffset
 
-                return (
-                  <motion.div
-                    key={image.src}
-                    className="absolute inset-3"
-                    style={{ zIndex: images.length - imageIndex }}
-                    initial={false}
-                    animate={
-                      shouldReduceMotion
-                        ? { x: 0, y: 0, rotate: 0 }
-                        : peek
-                          ? {
-                              x: unfanOffset.x,
-                              y: unfanOffset.y,
-                              rotate: unfanRotate,
-                            }
-                          : {
-                              x: restOffset.x,
-                              y: restOffset.y,
-                              rotate: restRotate,
-                            }
-                    }
-                    transition={
-                      shouldReduceMotion ? { duration: 0 } : UNFAN_TRANSITION
-                    }
-                  >
-                    <AlbumPhoto
-                      layoutId={featuredImageLayoutId(image.slug, image.name)}
-                      src={image.src}
-                      alt=""
-                      sizes={PHOTO_SIZES}
-                      layoutTransition={{
-                        ...layoutTransition,
-                        delay: shouldReduceMotion
-                          ? 0
-                          : (images.length - 1 - imageIndex) * STAGGER_EACH,
-                      }}
-                      loading={imageIndex === 0 ? "eager" : "lazy"}
-                      fetchPriority={imageIndex === 0 ? "high" : "low"}
-                      kind={image.kind}
-                      poster={image.poster}
-                      playing={
-                        image.kind === "video" && inView && !shouldReduceMotion
+                  return (
+                    <motion.div
+                      key={image.src}
+                      className="absolute inset-3"
+                      style={{ zIndex: images.length - imageIndex }}
+                      initial={false}
+                      animate={
+                        shouldReduceMotion
+                          ? { x: 0, y: 0, rotate: 0 }
+                          : peek
+                            ? {
+                                x: unfanOffset.x,
+                                y: unfanOffset.y,
+                                rotate: unfanRotate,
+                              }
+                            : {
+                                x: restOffset.x,
+                                y: restOffset.y,
+                                rotate: restRotate,
+                              }
                       }
-                      className="bg-surface-card h-full w-full overflow-hidden shadow"
-                    />
-                  </motion.div>
-                )
-              })}
-        </div>
-      </button>
+                      transition={
+                        shouldReduceMotion ? { duration: 0 } : UNFAN_TRANSITION
+                      }
+                    >
+                      <AlbumPhoto
+                        layoutId={
+                          sharedLayout
+                            ? featuredImageLayoutId(image.slug, image.name)
+                            : undefined
+                        }
+                        src={image.src}
+                        alt=""
+                        sizes={sharedLayout ? PHOTO_SIZES : "128px"}
+                        layoutTransition={{
+                          ...layoutTransition,
+                          delay: shouldReduceMotion
+                            ? 0
+                            : (images.length - 1 - imageIndex) * STAGGER_EACH,
+                        }}
+                        loading="eager"
+                        fetchPriority={imageIndex === 0 ? "high" : "low"}
+                        decoding={sharedLayout ? "sync" : "async"}
+                        kind={image.kind}
+                        poster={image.poster}
+                        playing={
+                          image.kind === "video" &&
+                          inView &&
+                          !shouldReduceMotion
+                        }
+                        className="bg-surface-card h-full w-full overflow-hidden shadow"
+                      />
+                    </motion.div>
+                  )
+                })}
+          </div>
+        </Link>
+        <button
+          ref={previewRef}
+          type="button"
+          hidden
+          className="text-content-subdued hover:text-content-ink text-sm outline-none focus:outline-none focus-visible:outline-none"
+          onClick={expand}
+          onFocus={peekOnKeyboard}
+          onBlur={peekOff}
+        >
+          {tDesigns("preview")}
+        </button>
+      </div>
     </div>
   )
 }
@@ -395,12 +455,14 @@ type FeaturedOverlayGridProps = {
   images: FeaturedImage[]
   layoutTransition: Transition
   shouldReduceMotion: boolean
+  sharedLayout: boolean
 }
 
 function FeaturedOverlayGrid({
   images,
   layoutTransition,
   shouldReduceMotion,
+  sharedLayout,
 }: FeaturedOverlayGridProps) {
   return (
     <ul className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
@@ -411,6 +473,7 @@ function FeaturedOverlayGrid({
           imageIndex={imageIndex}
           layoutTransition={layoutTransition}
           shouldReduceMotion={shouldReduceMotion}
+          sharedLayout={sharedLayout}
         />
       ))}
     </ul>
@@ -422,6 +485,7 @@ type FeaturedOverlayTileProps = {
   imageIndex: number
   layoutTransition: Transition
   shouldReduceMotion: boolean
+  sharedLayout: boolean
 }
 
 function FeaturedOverlayTile({
@@ -429,10 +493,12 @@ function FeaturedOverlayTile({
   imageIndex,
   layoutTransition,
   shouldReduceMotion,
+  sharedLayout,
 }: FeaturedOverlayTileProps) {
   const t = useTranslations("a11y")
   const { ref, inView } = useInView<HTMLLIElement>()
   const playing = image.kind === "video" && inView && !shouldReduceMotion
+  const inFirstRows = imageIndex < 6
 
   return (
     <li ref={ref} className="aspect-square" data-featured-photo="">
@@ -446,14 +512,20 @@ function FeaturedOverlayTile({
         }}
       >
         <AlbumPhoto
-          layoutId={featuredImageLayoutId(image.slug, image.name)}
+          layoutId={
+            sharedLayout
+              ? featuredImageLayoutId(image.slug, image.name)
+              : undefined
+          }
           src={image.src}
           alt=""
-          sizes={PHOTO_SIZES}
+          sizes={sharedLayout ? PHOTO_SIZES : OVERLAY_PHOTO_SIZES}
           layoutTransition={{
             ...layoutTransition,
             delay: shouldReduceMotion ? 0 : imageIndex * STAGGER_EACH,
           }}
+          loading={inFirstRows ? "eager" : "lazy"}
+          decoding={sharedLayout ? "sync" : "async"}
           kind={image.kind}
           poster={image.poster}
           playing={playing}

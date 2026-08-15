@@ -287,7 +287,7 @@ Split CPU-heavy work into smaller tasks when the UI needs opportunities to respo
 
 The initial render usually needs visible HTML, applicable CSS, blocking scripts, main-thread rendering time, and any image or font required by the result. It does not need below-the-fold media, analytics, chat widgets, or most interaction code.
 
-I optimize that dependency chain in this order:
+That dependency chain is optimized in this order:
 
 1. Reduce redirects and TTFB; stream useful HTML early.
 2. Make critical CSS, fonts, and the LCP image discoverable from HTML.

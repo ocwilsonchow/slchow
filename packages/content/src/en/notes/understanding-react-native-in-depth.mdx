@@ -7,7 +7,7 @@ category: frontend
 
 React Native is often introduced as "React, but the output is native views instead of the DOM." That description is not wrong, but it is too compressed to explain why a string inside a `View` crashes, why `useState` on scroll offset drops frames, why an Expo config plugin does not ship over the air, or why `useLayoutEffect` can measure a view in one commit on device and still fail if you animate `height` every frame.
 
-I ship React Native **through Expo**, the same way this site ships React through Next.js. The more useful model is that **Expo is an orchestrator around React Native**, and React Native is a **host renderer for React**. Expo classifies native modules, generates iOS and Android projects, bundles JavaScript with Metro, and maps artifacts onto devices. React Native turns a React tree into a C++ shadow tree, runs Yoga, and mounts `UIView` / `android.view.View` instances. React still owns elements, Fibers, lanes, render, and commit.
+This stack ships React Native **through Expo**, the same way this site ships React through Next.js. The more useful model is that **Expo is an orchestrator around React Native**, and React Native is a **host renderer for React**. Expo classifies native modules, generates iOS and Android projects, bundles JavaScript with Metro, and maps artifacts onto devices. React Native turns a React tree into a C++ shadow tree, runs Yoga, and mounts `UIView` / `android.view.View` instances. React still owns elements, Fibers, lanes, render, and commit.
 
 <br />
 
@@ -72,7 +72,7 @@ The boundaries matter because the same screens can behave differently without Re
 
 Calling Expo "a managed workflow" underspecifies the compiler. Calling React Native "a native app with a JS bridge" underspecifies the renderer. The durable mental model is a **native project generator plus bundler plus React renderer**, deployed through a host-specific adapter.
 
-I treat Expo the way [Understanding Next.js in Depth](/notes/understanding-next-js-in-depth) treats Next.js: policy and infrastructure around a React core. Next.js maps URLs to React trees for a browser. Expo maps `app/` files and native modules to React trees for a device.
+Expo is to React Native what Next.js is to the browser: policy and infrastructure around a React core. Next.js maps URLs to React trees for a browser. Expo maps `app/` files and native modules to React trees for a device.
 
 <br />
 
@@ -214,7 +214,7 @@ JSI is also not a React API. Application code should keep calling documented mod
 
 ## 6. Threading
 
-Fabric is designed to be thread-safe by keeping renderer structures immutable: updates clone rather than mutate. Two threads matter for almost every bug I actually chase:
+Fabric is designed to be thread-safe by keeping renderer structures immutable: updates clone rather than mutate. Two threads matter for almost every production bug:
 
 - The **JS thread** runs Hermes, React's render phase, and most Yoga work.
 - The **UI thread** (main thread) is the only thread that may create, update, or destroy host views.
@@ -394,7 +394,7 @@ That sharing is why keys and identity still matter: they are how React decides w
 
 Most information in the shadow tree originates in React and flows down. **C++ state** is the exception. Some host components keep state that JavaScript does not own. `ScrollView` offset is the usual example: the platform view scrolls, C++ records the offset, and APIs such as `measure` can read it. React did not render that update.
 
-If I put that offset in `useState`, I invent a second source of truth and I schedule a React render on every scroll event:
+Putting that offset in `useState` invents a second source of truth and schedules a React render on every scroll event:
 
 <br />
 
@@ -464,7 +464,7 @@ Two Expo contracts decide whether a module exists in the binary at all.
 
 <br />
 
-```json
+```json title="app.json"
 {
   "expo": {
     "plugins": [
@@ -542,7 +542,7 @@ Use the native stack. Expo Router's `Stack` is `@react-navigation/native-stack`.
 
 <br />
 
-```tsx
+```tsx title="app/_layout.tsx"
 import { Stack } from "expo-router"
 
 export default function Layout() {
@@ -556,7 +556,7 @@ Tabs should be native too when the product cares about platform feel:
 
 <br />
 
-```tsx
+```tsx title="app/(tabs)/_layout.tsx"
 import { NativeTabs } from "expo-router/unstable-native-tabs"
 
 export default function TabLayout() {
@@ -686,15 +686,15 @@ That one interaction is the whole stack: Expo Module, React scheduler, Fabric, Y
 
 ---
 
-## 16. The Debugging Questions I Use
+## 16. Debugging Questions
 
-When an Expo screen surprises me, I work through these in order:
+When an Expo screen surprises, work through these in order:
 
 1. **Which thread is busy?** JS freeze versus UI freeze versus both.
 2. **Is this Expo Go, a dev client, or a release binary?** Go cannot grow new native modules.
 3. **Did React render, Fabric commit, or mount?** A `console.log` in a component does not prove a `UIView` changed.
 4. **Is this C++ state or React state?** Scroll offset, text selection, and some gesture state never entered `useState`.
-5. **Did flattening remove the view I am looking for in the native inspector?**
+5. **Did flattening remove the view under inspection in the native inspector?**
 6. **Does this change need a native rebuild, or is JS enough?** Config plugins, permissions, fonts, and new Expo Modules need a new binary. EAS Update cannot invent them.
 7. **Is autolinking looking at the app package?** A native dep only in a workspace library is a missing link, not a Metro cache issue.
 8. **Is this a host-component contract?** Strings outside `Text`, `0 && <Text />`, `TouchableOpacity` in a Gesture Handler list.
@@ -733,7 +733,7 @@ These questions beat adding `memo` until a list stops dropping frames.
 
 ## Final Mental Model
 
-The shortest accurate model I use is:
+The shortest accurate model is:
 
 <br />
 

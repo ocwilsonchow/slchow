@@ -251,7 +251,7 @@ function Trigger({
         onClick?.(event)
       }}
       className={cn(
-        "px-1.25 w-full h-9 font-medium leading-none rounded-full flex items-center justify-between text-content-ink-on-popover",
+        "px-2 w-full h-9.5 font-medium leading-none rounded-full flex items-center justify-between text-content-ink-on-popover",
         className
       )}
     >
