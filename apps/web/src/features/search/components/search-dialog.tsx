@@ -37,7 +37,7 @@ const SEARCH_OPTIONS = {
 
 function Kbd({ children }: { children: ReactNode }) {
   return (
-    <kbd className="inline-flex h-5 min-w-5 items-center justify-center rounded border border-stroke-soft/75 bg-surface-alpha px-1 font-mono text-[10px] leading-none text-content-ink-on-popover">
+    <kbd className="inline-flex h-4.5 items-center justify-center rounded-md bg-surface-alpha px-1 py-px">
       {children}
     </kbd>
   )
@@ -224,7 +224,7 @@ export function SiteSearchDialog(props: SharedProps) {
             autoFocus
             className="text-content-ink-on-popover placeholder:text-content-body-on-popover"
           />
-          <SearchDialogClose className="border-stroke-soft/75 bg-surface-alpha text-content-body-on-popover hover:text-content-ink-on-popover text-xs px-1 py-0.5">
+          <SearchDialogClose className="inline-flex h-4.5 items-center justify-center rounded-md border-0 bg-surface-alpha px-1 py-px text-xs text-content-body-on-popover hover:text-content-ink-on-popover">
             {t("closeShort")}
           </SearchDialogClose>
         </SearchDialogHeader>

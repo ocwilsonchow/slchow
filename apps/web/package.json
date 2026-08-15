@@ -22,8 +22,10 @@
     "@repo/content": "workspace:*",
     "@repo/ds": "workspace:*",
     "@repo/intl": "workspace:*",
+    "@tanstack/react-form": "^1.33.5",
     "@tanstack/react-query": "^5.101.4",
     "@uidotdev/usehooks": "^2.4.1",
+    "@xstate/react": "^6.1.0",
     "ai": "^7.0.56",
     "fumadocs-core": "^16.11.5",
     "fumadocs-mdx": "^15.2.0",
@@ -39,6 +41,7 @@
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "react-markdown": "^10.1.0",
+    "xstate": "^5.32.5",
     "zod": "^4.4.3",
     "zustand": "^5.0.14"
   },

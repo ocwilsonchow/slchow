@@ -37,7 +37,7 @@
     "resultsLabel": "搜索结果",
     "placeholder": "搜索笔记、支线任务和简历…",
     "close": "关闭搜索",
-    "closeShort": "ESC",
+    "closeShort": "esc",
     "prompt": "输入文字以搜索网站全文。",
     "noResults": "未找到结果。",
     "error": "无法加载搜索，请重试。",
@@ -104,7 +104,43 @@
     }
   },
   "contact": {
-    "body": "欢迎来信：<email>sinlongchow@gmail.com</email>"
+    "questions": {
+      "name": "你叫什么名字？",
+      "email": "你的邮箱是？",
+      "intent": "想谈什么？",
+      "message": "想告诉我什么？"
+    },
+    "intents": {
+      "hiring": "招聘",
+      "project": "项目",
+      "collaboration": "合作",
+      "other": "其他"
+    },
+    "placeholders": {
+      "name": "陈大文",
+      "email": "you@example.com",
+      "message": "简单写一下职位、项目或想法。"
+    },
+    "progress": "{current} / {total}",
+    "progressSr": "第 {current} 步，共 {total} 步",
+    "next": "下一步",
+    "back": "返回",
+    "send": "发送",
+    "sending": "发送中",
+    "enterToProceed": "按 <kbd>回车</kbd> 继续",
+    "enterToSubmit": "按 <kbd>回车</kbd> 发送",
+    "thanks": "谢谢 — 我会通过邮件回复。",
+    "errors": {
+      "nameMin": "请至少输入 2 个字符。",
+      "nameMax": "请保持在 80 个字符以内。",
+      "emailInvalid": "请输入有效的邮箱地址。",
+      "intentRequired": "请选择一项。",
+      "messageMin": "请至少写 20 个字符。",
+      "messageMax": "请保持在 2,000 个字符以内。",
+      "invalid": "请检查此字段。",
+      "turnstile": "验证失败，请再试一次。",
+      "submit": "出了点问题，请再试一次。"
+    }
   },
   "notes": {
     "intro": "一些关于我感兴趣主题的笔记。与 Grok 4.6 Max、GPT-5.6 Sol 及 Kimi K3 Max 共同撰写与审核。",

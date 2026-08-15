@@ -37,7 +37,7 @@
     "resultsLabel": "搜尋結果",
     "placeholder": "搜尋筆記、支線任務及履歷…",
     "close": "關閉搜尋",
-    "closeShort": "ESC",
+    "closeShort": "esc",
     "prompt": "輸入文字以搜尋網站全文。",
     "noResults": "找不到結果。",
     "error": "無法載入搜尋，請再試一次。",
@@ -104,7 +104,43 @@
     }
   },
   "contact": {
-    "body": "歡迎來信：<email>sinlongchow@gmail.com</email>"
+    "questions": {
+      "name": "你叫什麼名字？",
+      "email": "你的電郵是？",
+      "intent": "想談什麼？",
+      "message": "想告訴我什麼？"
+    },
+    "intents": {
+      "hiring": "招聘",
+      "project": "項目",
+      "collaboration": "合作",
+      "other": "其他"
+    },
+    "placeholders": {
+      "name": "陳大文",
+      "email": "you@example.com",
+      "message": "簡單講下職位、項目或想法。"
+    },
+    "progress": "{current} / {total}",
+    "progressSr": "第 {current} 步，共 {total} 步",
+    "next": "下一步",
+    "back": "返回",
+    "send": "送出",
+    "sending": "送出中",
+    "enterToProceed": "按 <kbd>Enter</kbd> 繼續",
+    "enterToSubmit": "按 <kbd>Enter</kbd> 送出",
+    "thanks": "多謝 — 我會用電郵回覆。",
+    "errors": {
+      "nameMin": "請至少輸入 2 個字元。",
+      "nameMax": "請保持在 80 個字元以內。",
+      "emailInvalid": "請輸入有效的電郵地址。",
+      "intentRequired": "請選擇一項。",
+      "messageMin": "請至少寫 20 個字元。",
+      "messageMax": "請保持在 2,000 個字元以內。",
+      "invalid": "請檢查此欄位。",
+      "turnstile": "驗證失敗，請再試一次。",
+      "submit": "出咗啲問題，請再試一次。"
+    }
   },
   "notes": {
     "intro": "一些關於我感興趣主題的筆記。與 Grok 4.6 Max、GPT-5.6 Sol 及 Kimi K3 Max 共同撰寫與審核。",

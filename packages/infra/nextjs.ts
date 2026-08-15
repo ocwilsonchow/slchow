@@ -2,18 +2,25 @@
 
 import { isProd } from "./edge"
 import { router, siteDomain } from "./router"
-import { posthogProjectToken } from "./secrets"
+import {
+  contactDiscordWebhook,
+  posthogProjectToken,
+  turnstileSecret,
+} from "./secrets"
 
 export const nextjs = new sst.aws.Nextjs("WEB", {
   path: "apps/web",
   router: {
     instance: router,
   },
-  link: isProd ? [posthogProjectToken] : [],
+  link: isProd
+    ? [posthogProjectToken, turnstileSecret, contactDiscordWebhook]
+    : [],
   warm: isProd ? 1 : 0,
   environment: {
     NEXT_PUBLIC_SITE_URL: `https://${siteDomain}`,
     SST_STAGE: $app.stage,
+    ...(isProd ? { TURNSTILE_HOSTNAMES: siteDomain } : {}),
   },
   openNextVersion: "4.0.3",
   // SST invokes OpenNext directly (skips package.json prebuild). Sync design
