@@ -4,7 +4,7 @@ title: 简历 — 前端
 
 ## Wilson, Chow Sin Long
 
-拥有 **5 年**经验的前端 **software engineer**，在节奏快、多客户并行的环境中交付**中大型**生产级项目——用 **TypeScript** 将 React／React Native 消费级产品从 Figma 做到 App Store／Play Store，以及这些应用所依赖的类型安全 REST API 与移动端认证（OAuth／OIDC、SecureStore／Keychain、生物识别）。从零到一与多年演进共 **15+** 个应用。关键路径加载时间最多缩短 **80%**，搜索延迟降低 **90%**。目前主导多渠道 **Generative AI** agent 平台的客户端：聊天、工具调用与文件提及 UI，运行于可中断的持久化 agent runs。已获得 **AWS Solutions Architect Associate** 认证。
+拥有 **5 年**经验的前端 **software engineer**，用 TypeScript 交付 React／React Native——从 Figma 到 App Store／Play Store，以及这些应用所依赖的类型安全 API 与移动端认证。从零开始并多年维护 **15+** 个应用。加载时间最多缩短 **80%**，搜索延迟降低 **90%**。目前主导多渠道 **Generative AI** agent 平台的 UI：聊天、工具调用与文件提及，运行于持久化 agent runs。已获得 **AWS Solutions Architect Associate** 认证。
 
 ---
 
@@ -12,13 +12,13 @@ title: 简历 — 前端
 
 ### 软件开发者，Vioo Company Limited，2022 年 5 月至今
 
-担任多个并行客户产品的主要工程师，负责从 Figma 到生产 UI 及其背后的 API，并与技术及非技术利益相关者协作规划 UX、交付可靠可用的版本。
+担任多个并行客户产品的主要工程师，负责从 Figma 到生产 UI 及其背后的 API。
 
-- 从零到一交付并多年维护 **15+** 个生产级 React／React Native 应用，包括高保真 Figma 设计、跨客户复用的共享设计系统，以及 App Store／Play Store 上架。
-- 以自研 headless CMS（Strapi／Sanity）与搜索（Meilisearch／Algolia）取代WordPress，置于 **Turborepo** 中并以 **SST** 部署，过渡期间发布流程不中断：加载时间缩短 **80%**、搜索延迟降低 **90%**，PageSpeed Insights **>90**。将 Node.js API **容器化**后运行于 **ECS Fargate**；其余工作负载在 Lambda／API Gateway。
-- 建立共享的 Radix／Tailwind 组件与 hook 库，并通过 Storybook、Fumadocs 和 MDX 编写文档，供多个客户应用复用。主导前端审查；为关键流程加入 Vitest／Cypress。
-- 将 Next.js 作为 isomorphic UI 与 BFF：SSR／ISR，聚合 Shopify GraphQL、CMS 与搜索 API 并做缓存。独立排查 Node 运行时问题与生产瓶颈（Lighthouse、Sentry），覆盖 UI 与 API。
-- 将身份对接类型安全 API：OAuth 2.0／OIDC、JWT 生命周期、Better Auth sessions、组织成员与 RBAC。在 React Native 上：access token 留在内存，refresh token 存于 **SecureStore**（iOS Keychain／Android Keystore）——不用 AsyncStorage——并以 Face ID／指纹解锁会话。在 Web 上：使用 **HttpOnly／Secure／SameSite** cookies，而非 `localStorage`。
+- 从零开始交付并多年维护 **15+** 个生产级 React／React Native 应用，包括高保真 Figma 设计、跨客户复用的共享设计系统，以及 App Store／Play Store 上架。
+- 以自研 headless CMS（Strapi／Sanity）与搜索（Meilisearch／Algolia）取代 WordPress，置于 **pnpm** Turborepo（**Next.js** 与 **Vite** 应用）中并以 **SST** 部署，静态资源走 **CloudFront**（**CDN**），过渡期间发布流程不中断：加载时间缩短 **80%**、搜索延迟降低 **90%**，PageSpeed Insights **>90**。Node.js API 运行于 **ECS Fargate**；其余工作负载在 Lambda／API Gateway。
+- 建立共享组件库——**Chakra UI**、Radix／Tailwind／shadcn——配以 **Storybook**、Fumadocs 和 MDX 文档，供多个客户应用复用。主导前端审查；**Vitest** 单元／集成与 **Playwright**／Cypress E2E 覆盖关键与异步流程。
+- 用 SSR／ISR 构建 Next.js 应用，聚合 Shopify GraphQL、CMS 与搜索 API 并做缓存。以 **code splitting**、**memoization** 与 **bundle analysis** 优化 **Core Web Vitals**。独立排查 Node 运行时问题与生产瓶颈（Lighthouse、**Sentry**），覆盖 UI 与 API。
+- 在类型安全 API 上构建 auth：OAuth 2.0／OIDC、JWT 生命周期、Better Auth sessions、组织成员与 RBAC。在 React Native 上：access token 留在内存，refresh token 存于 **SecureStore**（iOS Keychain／Android Keystore）——不用 AsyncStorage——并以 Face ID／指纹解锁会话。在 Web 上：使用 **HttpOnly／Secure／SameSite** cookies，而非 `localStorage`。客户端加固：**CSP**、**Zod** 输入校验，密钥在 **SST Secret**——绝不进客户端包。
 - 使用 Hono、Drizzle／Prisma、OpenAPI 与 tRPC 构建类型安全 Node.js API。GitHub Actions + SST 做 CI／CD——部署前跑 lint、typecheck、tests 与 build——部署时间缩短 **50%+**。
 - 通过结对编程、代码审查与共同交付生产工作，指导暑期实习生与初级开发者。
 
@@ -30,12 +30,12 @@ title: 简历 — 前端
 
 ### 多渠道 Agent 平台，2026 年 4 月至今
 
-面向客户的 agent UI（Web + Discord）——持久化多渠道助手的产品表面。
+面向客户的 agent UI（Web + Discord），用于持久化多渠道助手。
 
-- 将每次 agent run 建模为**有状态、可中断、可恢复**的持久化串流：客户端可断线、重连并在执行途中恢复，而不会丢失进度——而非嵌套的聊天条件。
-- 交付可组合的聊天、工具调用与多步客户端流程，以及 TipTap @mention 文件标记组件，用于将 workspace 文件附加至 prompts。
-- 将失败视为一等、可测试的 UI：可见的 run 状态、重试与恢复——而不只是完成气泡。
-- 负责该表面背后 **SST**／**ECS Fargate** API 的客户端契约。
+- 每次 agent run 是持久化串流：客户端可断线、重连并在执行途中恢复，而不会丢失进度。
+- 交付聊天、工具调用与多步客户端流程，以及 TipTap @mention 文件标记组件，用于将 workspace 文件附加至 prompts。**TanStack Query** 管 server／run 状态；**Zustand** 管轻量客户端 UI。
+- UI 中可见 run 状态、重试与恢复。
+- 负责 **SST**／**ECS Fargate** API 的客户端契约。
 
 ---
 
@@ -43,10 +43,10 @@ title: 简历 — 前端
 
 担任内容与搜索型营销网站的前端负责人——性能、CMS 页面与发布 UX。
 
-- Next.js + Strapi + Meilisearch，达到 **LCP &lt; 0.5s**、**CLS &lt; 0.1**，PageSpeed Insights **>90**。
+- Next.js + Strapi + Meilisearch，**Core Web Vitals**——**LCP &lt; 0.5s**、**CLS &lt; 0.1**，PageSpeed Insights **>90**。
 - 选择混合 ISR 而非全量 SSG 或纯按需：主要页面与最新 100 篇文章在构建时生成，其余按需；通过 Strapi webhook 做 tag revalidation，发布后无需完整重建即可上线。
-- 将无障碍与 SEO 纳入交付标准：语义化结构、键盘可操作的导航与表单、Lighthouse + axe；来自 CMS 的 metadata／OG、canonicals、sitemap、robots.txt 与 Article JSON-LD。
-- 以 TanStack Query prefetch／hydration 与 TanStack Form + Zod 编排交互与多步流程；客户内容站点支持 locale-aware 路由、文案与日期／数字格式。
+- 将无障碍、SEO 与 **CSP** 纳入交付标准：语义化结构、键盘可操作的导航与表单、Lighthouse + axe；来自 CMS 的 metadata／OG、canonicals、sitemap、robots.txt 与 Article JSON-LD。
+- 以 TanStack Query prefetch／hydration 与 TanStack Form + Zod 构建交互与多步流程；客户内容站点支持 locale-aware 路由、文案与日期／数字格式。
 
 ---
 
@@ -55,7 +55,7 @@ title: 简历 — 前端
 - 主导 Figma 设计与 iOS／Android 会员应用（电子会员卡、积分、优惠）；发布至 App Store 与 Play Store。同时维护 Express API 与 Next.js 管理后台。
 - 基于 **OpenAPI**／Swagger 对接类型安全 **REST** 客户端与 Express API。Refresh tokens 存于 SecureStore／Keychain；Face ID／指纹解锁会话。
 - 通过 Sentry 独立诊断生产崩溃、设备兼容性与性能瓶颈，覆盖 app 与 API；上线后维持 **99%** crash-free sessions。
-- 使用 FlashList 改善列表卡顿；通过 react-native-screens freeze 与延迟挂载降低非活动标签页成本；仅在原生线程转场中使用 Reanimated。
+- 使用 FlashList 与列表 **memoization** 改善列表卡顿；通过 react-native-screens freeze 与延迟挂载降低非活动标签页成本；用 Reanimated 做原生线程转场。
 - 通过缓存远程图片，并避免在长列表中使用全分辨率素材，缩短动态列表中的图片加载时间。
 - 使用 Firebase Cloud Messaging 实现推送与 deep links（促销及会员里程碑）。
 
@@ -74,14 +74,14 @@ title: 简历 — 前端
 ## 技能
 
 - **编程语言**：TypeScript、Node.js
-- **前端**：React、Next.js、React Native、Expo、TanStack Query、TanStack Form、Framer Motion、Tailwind CSS、shadcn/ui、Storybook、Figma、MDX、TipTap
+- **前端**：React、Next.js、Vite、React Native、Expo、TanStack Query、Zustand、TanStack Form、TanStack Table、Framer Motion、Tailwind CSS、Chakra UI、shadcn/ui、Storybook、Figma、MDX、TipTap、CSS、D3
 - **移动端**：FlashList、Reanimated、FCM
-- **后端**：Hono、Drizzle、Prisma、OpenAPI、tRPC、Postgres、DynamoDB、Better Auth、Multitenancy
-- **Auth 与 i18n**：OAuth 2.0／OIDC、JWT、SecureStore、Keychain／Keystore、biometrics、HttpOnly cookies、CORS、RBAC、next-intl
+- **后端**：Hono、Drizzle、Prisma、OpenAPI、tRPC、Postgres、DynamoDB、Better Auth
+- **Auth 与 security**：OAuth 2.0／OIDC、JWT、SecureStore、Keychain／Keystore、biometrics、HttpOnly cookies、CORS、CSP、Zod、SST Secret、RBAC、next-intl
 - **AI**：Mastra、Vercel AI SDK、Langchain、Pinecone、Strands、AWS Bedrock
-- **测试与监控**：Cypress、Vitest、React Testing Library、Lighthouse、axe、Sentry、PostHog
+- **测试与监控**：Vitest、Playwright、Cypress、React Testing Library、Lighthouse、axe、Sentry、PostHog
 - **工作流**：Cursor、Claude Code
-- **DevOps**：SST、Docker、ECS Fargate、GitHub Actions、AWS · Kubernetes（熟悉）
+- **DevOps**：pnpm、Git、SST、Docker、ECS Fargate、CloudFront／CDN、GitHub Actions、AWS
 - **亦使用**：Flutter、Strapi、Sanity、Meilisearch
 
 <br />
@@ -102,7 +102,7 @@ title: 简历 — 前端
 ### University College London
 
 - MPharm 药学，2016 至 2020 年，一等荣誉学位
-- 从药剂转行进入软件——受监管、高风险领域——之后发现对构建应用与系统的热情
+- 热爱动手构建。从药剂转行至软件开发。
 
 <br />
 

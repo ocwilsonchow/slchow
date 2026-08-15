@@ -4,7 +4,7 @@ title: 履歷 — 全端
 
 ## Wilson, Chow Sin Long
 
-擁有 **5 年**經驗的全端 **software engineer**，在節奏快、多客戶並行的環境中交付**中大型**正式上線項目——從 Figma 到 React／React Native、Node.js、型別安全 API 與 AWS。從零到一與多年演進共 **15+** 個應用，包括 App Store／Play Store 上架。關鍵路徑載入時間最多縮短 **80%**，搜尋延遲降低 **90%**。目前主導一個具備持久化、可中斷 workflows、memory、RAG、scorers 與 evals 的多渠道 **Generative AI** agent 平台。已取得 **AWS Solutions Architect Associate** 認證。
+擁有 **5 年**經驗的全端 **software engineer**，在多客戶環境中交付正式上線應用——從 Figma 到 React／React Native、Node.js、型別安全 API 與 AWS。從零開始並多年維護 **15+** 個應用，包括 App Store／Play Store 上架。載入時間最多縮短 **80%**，搜尋延遲降低 **90%**。目前主導一個具備持久化 workflows、memory、RAG 與 evals 的多渠道 **Generative AI** agent 平台。已取得 **AWS Solutions Architect Associate** 認證。
 
 ---
 
@@ -12,16 +12,16 @@ title: 履歷 — 全端
 
 ### 軟件開發者，Vioo Company Limited，2022 年 5 月至今
 
-擔任多個並行客戶產品的主要工程師，負責從設計到雲端部署，並與技術及非技術持份者合作規劃 UX、交付可靠可用的正式版本。
+擔任多個並行客戶產品的主要工程師，負責從設計到雲端部署。
 
-- 從零到一交付並多年維護 **15+** 個正式上線的 React／React Native 應用，包括高保真 Figma 設計、共享設計系統，以及 App Store／Play Store 上架。
-- 以自研 headless CMS（Strapi／Sanity）與搜尋（Meilisearch／Algolia）取代WordPress，置於 **Turborepo** 中並以 **SST** 部署，過渡期間發布流程不中斷：載入時間縮短 **80%**、搜尋延遲降低 **90%**，PageSpeed Insights **>90**。將 Node.js API **容器化**後運行於 **ECS Fargate**；其餘工作負載在 Lambda／API Gateway，使長連線串流與突發流量不共享失敗域。透過 AWS Solutions Architect 學習熟悉 **Kubernetes**；生產容器是 ECS 上的 Docker，而非自管 K8s。
+- 從零開始交付並多年維護 **15+** 個正式上線的 React／React Native 應用，包括高保真 Figma 設計、共享設計系統，以及 App Store／Play Store 上架。
+- 以自研 headless CMS（Strapi／Sanity）與搜尋（Meilisearch／Algolia）取代 WordPress，置於 **Turborepo** 中並以 **SST** 部署，過渡期間發布流程不中斷：載入時間縮短 **80%**、搜尋延遲降低 **90%**，PageSpeed Insights **>90**。Node.js API 運行於 **ECS Fargate**；其餘工作負載在 Lambda／API Gateway。
 - 使用 Mastra、Vercel AI SDK 與 Langchain 交付生產級 AI agents（workflows、memory、tool calls、observability、evals）。
 - 建立共享的 Radix／Tailwind 元件與 hook 函式庫，並透過 Storybook、Fumadocs 和 MDX 撰寫文件，供多個客戶應用共用。為關鍵流程加入 Vitest／Cypress。
-- 將身分對接型別安全 API：Better Auth sessions 與組織成員、OAuth 2.0／OIDC、JWT／session 生命週期與 RBAC。Session 存放於 **HttpOnly／Secure／SameSite** cookies，而非 `localStorage` tokens。
-- 用 Drizzle／Prisma 為 Postgres 建模——SQL schemas、migrations、按組織隔離的表與 RBAC——使存取控制落在資料模型中，而不只在路由處理。存取模式合適時使用 DynamoDB／S3。
+- 在型別安全 API 上建構 auth：Better Auth sessions 與組織成員、OAuth 2.0／OIDC、JWT／session 生命週期與 RBAC。Session 存放於 **HttpOnly／Secure／SameSite** cookies，而非 `localStorage` tokens。
+- 用 Drizzle／Prisma 為 Postgres 建模——SQL schemas、migrations、按組織隔離的表與 RBAC——使存取控制落在資料模型中，而不只在路由處理。合適時使用 DynamoDB／S3。
 - 使用 Hono、OpenAPI 與 tRPC 在 AWS Lambda／API Gateway 上建構型別安全 Node.js API，並以 Scalar 提供文件。
-- 加固邊緣：**嚴格 CORS**、trusted origins、auth 路由的 WAF 限流，身分來自 authorizer cookie——絕不信任客戶端傳入的 user header。API keys、tokens 與憑證存放於 **SST Secret**，而非 `.env`。
+- 邊緣 auth：**嚴格 CORS**、trusted origins、auth 路由的 WAF 限流，身分來自 authorizer cookie——絕不信任客戶端傳入的 user header。API keys、tokens 與憑證存放於 **SST Secret**，而非 `.env`。
 - GitHub Actions + SST 做 CI／CD——部署前跑 lint、typecheck、tests 與 build——部署時間縮短 **50%+**。
 - 透過結對編程、程式碼審查與共同交付正式上線工作，指導暑期實習生與初級開發者。
 
@@ -35,11 +35,11 @@ title: 履歷 — 全端
 
 面向客戶的持久化多渠道助手平台（Web + Discord）。
 
-- 將每次 agent run 建模為跨越 Web 與 Discord 的**有狀態、可中斷、可恢復**持久化串流：客戶端可斷線、重連並在執行途中恢復，而不會遺失進度——靠 retries 與 resume，而非嵌套的聊天條件。
-- 基於 Mastra 與 AI SDK 建構 workflow、memory、scheduling 和 workspace 原語：pause／resume、retries、沙盒工具與 skills。
-- 端到端交付 RAG（ingest、chunk、Pinecone query／rerank），並以帶評分的 evals（golden prompts + LLM-as-judge）作為發布門控。
-- 將 **容器化**的 Hono + Better Auth 運行於 **ECS Fargate**。按存取模式與失敗域拆分儲存：Postgres 存核心資料、S3 存檔案、ClickHouse 記 run／tool traces 與成本／延遲——緩慢的 trace 寫入不會卡住一次 agent run。
-- 交付可組合的聊天、工具調用與多步客戶端流程，以及 TipTap @mention 檔案標記元件，用於將 workspace 檔案附加至 prompts。
+- 每次 agent run 是跨越 Web 與 Discord 的持久化串流：客戶端可斷線、重連並在執行途中恢復，而不會遺失進度。
+- 基於 Mastra 與 AI SDK 建構 workflows、memory、schedules 與 tools：pause／resume、retries、沙盒工具與 skills。
+- 端到端交付 RAG（ingest、chunk、Pinecone query／rerank），並以 evals 作為發布門控。
+- 將 Hono + Better Auth 運行於 **ECS Fargate**。Postgres 存核心資料、S3 存檔案、ClickHouse 記 run／tool traces 與成本／延遲——緩慢的 trace 寫入不會卡住一次 agent run。
+- 交付聊天、工具調用與多步客戶端流程，以及 TipTap @mention 檔案標記元件，用於將 workspace 檔案附加至 prompts。
 
 ---
 
@@ -50,7 +50,7 @@ title: 履歷 — 全端
 - Next.js + Strapi + Meilisearch，達到 **LCP &lt; 0.5s**、**CLS &lt; 0.1**，PageSpeed Insights **>90**。
 - 混合 ISR：主要頁面與最新 100 篇文章在建置時生成，其餘按需；透過 Strapi webhook revalidation，發布後無需完整重建即可上線。
 - 將無障礙與 SEO 納入交付標準；使用 AI SDK 建構用於生成式 AI 內容創作的自訂 Strapi plugin。
-- 以 TanStack Query prefetch／hydration 與 TanStack Form + Zod 編排互動與多步流程；客戶內容站點支援 locale-aware 路由、文案與日期／數字格式。
+- 以 TanStack Query prefetch／hydration 與 TanStack Form + Zod 建構互動與多步流程；客戶內容站點支援 locale-aware 路由、文案與日期／數字格式。
 
 ---
 
@@ -75,13 +75,13 @@ title: 履歷 — 全端
 ## 技能
 
 - **程式語言**：TypeScript、Node.js、SQL
-- **前端**：React、Next.js、React Native、Expo、TanStack Query、TanStack Form、Tailwind CSS、shadcn/ui、Storybook、Figma、TipTap
-- **後端**：Hono、Drizzle、Prisma、OpenAPI、tRPC、GraphQL、Postgres、DynamoDB、Better Auth、Multitenancy、durable workflows
+- **前端**：React、Next.js、React Native、Expo、TanStack Query、TanStack Form、TanStack Table、Tailwind CSS、shadcn/ui、Chakra UI、Framer Motion、Storybook、Figma、TipTap、D3
+- **後端**：Hono、Drizzle、Prisma、OpenAPI、tRPC、GraphQL、Postgres、DynamoDB、Better Auth
 - **Auth 與 i18n**：OAuth 2.0／OIDC、JWT、HttpOnly cookies、CORS、RBAC、next-intl
 - **AI**：Mastra、Vercel AI SDK、Langchain、Pinecone、Strands、AWS Bedrock
 - **測試與監控**：Cypress、Vitest、React Testing Library、Lighthouse、axe、Sentry、PostHog
 - **工作流程**：Cursor、Claude Code
-- **DevOps**：SST、Docker、ECS Fargate、GitHub Actions、AWS、Turborepo · Kubernetes（熟悉）
+- **DevOps**：SST、Docker、ECS Fargate、GitHub Actions、AWS、Turborepo
 
 <br />
 
@@ -101,7 +101,7 @@ title: 履歷 — 全端
 ### University College London
 
 - MPharm 藥學，2016 至 2020 年，一等榮譽學位
-- 從藥劑轉行投身軟件——受規管、高風險領域——之後發現對建構應用與系統的熱情
+- 熱愛動手建構。從藥劑轉行至軟件開發。
 
 <br />
 
