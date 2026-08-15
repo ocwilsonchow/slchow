@@ -12,16 +12,12 @@ title: 履歷 — 全端
 
 ### 軟件開發者，Vioo Company Limited，2022 年 5 月至今
 
-擔任多個並行客戶產品的主要工程師，負責從設計到雲端部署。
+擔任多個並行客戶產品的主要工程師——與技術和非技術持份者一起界定 UX，再從設計交付到雲端部署。
 
 - 從零開始交付並多年維護 **15+** 個正式上線的 React／React Native 應用，包括高保真 Figma 設計、共享設計系統，以及 App Store／Play Store 上架。
-- 以自研 headless CMS（Strapi／Sanity）與搜尋（Meilisearch／Algolia）取代 WordPress，置於 **Turborepo** 中並以 **SST** 部署，過渡期間發布流程不中斷：載入時間縮短 **80%**、搜尋延遲降低 **90%**，PageSpeed Insights **>90**。Node.js API 運行於 **ECS Fargate**；其餘工作負載在 Lambda／API Gateway。
-- 使用 Mastra、Vercel AI SDK 與 Langchain 交付生產級 AI agents（workflows、memory、tool calls、observability、evals）。
+- 以自研 headless CMS（Strapi／Sanity）與搜尋（Meilisearch／Algolia）取代 WordPress，置於 **Turborepo** 中並以 **SST** 部署，過渡期間發布流程不中斷：載入時間縮短 **80%**、搜尋延遲降低 **90%**，PageSpeed Insights **>90**。
+- 在 Lambda／API Gateway 與 **ECS Fargate** 上建構型別安全 Node.js API（Hono、OpenAPI、tRPC）：用 Drizzle／Prisma 做按組織隔離的 Postgres，Better Auth、OAuth 2.0／OIDC，以及落在資料模型中的 RBAC。
 - 建立共享的 Radix／Tailwind 元件與 hook 函式庫，並透過 Storybook、Fumadocs 和 MDX 撰寫文件，供多個客戶應用共用。為關鍵流程加入 Vitest／Cypress。
-- 在型別安全 API 上建構 auth：Better Auth sessions 與組織成員、OAuth 2.0／OIDC、JWT／session 生命週期與 RBAC。Session 存放於 **HttpOnly／Secure／SameSite** cookies，而非 `localStorage` tokens。
-- 用 Drizzle／Prisma 為 Postgres 建模——SQL schemas、migrations、按組織隔離的表與 RBAC——使存取控制落在資料模型中，而不只在路由處理。合適時使用 DynamoDB／S3。
-- 使用 Hono、OpenAPI 與 tRPC 在 AWS Lambda／API Gateway 上建構型別安全 Node.js API，並以 Scalar 提供文件。
-- 邊緣 auth：**嚴格 CORS**、trusted origins、auth 路由的 WAF 限流，身分來自 authorizer cookie——絕不信任客戶端傳入的 user header。API keys、tokens 與憑證存放於 **SST Secret**，而非 `.env`。
 - GitHub Actions + SST 做 CI／CD——部署前跑 lint、typecheck、tests 與 build——部署時間縮短 **50%+**。
 - 透過結對編程、程式碼審查與共同交付正式上線工作，指導暑期實習生與初級開發者。
 

@@ -12,16 +12,12 @@ Full-stack **software engineer** with **5 years** delivering production apps in 
 
 ### Software Developer, Vioo Company Limited, May 2022 – Present
 
-Primary engineer for concurrent client products — design through cloud deployment.
+Primary engineer for concurrent client products — scoping UX with technical and non-technical stakeholders, then shipping from design through cloud deployment.
 
 - Shipped and maintained **15+** production React / React Native apps from scratch and over multiple years, including high-fidelity Figma design, shared design systems, and App Store / Play Store releases.
-- Replaced a WordPress stack with an in-house headless CMS (Strapi / Sanity) and search (Meilisearch / Algolia) in a **Turborepo**, deployed with **SST**, so publishing continued through the transition: cut load time by **80%**, search latency by **90%**, and hit PageSpeed Insights **>90**. Node.js APIs on **ECS Fargate**; other workloads on Lambda / API Gateway.
-- Shipped production AI agents (workflows, memory, tool calls, observability, evals) with Mastra, Vercel AI SDK, and Langchain.
+- Replaced a WordPress stack with an in-house headless CMS (Strapi / Sanity) and search (Meilisearch / Algolia) in a **Turborepo**, deployed with **SST**, so publishing continued through the transition: cut load time by **80%**, search latency by **90%**, and hit PageSpeed Insights **>90**.
+- Built typed Node.js APIs on Lambda / API Gateway and **ECS Fargate** (Hono, OpenAPI, tRPC): org-scoped Postgres with Drizzle / Prisma, Better Auth, OAuth 2.0 / OIDC, and RBAC in the data model.
 - Established shared Radix / Tailwind component and hook libraries with Storybook, Fumadocs, and MDX docs, reused across client apps. Vitest / Cypress on critical flows.
-- Built auth on a typed API: Better Auth sessions and org membership, OAuth 2.0 / OIDC, JWT / session lifecycle, and RBAC. Sessions live in **HttpOnly / Secure / SameSite** cookies, not `localStorage` tokens.
-- Modeled Postgres data with Drizzle / Prisma — SQL schemas, migrations, org-scoped tables, and RBAC — so access is enforced in the data model, not only in route handlers. DynamoDB / S3 where it fit.
-- Built typed Node.js APIs with Hono, OpenAPI, and tRPC on AWS Lambda / API Gateway, with Scalar docs.
-- Auth at the edge: **strict CORS**, trusted origins, WAF rate limits on auth routes, identity from the authorizer cookie — never a client-supplied user header. API keys, tokens, and credentials in **SST Secret**, not `.env`.
 - GitHub Actions + SST for CI/CD — lint, typecheck, tests, and build before deploy — cutting deploy time by **50%+**.
 - Mentored summer interns and junior developers through pairing, code reviews, and shipping production work.
 
