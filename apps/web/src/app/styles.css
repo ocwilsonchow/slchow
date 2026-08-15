@@ -41,6 +41,17 @@
   font-style: var(--shiki-dark-font-style);
 }
 
+/* Design page only — hide native WebKit scrollbars (html/body + overlay). */
+html:has(.hide-webkit-scrollbar),
+html:has(.hide-webkit-scrollbar) body {
+  scrollbar-gutter: auto;
+}
+
+html:has(.hide-webkit-scrollbar)::-webkit-scrollbar,
+html:has(.hide-webkit-scrollbar) *::-webkit-scrollbar {
+  display: none;
+}
+
 /* Pre overflow scroller only — transparent track */
 .shiki {
   scrollbar-color: var(--content-subdued) transparent;

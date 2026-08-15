@@ -77,7 +77,7 @@ export function DesignAsset({
       draggable={false}
       className={
         kind === "video"
-          ? "h-full w-full object-contain select-none pointer-events-none"
+          ? "hidden"
           : className
       }
     />
