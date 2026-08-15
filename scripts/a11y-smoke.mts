@@ -12,9 +12,6 @@ const paths = [
   "/cn",
   "/cn/notes",
   "/cn/resume",
-  "/ja",
-  "/ja/notes",
-  "/ja/resume",
 ] as const
 
 const searchCases = [
@@ -59,12 +56,6 @@ const searchCases = [
     query: "人生之诗",
     result: "人生之诗",
     pathname: "/cn/notes/a-poem-of-life",
-  },
-  {
-    locale: "ja",
-    query: "人生の詩",
-    result: "人生の詩",
-    pathname: "/ja/notes/a-poem-of-life",
   },
 ] as const
 

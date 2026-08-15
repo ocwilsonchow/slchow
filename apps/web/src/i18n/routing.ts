@@ -2,7 +2,7 @@ import { defineRouting } from "next-intl/routing"
 
 export const routing = defineRouting({
   // A list of all locales that are supported
-  locales: ["en", "hk", "cn", "ja"],
+  locales: ["en", "hk", "cn"],
 
   // Used when no locale matches
   defaultLocale: "en",
@@ -23,10 +23,6 @@ export const localeOptions = [
   {
     id: "cn",
     title: "简体中文",
-  },
-  {
-    id: "ja",
-    title: "日本語",
   },
 ] as const satisfies ReadonlyArray<{
   id: (typeof routing.locales)[number]
