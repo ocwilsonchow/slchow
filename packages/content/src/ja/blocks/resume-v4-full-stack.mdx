@@ -4,20 +4,18 @@ title: 履歴書 — フルスタック
 
 ## Wilson, Chow Sin Long
 
-**5 年**の経験を持つフルスタック **software engineer**。ペースの速いマルチクライアント環境で**中〜大規模**の本番イニシアティブを納品——Figma から React / React Native、Node.js、型付き API、AWS デプロイまで。ゼロイチと多年にわたる進化で **15+** アプリ、App Store / Play Store リリースを含む。クリティカルパスの読み込み時間を最大 **80%**、検索レイテンシを **90%** 削減。現在は持続的で中断可能な workflows、memory、RAG、scorers、evals を備えたマルチチャネル **Generative AI** agent プラットフォームを主導。日常開発に **Cursor** / AI 支援ツールを使用。**AWS Solutions Architect Associate**。
-
-強み：エンドツーエンド納品 · Auth · 型付き API · 本番 AI agents · AWS
+**5 年**の経験を持つフルスタック **software engineer**。ペースの速いマルチクライアント環境で**中〜大規模**の本番イニシアティブを納品——Figma から React / React Native、Node.js、型付き API、AWS まで。ゼロイチと多年にわたる進化で **15+** アプリ、App Store / Play Store リリースを含む。クリティカルパスの読み込み時間を最大 **80%**、検索レイテンシを **90%** 削減。現在は持続的で中断可能な workflows、memory、RAG、scorers、evals を備えたマルチチャネル **Generative AI** agent プラットフォームを主導。**AWS Solutions Architect Associate**。
 
 ---
 
 ## 職歴
 
-### フルスタックエンジニア、Vioo Company Limited、2022 年 5 月〜現在
+### ソフトウェア開発者、Vioo Company Limited、2022 年 5 月〜現在
 
 並行する複数のクライアント製品の主要エンジニア — デザインからクラウドデプロイまで。技術・非技術のステークホルダーと連携して UX を定義し、信頼できる使える本番リリースを届けた。
 
 - ゼロイチから多年にわたり **15+** の本番 React / React Native アプリを開発・保守。高忠実度 Figma デザイン、共有デザインシステム、App Store / Play Store リリースを含む。
-- サードパーティの WordPress を自前の headless CMS（Strapi / Sanity）と検索（Meilisearch / Algolia）に置き換え、**Turborepo** 上で **SST** デプロイし、移行中も公開を継続：読み込み時間 **80%** 削減、検索レイテンシ **90%** 削減、PageSpeed Insights **>90**。Node.js API を **Docker 化**して **ECS Fargate** で運用；その他のワークロードは Lambda / API Gateway。AWS Solutions Architect の学習で **Kubernetes** に習熟；本番コンテナは ECS 上の Docker であり、自前運用の K8s ではない。
+- WordPress を自前の headless CMS（Strapi / Sanity）と検索（Meilisearch / Algolia）に置き換え、**Turborepo** 上で **SST** デプロイし、移行中も公開を継続：読み込み時間 **80%** 削減、検索レイテンシ **90%** 削減、PageSpeed Insights **>90**。Node.js API を **Docker 化**して **ECS Fargate** で運用；その他のワークロードは Lambda / API Gateway。長時間ストリームとバーストトラフィックが同じ障害ドメインを共有しないようにした。AWS Solutions Architect の学習で **Kubernetes** に習熟；本番コンテナは ECS 上の Docker であり、自前運用の K8s ではない。
 - Mastra、Vercel AI SDK、Langchain で本番 AI agents（workflows、memory、tool calls、observability、evals）をリリース。
 - Radix / Tailwind の共有コンポーネント・hook ライブラリを Storybook、Fumadocs、MDX ドキュメント付きで整備し、複数クライアントアプリで再利用。重要フローに Vitest / Cypress。
 - アイデンティティを型付き API に対してモデル化：Better Auth sessions と組織メンバーシップ、OAuth 2.0 / OIDC、JWT / session ライフサイクル、RBAC。Session は **HttpOnly / Secure / SameSite** cookies に置き、`localStorage` tokens には置かない。
@@ -37,10 +35,10 @@ title: 履歴書 — フルスタック
 
 持続的なマルチチャネルアシスタント（Web + Discord）向けのクライアント向けプラットフォーム。
 
-- 各 agent run を**ステートフル・中断可能・再開可能**な持続ストリームとしてモデル化：クライアントは切断・再接続し、実行途中から進捗を失わず再開できる——ネストしたチャット条件ではない。
+- 各 agent run を Web と Discord にまたがる**ステートフル・中断可能・再開可能**な持続ストリームとしてモデル化：クライアントは切断・再接続し、実行途中から進捗を失わず再開できる——retries と resume であり、ネストしたチャット条件ではない。
 - Mastra と AI SDK 上に workflow、memory、scheduling、workspace のプリミティブを構築：pause/resume、retries、サンドボックスツール、skills。
 - エンドツーエンドの RAG（ingest、chunk、Pinecone query/rerank）をリリースし、スコア付き evals（golden prompts + LLM-as-judge）でリリースをゲート。
-- **Docker 化**した Hono + Better Auth を **ECS Fargate** で運用。コアデータは Postgres、ファイルは S3。ClickHouse で run/tool traces とコスト／レイテンシ——問題の切り分けは UI、API、agent コンポーネントにまたがる。
+- **Docker 化**した Hono + Better Auth を **ECS Fargate** で運用。アクセスパターンと障害でストアを分割：コアデータは Postgres、ファイルは S3、run/tool traces とコスト／レイテンシは ClickHouse——遅い trace 書き込みが agent run を止めない。
 - 組み合わせ可能なチャット、ツール呼び出し、多段階クライアントフロー、およびワークスペースファイルを prompts に付ける TipTap @mention ファイルタグ付けコンポーネントをリリース。
 
 ---
@@ -78,7 +76,7 @@ title: 履歴書 — フルスタック
 
 - **言語**：TypeScript、Node.js、SQL
 - **フロントエンド**：React、Next.js、React Native、Expo、TanStack Query、TanStack Form、Tailwind CSS、shadcn/ui、Storybook、Figma、TipTap
-- **バックエンド**：Hono、Drizzle、Prisma、OpenAPI、tRPC、GraphQL、Postgres、DynamoDB、Better Auth、Multitenancy
+- **バックエンド**：Hono、Drizzle、Prisma、OpenAPI、tRPC、GraphQL、Postgres、DynamoDB、Better Auth、Multitenancy、durable workflows
 - **Auth と i18n**：OAuth 2.0 / OIDC、JWT、HttpOnly cookies、CORS、RBAC、next-intl
 - **AI**：Mastra、Vercel AI SDK、Langchain、Pinecone、Strands、AWS Bedrock
 - **テストと監視**：Cypress、Vitest、React Testing Library、Lighthouse、axe、Sentry、PostHog

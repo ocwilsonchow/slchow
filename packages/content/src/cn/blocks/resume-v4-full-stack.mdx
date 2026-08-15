@@ -4,20 +4,18 @@ title: 简历 — 全栈
 
 ## Wilson, Chow Sin Long
 
-拥有 **5 年**经验的全栈 **software engineer**，在节奏快、多客户并行的环境中交付**中大型**生产级项目——从 Figma 到 React／React Native、Node.js、类型安全 API 与 AWS 部署。从零到一与多年演进共 **15+** 个应用，包括 App Store／Play Store 上架。关键路径加载时间最多缩短 **80%**，搜索延迟降低 **90%**。目前主导一个具备持久化、可中断 workflows、memory、RAG、scorers 与 evals 的多渠道 **Generative AI** agent 平台。日常开发使用 **Cursor**／AI 辅助工具。已获得 **AWS Solutions Architect Associate** 认证。
-
-优势：端到端交付 · Auth · 类型安全 API · 生产级 AI agents · AWS
+拥有 **5 年**经验的全栈 **software engineer**，在节奏快、多客户并行的环境中交付**中大型**生产级项目——从 Figma 到 React／React Native、Node.js、类型安全 API 与 AWS。从零到一与多年演进共 **15+** 个应用，包括 App Store／Play Store 上架。关键路径加载时间最多缩短 **80%**，搜索延迟降低 **90%**。目前主导一个具备持久化、可中断 workflows、memory、RAG、scorers 与 evals 的多渠道 **Generative AI** agent 平台。已获得 **AWS Solutions Architect Associate** 认证。
 
 ---
 
 ## 工作经历
 
-### 全栈工程师，Vioo Company Limited，2022 年 5 月至今
+### 软件开发者，Vioo Company Limited，2022 年 5 月至今
 
 担任多个并行客户产品的主要工程师，负责从设计到云端部署，并与技术及非技术利益相关者协作规划 UX、交付可靠可用的生产版本。
 
 - 从零到一交付并多年维护 **15+** 个生产级 React／React Native 应用，包括高保真 Figma 设计、共享设计系统，以及 App Store／Play Store 上架。
-- 以自研 headless CMS（Strapi／Sanity）与搜索（Meilisearch／Algolia）取代第三方 WordPress，置于 **Turborepo** 中并以 **SST** 部署，过渡期间发布流程不中断：加载时间缩短 **80%**、搜索延迟降低 **90%**，PageSpeed Insights **>90**。将 Node.js API **容器化**后运行于 **ECS Fargate**；其余工作负载在 Lambda／API Gateway。通过 AWS Solutions Architect 学习熟悉 **Kubernetes**；生产容器是 ECS 上的 Docker，而非自管 K8s。
+- 以自研 headless CMS（Strapi／Sanity）与搜索（Meilisearch／Algolia）取代WordPress，置于 **Turborepo** 中并以 **SST** 部署，过渡期间发布流程不中断：加载时间缩短 **80%**、搜索延迟降低 **90%**，PageSpeed Insights **>90**。将 Node.js API **容器化**后运行于 **ECS Fargate**；其余工作负载在 Lambda／API Gateway，使长连接串流与突发流量不共享失败域。通过 AWS Solutions Architect 学习熟悉 **Kubernetes**；生产容器是 ECS 上的 Docker，而非自管 K8s。
 - 使用 Mastra、Vercel AI SDK 与 Langchain 交付生产级 AI agents（workflows、memory、tool calls、observability、evals）。
 - 建立共享的 Radix／Tailwind 组件与 hook 库，并通过 Storybook、Fumadocs 和 MDX 编写文档，供多个客户应用复用。为关键流程加入 Vitest／Cypress。
 - 将身份对接类型安全 API：Better Auth sessions 与组织成员、OAuth 2.0／OIDC、JWT／session 生命周期与 RBAC。Session 存放于 **HttpOnly／Secure／SameSite** cookies，而非 `localStorage` tokens。
@@ -37,10 +35,10 @@ title: 简历 — 全栈
 
 面向客户的持久化多渠道助手平台（Web + Discord）。
 
-- 将每次 agent run 建模为**有状态、可中断、可恢复**的持久化串流：客户端可断线、重连并在执行途中恢复，而不会丢失进度——而非嵌套的聊天条件。
+- 将每次 agent run 建模为跨越 Web 与 Discord 的**有状态、可中断、可恢复**持久化串流：客户端可断线、重连并在执行途中恢复，而不会丢失进度——靠 retries 与 resume，而非嵌套的聊天条件。
 - 基于 Mastra 与 AI SDK 构建 workflow、memory、scheduling 和 workspace 原语：pause／resume、retries、沙箱工具与 skills。
 - 端到端交付 RAG（ingest、chunk、Pinecone query／rerank），并以带评分的 evals（golden prompts + LLM-as-judge）作为发布门控。
-- 将 **容器化**的 Hono + Better Auth 运行于 **ECS Fargate**，以 Postgres 存储核心数据、S3 存储文件，并以 ClickHouse 记录 run／tool traces 与成本／延迟——问题诊断覆盖 UI、API 与 agent 组件。
+- 将 **容器化**的 Hono + Better Auth 运行于 **ECS Fargate**。按访问模式与失败域拆分存储：Postgres 存核心数据、S3 存文件、ClickHouse 记 run／tool traces 与成本／延迟——缓慢的 trace 写入不会卡住一次 agent run。
 - 交付可组合的聊天、工具调用与多步客户端流程，以及 TipTap @mention 文件标记组件，用于将 workspace 文件附加至 prompts。
 
 ---
@@ -78,7 +76,7 @@ title: 简历 — 全栈
 
 - **编程语言**：TypeScript、Node.js、SQL
 - **前端**：React、Next.js、React Native、Expo、TanStack Query、TanStack Form、Tailwind CSS、shadcn/ui、Storybook、Figma、TipTap
-- **后端**：Hono、Drizzle、Prisma、OpenAPI、tRPC、GraphQL、Postgres、DynamoDB、Better Auth、Multitenancy
+- **后端**：Hono、Drizzle、Prisma、OpenAPI、tRPC、GraphQL、Postgres、DynamoDB、Better Auth、Multitenancy、durable workflows
 - **Auth 与 i18n**：OAuth 2.0／OIDC、JWT、HttpOnly cookies、CORS、RBAC、next-intl
 - **AI**：Mastra、Vercel AI SDK、Langchain、Pinecone、Strands、AWS Bedrock
 - **测试与监控**：Cypress、Vitest、React Testing Library、Lighthouse、axe、Sentry、PostHog

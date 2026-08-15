@@ -4,20 +4,18 @@ title: 履歴書 — フロントエンド
 
 ## Wilson, Chow Sin Long
 
-**5 年**の経験を持つフロントエンド **software engineer**。ペースの速いマルチクライアント環境で**中〜大規模**の本番イニシアティブを納品——**TypeScript** の React / React Native 消費者向け製品を Figma から App Store / Play Store まで、それらが依存する型付き REST API、およびモバイル認証（OAuth / OIDC、SecureStore / Keychain、生体認証）。ゼロイチと多年にわたる進化で **15+** アプリ。クリティカルパスの読み込み時間を最大 **80%**、検索レイテンシを **90%** 削減。現在はマルチチャネル **Generative AI** agent プラットフォームのクライアント面を主導：チャット、ツール呼び出し、ファイルメンション UI を、中断可能な持続的 agent runs の上に載せる。日常開発に **Cursor** / AI 支援ツールを使用。**AWS Solutions Architect Associate**。
-
-強み：フロントエンド · React Native · パフォーマンス · モバイル認証 · 型付き API
+**5 年**の経験を持つフロントエンド **software engineer**。ペースの速いマルチクライアント環境で**中〜大規模**の本番イニシアティブを納品——**TypeScript** の React / React Native 消費者向け製品を Figma から App Store / Play Store まで、それらが依存する型付き REST API、およびモバイル認証（OAuth / OIDC、SecureStore / Keychain、生体認証）。ゼロイチと多年にわたる進化で **15+** アプリ。クリティカルパスの読み込み時間を最大 **80%**、検索レイテンシを **90%** 削減。現在はマルチチャネル **Generative AI** agent プラットフォームのクライアント面を主導：チャット、ツール呼び出し、ファイルメンション UI を、中断可能な持続的 agent runs の上に載せる。**AWS Solutions Architect Associate**。
 
 ---
 
 ## 職歴
 
-### フルスタックエンジニア、Vioo Company Limited、2022 年 5 月〜現在
+### ソフトウェア開発者、Vioo Company Limited、2022 年 5 月〜現在
 
 並行する複数のクライアント製品の主要エンジニア — Figma から本番 UI とその背後の API まで。技術・非技術のステークホルダーと連携して UX を定義し、信頼できる使えるリリースを届けた。
 
 - ゼロイチから多年にわたり **15+** の本番 React / React Native アプリを開発・保守。高忠実度 Figma デザイン、クライアント間で再利用する共有デザインシステム、App Store / Play Store リリースを含む。
-- サードパーティの WordPress を自前の headless CMS（Strapi / Sanity）と検索（Meilisearch / Algolia）に置き換え、**Turborepo** 上で **SST** デプロイし、移行中も公開を継続：読み込み時間 **80%** 削減、検索レイテンシ **90%** 削減、PageSpeed Insights **>90**。Node.js API を **Docker 化**して **ECS Fargate** で運用；その他のワークロードは Lambda / API Gateway。
+- WordPress を自前の headless CMS（Strapi / Sanity）と検索（Meilisearch / Algolia）に置き換え、**Turborepo** 上で **SST** デプロイし、移行中も公開を継続：読み込み時間 **80%** 削減、検索レイテンシ **90%** 削減、PageSpeed Insights **>90**。Node.js API を **Docker 化**して **ECS Fargate** で運用；その他のワークロードは Lambda / API Gateway。
 - Radix / Tailwind の共有コンポーネント・hook ライブラリを Storybook、Fumadocs、MDX ドキュメント付きで整備し、複数クライアントアプリで再利用。フロントエンドレビューを主導。重要フローに Vitest / Cypress。
 - Next.js を isomorphic UI 兼 BFF として構築：SSR / ISR、Shopify GraphQL・CMS・検索 API の集約とキャッシュ。Node ランタイムの問題と本番ボトルネックを UI と API にまたがって独立して切り分け（Lighthouse、Sentry）。
 - アイデンティティを型付き API に対してモデル化：OAuth 2.0 / OIDC、JWT ライフサイクル、Better Auth sessions、組織メンバーシップ、RBAC。React Native では access token をメモリに置き、refresh token は **SecureStore**（iOS Keychain / Android Keystore）へ——AsyncStorage には置かない——Face ID / 指紋でセッションを解除。Web では **HttpOnly / Secure / SameSite** cookies に置き、`localStorage` には置かない。

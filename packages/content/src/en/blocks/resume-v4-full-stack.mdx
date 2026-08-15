@@ -4,20 +4,18 @@ title: Resume — Full-Stack
 
 ## Wilson, Chow Sin Long
 
-Full-stack **software engineer** with **5 years** delivering **medium-to-large** production initiatives in a fast-paced, multi-client environment — Figma through React / React Native, Node.js, typed APIs, and AWS deploy. Zero-to-one and multi-year evolution of **15+** apps, including App Store / Play Store releases. Cut critical-path load times by up to **80%** and search latency by **90%**. Currently leading a multi-channel **Generative AI** agent platform with durable, interruptible workflows, memory, RAG, scorers, and evals. Daily workflow includes **Cursor** / AI-assisted development. **AWS Solutions Architect Associate**.
-
-Strengths: End-to-end delivery · Auth · Typed APIs · Production AI agents · AWS
+Full-stack **software engineer** with **5 years** delivering **medium-to-large** production initiatives in a fast-paced, multi-client environment — Figma through React / React Native, Node.js, typed APIs, and AWS. Zero-to-one and multi-year evolution of **15+** apps, including App Store / Play Store releases. Cut critical-path load times by up to **80%** and search latency by **90%**. Currently leading a multi-channel **Generative AI** agent platform with durable, interruptible workflows, memory, RAG, scorers, and evals. **AWS Solutions Architect Associate**.
 
 ---
 
 ## Experience
 
-### Full-Stack Engineer, Vioo Company Limited, May 2022 – Present
+### Software Developer, Vioo Company Limited, May 2022 – Present
 
 Primary engineer for concurrent client products — design through cloud deployment, partnering with technical and non-technical stakeholders to scope UX and ship reliable, usable production releases.
 
 - Shipped and maintained **15+** production React / React Native apps from zero-to-one and over multiple years, including high-fidelity Figma design, shared design systems, and App Store / Play Store releases.
-- Replaced a third-party WordPress stack with an in-house headless CMS (Strapi / Sanity) and search (Meilisearch / Algolia) in a **Turborepo**, deployed with **SST**, so publishing continued through the transition: cut load time by **80%**, search latency by **90%**, and hit PageSpeed Insights **>90**. **Dockerized** Node.js APIs and ran them on **ECS Fargate**; other workloads on Lambda / API Gateway. Familiar with **Kubernetes** from AWS Solutions Architect study; production containers are Docker on ECS, not self-managed K8s.
+- Replaced a WordPress stack with an in-house headless CMS (Strapi / Sanity) and search (Meilisearch / Algolia) in a **Turborepo**, deployed with **SST**, so publishing continued through the transition: cut load time by **80%**, search latency by **90%**, and hit PageSpeed Insights **>90**. **Dockerized** Node.js APIs and ran them on **ECS Fargate**; other workloads on Lambda / API Gateway so long-running streams and bursty traffic do not share a failure domain. Familiar with **Kubernetes** from AWS Solutions Architect study; production containers are Docker on ECS, not self-managed K8s.
 - Shipped production AI agents (workflows, memory, tool calls, observability, evals) with Mastra, Vercel AI SDK, and Langchain.
 - Established shared Radix / Tailwind component and hook libraries with Storybook, Fumadocs, and MDX docs, reused across client apps. Vitest / Cypress on critical flows.
 - Modeled identity against a typed API: Better Auth sessions and org membership, OAuth 2.0 / OIDC, JWT / session lifecycle, and RBAC. Sessions live in **HttpOnly / Secure / SameSite** cookies, not `localStorage` tokens.
@@ -37,10 +35,10 @@ Primary engineer for concurrent client products — design through cloud deploym
 
 Client-facing agent platform for durable, multi-channel assistants (web + Discord).
 
-- Modeled each agent run as a **stateful, interruptible, resumable** durable stream: clients disconnect, reconnect, and resume mid-run without losing progress — not nested chat conditionals.
+- Modeled each agent run as a **stateful, interruptible, resumable** durable stream across web and Discord: clients disconnect, reconnect, and resume mid-run without losing progress — retries and resume, not nested chat conditionals.
 - Built workflow, memory, scheduling, and workspace primitives on Mastra and AI SDK: pause/resume, retries, sandboxed tools, and skills.
 - Shipped end-to-end RAG (ingest, chunk, Pinecone query/rerank) and gated releases on scored evals (golden prompts + LLM-as-judge).
-- Ran **Dockerized** Hono + Better Auth on **ECS Fargate**, with Postgres for core data, S3 for files, and ClickHouse for run/tool traces and cost/latency — diagnosing issues across UI, API, and agent components.
+- Ran **Dockerized** Hono + Better Auth on **ECS Fargate**. Split stores by access pattern and failure: Postgres for core data, S3 for files, ClickHouse for run/tool traces and cost/latency — a slow trace write cannot stall an agent run.
 - Shipped composable chat, tool-invocation, and multi-step client flows, plus a TipTap @mention file-tagging component for attaching workspace files into prompts.
 
 ---
@@ -78,7 +76,7 @@ Loyalty and membership apps, CMS content sites, Shopify storefronts, a health/we
 
 - **Languages**: TypeScript, Node.js, SQL
 - **Frontend**: React, Next.js, React Native, Expo, TanStack Query, TanStack Form, Tailwind CSS, shadcn/ui, Storybook, Figma, TipTap
-- **Backend**: Hono, Drizzle, Prisma, OpenAPI, tRPC, GraphQL, Postgres, DynamoDB, Better Auth, Multitenancy
+- **Backend**: Hono, Drizzle, Prisma, OpenAPI, tRPC, GraphQL, Postgres, DynamoDB, Better Auth, Multitenancy, durable workflows
 - **Auth & i18n**: OAuth 2.0 / OIDC, JWT, HttpOnly cookies, CORS, RBAC, next-intl
 - **AI**: Mastra, Vercel AI SDK, Langchain, Pinecone, Strands, AWS Bedrock
 - **Testing & monitoring**: Cypress, Vitest, React Testing Library, Lighthouse, axe, Sentry, PostHog

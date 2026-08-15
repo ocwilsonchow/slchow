@@ -4,20 +4,18 @@ title: 简历 — 前端
 
 ## Wilson, Chow Sin Long
 
-拥有 **5 年**经验的前端 **software engineer**，在节奏快、多客户并行的环境中交付**中大型**生产级项目——用 **TypeScript** 将 React／React Native 消费级产品从 Figma 做到 App Store／Play Store，以及这些应用所依赖的类型安全 REST API 与移动端认证（OAuth／OIDC、SecureStore／Keychain、生物识别）。从零到一与多年演进共 **15+** 个应用。关键路径加载时间最多缩短 **80%**，搜索延迟降低 **90%**。目前主导多渠道 **Generative AI** agent 平台的客户端：聊天、工具调用与文件提及 UI，运行于可中断的持久化 agent runs。日常开发使用 **Cursor**／AI 辅助工具。已获得 **AWS Solutions Architect Associate** 认证。
-
-优势：前端 · React Native · 性能 · 移动端认证 · 类型安全 API
+拥有 **5 年**经验的前端 **software engineer**，在节奏快、多客户并行的环境中交付**中大型**生产级项目——用 **TypeScript** 将 React／React Native 消费级产品从 Figma 做到 App Store／Play Store，以及这些应用所依赖的类型安全 REST API 与移动端认证（OAuth／OIDC、SecureStore／Keychain、生物识别）。从零到一与多年演进共 **15+** 个应用。关键路径加载时间最多缩短 **80%**，搜索延迟降低 **90%**。目前主导多渠道 **Generative AI** agent 平台的客户端：聊天、工具调用与文件提及 UI，运行于可中断的持久化 agent runs。已获得 **AWS Solutions Architect Associate** 认证。
 
 ---
 
 ## 工作经历
 
-### 全栈工程师，Vioo Company Limited，2022 年 5 月至今
+### 软件开发者，Vioo Company Limited，2022 年 5 月至今
 
 担任多个并行客户产品的主要工程师，负责从 Figma 到生产 UI 及其背后的 API，并与技术及非技术利益相关者协作规划 UX、交付可靠可用的版本。
 
 - 从零到一交付并多年维护 **15+** 个生产级 React／React Native 应用，包括高保真 Figma 设计、跨客户复用的共享设计系统，以及 App Store／Play Store 上架。
-- 以自研 headless CMS（Strapi／Sanity）与搜索（Meilisearch／Algolia）取代第三方 WordPress，置于 **Turborepo** 中并以 **SST** 部署，过渡期间发布流程不中断：加载时间缩短 **80%**、搜索延迟降低 **90%**，PageSpeed Insights **>90**。将 Node.js API **容器化**后运行于 **ECS Fargate**；其余工作负载在 Lambda／API Gateway。
+- 以自研 headless CMS（Strapi／Sanity）与搜索（Meilisearch／Algolia）取代WordPress，置于 **Turborepo** 中并以 **SST** 部署，过渡期间发布流程不中断：加载时间缩短 **80%**、搜索延迟降低 **90%**，PageSpeed Insights **>90**。将 Node.js API **容器化**后运行于 **ECS Fargate**；其余工作负载在 Lambda／API Gateway。
 - 建立共享的 Radix／Tailwind 组件与 hook 库，并通过 Storybook、Fumadocs 和 MDX 编写文档，供多个客户应用复用。主导前端审查；为关键流程加入 Vitest／Cypress。
 - 将 Next.js 作为 isomorphic UI 与 BFF：SSR／ISR，聚合 Shopify GraphQL、CMS 与搜索 API 并做缓存。独立排查 Node 运行时问题与生产瓶颈（Lighthouse、Sentry），覆盖 UI 与 API。
 - 将身份对接类型安全 API：OAuth 2.0／OIDC、JWT 生命周期、Better Auth sessions、组织成员与 RBAC。在 React Native 上：access token 留在内存，refresh token 存于 **SecureStore**（iOS Keychain／Android Keystore）——不用 AsyncStorage——并以 Face ID／指纹解锁会话。在 Web 上：使用 **HttpOnly／Secure／SameSite** cookies，而非 `localStorage`。

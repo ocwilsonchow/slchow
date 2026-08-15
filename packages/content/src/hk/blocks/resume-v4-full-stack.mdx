@@ -4,20 +4,18 @@ title: 履歷 — 全端
 
 ## Wilson, Chow Sin Long
 
-擁有 **5 年**經驗的全端 **software engineer**，在節奏快、多客戶並行的環境中交付**中大型**正式上線項目——從 Figma 到 React／React Native、Node.js、型別安全 API 與 AWS 部署。從零到一與多年演進共 **15+** 個應用，包括 App Store／Play Store 上架。關鍵路徑載入時間最多縮短 **80%**，搜尋延遲降低 **90%**。目前主導一個具備持久化、可中斷 workflows、memory、RAG、scorers 與 evals 的多渠道 **Generative AI** agent 平台。日常開發使用 **Cursor**／AI 輔助工具。已取得 **AWS Solutions Architect Associate** 認證。
-
-優勢：端到端交付 · Auth · 型別安全 API · 生產級 AI agents · AWS
+擁有 **5 年**經驗的全端 **software engineer**，在節奏快、多客戶並行的環境中交付**中大型**正式上線項目——從 Figma 到 React／React Native、Node.js、型別安全 API 與 AWS。從零到一與多年演進共 **15+** 個應用，包括 App Store／Play Store 上架。關鍵路徑載入時間最多縮短 **80%**，搜尋延遲降低 **90%**。目前主導一個具備持久化、可中斷 workflows、memory、RAG、scorers 與 evals 的多渠道 **Generative AI** agent 平台。已取得 **AWS Solutions Architect Associate** 認證。
 
 ---
 
 ## 工作經驗
 
-### 全端工程師，Vioo Company Limited，2022 年 5 月至今
+### 軟件開發者，Vioo Company Limited，2022 年 5 月至今
 
 擔任多個並行客戶產品的主要工程師，負責從設計到雲端部署，並與技術及非技術持份者合作規劃 UX、交付可靠可用的正式版本。
 
 - 從零到一交付並多年維護 **15+** 個正式上線的 React／React Native 應用，包括高保真 Figma 設計、共享設計系統，以及 App Store／Play Store 上架。
-- 以自研 headless CMS（Strapi／Sanity）與搜尋（Meilisearch／Algolia）取代第三方 WordPress，置於 **Turborepo** 中並以 **SST** 部署，過渡期間發布流程不中斷：載入時間縮短 **80%**、搜尋延遲降低 **90%**，PageSpeed Insights **>90**。將 Node.js API **容器化**後運行於 **ECS Fargate**；其餘工作負載在 Lambda／API Gateway。透過 AWS Solutions Architect 學習熟悉 **Kubernetes**；生產容器是 ECS 上的 Docker，而非自管 K8s。
+- 以自研 headless CMS（Strapi／Sanity）與搜尋（Meilisearch／Algolia）取代WordPress，置於 **Turborepo** 中並以 **SST** 部署，過渡期間發布流程不中斷：載入時間縮短 **80%**、搜尋延遲降低 **90%**，PageSpeed Insights **>90**。將 Node.js API **容器化**後運行於 **ECS Fargate**；其餘工作負載在 Lambda／API Gateway，使長連線串流與突發流量不共享失敗域。透過 AWS Solutions Architect 學習熟悉 **Kubernetes**；生產容器是 ECS 上的 Docker，而非自管 K8s。
 - 使用 Mastra、Vercel AI SDK 與 Langchain 交付生產級 AI agents（workflows、memory、tool calls、observability、evals）。
 - 建立共享的 Radix／Tailwind 元件與 hook 函式庫，並透過 Storybook、Fumadocs 和 MDX 撰寫文件，供多個客戶應用共用。為關鍵流程加入 Vitest／Cypress。
 - 將身分對接型別安全 API：Better Auth sessions 與組織成員、OAuth 2.0／OIDC、JWT／session 生命週期與 RBAC。Session 存放於 **HttpOnly／Secure／SameSite** cookies，而非 `localStorage` tokens。
@@ -37,10 +35,10 @@ title: 履歷 — 全端
 
 面向客戶的持久化多渠道助手平台（Web + Discord）。
 
-- 將每次 agent run 建模為**有狀態、可中斷、可恢復**的持久化串流：客戶端可斷線、重連並在執行途中恢復，而不會遺失進度——而非嵌套的聊天條件。
+- 將每次 agent run 建模為跨越 Web 與 Discord 的**有狀態、可中斷、可恢復**持久化串流：客戶端可斷線、重連並在執行途中恢復，而不會遺失進度——靠 retries 與 resume，而非嵌套的聊天條件。
 - 基於 Mastra 與 AI SDK 建構 workflow、memory、scheduling 和 workspace 原語：pause／resume、retries、沙盒工具與 skills。
 - 端到端交付 RAG（ingest、chunk、Pinecone query／rerank），並以帶評分的 evals（golden prompts + LLM-as-judge）作為發布門控。
-- 將 **容器化**的 Hono + Better Auth 運行於 **ECS Fargate**，以 Postgres 儲存核心資料、S3 儲存檔案，並以 ClickHouse 記錄 run／tool traces 與成本／延遲——問題診斷覆蓋 UI、API 與 agent 元件。
+- 將 **容器化**的 Hono + Better Auth 運行於 **ECS Fargate**。按存取模式與失敗域拆分儲存：Postgres 存核心資料、S3 存檔案、ClickHouse 記 run／tool traces 與成本／延遲——緩慢的 trace 寫入不會卡住一次 agent run。
 - 交付可組合的聊天、工具調用與多步客戶端流程，以及 TipTap @mention 檔案標記元件，用於將 workspace 檔案附加至 prompts。
 
 ---
@@ -78,7 +76,7 @@ title: 履歷 — 全端
 
 - **程式語言**：TypeScript、Node.js、SQL
 - **前端**：React、Next.js、React Native、Expo、TanStack Query、TanStack Form、Tailwind CSS、shadcn/ui、Storybook、Figma、TipTap
-- **後端**：Hono、Drizzle、Prisma、OpenAPI、tRPC、GraphQL、Postgres、DynamoDB、Better Auth、Multitenancy
+- **後端**：Hono、Drizzle、Prisma、OpenAPI、tRPC、GraphQL、Postgres、DynamoDB、Better Auth、Multitenancy、durable workflows
 - **Auth 與 i18n**：OAuth 2.0／OIDC、JWT、HttpOnly cookies、CORS、RBAC、next-intl
 - **AI**：Mastra、Vercel AI SDK、Langchain、Pinecone、Strands、AWS Bedrock
 - **測試與監控**：Cypress、Vitest、React Testing Library、Lighthouse、axe、Sentry、PostHog
