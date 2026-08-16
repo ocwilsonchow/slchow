@@ -2,30 +2,15 @@
 
 import { RootProvider } from "fumadocs-ui/provider/next"
 import { useLocale, useTranslations } from "next-intl"
-import { lazy, type ReactNode, useEffect } from "react"
-import { playClickSound } from "@/lib/click-sound"
+import { lazy, type ReactNode } from "react"
 
 const SiteSearchDialog = lazy(() =>
   import("./search-dialog").then((m) => ({ default: m.SiteSearchDialog }))
 )
 
-function isSearchHotKey(event: KeyboardEvent) {
-  return (event.metaKey || event.ctrlKey) && event.key === "k"
-}
-
 export function SiteSearchProvider({ children }: { children: ReactNode }) {
   const locale = useLocale()
   const t = useTranslations("search")
-
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (!isSearchHotKey(event)) return
-      playClickSound()
-    }
-
-    window.addEventListener("keydown", onKeyDown)
-    return () => window.removeEventListener("keydown", onKeyDown)
-  }, [])
 
   return (
     <RootProvider

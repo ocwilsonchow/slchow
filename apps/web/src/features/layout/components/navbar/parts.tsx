@@ -15,12 +15,6 @@ import {
   useState,
 } from "react"
 import { Link as I18nLink, usePathname } from "@/i18n/navigation"
-import {
-  playClickSound,
-  playClickSoundOnKeyboardClick,
-  playClickSoundOnPointerDown,
-  preloadClickSound,
-} from "@/lib/click-sound"
 import { fontPresets } from "../styles"
 import {
   NavbarContext,
@@ -69,13 +63,8 @@ function Root({ children }: { children: ReactNode }) {
   const toggle = () => setOpen((current) => !current)
   const onToggleShortcut = useEffectEvent(() => {
     if (hiddenByOverlay) return
-    playClickSound()
     toggle()
   })
-
-  useEffect(() => {
-    preloadClickSound()
-  }, [])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -148,10 +137,7 @@ function Backdrop({ className, ...props }: HTMLMotionProps<"button">) {
         variants={variants}
         initial="hidden"
         animate={open ? "visible" : "hidden"}
-        onClick={() => {
-          playClickSound()
-          setOpen(false)
-        }}
+        onClick={() => setOpen(false)}
         className={cn(
           "fixed inset-0 z-40 bg-surface-backdrop/75 backdrop-blur-md outline-none focus:outline-none focus-visible:outline-none",
           open ? "pointer-events-auto" : "pointer-events-none",
@@ -238,7 +224,6 @@ function Trigger({
   className,
   children,
   onClick,
-  onPointerDown,
   ...props
 }: Omit<HTMLMotionProps<"button">, "children"> & { children?: ReactNode }) {
   const { open, toggle, triggerRef } = useNavbarContext()
@@ -255,12 +240,7 @@ function Trigger({
       aria-expanded={open}
       aria-controls={SITE_NAV_PANEL_ID}
       {...props}
-      onPointerDown={(event) => {
-        playClickSoundOnPointerDown(event)
-        onPointerDown?.(event)
-      }}
       onClick={(event) => {
-        playClickSoundOnKeyboardClick(event)
         toggle()
         onClick?.(event)
       }}
@@ -333,7 +313,6 @@ function NavLink({
       href={href}
       {...props}
       onClick={(event) => {
-        playClickSound()
         setOpen(false)
         onClick?.(event)
       }}

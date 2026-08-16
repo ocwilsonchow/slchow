@@ -6,7 +6,6 @@ import { useTranslations } from "next-intl"
 import { Fragment } from "react"
 import profilePicture from "@/assets/profile-pic.webp"
 import { Link, usePathname } from "@/i18n/navigation"
-import { playClickSound } from "@/lib/click-sound"
 import { LanguageSettings, ThemeSettings } from "../navbar-settings"
 import { useNavbarContext } from "./context"
 import { Navbar } from "./parts"
@@ -92,12 +91,7 @@ function NavSettings() {
         <ThemeSettings />
       </Navbar.StaggerItem>
       <Navbar.StaggerItem className="mb-3">
-        <LanguageSettings
-          onBeforeChange={() => {
-            playClickSound()
-            setOpen(false)
-          }}
-        />
+        <LanguageSettings onBeforeChange={() => setOpen(false)} />
       </Navbar.StaggerItem>
     </>
   )

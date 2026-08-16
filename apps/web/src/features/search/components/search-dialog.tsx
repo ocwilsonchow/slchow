@@ -22,14 +22,8 @@ import { useLocale, useTranslations } from "next-intl"
 import {
   type ComponentPropsWithoutRef,
   type ReactNode,
-  useEffect,
   useMemo,
 } from "react"
-import {
-  playClickSound,
-  playClickSoundOnKeyboardClick,
-  playClickSoundOnPointerDown,
-} from "@/lib/click-sound"
 import { createSearchDatabase } from "@/lib/search-tokenizer"
 
 const SEARCH_OPTIONS = {
@@ -113,11 +107,7 @@ function SearchResultItem({
   return (
     <SearchDialogListItem
       item={item}
-      onPointerDown={playClickSoundOnPointerDown}
-      onClick={(event) => {
-        playClickSoundOnKeyboardClick(event)
-        onClick()
-      }}
+      onClick={onClick}
       role="option"
       className={cn(
         "rounded-xl px-3 py-2.5 text-content-body-on-popover aria-selected:bg-surface-alpha aria-selected:text-content-ink-on-popover",
@@ -199,24 +189,6 @@ export function SiteSearchDialog(props: SharedProps) {
   const hasError = Boolean(query.error)
   const showPrompt = query.data === "empty" && search.length === 0
 
-  useEffect(() => {
-    if (!props.open) return
-
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        playClickSound()
-        return
-      }
-
-      if (event.key !== "Enter" || event.isComposing) return
-      if (!items || items.length === 0) return
-      playClickSound()
-    }
-
-    window.addEventListener("keydown", onKeyDown)
-    return () => window.removeEventListener("keydown", onKeyDown)
-  }, [props.open, items])
-
   return (
     <SearchDialog
       {...props}
@@ -224,10 +196,7 @@ export function SiteSearchDialog(props: SharedProps) {
       onSearchChange={setSearch}
       isLoading={query.isLoading}
     >
-      <SearchDialogOverlay
-        className="bg-surface-backdrop/75 backdrop-blur-md"
-        onPointerDown={playClickSoundOnPointerDown}
-      />
+      <SearchDialogOverlay className="bg-surface-backdrop/75 backdrop-blur-md" />
       <SearchDialogContent className="top-3 md:top-[calc(50%-250px)] max-w-2xl rounded-xl border-stroke-soft/75 bg-surface-popover text-content-ink-on-popover shadow-2xl">
         <SearchDialogHeader className="gap-3 border-stroke-soft/75 p-3">
           <SearchDialogIcon
@@ -240,10 +209,7 @@ export function SiteSearchDialog(props: SharedProps) {
             autoFocus
             className="text-content-ink-on-popover placeholder:text-content-body-on-popover"
           />
-          <SearchDialogClose
-            className="inline-flex h-4.5 items-center justify-center rounded-md border-0 bg-surface-alpha px-1 py-px text-xs text-content-body-on-popover hover:text-content-ink-on-popover"
-            onPointerDown={playClickSoundOnPointerDown}
-          >
+          <SearchDialogClose className="inline-flex h-4.5 items-center justify-center rounded-md border-0 bg-surface-alpha px-1 py-px text-xs text-content-body-on-popover hover:text-content-ink-on-popover">
             {t("closeShort")}
           </SearchDialogClose>
         </SearchDialogHeader>

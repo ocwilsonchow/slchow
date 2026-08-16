@@ -3,10 +3,6 @@
 import { cn } from "@repo/ds"
 import { motion, type Transition } from "motion/react"
 import { useState } from "react"
-import {
-  playClickSoundOnKeyboardClick,
-  playClickSoundOnPointerDown,
-} from "@/lib/click-sound"
 import { FAN_COUNT, PHOTO_SIZES, STAGGER_EACH } from "../album"
 import type { Design } from "../get-designs"
 import { designImageLayoutId } from "../layout-ids"
@@ -104,9 +100,7 @@ export function AlbumStack({
             "flex w-full flex-col gap-3 text-left outline-none focus:outline-none focus-visible:outline-none",
             isReturning && "relative z-60"
           )}
-          onPointerDown={playClickSoundOnPointerDown}
-          onClick={(event) => {
-            playClickSoundOnKeyboardClick(event)
+          onClick={() => {
             prefetchAlbumThumbs(design.images)
             onExpand(design.slug)
           }}
