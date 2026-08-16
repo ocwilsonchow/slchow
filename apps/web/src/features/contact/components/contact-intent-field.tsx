@@ -68,14 +68,6 @@ export function ContactIntentField({
                 }}
                 whileTap={{ scale: 0.98 }}
               >
-                <div
-                  className={cn(
-                    "w-3.5 h-3.5 rounded-full border-2",
-                    selected
-                      ? "border-content-ink bg-content-ink"
-                      : "bg-transparent"
-                  )}
-                />
                 {t(`intents.${intent}`)}
               </motion.button>
             )

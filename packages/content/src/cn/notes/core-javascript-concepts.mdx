@@ -12,7 +12,7 @@ category: frontend
 
 <br />
 
-![JavaScript Event Loop in the browser](./images/javascript-event-loop-browser.png)
+![JavaScript Event Loop in the browser](./images/javascript-event-loop-browser.webp)
 
 浏览器 event loop 一览：同步代码在 call stack 上执行，host APIs 在后台完成工作并 enqueue tasks，而 promise reactions 进入优先级更高的 microtask queue。每当 stack 清空，event loop 就把下一个 callback 推进去——先 microtasks，再一次一个 task。
 
