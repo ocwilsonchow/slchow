@@ -1,7 +1,7 @@
 import { ArrowLeftIcon } from "lucide-react"
 import type { Metadata } from "next"
 import type { Locale } from "next-intl"
-import { setRequestLocale } from "next-intl/server"
+import { getTranslations, setRequestLocale } from "next-intl/server"
 import { BackLink } from "@/features/layout/components/back-link"
 import { Header } from "@/features/layout/components/header"
 import { PageLayout } from "@/features/layout/components/page"
@@ -35,7 +35,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 
 const Page = async ({ params }: Props) => {
   const { locale, slug } = await params
-
+  const t = await getTranslations({ locale, namespace: "notes" })
   setRequestLocale(locale)
 
   const page = getMdxContent("notes", slug, locale)
@@ -51,10 +51,16 @@ const Page = async ({ params }: Props) => {
           className="grid gap-5 max-h-screen overflow-y-auto lg:pb-20"
           data-lenis-prevent
         >
-          <div className="mt-8 lg:mt-0 space-y-2 max-w-prose">
+          <div className="mt-8 lg:mt-0 space-y-3 max-w-prose">
             <h1 className="text-lg lg:text-sm font-semibold tracking-tight text-content-ink leading-tight">
               {page?.data.title}
             </h1>
+
+            {page?.data.category ? (
+              <div className="w-fit font-semibold text-content-body/70 text-[11px] bg-surface-alpha px-1.25 py-px rounded-md">
+                {t(`categories.${page?.data.category}`)}
+              </div>
+            ) : null}
             {page?.data.description && (
               <p className="text-content-subdued leading-snug">
                 {page?.data.description}

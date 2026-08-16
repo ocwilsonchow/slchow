@@ -2,12 +2,17 @@
 
 import { ChevronBadge } from "@repo/ds/components/ui/chevron-badge"
 import { useBreakpointValues } from "@repo/ds/hooks/use-breakpoint-values"
+import { useTranslations } from "next-intl"
 import { Link } from "@/i18n/navigation"
+
+export type ListNoteCategory =
+  "frontend" | "backend" | "ai" | "computer-science" | "personal"
 
 export type ListNoteItem = {
   url: string
   slug: string
   title: string
+  category?: ListNoteCategory
 }
 
 type ListNotesItemsProps = {
@@ -27,6 +32,7 @@ export function ListNotesItems({
   showHeading = true,
   notesLabel,
 }: ListNotesItemsProps) {
+  const t = useTranslations("notes")
   const previewLimit = useBreakpointValues(NOTES_PREVIEW_LIMIT)
   const limit = preview ? previewLimit : notes.length
   const visibleNotes = notes.slice(0, limit)
@@ -47,6 +53,11 @@ export function ListNotesItems({
           <li key={page.url}>
             <Link href={`/notes/${page.slug}`} className={linkClassName}>
               {page.title}
+              {page.category ? (
+                <span className="font-semibold text-content-body/70 text-[11px] bg-surface-alpha px-1.25 py-px rounded-md">
+                  {t(`categories.${page.category}`)}
+                </span>
+              ) : null}
             </Link>
           </li>
         ))}
