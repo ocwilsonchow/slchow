@@ -9,12 +9,12 @@ import {
 import { basename, dirname, extname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import sharp from "sharp"
+import { DESIGN_THUMB_WIDTHS } from "../src/features/design/asset-urls"
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..")
 const source = join(root, "../../packages/content/design")
 const destination = join(root, "public/design-assets")
 
-const VARIANT_WIDTHS = [400, 800] as const
 const VARIANT_RE = /\.w\d+\.webp$/i
 const WEBP_QUALITY = 80
 const WEBP_EFFORT = 4
@@ -34,7 +34,7 @@ const masters = listMasterWebps(destination)
 await Promise.all(masters.map((file) => writeVariants(file)))
 
 console.log(
-  `Synced design assets → ${destination} (${masters.length} images, ${VARIANT_WIDTHS.join("/")}w variants)`
+  `Synced design assets → ${destination} (${masters.length} images, ${DESIGN_THUMB_WIDTHS.join("/")}w variants)`
 )
 
 function listMasterWebps(dir: string): string[] {
@@ -61,7 +61,7 @@ async function writeVariants(inputPath: string) {
   const stem = inputPath.slice(0, -ext.length)
 
   await Promise.all(
-    VARIANT_WIDTHS.map(async (width) => {
+    DESIGN_THUMB_WIDTHS.map(async (width) => {
       const buffer = await sharp(inputPath, { failOn: "none" })
         .rotate()
         .resize({

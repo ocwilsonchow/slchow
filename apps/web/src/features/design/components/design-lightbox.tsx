@@ -13,13 +13,14 @@ type DesignLightboxProps = {
   onClose: () => void
 }
 
-/** Single shared lightbox — mounted only while open. */
+/** Full-res master in a native `<dialog>`. Portaled to `document.body` so overlay stacking/scroll cannot clip it. */
 export function DesignLightbox({ src, alt, onClose }: DesignLightboxProps) {
   const dialogRef = useRef<HTMLDialogElement>(null)
   const lenis = useLenis()
   const t = useTranslations("a11y")
 
   useEffect(() => {
+    // Smooth-scroll would move the page behind the modal.
     lenis?.stop()
     return () => {
       lenis?.start()
@@ -29,6 +30,7 @@ export function DesignLightbox({ src, alt, onClose }: DesignLightboxProps) {
   useEffect(() => {
     const dialog = dialogRef.current
     if (!dialog) return
+    // Native modal: backdrop, focus trap, Escape → `onClose`.
     if (!dialog.open) dialog.showModal()
   }, [])
 

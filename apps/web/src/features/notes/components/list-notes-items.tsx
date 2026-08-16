@@ -1,12 +1,15 @@
 "use client"
 
 import { ChevronBadge } from "@repo/ds/components/ui/chevron-badge"
-import { useBreakpointValues } from "@repo/ds/hooks/use-breakpoint-values"
 import { useTranslations } from "next-intl"
 import { Link } from "@/i18n/navigation"
 
 export type ListNoteCategory =
-  "frontend" | "backend" | "ai" | "computer-science" | "personal"
+  | "frontend"
+  | "backend"
+  | "ai"
+  | "computer-science"
+  | "personal"
 
 export type ListNoteItem = {
   url: string
@@ -23,7 +26,8 @@ type ListNotesItemsProps = {
   notesLabel: string
 }
 
-const NOTES_PREVIEW_LIMIT = { base: 3, md: 5 } as const
+const NOTES_PREVIEW_MOBILE = 3
+const NOTES_PREVIEW_DESKTOP = 5
 
 export function ListNotesItems({
   notes,
@@ -33,9 +37,7 @@ export function ListNotesItems({
   notesLabel,
 }: ListNotesItemsProps) {
   const t = useTranslations("notes")
-  const previewLimit = useBreakpointValues(NOTES_PREVIEW_LIMIT)
-  const limit = preview ? previewLimit : notes.length
-  const visibleNotes = notes.slice(0, limit)
+  const visibleNotes = preview ? notes.slice(0, NOTES_PREVIEW_DESKTOP) : notes
 
   return (
     <div className="flex flex-col gap-2 leading-tight">
@@ -49,8 +51,15 @@ export function ListNotesItems({
         </Link>
       )}
       <ul className="grid list-disc list-outside ml-4 gap-px">
-        {visibleNotes.map((page) => (
-          <li key={page.url}>
+        {visibleNotes.map((page, index) => (
+          <li
+            key={page.url}
+            className={
+              preview && index >= NOTES_PREVIEW_MOBILE
+                ? "max-md:hidden"
+                : undefined
+            }
+          >
             <Link href={`/notes/${page.slug}`} className={linkClassName}>
               <span>{page.title}</span>
               {page.category ? (

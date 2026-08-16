@@ -2,6 +2,7 @@
 
 import { useSyncExternalStore } from "react"
 
+/** Touch phones/tablets — FLIP layout animations jank on coarse pointers. */
 const COARSE_POINTER = "(pointer: coarse)"
 
 function subscribe(onStoreChange: () => void) {
@@ -10,7 +11,7 @@ function subscribe(onStoreChange: () => void) {
   return () => mediaQuery.removeEventListener("change", onStoreChange)
 }
 
-/** Touch phones/tablets — skip shared-element layout animations. */
+/** True on touch. SSR snapshot is `false` so markup assumes fine pointer until hydrate. */
 export function useCoarsePointer() {
   return useSyncExternalStore(
     subscribe,

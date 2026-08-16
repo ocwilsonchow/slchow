@@ -1,5 +1,12 @@
 "use client"
 
+/**
+ * Collapsed album card: a fanned stack of covers.
+ *
+ * With shared layout, every album image is mounted (non-fan slots at opacity 0)
+ * so overlay tiles have a FLIP source. Cheap motion only mounts `FAN_COUNT`.
+ * While expanded the stack unmounts so the overlay owns those `layoutId`s.
+ */
 import { cn } from "@repo/ds"
 import { motion, type Transition } from "motion/react"
 import { useState } from "react"
@@ -10,6 +17,7 @@ import { prefetchAlbumThumbs } from "../prefetch"
 import { useInView } from "../use-in-view"
 import { AlbumPhoto } from "./album-photo"
 
+/** Resting fan pose (index 0 is the front cover). */
 const FAN_ROTATE = [2, -7, 6, -4]
 const FAN_OFFSET = [
   { x: 0, y: 0 },
@@ -18,6 +26,7 @@ const FAN_OFFSET = [
   { x: 8, y: 14 },
 ]
 
+/** Hover/keyboard peek — covers spread farther so the stack reads as a pile. */
 const UNFAN_ROTATE = [1, -16, 14]
 const UNFAN_OFFSET = [
   { x: 0, y: 0 },
@@ -31,6 +40,7 @@ const UNFAN_TRANSITION: Transition = {
   ease: [0.32, 0.72, 0, 1],
 }
 
+/** CSS enter delay before the first stack; per-card offset uses `STAGGER_EACH`. */
 const STAGGER_DELAY = 0.5
 
 type AlbumStackProps = {
@@ -98,6 +108,7 @@ export function AlbumStack({
           aria-label={openAlbumLabel}
           className={cn(
             "flex w-full flex-col gap-3 text-left outline-none focus:outline-none focus-visible:outline-none",
+            // Returning covers paint above neighboring stacks during the close FLIP.
             isReturning && "relative z-60"
           )}
           onClick={() => {
@@ -136,6 +147,7 @@ export function AlbumStack({
                   }
                   const unfanRotate = UNFAN_ROTATE[imageIndex] ?? restRotate
                   const unfanOffset = UNFAN_OFFSET[imageIndex] ?? restOffset
+                  // Flatten while returning so FLIP lands on an untilted card.
                   const pose =
                     shouldReduceMotion || isReturning
                       ? { x: 0, y: 0, rotate: 0 }
@@ -188,19 +200,20 @@ export function AlbumStack({
                           loading={isFan || isLcpCover ? "eager" : "lazy"}
                           fetchPriority={isLcpCover ? "high" : "low"}
                           decoding={
+                            // Sync decode avoids a blank frame mid-FLIP.
                             sharedLayout && (isFan || isLcpCover)
                               ? "sync"
                               : "async"
                           }
                           kind={image.kind}
-                          poster={image.poster}
                           playing={
                             !isReturning &&
                             imageIndex === 0 &&
                             image.kind === "video" &&
-                            inView &&
-                            !shouldReduceMotion
+                            !shouldReduceMotion &&
+                            (isLcp || inView)
                           }
+                          // Hidden slots still occupy layout so overlay FLIP has a source.
                           opacity={isFan ? undefined : 0}
                           className={
                             isFan

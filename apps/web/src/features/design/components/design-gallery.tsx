@@ -1,5 +1,9 @@
 "use client"
 
+/**
+ * `/design` grids: collapsed album stacks, and the expanded overlay photo grid.
+ * Overlay uses `PHOTO_SIZES` when FLIP-sharing with the stack, else `OVERLAY_PHOTO_SIZES`.
+ */
 import { motion, type Transition } from "motion/react"
 import { OVERLAY_PHOTO_SIZES, PHOTO_SIZES, STAGGER_EACH } from "../album"
 import type { Design, DesignImage } from "../get-designs"
@@ -20,6 +24,7 @@ type DesignGalleryProps = {
   registerCard: (slug: string, el: HTMLButtonElement | null) => void
 }
 
+/** Collapsed album grid. First card is LCP; `returningSlug` is the album mid-close FLIP. */
 export function DesignGallery({
   designs,
   expandedSlug,
@@ -33,6 +38,7 @@ export function DesignGallery({
 }: DesignGalleryProps) {
   return (
     <motion.ul
+      // Don't inherit the overlay FLIP tween onto the grid itself.
       transition={{}}
       className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6 md:gap-8"
     >
@@ -42,6 +48,7 @@ export function DesignGallery({
           design={design}
           index={index}
           isExpanded={design.slug === expandedSlug}
+          // Fade other stacks while one album is open.
           isInactive={expandedSlug != null && design.slug !== expandedSlug}
           isReturning={design.slug === returningSlug}
           isLcp={index === 0}
@@ -64,6 +71,7 @@ type AlbumOverlayGridProps = {
   sharedLayout: boolean
 }
 
+/** Expanded album photos. Unmounted on FLIP close so tiles morph back into the stack. */
 export function AlbumOverlayGrid({
   album,
   layoutTransition,
@@ -107,18 +115,18 @@ function AlbumOverlayTile({
   const { ref, inView } = useInView<HTMLLIElement>()
   const playing = image.kind === "video" && inView && !shouldReduceMotion
   const alt = `${album.title} — ${image.name}`
+  // First ~two rows of a 2–3 col grid; shared-layout tiles are all eager for FLIP.
   const inFirstRows = imageIndex < 6
 
   return (
     <li ref={ref} className="aspect-square">
       <AlbumPhoto
         layoutId={
-          sharedLayout
-            ? designImageLayoutId(album.slug, image.name)
-            : undefined
+          sharedLayout ? designImageLayoutId(album.slug, image.name) : undefined
         }
         src={image.src}
         alt={alt}
+        // Same srcset as the stack during FLIP; denser overlay grid otherwise.
         sizes={sharedLayout ? PHOTO_SIZES : OVERLAY_PHOTO_SIZES}
         layoutTransition={{
           ...layoutTransition,
@@ -127,7 +135,6 @@ function AlbumOverlayTile({
         loading={sharedLayout || inFirstRows ? "eager" : "lazy"}
         decoding={sharedLayout ? "sync" : "async"}
         kind={image.kind}
-        poster={image.poster}
         playing={playing}
         className="bg-surface-card h-full w-full overflow-hidden"
       />

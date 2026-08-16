@@ -1,8 +1,13 @@
 "use client"
 
-import { useEffect, useRef } from "react"
-import { DESIGN_MASTER_WIDTH, designResponsiveSrcSet, designThumbSrc } from "../asset-urls"
 import { cn } from "@repo/ds/lib/utils"
+import { useEffect, useRef } from "react"
+import {
+  DESIGN_MASTER_WIDTH,
+  DESIGN_THUMB_FALLBACK_WIDTH,
+  designResponsiveSrcSet,
+  designThumbSrc,
+} from "../asset-urls"
 
 type DesignAssetProps = {
   src: string
@@ -15,8 +20,7 @@ type DesignAssetProps = {
   /** Skip thumbnail srcset and load the 2048 master (lightbox). */
   fullResolution?: boolean
   kind?: "image" | "video"
-  poster?: string
-  /** Muted looping video when true; otherwise the poster/still. */
+  /** Muted looping video when true; otherwise paused. */
   playing?: boolean
 }
 
@@ -34,31 +38,29 @@ export function DesignAsset({
   decoding = "async",
   fullResolution = false,
   kind = "image",
-  poster,
   playing = false,
 }: DesignAssetProps) {
-  const stillSrc = kind === "video" ? poster : src
-
-  if (!stillSrc) {
+  if (kind === "video") {
     return (
-      <video
+      <LoopingVideo
         src={src}
-        muted
-        playsInline
-        preload="metadata"
-        aria-label={alt}
-        draggable={false}
+        alt={alt}
+        playing={playing}
+        fetchPriority={fetchPriority}
         className={className}
       />
     )
   }
 
+  // Fallback `src` when srcset is ignored; width hints intrinsic ratio (assets are square).
   const displaySrc = fullResolution
-    ? stillSrc
-    : designThumbSrc(stillSrc, 800)
-  const displayWidth = fullResolution ? DESIGN_MASTER_WIDTH : 800
+    ? src
+    : designThumbSrc(src, DESIGN_THUMB_FALLBACK_WIDTH)
+  const displayWidth = fullResolution
+    ? DESIGN_MASTER_WIDTH
+    : DESIGN_THUMB_FALLBACK_WIDTH
 
-  const still = (
+  return (
     // biome-ignore lint/performance/noImgElement: design assets skip the image optimizer
     <img
       src={displaySrc}
@@ -68,49 +70,29 @@ export function DesignAsset({
       sizes={sizes}
       srcSet={
         fullResolution
-          ? `${stillSrc} ${DESIGN_MASTER_WIDTH}w`
-          : designResponsiveSrcSet(stillSrc)
+          ? `${src} ${DESIGN_MASTER_WIDTH}w`
+          : designResponsiveSrcSet(src)
       }
       loading={loading}
       decoding={decoding}
       fetchPriority={fetchPriority}
       draggable={false}
-      className={
-        kind === "video"
-          ? "hidden"
-          : className
-      }
+      className={className}
     />
-  )
-
-  if (kind !== "video") {
-    return still
-  }
-
-  return (
-    <div className={cn("relative", className)}>
-      {still}
-      {playing ? (
-        <LoopingVideo
-          src={src}
-          poster={poster}
-          alt={alt}
-          className="absolute inset-0 h-full w-full object-contain p-2 sm:p-4"
-        />
-      ) : null}
-    </div>
   )
 }
 
 function LoopingVideo({
   src,
-  poster,
   alt,
+  playing,
+  fetchPriority,
   className,
 }: {
   src: string
-  poster?: string
   alt: string
+  playing: boolean
+  fetchPriority?: "high" | "low" | "auto"
   className?: string
 }) {
   const ref = useRef<HTMLVideoElement>(null)
@@ -118,23 +100,26 @@ function LoopingVideo({
   useEffect(() => {
     const node = ref.current
     if (!node) return
+    // `muted` must be set before play(); autoplay rejection is ignored.
     node.muted = true
-    void node.play().catch(() => {})
-  }, [])
+    if (playing) void node.play().catch(() => {})
+    else node.pause()
+  }, [playing])
 
   return (
     <video
       ref={ref}
       src={src}
-      poster={poster}
       muted
       loop
       playsInline
-      autoPlay
-      preload="metadata"
+      autoPlay={playing}
+      preload={fetchPriority === "high" ? "auto" : "metadata"}
+      // @ts-expect-error React types omit fetchPriority on <video>
+      fetchPriority={fetchPriority}
       aria-label={alt}
       draggable={false}
-      className={className}
+      className={cn("h-full w-full object-contain p-2 sm:p-4", className)}
     />
   )
 }

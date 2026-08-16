@@ -1,3 +1,7 @@
+/**
+ * Filesystem catalog: each folder under `packages/content/design` is an album.
+ * Assets are synced to `public/design-assets` for static serving.
+ */
 import { readdirSync } from "node:fs"
 import { extname, join } from "node:path"
 
@@ -27,6 +31,7 @@ export type Design = {
   images: DesignImage[]
 }
 
+/** `my-project` → `My Project`. */
 function titleFromSlug(slug: string) {
   return slug
     .split(/[-_]/)
@@ -63,6 +68,7 @@ function listImages(slug: string): DesignImage[] {
       const ext = extname(file).toLowerCase()
       if (ext === ".mp4") return true
       if (!IMAGE_EXTENSIONS.has(ext)) return false
+      // Same-stem stills are posters, not extra gallery tiles.
       return !videoStems.has(pairingStem(file))
     })
     .map((name) => {
@@ -88,6 +94,7 @@ function listImages(slug: string): DesignImage[] {
       }
     })
     .sort((a, b) => {
+      // `*` pin first (featured cover / stack front), then videos, then name.
       const aPinned = a.name.startsWith("*")
       const bPinned = b.name.startsWith("*")
       if (aPinned !== bPinned) return aPinned ? -1 : 1

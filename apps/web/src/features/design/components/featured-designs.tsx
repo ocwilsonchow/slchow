@@ -1,5 +1,11 @@
 "use client"
 
+/**
+ * Homepage featured covers: a small stacked preview that expands into a
+ * full-screen overlay of one image per album (files named with a leading `*`).
+ *
+ * `LayoutGroup id="featured-designs"` keeps these `layoutId`s off `/design`.
+ */
 import { cn } from "@repo/ds"
 import { ChevronBadge } from "@repo/ds/components/ui/chevron-badge"
 import { useLenis } from "lenis/react"
@@ -29,6 +35,7 @@ import { Link } from "@/i18n/navigation"
 import {
   CHEAP_MOTION_DURATION,
   designAlbumHref,
+  FEATURED_STACK_SIZES,
   OVERLAY_PHOTO_SIZES,
   PHOTO_SIZES,
   STAGGER_EACH,
@@ -42,6 +49,7 @@ import { AlbumPhoto } from "./album-photo"
 
 type FeaturedImage = DesignImage & { slug: string }
 
+/** Resting fan pose for the collapsed `w-32` stack. */
 const REST_ROTATE = [2, -7, 6, -4, 5]
 const REST_OFFSET = [
   { x: 0, y: 0 },
@@ -51,6 +59,7 @@ const REST_OFFSET = [
   { x: -6, y: 18 },
 ]
 
+/** Hover/keyboard peek — covers spread farther than rest. */
 const UNFAN_ROTATE = [1, -16, 14, -12, 12]
 const UNFAN_OFFSET = [
   { x: 0, y: 0 },
@@ -94,6 +103,7 @@ type FeaturedDesignsProps = {
   children: ReactNode
 }
 
+/** Overlay click-outside close, but photo tiles navigate to `/design?album=`. */
 function isFeaturedPhotoEvent(event: { target: EventTarget | null }) {
   return (
     event.target instanceof Element &&
@@ -101,6 +111,7 @@ function isFeaturedPhotoEvent(event: { target: EventTarget | null }) {
   )
 }
 
+/** Provider + overlay. `children` is the homepage intro; `FeaturedStack` is the peekable pile. */
 export function FeaturedDesigns({
   images,
   assetCount,
@@ -111,6 +122,7 @@ export function FeaturedDesigns({
   const tDesigns = useTranslations("designs")
   const shouldReduceMotion = useReducedMotion() ?? false
   const coarsePointer = useCoarsePointer()
+  // FLIP only when the pointer can hover and motion is allowed.
   const sharedLayout = !shouldReduceMotion && !coarsePointer
   const lenis = useLenis()
   const [isExpanded, setIsExpanded] = useState(false)
@@ -201,12 +213,14 @@ export function FeaturedDesigns({
 
   return (
     <FeaturedDesignsContext.Provider value={contextValue}>
-      <LayoutGroup>
+      <LayoutGroup id="featured-designs">
+        {/* Inert so homepage content isn't in the tab order while the dialog is up. */}
         <div
           inert={isExpanded}
           aria-hidden={isExpanded || undefined}
           className={cn(
             "md:grid md:grid-cols-2 items-start",
+            // Stay mounted (invisible) so layoutIds and focus restore survive.
             isExpanded && "invisible"
           )}
         >
@@ -221,6 +235,7 @@ export function FeaturedDesigns({
               aria-modal="true"
               aria-label={t("featuredDesigns")}
               className="fixed inset-0 z-50"
+              // Isolate layout measurements to this overlay so the homepage stack doesn't participate.
               layoutRoot={sharedLayout}
               initial={false}
               exit={{ opacity: sharedLayout ? 1 : 0 }}
@@ -311,6 +326,7 @@ export function FeaturedDesigns({
   )
 }
 
+/** Collapsed `w-32` pile. Unmounts covers while expanded so overlay tiles own the `layoutId`s. */
 export function FeaturedStack() {
   const {
     images,
@@ -327,6 +343,12 @@ export function FeaturedStack() {
   const [isPeeking, setIsPeeking] = useState(false)
   const peek = isPeeking && !shouldReduceMotion
   const { ref: inViewRef, inView } = useInView<HTMLDivElement>()
+  const [layoutReady, setLayoutReady] = useState(false)
+
+  useEffect(() => {
+    // Assign layoutIds after first paint so Motion doesn't FLIP from 0×0.
+    setLayoutReady(true)
+  }, [])
 
   const peekOn = useCallback(() => {
     prefetchAlbumThumbs(images)
@@ -404,28 +426,29 @@ export function FeaturedStack() {
                     >
                       <AlbumPhoto
                         layoutId={
-                          sharedLayout
+                          layoutReady && sharedLayout
                             ? featuredImageLayoutId(image.slug, image.name)
                             : undefined
                         }
                         src={image.src}
                         alt=""
-                        sizes={sharedLayout ? PHOTO_SIZES : "128px"}
+                        // Collapsed stack is `w-32`; overlay tiles use PHOTO_SIZES / OVERLAY_PHOTO_SIZES.
+                        sizes={FEATURED_STACK_SIZES}
                         layoutTransition={{
                           ...layoutTransition,
+                          // Back of the stack flies first so the front cover lands last.
                           delay: shouldReduceMotion
                             ? 0
                             : (images.length - 1 - imageIndex) * STAGGER_EACH,
                         }}
-                        loading="eager"
+                        loading={imageIndex === 0 ? "eager" : "lazy"}
                         fetchPriority={imageIndex === 0 ? "high" : "low"}
                         decoding={sharedLayout ? "sync" : "async"}
                         kind={image.kind}
-                        poster={image.poster}
                         playing={
                           image.kind === "video" &&
-                          inView &&
-                          !shouldReduceMotion
+                          !shouldReduceMotion &&
+                          (imageIndex === 0 || inView)
                         }
                         className="bg-surface-card h-full w-full overflow-hidden shadow"
                       />
@@ -434,6 +457,7 @@ export function FeaturedStack() {
                 })}
           </div>
         </Link>
+        {/* Hidden expand control — the visible stack is a Link to `/design`. Focus returns here on collapse. */}
         <button
           ref={previewRef}
           type="button"
@@ -457,6 +481,7 @@ type FeaturedOverlayGridProps = {
   sharedLayout: boolean
 }
 
+/** One cover per album; columns match `OVERLAY_PHOTO_SIZES` from md up (3/4/5/6). */
 function FeaturedOverlayGrid({
   images,
   layoutTransition,
@@ -497,9 +522,11 @@ function FeaturedOverlayTile({
   const t = useTranslations("a11y")
   const { ref, inView } = useInView<HTMLLIElement>()
   const playing = image.kind === "video" && inView && !shouldReduceMotion
+  // First ~two rows of a 3-col grid.
   const inFirstRows = imageIndex < 6
 
   return (
+    // `data-featured-photo` lets overlay click-outside ignore tile clicks.
     <li ref={ref} className="aspect-square" data-featured-photo="">
       <Link
         href={designAlbumHref(image.slug)}
@@ -517,6 +544,7 @@ function FeaturedOverlayTile({
           }
           src={image.src}
           alt=""
+          // PHOTO_SIZES during FLIP so the landed tile isn't stuck on the 128px stack candidate.
           sizes={sharedLayout ? PHOTO_SIZES : OVERLAY_PHOTO_SIZES}
           layoutTransition={{
             ...layoutTransition,
@@ -525,7 +553,6 @@ function FeaturedOverlayTile({
           loading={inFirstRows ? "eager" : "lazy"}
           decoding={sharedLayout ? "sync" : "async"}
           kind={image.kind}
-          poster={image.poster}
           playing={playing}
           className="bg-surface-card h-full w-full overflow-hidden"
         />
