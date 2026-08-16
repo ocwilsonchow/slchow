@@ -1,13 +1,21 @@
 "use client"
 
 import { ChevronBadge } from "@repo/ds/components/ui/chevron-badge"
-import { useBreakpointValues } from "@repo/ds/hooks/use-breakpoint-values"
+import { useTranslations } from "next-intl"
 import { Link } from "@/i18n/navigation"
+
+export type ListNoteCategory =
+  | "frontend"
+  | "backend"
+  | "ai"
+  | "computer-science"
+  | "personal"
 
 export type ListNoteItem = {
   url: string
   slug: string
   title: string
+  category?: ListNoteCategory
 }
 
 type ListNotesItemsProps = {
@@ -18,7 +26,8 @@ type ListNotesItemsProps = {
   notesLabel: string
 }
 
-const NOTES_PREVIEW_LIMIT = { base: 3, md: 5 } as const
+const NOTES_PREVIEW_MOBILE = 3
+const NOTES_PREVIEW_DESKTOP = 5
 
 export function ListNotesItems({
   notes,
@@ -27,9 +36,8 @@ export function ListNotesItems({
   showHeading = true,
   notesLabel,
 }: ListNotesItemsProps) {
-  const previewLimit = useBreakpointValues(NOTES_PREVIEW_LIMIT)
-  const limit = preview ? previewLimit : notes.length
-  const visibleNotes = notes.slice(0, limit)
+  const t = useTranslations("notes")
+  const visibleNotes = preview ? notes.slice(0, NOTES_PREVIEW_DESKTOP) : notes
 
   return (
     <div className="flex flex-col gap-2 leading-tight">
@@ -43,10 +51,22 @@ export function ListNotesItems({
         </Link>
       )}
       <ul className="grid list-disc list-outside ml-4 gap-px">
-        {visibleNotes.map((page) => (
-          <li key={page.url}>
+        {visibleNotes.map((page, index) => (
+          <li
+            key={page.url}
+            className={
+              preview && index >= NOTES_PREVIEW_MOBILE
+                ? "max-md:hidden"
+                : undefined
+            }
+          >
             <Link href={`/notes/${page.slug}`} className={linkClassName}>
-              {page.title}
+              <span>{page.title}</span>
+              {page.category ? (
+                <span className="inline-block font-semibold text-content-body/70 text-[11px] bg-surface-alpha px-1.25 py-px rounded-md">
+                  {t(`categories.${page.category}`)}
+                </span>
+              ) : null}
             </Link>
           </li>
         ))}
@@ -56,4 +76,4 @@ export function ListNotesItems({
 }
 
 const linkClassName =
-  "flex items-baseline gap-2 text-content-ink py-0.75 px-1.5 font-semibold hover:bg-surface-alpha rounded-md"
+  "block items-baseline space-x-2 text-content-ink py-0.75 px-1.5 font-semibold hover:bg-surface-alpha rounded-md"

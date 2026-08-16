@@ -18,6 +18,7 @@
   --content-ink: #3f3d39;
   --content-body: #6e6e6e;
   --content-subdued: #796969;
+  --content-error: var(--color-red-500);
   --content-ink-inverse: #ffffff;
   --content-ink-on-accent: #0f0f10;
   --content-ink-on-popover: #ffffff;
@@ -38,6 +39,7 @@
   --content-ink: #ffffff;
   --content-body: #c1c1c1;
   --content-subdued: #8a8a8a;
+  --content-error: var(--color-red-500);
   --content-ink-inverse: #3f3d39;
   --content-ink-on-accent: #0f0f10;
   --content-ink-on-popover: #ffffff;
@@ -58,6 +60,7 @@
   --color-content-ink: var(--content-ink);
   --color-content-body: var(--content-body);
   --color-content-subdued: var(--content-subdued);
+  --color-content-error: var(--content-error);
   --color-content-ink-inverse: var(--content-ink-inverse);
   --color-content-ink-on-accent: var(--content-ink-on-accent);
   --color-content-ink-on-popover: var(--content-ink-on-popover);

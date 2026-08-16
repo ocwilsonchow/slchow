@@ -26,6 +26,7 @@ export const ListNotes = async ({
     url: page.url,
     slug: page.slugs.slice(1).join("/"),
     title: page.data.title ?? "",
+    category: page.data.category,
   }))
 
   return (

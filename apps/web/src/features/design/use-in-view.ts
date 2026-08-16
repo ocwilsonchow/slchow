@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from "react"
 
-/** True once the returned ref's element intersects the viewport. */
+/**
+ * True while the returned ref intersects the viewport.
+ * Default 0.35 so looping videos start once a decent portion is visible.
+ */
 export function useInView<T extends HTMLElement>(threshold = 0.35) {
   const ref = useRef<T | null>(null)
   const [inView, setInView] = useState(false)

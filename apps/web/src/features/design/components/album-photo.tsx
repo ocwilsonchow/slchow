@@ -23,7 +23,6 @@ type AlbumPhotoProps = {
   fetchPriority?: "high" | "low" | "auto"
   decoding?: "async" | "sync" | "auto"
   kind?: DesignImage["kind"]
-  poster?: string
   playing?: boolean
 }
 
@@ -43,9 +42,9 @@ export function AlbumPhoto({
   fetchPriority,
   decoding,
   kind,
-  poster,
   playing = false,
 }: AlbumPhotoProps) {
+  // Only animate keys the caller set — overlay tiles must not inherit stack x/y/rotate.
   const hasOpacity = opacity !== undefined
   const hasPose = x !== undefined || y !== undefined || rotate !== undefined
   const animate =
@@ -59,11 +58,12 @@ export function AlbumPhoto({
   return (
     <motion.div
       layoutId={layoutId}
+      initial={false}
+      // Letterbox behind `object-contain` video padding.
       className={cn(className, kind === "video" && "bg-[#D0CFCF]")}
+      // Radius on the FLIP node so it interpolates between stack and overlay.
       style={{ borderRadius: ALBUM_PHOTO_RADIUS }}
-      {...(animate
-        ? { initial: false as const, animate }
-        : {})}
+      {...(animate ? { animate } : {})}
       transition={layoutTransition}
     >
       <DesignAsset
@@ -74,7 +74,6 @@ export function AlbumPhoto({
         fetchPriority={fetchPriority}
         decoding={decoding}
         kind={kind}
-        poster={poster}
         playing={playing}
         className="h-full w-full object-contain select-none pointer-events-none"
       />

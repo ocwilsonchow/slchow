@@ -37,7 +37,7 @@
     "resultsLabel": "Search results",
     "placeholder": "Search notes, side quests, and resume…",
     "close": "Close search",
-    "closeShort": "ESC",
+    "closeShort": "esc",
     "prompt": "Start typing to search the full text of this site.",
     "noResults": "No results found.",
     "error": "Search could not be loaded. Please try again.",
@@ -104,7 +104,53 @@
     }
   },
   "contact": {
-    "body": "Please contact me at <email>sinlongchow@gmail.com</email>"
+    "intro": "Drop me a note, i will get back as soon as i can.",
+    "questions": {
+      "name": "What’s your name?",
+      "email": "What’s your email?",
+      "intent": "What is this about?",
+      "message": "What would you like to talk about?",
+      "review": "Does this look right?"
+    },
+    "review": {
+      "name": "Name",
+      "email": "Email",
+      "intent": "Topic",
+      "message": "Message"
+    },
+    "intents": {
+      "hiring": "Hiring",
+      "project": "Project",
+      "collaboration": "Collaboration",
+      "other": "Other"
+    },
+    "placeholders": {
+      "name": "Jane Doe",
+      "email": "you@example.com",
+      "message": "A short note about the role, project, or idea."
+    },
+    "progressSr": "Step {current} of {total}",
+    "next": "Next",
+    "back": "Back",
+    "send": "Send",
+    "sending": "Sending",
+    "enterToProceed": "Press <kbd>Enter</kbd> to proceed",
+    "shiftEnterToNewline": "Press <modifier>Shift</modifier> + <kbd>Enter</kbd> to add a new line",
+    "enterToSubmit": "Press <kbd>Enter</kbd> to submit",
+    "characterCount": "{count} / {max} characters",
+    "thanks": "Got it! I’ll email you as soon as I can.",
+    "backHome": "Go to home page",
+    "errors": {
+      "nameMin": "Please enter at least 2 characters.",
+      "nameMax": "Please keep this under 80 characters.",
+      "emailInvalid": "Please enter a valid email.",
+      "intentRequired": "Please choose one.",
+      "messageMin": "Please write at least 20 characters.",
+      "messageMax": "Please keep this under 500 characters.",
+      "invalid": "Please check this field.",
+      "turnstile": "Verification failed. Please try again.",
+      "submit": "Something went wrong. Please try again."
+    }
   },
   "notes": {
     "intro": "Some notes on the topics that interest me. Co-authored and co-audited with Grok 4.6 Max, GPT-5.6 Sol and Kimi K3 Max.",

@@ -5,6 +5,9 @@ node_modules
 dist
 build
 coverage
+playwright-report
+test-results
+blob-report
 *.min.js
 next-env.d.ts
 sst-env.d.ts

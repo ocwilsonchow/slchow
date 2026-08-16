@@ -1,12 +1,7 @@
 import { cn } from "@repo/ds"
-import { FontAero, FontMono } from "@repo/ds/lib/fonts"
+import { FontAero } from "@repo/ds/lib/font-aero"
 
 export const fontPresets = {
-  mono: cn(
-    FontMono.variable,
-    FontMono.className,
-    "text-sm font-medium leading-normal"
-  ),
   aero: cn(
     FontAero.variable,
     FontAero.className,

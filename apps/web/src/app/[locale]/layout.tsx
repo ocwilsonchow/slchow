@@ -1,14 +1,13 @@
 import { DesignSystemProvider } from "@repo/ds"
-import "lenis/dist/lenis.css"
 import type { Metadata } from "next"
 import { notFound } from "next/navigation"
 import { hasLocale, type Locale, NextIntlClientProvider } from "next-intl"
-import NextTopLoader from "nextjs-toploader"
 import {
   getMessages,
   getTranslations,
   setRequestLocale,
 } from "next-intl/server"
+import NextTopLoader from "nextjs-toploader"
 import { getDesigns } from "@/features/design/get-designs"
 import {
   NavbarVisibilityProvider,
@@ -107,7 +106,6 @@ export default async function LocaleLayout({ children, params }: Props) {
                           notesCount={notesCount}
                           designsCount={designsCount}
                         />
-                        {/* <div className="fixed bottom-0 left-0 right-0 h-24 bg-linear-to-t pointer-events-none from-surface-canvas to-surface-canvas/0" /> */}
                         <RootLayout>{children}</RootLayout>
                       </NavbarVisibilityProvider>
                     </SiteSearchProvider>

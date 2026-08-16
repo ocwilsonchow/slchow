@@ -1,3 +1,7 @@
+/**
+ * Motion `layoutId` namespaces. Homepage featured and `/design` must not
+ * collide, or a navigation would try to morph the wrong photo.
+ */
 export function designImageLayoutId(slug: string, name: string) {
   return `design-image-${slug}-${name}`
 }

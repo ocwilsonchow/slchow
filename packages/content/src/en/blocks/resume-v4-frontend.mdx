@@ -46,7 +46,7 @@ Lead frontend for a content + search marketing site — performance, CMS-backed 
 - Next.js + Strapi + Meilisearch with **Core Web Vitals** — **LCP &lt; 0.5s**, **CLS &lt; 0.1**, and PageSpeed Insights **>90**.
 - Chose hybrid ISR over full SSG or on-demand-only: main pages and the latest 100 articles at build; the rest on demand; Strapi webhook tag revalidation so publishes go live without a full rebuild.
 - Accessibility, SEO, and **CSP** as ship criteria: semantic structure, keyboard-safe nav/forms, Lighthouse + axe; metadata/OG, canonicals, sitemap, robots.txt, and Article JSON-LD from CMS.
-- Built interactive and multi-step flows with TanStack Query prefetch/hydration and TanStack Form + Zod; locale-aware routing, copy, and date/number formatting on client content sites.
+- Built interactive and multi-step flows with TanStack Query prefetch/hydration, TanStack Form + Zod, and XState; locale-aware routing, copy, and date/number formatting on client content sites.
 
 ---
 
@@ -74,7 +74,7 @@ Also shipped restaurant loyalty apps (React Native), a homebound elderly care ap
 ## Skills
 
 - **Languages**: TypeScript, Node.js
-- **Frontend**: React, Next.js, Vite, React Native, Expo, TanStack Query, Zustand, TanStack Form, TanStack Table, Framer Motion, Tailwind CSS, Chakra UI, shadcn/ui, Storybook, Figma, MDX, TipTap, CSS, D3
+- **Frontend**: React, Next.js, Vite, React Native, Expo, TanStack Query, Zustand, TanStack Form, XState, TanStack Table, Framer Motion, Tailwind CSS, Chakra UI, shadcn/ui, Storybook, Figma, MDX, TipTap, CSS, D3
 - **Mobile**: FlashList, Reanimated, FCM
 - **Backend**: Hono, Drizzle, Prisma, OpenAPI, tRPC, Postgres, DynamoDB, Better Auth
 - **Auth & security**: OAuth 2.0 / OIDC, JWT, SecureStore, Keychain / Keystore, biometrics, HttpOnly cookies, CORS, CSP, Zod, SST Secret, RBAC, next-intl

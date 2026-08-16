@@ -1,6 +1,8 @@
 import type { Metadata } from "next"
 import type { Locale } from "next-intl"
 import { getTranslations, setRequestLocale } from "next-intl/server"
+import { ContactForm } from "@/features/contact/components/contact-form"
+import { isSstProduction } from "@/features/contact/lib/stage"
 import { Header } from "@/features/layout/components/header"
 import { PageLayout } from "@/features/layout/components/page"
 import { buildPageMetadata } from "@/lib/metadata"
@@ -32,26 +34,18 @@ const Page = async ({ params }: Props) => {
   return (
     <PageLayout className="grid lg:grid-cols-2 items-start">
       <Header.Root>
-        <Header.Info />
-        <Header.Column>
+        <Header.Info className="hidden lg:block" />
+        <Header.Column className="space-y-1">
           <h1 className="font-semibold tracking-tight text-content-ink">
             {t("contact.title")}
           </h1>
+          <p className="leading-snug text-content-subdued">
+            {tContact("intro")}
+          </p>
         </Header.Column>
       </Header.Root>
       <div className="p-5">
-        <p>
-          {tContact.rich("body", {
-            email: (chunks) => (
-              <a
-                href="mailto:sinlongchow@gmail.com"
-                className="text-content-ink underline underline-offset-4 font-semibold"
-              >
-                {chunks}
-              </a>
-            ),
-          })}
-        </p>
+        <ContactForm requireTurnstile={isSstProduction()} />
       </div>
     </PageLayout>
   )

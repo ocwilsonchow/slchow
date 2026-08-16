@@ -15,7 +15,6 @@ import {
   useState,
 } from "react"
 import { Link as I18nLink, usePathname } from "@/i18n/navigation"
-import { playClickSound, preloadClickSound } from "@/lib/click-sound"
 import { fontPresets } from "../styles"
 import {
   NavbarContext,
@@ -58,7 +57,6 @@ function Root({ children }: { children: ReactNode }) {
     const next = typeof value === "function" ? value(current) : value
     if (next === current) return
     openRef.current = next
-    playClickSound()
     setOpenState(next)
   }
 
@@ -67,10 +65,6 @@ function Root({ children }: { children: ReactNode }) {
     if (hiddenByOverlay) return
     toggle()
   })
-
-  useEffect(() => {
-    preloadClickSound()
-  }, [])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -323,7 +317,7 @@ function NavLink({
         onClick?.(event)
       }}
       className={cn(
-        "block transition-colors hover:text-content-ink-on-popover py-px font-semibold text-2xl",
+        "block transition-colors hover:text-content-ink-on-popover py-px font-semibold text-xl",
         isActive
           ? "text-content-ink-on-popover"
           : "text-content-body-on-popover",

@@ -13,7 +13,7 @@ JavaScript 是 single-threaded。這不代表 timer 在走、或 network respons
 
 <br />
 
-![JavaScript event loop in the browser: call stack, Web APIs, microtask queue, task queue, and event loop](./images/event-loop-architecture.png)
+![JavaScript event loop in the browser: call stack, Web APIs, microtask queue, task queue, and event loop](./images/event-loop-architecture.webp)
 
 <br />
 
@@ -57,7 +57,7 @@ while (Date.now() - start < 3000) {
 
 <br />
 
-![Blocking while-loop versus offloaded setTimeout and fetch](./images/event-loop-blocking-vs-offload.png)
+![Blocking while-loop versus offloaded setTimeout and fetch](./images/event-loop-blocking-vs-offload.webp)
 
 <br />
 
@@ -144,7 +144,7 @@ Delay 為 `0` 的意思是「一旦你被允許跑 timer task 就盡快」，不
 
 <br />
 
-![setTimeout path from the call stack through a Web API timer and the task queue](./images/event-loop-settimeout-path.png)
+![setTimeout path from the call stack through a Web API timer and the task queue](./images/event-loop-settimeout-path.webp)
 
 <br />
 
@@ -171,7 +171,7 @@ Callback 必須等 **以下全部**：
 
 <br />
 
-![Microtask checkpoint draining until the queue is empty, including nested microtasks](./images/event-loop-microtask-drain.png)
+![Microtask checkpoint draining until the queue is empty, including nested microtasks](./images/event-loop-microtask-drain.webp)
 
 <br />
 
@@ -313,7 +313,7 @@ Script task 結束。Stack 為空。
 
 <br />
 
-![Walkthrough of the 5 1 3 4 2 log order across the script task, microtask checkpoint, and timer task](./images/event-loop-challenge-51342.png)
+![Walkthrough of the 5 1 3 4 2 log order across the script task, microtask checkpoint, and timer task](./images/event-loop-challenge-51342.webp)
 
 <br />
 
@@ -329,7 +329,7 @@ Script task 結束。Stack 為空。
 
 <br />
 
-![HTML event-loop turn: one task, microtask checkpoint, optional rendering, then the next task](./images/event-loop-html-algorithm.png)
+![HTML event-loop turn: one task, microtask checkpoint, optional rendering, then the next task](./images/event-loop-html-algorithm.webp)
 
 <br />
 
@@ -355,7 +355,7 @@ Script task 結束。Stack 為空。
 
 <br />
 
-![Node.js libuv phases compared with a browser event-loop turn](./images/event-loop-nodejs-phases.png)
+![Node.js libuv phases compared with a browser event-loop turn](./images/event-loop-nodejs-phases.webp)
 
 <br />
 

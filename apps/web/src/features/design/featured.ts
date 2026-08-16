@@ -2,7 +2,10 @@ import { getDesigns, type DesignImage } from "./get-designs"
 
 export type FeaturedImage = DesignImage & { slug: string }
 
-/** One cover per album: the file whose name starts with `*`. */
+/**
+ * Homepage stack: one cover per album. Pin a file by prefixing its name with
+ * `*` (stripped for video/poster pairing in `get-designs`).
+ */
 export function getFeaturedImages(): FeaturedImage[] {
   return getDesigns().flatMap((design) => {
     const image = design.images.find((item) => item.name.startsWith("*"))

@@ -1,5 +1,11 @@
 "use client"
 
+/**
+ * `/design` page: album grid + URL-driven overlay (`?album=`).
+ *
+ * Fine pointer + motion: shared-element FLIP from stack covers into the overlay.
+ * Touch / reduced-motion: fade the overlay (`CHEAP_MOTION_DURATION`) instead.
+ */
 import { useLenis } from "lenis/react"
 import { CornerDownLeftIcon } from "lucide-react"
 import {
@@ -21,7 +27,6 @@ import {
 } from "react"
 import { useHideNavbarForOverlay } from "@/features/layout/components/navbar"
 import { usePathname, useRouter } from "@/i18n/navigation"
-import { playClickSound } from "@/lib/click-sound"
 import {
   ALBUM_SEARCH_PARAM,
   CHEAP_MOTION_DURATION,
@@ -42,6 +47,7 @@ type DesignPageViewProps = {
 
 export function DesignPageView(props: DesignPageViewProps) {
   return (
+    // `useSearchParams` suspends; fallback paints the grid closed.
     <Suspense fallback={<DesignPageInner {...props} albumParam={null} />}>
       <DesignPageFromUrl {...props} />
     </Suspense>
@@ -73,6 +79,7 @@ function DesignPageInner({
   const tNav = useTranslations("navigation")
   const shouldReduceMotion = useReducedMotion() ?? false
   const coarsePointer = useCoarsePointer()
+  // FLIP only when the pointer can hover and motion is allowed.
   const sharedLayout = !shouldReduceMotion && !coarsePointer
   const lenis = useLenis()
   const router = useRouter()
@@ -84,6 +91,7 @@ function DesignPageInner({
   const albumFromUrl =
     designs.find((design) => design.slug === albumParam)?.slug ?? null
   const [expandedSlug, setExpandedSlug] = useState<string | null>(albumFromUrl)
+  // Keep the overlay mounted after URL clear so the close FLIP can reverse.
   const [closingSlug, setClosingSlug] = useState<string | null>(null)
   const expandedSlugRef = useRef(expandedSlug)
   expandedSlugRef.current = expandedSlug
@@ -103,6 +111,7 @@ function DesignPageInner({
     if (expandedSlug || !closingSlug) return
     const album = designs.find((design) => design.slug === closingSlug)
     const lastDelay = Math.max(0, (album?.images.length ?? 1) - 1) * STAGGER_EACH
+    // Drop `closingSlug` after the last staggered tile finishes (or the fade).
     const timeout = window.setTimeout(
       () => setClosingSlug(null),
       shouldReduceMotion
@@ -127,16 +136,15 @@ function DesignPageInner({
   )
 
   const collapse = useCallback(() => {
-    playClickSound()
     const slug = expandedSlugRef.current
     if (slug) setClosingSlug(slug)
     setExpandedSlug(null)
+    // Strip `?album=` without scrolling; overlay stays up via `closingSlug`.
     router.replace(pathname, { scroll: false })
   }, [pathname, router])
 
   const expand = useCallback(
     (slug: string) => {
-      playClickSound()
       setClosingSlug(null)
       setExpandedSlug(slug)
       router.push(designAlbumHref(slug), { scroll: false })
@@ -176,6 +184,7 @@ function DesignPageInner({
     return () => cancelAnimationFrame(frame)
   }, [expandedSlug])
 
+  // Restore focus to the album card once the overlay (including close FLIP) is gone.
   useEffect(() => {
     if (overlayOpen) return
     const previousSlug = previousSlugRef.current
@@ -206,6 +215,7 @@ function DesignPageInner({
 
   return (
     <LayoutGroup>
+      {/* Inert so the grid isn't in the tab order while the dialog is up. */}
       <div inert={overlayOpen} aria-hidden={overlayOpen || undefined}>
         <motion.div
           initial={false}
@@ -249,8 +259,10 @@ function DesignPageInner({
           aria-modal="true"
           aria-label={overlayAlbum.title}
           className="fixed inset-0 z-50"
+          // Isolate layout measurements to this overlay so the page grid doesn't participate.
           layoutRoot={sharedLayout}
           initial={sharedLayout ? false : { opacity: 0 }}
+          // Stay opaque during FLIP close; cheap motion fades the whole overlay.
           animate={{ opacity: sharedLayout || isExpanded ? 1 : 0 }}
           transition={{
             duration:
@@ -258,6 +270,7 @@ function DesignPageInner({
           }}
           onClick={isExpanded ? collapse : undefined}
         >
+          {/* Solid canvas for the fade path; FLIP has no backdrop so photos can morph over the page. */}
           {sharedLayout ? null : (
             <div className="bg-surface-canvas absolute inset-0" />
           )}
@@ -286,6 +299,7 @@ function DesignPageInner({
               </button>
             </div>
             <div className="p-5 pb-50">
+              {/* Unmount overlay tiles on FLIP close so they morph back into the stack. Cheap motion keeps them for the fade. */}
               {expandedAlbum || !sharedLayout ? (
                 <AlbumOverlayGrid
                   album={overlayAlbum}

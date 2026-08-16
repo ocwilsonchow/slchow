@@ -32,7 +32,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: "/notes", labelKey: "notes", countKey: "notesCount" },
   // { href: "/works", labelKey: "works" },
   { href: "/design", labelKey: "designs", countKey: "designsCount" },
-  // { href: "/contact", labelKey: "contact" },
+  { href: "/contact", labelKey: "contact" },
 ]
 
 const SOCIAL_LINKS = [
