@@ -52,9 +52,9 @@ export function ListNotesItems({
         {visibleNotes.map((page) => (
           <li key={page.url}>
             <Link href={`/notes/${page.slug}`} className={linkClassName}>
-              {page.title}
+              <span>{page.title}</span>
               {page.category ? (
-                <span className="font-semibold text-content-body/70 text-[11px] bg-surface-alpha px-1.25 py-px rounded-md">
+                <span className="inline-block font-semibold text-content-body/70 text-[11px] bg-surface-alpha px-1.25 py-px rounded-md">
                   {t(`categories.${page.category}`)}
                 </span>
               ) : null}
@@ -67,4 +67,4 @@ export function ListNotesItems({
 }
 
 const linkClassName =
-  "flex items-baseline gap-2 text-content-ink py-0.75 px-1.5 font-semibold hover:bg-surface-alpha rounded-md"
+  "block items-baseline space-x-2 text-content-ink py-0.75 px-1.5 font-semibold hover:bg-surface-alpha rounded-md"

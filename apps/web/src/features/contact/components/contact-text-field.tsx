@@ -8,7 +8,7 @@ import type { useContactForm } from "../hooks/use-contact-form"
 import { CONTACT_MESSAGE_MAX_LENGTH } from "../schema"
 
 const inputClassName =
-  "w-full border border-stroke-soft rounded-xl bg-transparent py-2 px-3 text-content-ink caret-content-ink placeholder:text-content-subdued"
+  "w-full border border-stroke-soft rounded-xl bg-transparent py-2 px-3 text-base md:text-sm text-content-ink caret-content-ink placeholder:text-content-subdued"
 
 type ContactFormApi = ReturnType<typeof useContactForm>["form"]
 
