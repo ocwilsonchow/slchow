@@ -104,11 +104,19 @@
     }
   },
   "contact": {
+    "intro": "留個言給我，我會盡快回覆。",
     "questions": {
       "name": "你叫什麼名字？",
       "email": "你的電郵是？",
       "intent": "想談什麼？",
-      "message": "想告訴我什麼？"
+      "message": "想告訴我什麼？",
+      "review": "資料正確嗎？"
+    },
+    "review": {
+      "name": "姓名",
+      "email": "電郵",
+      "intent": "主題",
+      "message": "訊息"
     },
     "intents": {
       "hiring": "招聘",
@@ -121,22 +129,24 @@
       "email": "you@example.com",
       "message": "簡單講下職位、項目或想法。"
     },
-    "progress": "{current} / {total}",
     "progressSr": "第 {current} 步，共 {total} 步",
     "next": "下一步",
     "back": "返回",
     "send": "送出",
     "sending": "送出中",
     "enterToProceed": "按 <kbd>Enter</kbd> 繼續",
+    "shiftEnterToNewline": "按 <modifier>Shift</modifier> + <kbd>Enter</kbd> 換行",
     "enterToSubmit": "按 <kbd>Enter</kbd> 送出",
-    "thanks": "多謝 — 我會用電郵回覆。",
+    "characterCount": "{count} / {max} 個字元",
+    "thanks": "收到！我會盡快用電郵回覆你。",
+    "backHome": "返回首頁",
     "errors": {
       "nameMin": "請至少輸入 2 個字元。",
       "nameMax": "請保持在 80 個字元以內。",
       "emailInvalid": "請輸入有效的電郵地址。",
       "intentRequired": "請選擇一項。",
       "messageMin": "請至少寫 20 個字元。",
-      "messageMax": "請保持在 2,000 個字元以內。",
+      "messageMax": "請保持在 500 個字元以內。",
       "invalid": "請檢查此欄位。",
       "turnstile": "驗證失敗，請再試一次。",
       "submit": "出咗啲問題，請再試一次。"

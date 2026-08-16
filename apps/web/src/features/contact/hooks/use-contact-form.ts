@@ -36,6 +36,14 @@ type FieldErrorKey = (typeof FIELD_ERROR_KEYS)[number]
 
 const FIELD_ERROR_KEY_SET: ReadonlySet<string> = new Set(FIELD_ERROR_KEYS)
 
+const SUBMIT_MIN_DELAY_MS = 1000
+
+function wait(ms: number) {
+  return new Promise<void>((resolve) => {
+    setTimeout(resolve, ms)
+  })
+}
+
 function translateFieldError(
   t: ReturnType<typeof useTranslations<"contact">>,
   code: string
@@ -61,6 +69,7 @@ export function useContactForm(requireTurnstile: boolean) {
     async () => {}
   )
   deliverRef.current = async (fields) => {
+    const minDelay = wait(SUBMIT_MIN_DELAY_MS)
     try {
       const turnstileToken = await execute()
       await mutation.mutateAsync({
@@ -69,6 +78,7 @@ export function useContactForm(requireTurnstile: boolean) {
         turnstileToken,
       })
     } finally {
+      await minDelay
       reset()
     }
   }
@@ -96,7 +106,7 @@ export function useContactForm(requireTurnstile: boolean) {
 
   const step = getVisibleContactStep(snapshot)
   const stepIndex = getContactStepIndex(step)
-  const isLastStep = step === "message"
+  const isLastStep = step === "review"
   const isBusy = snapshot.hasTag("busy")
   const canGoBack = snapshot.hasTag("step") && !snapshot.matches("name")
   const errorMessage = snapshot.context.stepError
@@ -120,7 +130,7 @@ export function useContactForm(requireTurnstile: boolean) {
     event.stopPropagation()
     if (isBusy) return
 
-    if (snapshot.matches("message")) {
+    if (snapshot.matches("review")) {
       send({ type: "SUBMIT", values: form.state.values })
       return
     }

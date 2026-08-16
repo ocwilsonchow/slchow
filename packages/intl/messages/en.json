@@ -104,11 +104,19 @@
     }
   },
   "contact": {
+    "intro": "Drop me a note, i will get back as soon as i can.",
     "questions": {
       "name": "What’s your name?",
       "email": "What’s your email?",
       "intent": "What is this about?",
-      "message": "What would you like to talk about?"
+      "message": "What would you like to talk about?",
+      "review": "Does this look right?"
+    },
+    "review": {
+      "name": "Name",
+      "email": "Email",
+      "intent": "Topic",
+      "message": "Message"
     },
     "intents": {
       "hiring": "Hiring",
@@ -121,22 +129,24 @@
       "email": "you@example.com",
       "message": "A short note about the role, project, or idea."
     },
-    "progress": "{current} / {total}",
     "progressSr": "Step {current} of {total}",
     "next": "Next",
     "back": "Back",
     "send": "Send",
     "sending": "Sending",
     "enterToProceed": "Press <kbd>Enter</kbd> to proceed",
+    "shiftEnterToNewline": "Press <modifier>Shift</modifier> + <kbd>Enter</kbd> to add a new line",
     "enterToSubmit": "Press <kbd>Enter</kbd> to submit",
-    "thanks": "Thanks — I’ll reply by email.",
+    "characterCount": "{count} / {max} characters",
+    "thanks": "Got it! I’ll email you as soon as I can.",
+    "backHome": "Go to home page",
     "errors": {
       "nameMin": "Please enter at least 2 characters.",
       "nameMax": "Please keep this under 80 characters.",
       "emailInvalid": "Please enter a valid email.",
       "intentRequired": "Please choose one.",
       "messageMin": "Please write at least 20 characters.",
-      "messageMax": "Please keep this under 2,000 characters.",
+      "messageMax": "Please keep this under 500 characters.",
       "invalid": "Please check this field.",
       "turnstile": "Verification failed. Please try again.",
       "submit": "Something went wrong. Please try again."

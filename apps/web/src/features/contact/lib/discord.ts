@@ -1,16 +1,11 @@
 import "server-only"
 
 import { Resource } from "sst"
-import {
-  CONTACT_INTENT_LABELS,
-  type ContactFields,
-  type ContactLocale,
-} from "../schema"
-import { isSstProduction } from "./stage"
+import type { ContactFields, ContactLocale } from "../schema"
+import { buildContactDiscordEmbed } from "./discord-embed"
+import { getSstStage } from "./stage"
 
 export function getContactDiscordWebhook(): string | undefined {
-  if (!isSstProduction()) return undefined
-
   try {
     const value = (
       Resource as typeof Resource & {
@@ -37,21 +32,10 @@ export async function sendContactDiscordEmbed(input: {
       signal: AbortSignal.timeout(10_000),
       body: JSON.stringify({
         embeds: [
-          {
-            title: "New contact",
-            description: input.fields.message,
-            fields: [
-              { name: "Name", value: input.fields.name, inline: true },
-              { name: "Email", value: input.fields.email, inline: true },
-              {
-                name: "Intent",
-                value: CONTACT_INTENT_LABELS[input.fields.intent],
-                inline: true,
-              },
-              { name: "Locale", value: input.locale, inline: true },
-            ],
-            timestamp: new Date().toISOString(),
-          },
+          buildContactDiscordEmbed({
+            ...input,
+            stage: getSstStage(),
+          }),
         ],
       }),
     })

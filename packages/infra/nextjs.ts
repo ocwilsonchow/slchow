@@ -1,6 +1,6 @@
 /// <reference path="../../.sst/platform/config.d.ts" />
 
-import { isProd } from "./edge"
+import { isDev, isProd } from "./edge"
 import { router, siteDomain } from "./router"
 import {
   contactDiscordWebhook,
@@ -13,9 +13,10 @@ export const nextjs = new sst.aws.Nextjs("WEB", {
   router: {
     instance: router,
   },
-  link: isProd
-    ? [posthogProjectToken, turnstileSecret, contactDiscordWebhook]
-    : [],
+  link: [
+    ...(isProd ? [posthogProjectToken, turnstileSecret] : []),
+    ...(isProd || isDev ? [contactDiscordWebhook] : []),
+  ],
   warm: isProd ? 1 : 0,
   environment: {
     NEXT_PUBLIC_SITE_URL: `https://${siteDomain}`,

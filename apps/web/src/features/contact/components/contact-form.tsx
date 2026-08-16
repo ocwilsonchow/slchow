@@ -4,13 +4,35 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import Script from "next/script"
 import { useTranslations } from "next-intl"
 import { useContactForm } from "../hooks/use-contact-form"
-import { CONTACT_STEPS } from "../schema"
+import { CONTACT_STEPS, type ContactStep } from "../schema"
 import { ContactFormActions } from "./contact-form-actions"
 import { ContactIntentField } from "./contact-intent-field"
+import { ContactProgress } from "./contact-progress"
+import { ContactReviewFields } from "./contact-review-fields"
 import { ContactTextField } from "./contact-text-field"
+import { Link } from "@/i18n/navigation"
+import { MoveRightIcon } from "lucide-react"
 
 const HEADING_ID = "contact-step-heading"
 const ERROR_ID = "contact-step-error"
+
+function stepHeading(
+  t: ReturnType<typeof useTranslations<"contact">>,
+  step: ContactStep
+) {
+  switch (step) {
+    case "name":
+      return t("questions.name")
+    case "email":
+      return t("questions.email")
+    case "intent":
+      return t("questions.intent")
+    case "message":
+      return t("questions.message")
+    case "review":
+      return t("questions.review")
+  }
+}
 
 type Props = {
   requireTurnstile: boolean
@@ -38,9 +60,11 @@ export function ContactForm({ requireTurnstile }: Props) {
 
   if (snapshot.hasTag("complete")) {
     return (
-      <p className="font-semibold tracking-tight text-content-ink">
-        {t("thanks")}
-      </p>
+      <div className="space-y-2">
+        <p className="font-semibold tracking-tight text-content-ink">
+          😊 {t("thanks")}
+        </p>
+      </div>
     )
   }
 
@@ -63,18 +87,15 @@ export function ContactForm({ requireTurnstile }: Props) {
         onSubmit={submit}
         aria-labelledby={HEADING_ID}
       >
-        <p className="text-sm text-content-subdued" aria-hidden>
-          {t("progress", {
+        <ContactProgress
+          current={stepIndex + 1}
+          total={CONTACT_STEPS.length}
+          label={t("progressSr", {
             current: stepIndex + 1,
             total: CONTACT_STEPS.length,
           })}
-        </p>
-        <span className="sr-only">
-          {t("progressSr", {
-            current: stepIndex + 1,
-            total: CONTACT_STEPS.length,
-          })}
-        </span>
+          reduceMotion={Boolean(shouldReduceMotion)}
+        />
 
         <AnimatePresence mode="wait" initial={false}>
           <motion.div
@@ -89,7 +110,7 @@ export function ContactForm({ requireTurnstile }: Props) {
               id={HEADING_ID}
               className="font-semibold tracking-tight text-content-ink"
             >
-              {t(`questions.${step}`)}
+              {stepHeading(t, step)}
             </h2>
 
             {step === "name" ? (
@@ -146,11 +167,15 @@ export function ContactForm({ requireTurnstile }: Props) {
               />
             ) : null}
 
+            {step === "review" ? (
+              <ContactReviewFields values={form.state.values} />
+            ) : null}
+
             {errorMessage ? (
               <p
                 id={ERROR_ID}
                 role="alert"
-                className="text-sm text-content-ink"
+                className="text-xs text-content-error"
               >
                 {errorMessage}
               </p>
@@ -162,7 +187,15 @@ export function ContactForm({ requireTurnstile }: Props) {
           canGoBack={canGoBack}
           isBusy={isBusy}
           isLastStep={isLastStep}
+          hint={
+            step === "review"
+              ? "submit"
+              : step === "message"
+                ? "newline"
+                : "proceed"
+          }
           onBack={() => send({ type: "BACK" })}
+          focusSubmit={isLastStep ? focusOnMount : undefined}
         />
 
         <div ref={containerRef} />

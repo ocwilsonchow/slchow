@@ -29,15 +29,19 @@ const Page = async ({ params }: Props) => {
   setRequestLocale(locale)
 
   const t = await getTranslations({ locale, namespace: "metadata" })
+  const tContact = await getTranslations({ locale, namespace: "contact" })
 
   return (
     <PageLayout className="grid lg:grid-cols-2 items-start">
       <Header.Root>
-        <Header.Info />
-        <Header.Column>
+        <Header.Info className="hidden lg:block" />
+        <Header.Column className="space-y-1">
           <h1 className="font-semibold tracking-tight text-content-ink">
             {t("contact.title")}
           </h1>
+          <p className="leading-snug text-content-subdued">
+            {tContact("intro")}
+          </p>
         </Header.Column>
       </Header.Root>
       <div className="p-5">

@@ -1,6 +1,7 @@
 /*
- * Contact form flow: name → email → intent → message → submitting → success.
- * TanStack Form owns values; this machine owns step, validation gates, and delivery.
+ * Contact form flow: name → email → intent → message → review → submitting →
+ * success. TanStack Form owns values; this machine owns step, validation gates,
+ * and delivery.
  *
  * NEXT/SUBMIT carry TanStack values for guards. EDIT clears errors. BACK never
  * validates. Invalid NEXT/SUBMIT stay on the same state and assign*Error.
@@ -10,6 +11,7 @@
 import { assign, fromPromise, type SnapshotFrom, setup } from "xstate"
 import {
   CONTACT_STEPS,
+  type ContactFieldStep,
   type ContactFields,
   type ContactFormValues,
   type ContactStep,
@@ -37,12 +39,12 @@ function isValuesEvent(
   return event.type === "NEXT" || event.type === "SUBMIT"
 }
 
-function stepIsValid(step: ContactStep, event: ContactFormEvent) {
+function stepIsValid(step: ContactFieldStep, event: ContactFormEvent) {
   if (!isValuesEvent(event)) return false
   return contactStepSchemas[step].safeParse(event.values).success
 }
 
-function stepErrorFromEvent(step: ContactStep, event: ContactFormEvent) {
+function stepErrorFromEvent(step: ContactFieldStep, event: ContactFormEvent) {
   if (!isValuesEvent(event)) return undefined
   const result = contactStepSchemas[step].safeParse(event.values)
   return result.success ? undefined : firstIssueCode(result.error)
@@ -93,6 +95,7 @@ export const contactFormMachine = setup({
     nameValid: ({ event }) => stepIsValid("name", event),
     emailValid: ({ event }) => stepIsValid("email", event),
     intentValid: ({ event }) => stepIsValid("intent", event),
+    messageValid: ({ event }) => stepIsValid("message", event),
     formValid: ({ event }) => formIsValid(event),
   },
   actions: {
@@ -110,6 +113,10 @@ export const contactFormMachine = setup({
     }),
     assignIntentError: assign({
       stepError: ({ event }) => stepErrorFromEvent("intent", event),
+      submitError: undefined,
+    }),
+    assignMessageError: assign({
+      stepError: ({ event }) => stepErrorFromEvent("message", event),
       submitError: undefined,
     }),
     assignFormError: assign({
@@ -164,6 +171,17 @@ export const contactFormMachine = setup({
       on: {
         EDIT: { actions: "clearErrors" },
         BACK: { target: "intent", actions: "clearErrors" },
+        NEXT: [
+          { guard: "messageValid", target: "review", actions: "clearErrors" },
+          { actions: "assignMessageError" }, // stay; assign field error
+        ],
+      },
+    },
+    review: {
+      tags: ["step"],
+      on: {
+        EDIT: { actions: "clearErrors" },
+        BACK: { target: "message", actions: "clearErrors" },
         SUBMIT: [
           {
             guard: "formValid",
@@ -186,7 +204,7 @@ export const contactFormMachine = setup({
         },
         onDone: "success",
         onError: {
-          target: "message",
+          target: "review",
           actions: "assignSubmitError",
         },
       },
@@ -205,8 +223,9 @@ export function getVisibleContactStep(
 ): ContactStep {
   if (snapshot.matches("email")) return "email"
   if (snapshot.matches("intent")) return "intent"
-  if (snapshot.matches("message") || snapshot.matches("submitting")) {
-    return "message"
+  if (snapshot.matches("message")) return "message"
+  if (snapshot.matches("review") || snapshot.matches("submitting")) {
+    return "review"
   }
   return "name"
 }

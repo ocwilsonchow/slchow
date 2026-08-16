@@ -33,7 +33,9 @@ export const Info = async ({ ...props }: ComponentProps<"div">) => {
         <h1>
           <Link href="/">Wilson Chow</Link>
         </h1>
-        <h2 className="text-content-subdued font-medium text-sm">{t("role")}</h2>
+        <h2 className="text-content-subdued font-medium text-sm">
+          {t("role")}
+        </h2>
       </div>
       <HeaderSearchTrigger />
     </div>
@@ -61,7 +63,7 @@ export const Links = async ({ className, ...props }: ComponentProps<"div">) => {
   )
 
   return (
-    <div {...props} className={cn("hidden md:flex flex-col gap-5", className)}>
+    <div {...props} className={cn("hidden md:flex flex-col gap-8", className)}>
       <ul className="flex flex-col gap-px">
         <HeaderLink href="/resume">{t("resume")}</HeaderLink>
         <HeaderLink href="/notes">
@@ -71,6 +73,7 @@ export const Links = async ({ className, ...props }: ComponentProps<"div">) => {
           {t("designs")}{" "}
           <sup className="text-content-subdued">{designsCount}</sup>
         </HeaderLink>
+        <HeaderLink href="/contact">{t("contact")}</HeaderLink>
       </ul>
       <ul className="flex flex-col gap-px">
         <HeaderLink

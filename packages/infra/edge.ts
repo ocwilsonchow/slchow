@@ -3,6 +3,7 @@
 import { password, username } from "./secrets"
 
 export const isProd = $app.stage === "production"
+export const isDev = $app.stage === "dev"
 
 /** Non-prod CloudFront Basic Auth for the shared Router. */
 export const basicAuthEdge = !isProd

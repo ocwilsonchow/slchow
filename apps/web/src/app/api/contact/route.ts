@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
 import { sendContactDiscordEmbed } from "@/features/contact/lib/discord"
-import { isSstProduction } from "@/features/contact/lib/stage"
+import {
+  isSstProduction,
+  shouldSendContactDiscord,
+} from "@/features/contact/lib/stage"
 import {
   getClientIp,
   verifyTurnstileToken,
@@ -60,7 +63,9 @@ export async function POST(request: Request) {
     if (!verification.ok) {
       return jsonError(403, "turnstile", [{ message: "forbidden" }])
     }
+  }
 
+  if (shouldSendContactDiscord()) {
     const delivered = await sendContactDiscordEmbed({
       fields: {
         name: parsed.data.name,

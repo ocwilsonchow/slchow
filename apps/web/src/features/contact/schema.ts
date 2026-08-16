@@ -16,9 +16,23 @@ export const CONTACT_INTENT_LABELS: Record<ContactIntent, string> = {
   other: "Other",
 }
 
-export const CONTACT_STEPS = ["name", "email", "intent", "message"] as const
+export const CONTACT_STEPS = [
+  "name",
+  "email",
+  "intent",
+  "message",
+  "review",
+] as const
 
 export type ContactStep = (typeof CONTACT_STEPS)[number]
+export type ContactFieldStep = Exclude<ContactStep, "review">
+
+export const CONTACT_FIELD_STEPS = CONTACT_STEPS.filter(
+  (step): step is ContactFieldStep => step !== "review"
+)
+
+export const CONTACT_MESSAGE_MIN_LENGTH = 20
+export const CONTACT_MESSAGE_MAX_LENGTH = 500
 
 export const contactFieldsSchema = z.object({
   name: z
@@ -31,8 +45,8 @@ export const contactFieldsSchema = z.object({
   message: z
     .string()
     .trim()
-    .min(20, { error: "messageMin" })
-    .max(2000, { error: "messageMax" }),
+    .min(CONTACT_MESSAGE_MIN_LENGTH, { error: "messageMin" })
+    .max(CONTACT_MESSAGE_MAX_LENGTH, { error: "messageMax" }),
 })
 
 export type ContactFields = z.infer<typeof contactFieldsSchema>
@@ -47,7 +61,7 @@ export type ContactFormValues = {
 export const contactFormDefaults: ContactFormValues = {
   name: "",
   email: "",
-  intent: undefined,
+  intent: CONTACT_INTENTS[0],
   message: "",
 }
 

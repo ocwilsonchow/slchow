@@ -13,7 +13,10 @@
       "!.next",
       "!dist",
       "!build",
-      "!sst-env.d.ts"
+      "!sst-env.d.ts",
+      "!playwright-report",
+      "!test-results",
+      "!blob-report"
     ]
   },
   "formatter": {
