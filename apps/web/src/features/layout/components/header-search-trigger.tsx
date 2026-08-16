@@ -3,17 +3,28 @@
 import { useSearchContext } from "fumadocs-ui/contexts/search"
 import { SearchIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
+import type { MouseEvent } from "react"
+import {
+  playClickSoundOnKeyboardClick,
+  playClickSoundOnPointerDown,
+} from "@/lib/click-sound"
 
 export function HeaderSearchTrigger() {
   const { setOpenSearch } = useSearchContext()
   const t = useTranslations("search")
+
+  const onClick = (event: MouseEvent<HTMLButtonElement>) => {
+    playClickSoundOnKeyboardClick(event)
+    setOpenSearch(true)
+  }
 
   return (
     <>
       <button
         type="button"
         aria-label={t("trigger")}
-        onClick={() => setOpenSearch(true)}
+        onPointerDown={playClickSoundOnPointerDown}
+        onClick={onClick}
         className="block md:hidden  rounded-full p-2"
       >
         <SearchIcon size={12} strokeWidth={3.5} aria-hidden />
@@ -21,7 +32,8 @@ export function HeaderSearchTrigger() {
       <button
         type="button"
         aria-label={t("trigger")}
-        onClick={() => setOpenSearch(true)}
+        onPointerDown={playClickSoundOnPointerDown}
+        onClick={onClick}
         className="hidden lg:block text-content-subdued text-xs"
       >
         {t.rich("headerHint", {

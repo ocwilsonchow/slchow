@@ -21,7 +21,11 @@ import {
 } from "react"
 import { useHideNavbarForOverlay } from "@/features/layout/components/navbar"
 import { usePathname, useRouter } from "@/i18n/navigation"
-import { playClickSound } from "@/lib/click-sound"
+import {
+  playClickSound,
+  playClickSoundOnKeyboardClick,
+  playClickSoundOnPointerDown,
+} from "@/lib/click-sound"
 import {
   ALBUM_SEARCH_PARAM,
   CHEAP_MOTION_DURATION,
@@ -127,7 +131,6 @@ function DesignPageInner({
   )
 
   const collapse = useCallback(() => {
-    playClickSound()
     const slug = expandedSlugRef.current
     if (slug) setClosingSlug(slug)
     setExpandedSlug(null)
@@ -136,7 +139,6 @@ function DesignPageInner({
 
   const expand = useCallback(
     (slug: string) => {
-      playClickSound()
       setClosingSlug(null)
       setExpandedSlug(slug)
       router.push(designAlbumHref(slug), { scroll: false })
@@ -160,7 +162,9 @@ function DesignPageInner({
     if (!expandedSlug) return
 
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") collapse()
+      if (event.key !== "Escape") return
+      playClickSound()
+      collapse()
     }
 
     window.addEventListener("keydown", onKeyDown)
@@ -256,6 +260,9 @@ function DesignPageInner({
             duration:
               sharedLayout || shouldReduceMotion ? 0 : CHEAP_MOTION_DURATION,
           }}
+          onPointerDown={
+            isExpanded ? playClickSoundOnPointerDown : undefined
+          }
           onClick={isExpanded ? collapse : undefined}
         >
           {sharedLayout ? null : (
@@ -272,9 +279,14 @@ function DesignPageInner({
                 type="button"
                 aria-label={t("backToAlbums")}
                 className="group hover:text-content-ink select-none outline-none focus:outline-none focus-visible:outline-none"
+                onPointerDown={(event) => {
+                  event.stopPropagation()
+                  playClickSoundOnPointerDown(event)
+                }}
                 onClick={(event) => {
                   event.stopPropagation()
                   if (!isExpanded) return
+                  playClickSoundOnKeyboardClick(event)
                   collapse()
                 }}
               >

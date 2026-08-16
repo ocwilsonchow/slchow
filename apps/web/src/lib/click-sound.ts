@@ -32,3 +32,13 @@ export function playClickSound() {
   el.currentTime = 0
   void el.play().catch(() => {})
 }
+
+/** Primary press — starts audio before click handlers run React updates. */
+export function playClickSoundOnPointerDown(event: { button: number }) {
+  if (event.button === 0) playClickSound()
+}
+
+/** Keyboard activation has no pointerdown (`click.detail === 0`). */
+export function playClickSoundOnKeyboardClick(event: { detail: number }) {
+  if (event.detail === 0) playClickSound()
+}

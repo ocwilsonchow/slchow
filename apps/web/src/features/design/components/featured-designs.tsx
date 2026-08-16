@@ -26,7 +26,11 @@ import {
 } from "react"
 import { useHideNavbarForOverlay } from "@/features/layout/components/navbar"
 import { Link } from "@/i18n/navigation"
-import { playClickSound } from "@/lib/click-sound"
+import {
+  playClickSound,
+  playClickSoundOnKeyboardClick,
+  playClickSoundOnPointerDown,
+} from "@/lib/click-sound"
 import {
   CHEAP_MOTION_DURATION,
   designAlbumHref,
@@ -95,6 +99,13 @@ type FeaturedDesignsProps = {
   children: ReactNode
 }
 
+function isFeaturedPhotoEvent(event: { target: EventTarget | null }) {
+  return (
+    event.target instanceof Element &&
+    Boolean(event.target.closest("[data-featured-photo]"))
+  )
+}
+
 export function FeaturedDesigns({
   images,
   assetCount,
@@ -126,12 +137,10 @@ export function FeaturedDesigns({
   )
 
   const collapse = useCallback(() => {
-    playClickSound()
     setIsExpanded(false)
   }, [])
 
   const expand = useCallback(() => {
-    playClickSound()
     prefetchAlbumThumbs(images)
     setIsExpanded(true)
   }, [images])
@@ -140,7 +149,9 @@ export function FeaturedDesigns({
     if (!isExpanded) return
 
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") collapse()
+      if (event.key !== "Escape") return
+      playClickSound()
+      collapse()
     }
 
     window.addEventListener("keydown", onKeyDown)
@@ -227,13 +238,12 @@ export function FeaturedDesigns({
                     ? 0.4
                     : CHEAP_MOTION_DURATION,
               }}
+              onPointerDown={(event) => {
+                if (isFeaturedPhotoEvent(event)) return
+                playClickSoundOnPointerDown(event)
+              }}
               onClick={(event) => {
-                if (
-                  event.target instanceof Element &&
-                  event.target.closest("[data-featured-photo]")
-                ) {
-                  return
-                }
+                if (isFeaturedPhotoEvent(event)) return
                 collapse()
               }}
             >
@@ -272,8 +282,13 @@ export function FeaturedDesigns({
                     type="button"
                     aria-label={t("backToFeatured")}
                     className="group hover:text-content-ink select-none outline-none focus:outline-none focus-visible:outline-none"
+                    onPointerDown={(event) => {
+                      event.stopPropagation()
+                      playClickSoundOnPointerDown(event)
+                    }}
                     onClick={(event) => {
                       event.stopPropagation()
+                      playClickSoundOnKeyboardClick(event)
                       collapse()
                     }}
                   >
@@ -286,6 +301,7 @@ export function FeaturedDesigns({
                   <Link
                     href="/design"
                     className="group hover:text-content-ink outline-none focus:outline-none focus-visible:outline-none"
+                    onPointerDown={(event) => event.stopPropagation()}
                     onClick={(event) => event.stopPropagation()}
                   >
                     {tDesigns("fullCollection", { count: assetCount })}
@@ -440,7 +456,11 @@ export function FeaturedStack() {
           type="button"
           hidden
           className="text-content-subdued hover:text-content-ink text-sm outline-none focus:outline-none focus-visible:outline-none"
-          onClick={expand}
+          onPointerDown={playClickSoundOnPointerDown}
+          onClick={(event) => {
+            playClickSoundOnKeyboardClick(event)
+            expand()
+          }}
           onFocus={peekOnKeyboard}
           onBlur={peekOff}
         >
@@ -506,9 +526,13 @@ function FeaturedOverlayTile({
         href={designAlbumHref(image.slug)}
         aria-label={t("openAlbum", { title: image.slug })}
         className="block h-full w-full outline-none focus:outline-none focus-visible:outline-none"
+        onPointerDown={(event) => {
+          event.stopPropagation()
+          playClickSoundOnPointerDown(event)
+        }}
         onClick={(event) => {
           event.stopPropagation()
-          playClickSound()
+          playClickSoundOnKeyboardClick(event)
         }}
       >
         <AlbumPhoto

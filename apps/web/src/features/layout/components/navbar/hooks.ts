@@ -11,6 +11,7 @@ import {
   useRef,
   useSyncExternalStore,
 } from "react"
+import { playClickSound } from "@/lib/click-sound"
 
 const FOCUSABLE_SELECTOR = [
   "a[href]",
@@ -154,6 +155,7 @@ export function useNavbarFocusLock({
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault()
+        playClickSound()
         setOpen(false)
         return
       }
