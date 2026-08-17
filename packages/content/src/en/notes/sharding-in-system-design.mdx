@@ -1,0 +1,361 @@
+---
+title: Sharding in System Design
+description: Why writes and storage leave one node — shard keys, hash vs range, hotspots, cross-shard work, and the failure modes that follow
+date: 2026-08-17
+category: system-design
+---
+
+**Sharding** splits a dataset across independent databases so no single machine holds the writes, the disk, or the connection pool. Each shard is its own Postgres: CPU, memory, storage, connections. Together they are the dataset. Vertical scale is the first move. Sharding is what you reach for after the machine is the ceiling.
+
+This note follows [Evan's walkthrough](https://www.youtube.com/watch?v=L521gizea4s). The schema is [Data Modeling in System Design](/notes/data-modeling-in-system-design). Partitioning inside one Postgres is [Core SQL Concepts](/notes/core-sql-concepts). The denormalized global copy lives in [Caching in System Design](/notes/caching-in-system-design). Compensating steps are [Message Queues in System Design](/notes/message-queues-in-system-design). This note is the split.
+
+<br />
+
+---
+
+## Pattern Map
+
+| Pattern | How a row finds a machine | Reach for it when |
+| --- | --- | --- |
+| Range | Contiguous key ranges | Data naturally falls into ranges; range scans stay on one shard |
+| Hash + consistent hashing | `hash(key)` on a ring | Default. Even spread, and adding a shard does not reshuffle everything |
+| Directory | A lookup table says where the key lives | You must move one hot key without rehashing the cluster |
+
+<br />
+
+---
+
+## 1. Why sharding exists
+
+A large RDS Postgres is enough for a long time. ~70 TB. ~10k writes per second. Upgrade first. Shard after the bigger box is still angry.
+
+<br />
+
+```text
+One Postgres  →  bigger Postgres  →  shards
+   (default)        (vertical)       (horizontal)
+```
+
+<br />
+
+- Traffic grows. Reads grow. Writes grow. The first instinct is a larger instance — more CPU, more disk, 140 TB, tens of thousands of writes. Most companies never leave this box.
+- The ceiling is real. Storage fills. Write throughput saturates. Backups take forever. Queries slow because the working set no longer fits. A bigger machine does not exist.
+- Sharding is then the only move that adds capacity: split rows across machines. Storage and throughput scale by adding a fourth shard, a fifth, a sixth.
+- The cost is operational. You now choose a key, route queries, live with hot shards, and rebalance. That complexity is why you do the math before you draw the boxes.
+
+<br />
+
+**Failure:** sharding a 2.5 TB dataset because "we always shard," while a single Postgres would have held it. The interview wanted the numbers, not the split.
+
+<br />
+
+---
+
+## 2. Partitioning vs sharding
+
+Partitioning organizes a table **inside one database**. Sharding is **multiple databases**. Same word in casual talk. Different failure domain.
+
+<br />
+
+| | Partitioning | Sharding |
+| --- | --- | --- |
+| Where the data lives | One Postgres | Many Postgres instances |
+| What scales | Vacuum, pruning, drop-a-month | Writes, disk, connections |
+| Failure domain | One primary, one WAL, one backup | Each shard is its own outage |
+| App change | Usually none — the parent table is still the query | Routing by key. Cross-shard work is now yours |
+
+<br />
+
+- A 500M-row orders table on one node is a partition problem: huge indexes, autovacuum on the whole table, a date query that scans years. Split by month. The primary is still one machine.
+- Horizontal partition: same columns, fewer rows per piece. Vertical partition: same rows, fewer columns per piece. Neither adds a second primary.
+- A shard has its own CPU, memory, storage, and pool. No single box holds the dataset. That is how **writes and storage** scale past one machine.
+- The statement model, and when a partition key actually prunes, is [Core SQL Concepts](/notes/core-sql-concepts). The schema that the key has to serve is [Data Modeling in System Design](/notes/data-modeling-in-system-design).
+
+<br />
+
+**Failure:** calling table partitions "sharding," then discovering unique constraints, joins, and transactions still live on one WAL — or treating a second RDS instance as a partition the planner can see.
+
+<br />
+
+---
+
+## 3. Shard key
+
+Two decisions. **What** you group by — the shard key. **How** those groups land on machines — the next section. In an interview, name the column and why. The key is usually permanent.
+
+<br />
+
+A good key has three properties:
+
+<br />
+
+- **High cardinality.** Many distinct values, so the data can actually spread. A boolean is two groups. You have capped yourself at two shards.
+- **Even distribution.** Values should not pile onto one machine. `user_id` usually spreads. Country, if 90% of users are in one country, does not.
+- **Query alignment.** The hot path should hit **one** shard. `GET /users/{id}/posts` wants `user_id`. A key that does not match the APIs turns every common read into scatter-gather.
+
+<br />
+
+| Key | Why |
+| --- | --- |
+| `user_id` on a social app | Millions of values. Profiles, posts, likes are user-scoped. One user, one shard. |
+| `order_id` on checkout | Millions of orders. Create, status, receipt are one order. |
+| `is_premium` | Two values. Two shards. Then you are stuck. |
+| `created_at` on the write path | Every insert lands on **today**. That shard is on fire. Older shards sit idle. Time-range belongs on archival, not OLTP. |
+
+<br />
+
+- Collocate related rows. Comments on the same shard as their post. A detail page is one database, not a join across machines.
+- Tenant-centric products often shard by `organization_id`. The isolation story in this stack is still RLS on the row. [Building a Multi-Tenant Backend with Hono, Better Auth, Drizzle, and Postgres RLS](/notes/multi-tenant-backend-drizzle-hono-better-auth).
+
+<br />
+
+**Failure:** sharding by `created_at` so all writes hit today's shard, or splitting posts and comments onto different keys so every detail page is a cross-shard join.
+
+<br />
+
+---
+
+## 4. How to place groups
+
+The key groups rows. The strategy places groups. Three options. The interview default is hash plus consistent hashing.
+
+<br />
+
+### Range
+
+```text
+Shard 1 → user_id 0 – 10M
+Shard 2 → user_id 10M – 20M
+Shard 3 → user_id 20M – 30M
+```
+
+<br />
+
+- Simple. A range scan that stays inside one interval hits one shard.
+- Early on, only shard 1 has users. Later, new ids are monotonic — every new user, every write, lands on the highest range. That shard takes the heat.
+- Range works when different tenants naturally query different ranges. It is not the production default for a growing `user_id`.
+
+<br />
+
+### Hash
+
+```text
+shard = hash(user_id) % N
+
+user 42  → hash(42)  % 3 = shard 1
+user 99  → hash(99)  % 3 = shard 2
+user 123 → hash(123) % 3 = shard 0
+```
+
+<br />
+
+- The hash scrambles the input. New users spread evenly. That is the win.
+- `N` changing is the loss. `% 3` to `% 4` remaps almost every key. Most of the dataset moves. Operationally a nightmare.
+- **Consistent hashing** puts keys and shards on a ring. Walk clockwise to the next shard. Add a node, and only a fraction of keys move — the neighbors, not the cluster. Virtual nodes keep the ring from clumping. This is the industry default. In an interview, "shard by `user_id`" already implies it unless you are mid-level and they ask how.
+
+<br />
+
+### Directory
+
+```text
+user_to_shard
+---------------
+15  → shard 1
+87  → shard 4
+204 → shard 2
+```
+
+<br />
+
+- A lookup says where the key lives. Move Messi to his own shard by updating a row. Rebalance without rehashing.
+- Every request is now two hops: directory, then shard. The directory is a **single point of failure**. If it is down, healthy shards are unreachable — you do not know where the data is.
+- Flexibility you can afford in production for a handful of hot keys. Almost never the interview answer. It invites a derail about the lookup's HA.
+
+<br />
+
+**Failure:** `hash % N` with no plan for `N+1`, or leading with a directory so the rest of the hour is the lookup service.
+
+<br />
+
+---
+
+## 5. Hotspots
+
+A good key still has outliers. Hashing spreads **keys**, not **traffic**. One key can be most of the load.
+
+<br />
+
+- **Celebrity problem.** Shard by `user_id`. Messi lands on shard 1. Every profile view, like, comment, and DM hits that shard. The others sit cold. The cluster looks fine. One primary is on fire.
+- Time-range is the other shape: all new writes go to the newest shard. Same incident, different cause.
+- Detect it from shard metrics — latency, CPU, RPS — not from "the keyspace is even."
+
+<br />
+
+Two responses:
+
+<br />
+
+- **Compound key.** Hash `user_id + n`, or `user_id + date`, so one celebrity's posts spread across shards. Reads that used to be one shard now fan out. You bought write spread with a smaller scatter-gather on that user.
+- **Dedicated celebrity shard.** Detect the hot keys. Move them onto their own hardware. A small directory overlay: if celebrity, that shard; else hash. Most systems never need this. A social graph with Messi does.
+
+<br />
+
+Caching a hot **read** is the other half. Redis in front of the profile does not make the write path infinite, but it stops the read storm from also being a database storm. [Caching in System Design](/notes/caching-in-system-design).
+
+<br />
+
+**Failure:** hashing `user_id` and calling the cluster balanced because each shard has the same number of users, while one of those users is the product.
+
+<br />
+
+---
+
+## 6. Cross-shard work
+
+Once rows live on many machines, any query that needs more than one shard is a fan-out: query N, wait, merge. The hot path should not be that.
+
+<br />
+
+```text
+GET /users/123            → one shard
+GET /posts/trending       → all shards, then merge
+```
+
+<br />
+
+- Alignment is the first defense. If most queries are user-scoped, shard by `user_id`. Global top-10 is then the exception, not the feed.
+- You cannot eliminate global queries. Trending, leaderboards, "how many users." The first expensive scatter-gather **caches**. Five minutes stale is the product for a trending page. Precompute with a job so the request never fans out. [Caching in System Design](/notes/caching-in-system-design).
+- **Denormalize** so related facts live together. Copy the fields the hot read needs onto the shard that already has the user. Writes go to two places. Reads stay on one. The schema trade is [Data Modeling in System Design](/notes/data-modeling-in-system-design).
+- Rare admin totals can hit every shard. A common user-facing path that always scatter-gathers means the **key is wrong**.
+
+<br />
+
+**Failure:** "we'll query all shards and aggregate" as the plan for the homepage. That is a signal to change the key, cache the merge, or precompute — not to accept N round-trips as the product.
+
+<br />
+
+---
+
+## 7. Consistency
+
+One Postgres makes a transfer one transaction. Two shards make it two databases that do not know each other. ACID does not span them.
+
+<br />
+
+```text
+-- one database
+BEGIN;
+  UPDATE accounts SET balance = balance - 5 WHERE id = bob;
+  UPDATE accounts SET balance = balance + 5 WHERE id = alice;
+COMMIT;
+```
+
+<br />
+
+- Bob on shard 3, Alice on shard 1: deduct can succeed and credit can fail. The money is gone. The inverse is a double credit. There is no `ROLLBACK` that covers both boxes.
+- **Two-phase commit** asks every shard to prepare, then commit. Correct, slow, fragile. A coordinator or a shard dying mid-flight leaves locks you cannot easily unwind. Production avoids it.
+- The golden rule: **do not have the distributed transaction**. Keep a user's balance, history, and profile on that user's shard. Collocation is the consistency strategy. The key was the design.
+- When two users on two shards must move money, a **saga**: deduct Bob, credit Alice; if credit fails, **refund** Bob. Compensation is not undo. It is a new, durable, retryable write with its own audit. [Message Queues in System Design](/notes/message-queues-in-system-design).
+- Follower counts and denormalized tallies can be eventually consistent. A few seconds of disagreement is cheaper than 2PC. Money is not a tally.
+
+<br />
+
+**Failure:** 2PC as the default because the textbook named it, or treating a saga compensation as a rollback — the money already moved; the refund is a second business event.
+
+<br />
+
+---
+
+## 8. What to say
+
+Sharding shows up in the deep dive, when you are satisfying a scaling non-functional. Do the math first. A well-tuned single Postgres is a long way.
+
+<br />
+
+- **Storage.** 500M users × 5 KB = 2.5 TB. One instance holds that. Say so. Shard if you 10× or 100×.
+- **Write throughput.** 50k writes/s at peak is past a comfortable single primary. Now you have a reason.
+- **Read throughput.** Replicas take you far. 100M DAU with several queries each may still need the read load split. Prove it.
+
+<br />
+
+If the numbers require the split:
+
+<br />
+
+1. **Key from access patterns.** Social app, user-centric reads — posts, followers, likes scoped to one user — shard by `user_id`.
+2. **Distribution.** Hash-based with consistent hashing. Even spread. Adding a shard moves a fraction, not the cluster. Mid-level: say it. Senior: it is the default.
+3. **Trade-off.** Global queries get expensive. Trending is cache or a precompute job, not scatter-gather on every request.
+4. **Growth.** Start with enough shards to grow. Consistent hashing is how you add more without moving everything.
+
+<br />
+
+**Failure:** drawing shards before the bottleneck, or naming a key with no access pattern, or skipping the global-query cost so the interviewer has to pull it.
+
+<br />
+
+---
+
+## Recap Q&A
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="shard-when">
+    <AccordionTrigger>1. When do you shard, and when is one Postgres enough?</AccordionTrigger>
+    <AccordionContent>
+
+      - Vertical scale first. A large RDS instance is tens of TB and tens of thousands of writes per second. Most designs never leave it.
+      - Shard when **storage**, **write throughput**, or **read throughput** (after replicas) is past one machine. Do the math — 500M × 5 KB is 2.5 TB, not a split.
+      - Partitioning inside one Postgres is not sharding. One primary, one WAL. [Core SQL Concepts](/notes/core-sql-concepts).
+      - **Failure:** sharding because the word showed up, while a single instance would have held the numbers.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="shard-key">
+    <AccordionTrigger>2. How do you pick a shard key?</AccordionTrigger>
+    <AccordionContent>
+
+      - Name the column. High **cardinality**, even **spread**, **query alignment** with the hot path. The key is usually permanent.
+      - Social: `user_id`. Checkout: `order_id`. Collocate related rows — comments with their post — so a common read is one database.
+      - Hash for even spread. `is_premium` is two shards. `created_at` on a write-heavy table is today's shard on fire.
+      - **Failure:** sharding by `created_at`, or splitting posts and comments onto different keys so every detail page is a cross-shard join.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="shard-place">
+    <AccordionTrigger>3. Range, hash, or directory?</AccordionTrigger>
+    <AccordionContent>
+
+      - **Range** is simple and range-scan friendly. Monotonic ids and "today" dump all writes on the newest shard.
+      - **Hash `% N`** spreads evenly. Changing `N` remaps almost every key. **Consistent hashing** is the default so adding a shard moves a fraction.
+      - **Directory** can move one hot key. Extra hop, single point of failure. Almost never the interview answer.
+      - **Failure:** `hash % N` with no reshard plan, or leading with a directory so the hour becomes the lookup.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="shard-hot-cross">
+    <AccordionTrigger>4. What do you do about hotspots and cross-shard queries?</AccordionTrigger>
+    <AccordionContent>
+
+      - Hashing spreads keys, not traffic. A celebrity is one key and most of the RPS. Compound the key, or put outliers on a dedicated shard.
+      - Cross-shard work is scatter-gather. The hot path should hit one shard. Global top-N: cache, precompute, or denormalize. Frequent fan-out means the key is wrong.
+      - A rare admin total can hit every shard. A homepage that always does cannot.
+      - **Failure:** calling the cluster balanced because user counts match, while one user is the product — or "query all shards" as the feed.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="shard-consistency">
+    <AccordionTrigger>5. How do you keep writes consistent without 2PC?</AccordionTrigger>
+    <AccordionContent>
+
+      - ACID does not span shards. Collocate so a user's balance, history, and profile are one transaction on one database. That is the design.
+      - 2PC is correct, slow, and fragile. Production avoids it.
+      - When two shards must move money, a **saga**: local steps plus a **compensating** write — a refund, not undo. [Message Queues in System Design](/notes/message-queues-in-system-design).
+      - Tallies can be eventually consistent. Money cannot.
+      - **Failure:** 2PC by default, or treating compensation as a distributed rollback after the money already moved.
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>
