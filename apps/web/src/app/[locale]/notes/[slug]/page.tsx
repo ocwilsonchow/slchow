@@ -10,9 +10,12 @@ import { CollapsibleToc } from "@/features/mdx/components/toc"
 import { NextNoteLink } from "@/features/notes/components/next-note-link"
 import { buildPageMetadata } from "@/lib/metadata"
 import {
+  FULL_STACK_QA_SLUG,
   getMdxContent,
   getNotesStaticParams,
   getPageLocales,
+  loadFullStackQa,
+  loadMdxCompiled,
 } from "@/lib/source"
 
 type Props = {
@@ -39,7 +42,12 @@ const Page = async ({ params }: Props) => {
   setRequestLocale(locale)
 
   const page = getMdxContent("notes", slug, locale)
-  const toc = page?.data.toc ?? []
+  const toc =
+    slug === FULL_STACK_QA_SLUG
+      ? (await loadFullStackQa(locale)).toc
+      : page
+        ? ((await loadMdxCompiled(page)).toc ?? [])
+        : []
 
   return (
     <PageLayout className="grid lg:grid-cols-2 content-start items-start">

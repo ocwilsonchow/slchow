@@ -8,7 +8,10 @@ export type ListNoteCategory =
   | "frontend"
   | "backend"
   | "ai"
+  | "security"
+  | "devops"
   | "computer-science"
+  | "full-stack"
   | "personal"
 
 export type ListNoteItem = {

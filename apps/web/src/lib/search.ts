@@ -1,3 +1,6 @@
+import { readdir, readFile } from "node:fs/promises"
+import path from "node:path"
+import { fileURLToPath } from "node:url"
 import { structure } from "fumadocs-core/mdx-plugins"
 import {
   type AdvancedIndex,
@@ -6,14 +9,61 @@ import {
 import { publicResumeSlug } from "@/features/resume/variants"
 import { fumadocsI18n } from "@/lib/fumadocs-i18n"
 import { createSearchTokenizer } from "@/lib/search-tokenizer"
-import { content, isHiddenSourcePage } from "@/lib/source"
+import {
+  FULL_STACK_QA_SECTION_SLUGS,
+  FULL_STACK_QA_SLUG,
+  isFullStackQaSection,
+  isHiddenSourcePage,
+} from "@/lib/source-hidden"
 
 type LocalizedSearchIndex = AdvancedIndex & {
   locale: string
 }
 
 const SEARCHABLE_CATEGORIES = new Set(["notes", "works"])
-const FRONTMATTER = /^---\r?\n[\s\S]*?\r?\n---\r?\n?/
+const FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/
+const CONTENT_ROOT = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../../../../packages/content/src"
+)
+
+async function listMdxFiles(dir: string, prefix = ""): Promise<string[]> {
+  const entries = await readdir(dir, { withFileTypes: true })
+  const files: string[] = []
+
+  for (const entry of entries) {
+    const rel = prefix ? `${prefix}/${entry.name}` : entry.name
+    if (entry.isDirectory()) {
+      files.push(...(await listMdxFiles(path.join(dir, entry.name), rel)))
+      continue
+    }
+    if (entry.name.endsWith(".mdx")) files.push(rel)
+  }
+
+  return files
+}
+
+function parseFrontmatter(source: string) {
+  const match = /^---\r?\n([\s\S]*?)\r?\n---/.exec(source)
+  if (!match) return {}
+
+  const data: Record<string, string> = {}
+  for (const line of match[1].split("\n")) {
+    const separator = line.indexOf(":")
+    if (separator === -1) continue
+    const key = line.slice(0, separator).trim()
+    if (!key) continue
+    let value = line.slice(separator + 1).trim()
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1)
+    }
+    data[key] = value
+  }
+  return data
+}
 
 function getSearchTarget(slugs: string[], pageUrl: string, locale: string) {
   const [category, slug] = slugs
@@ -35,64 +85,60 @@ function getSearchTarget(slugs: string[], pageUrl: string, locale: string) {
   return null
 }
 
-async function resolveStructuredData(page: {
-  path: string
-  data: {
-    structuredData?:
-      | AdvancedIndex["structuredData"]
-      | (() => Promise<AdvancedIndex["structuredData"]>)
-    getText?: (type: "raw" | "processed") => Promise<string>
-    load?: () => Promise<{ structuredData?: AdvancedIndex["structuredData"] }>
-  }
-}) {
-  let structuredData =
-    typeof page.data.structuredData === "function"
-      ? await page.data.structuredData()
-      : page.data.structuredData
-
-  if (
-    !structuredData &&
-    "load" in page.data &&
-    typeof page.data.load === "function"
-  ) {
-    structuredData = (await page.data.load()).structuredData
-  }
-
-  if (!structuredData && typeof page.data.getText === "function") {
-    const raw = await page.data.getText("raw")
-    structuredData = structure(raw.replace(FRONTMATTER, ""))
-  }
-
-  if (!structuredData) {
-    throw new Error(
-      `Cannot build search index for "${page.path}": structured MDX data is missing.`
-    )
-  }
-
-  return structuredData
-}
-
 async function buildSearchIndexes(): Promise<LocalizedSearchIndex[]> {
   const indexes: LocalizedSearchIndex[] = []
+  const files = await listMdxFiles(CONTENT_ROOT)
 
-  for (const { language, pages } of content.getLanguages()) {
-    for (const page of pages) {
-      if (isHiddenSourcePage(page.path)) continue
-      const target = getSearchTarget(page.slugs, page.url, language)
-      if (!target) continue
+  for (const rel of files) {
+    const posix = rel.split(path.sep).join("/")
+    if (isHiddenSourcePage(posix) || isFullStackQaSection(posix)) continue
 
-      const structuredData = await resolveStructuredData(page)
+    const [locale, category, ...rest] = posix.split("/")
+    if (!locale || !category || rest.length === 0) continue
+    if (!(fumadocsI18n.languages as string[]).includes(locale)) continue
 
-      indexes.push({
-        id: target.url,
-        title: page.data.title ?? page.slugs.at(-1) ?? page.path,
-        description: page.data.description,
-        structuredData,
-        url: target.url,
-        tag: target.category,
-        locale: language,
-      })
+    const slugParts = rest.map((part, index) =>
+      index === rest.length - 1 ? part.replace(/\.mdx$/, "") : part
+    )
+    const slugs = [category, ...slugParts]
+    const pageUrl = `/${slugs.join("/")}`
+    const target = getSearchTarget(slugs, pageUrl, locale)
+    if (!target) continue
+
+    const source = await readFile(path.join(CONTENT_ROOT, rel), "utf-8")
+    const matter = parseFrontmatter(source)
+    const slug = slugParts.join("/")
+    let markdown = source.replace(FRONTMATTER, "")
+
+    if (slug === FULL_STACK_QA_SLUG) {
+      const sections = await Promise.all(
+        FULL_STACK_QA_SECTION_SLUGS.map(async (sectionSlug) => {
+          const sectionPath = path.join(
+            CONTENT_ROOT,
+            locale,
+            category,
+            `${sectionSlug}.mdx`
+          )
+          try {
+            const sectionSource = await readFile(sectionPath, "utf-8")
+            return sectionSource.replace(FRONTMATTER, "")
+          } catch {
+            return ""
+          }
+        })
+      )
+      markdown = sections.filter(Boolean).join("\n\n")
     }
+
+    indexes.push({
+      id: target.url,
+      title: matter.title ?? slugParts.at(-1) ?? posix,
+      description: matter.description,
+      structuredData: structure(markdown),
+      url: target.url,
+      tag: target.category,
+      locale,
+    })
   }
 
   return indexes

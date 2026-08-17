@@ -1,7 +1,12 @@
 import { cn } from "@repo/ds"
 import type { ComponentProps } from "react"
 import Markdown, { type Components } from "react-markdown"
-import { getMdxContent } from "@/lib/source"
+import {
+  FULL_STACK_QA_SLUG,
+  getMdxContent,
+  loadFullStackQa,
+  loadMdxCompiled,
+} from "@/lib/source"
 import { getMDXComponents } from "."
 
 type RenderMdxBlockProps = {
@@ -10,16 +15,24 @@ type RenderMdxBlockProps = {
   locale: string
 }
 
-export const RenderMdxBlockByPath = ({
+export const RenderMdxBlockByPath = async ({
   category,
   slug,
   locale,
   ...props
 }: RenderMdxBlockProps & ComponentProps<"div">) => {
-  const content = getMdxContent(category, slug, locale)
-  const MDX = content?.data.body
+  const components = getMDXComponents()
+  const sections =
+    category === "notes" && slug === FULL_STACK_QA_SLUG
+      ? (await loadFullStackQa(locale)).sections
+      : await (async () => {
+          const content = getMdxContent(category, slug, locale)
+          if (!content) return []
+          const compiled = await loadMdxCompiled(content)
+          return compiled.body ? [{ slug, body: compiled.body }] : []
+        })()
 
-  if (!MDX) return null
+  if (sections.length === 0) return null
 
   return (
     <div
@@ -29,7 +42,9 @@ export const RenderMdxBlockByPath = ({
         props.className
       )}
     >
-      <MDX components={getMDXComponents()} />
+      {sections.map(({ slug: sectionSlug, body: MDX }) => (
+        <MDX key={sectionSlug} components={components} />
+      ))}
     </div>
   )
 }

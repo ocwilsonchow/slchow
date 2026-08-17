@@ -1,8 +1,5 @@
-import { afterEach, describe, expect, it, vi } from "vitest"
-
-vi.mock("collections/server", () => ({ docs: [] }))
-
-import { isHiddenSourcePage } from "./source"
+import { afterEach, describe, expect, it } from "vitest"
+import { isFullStackQaSection, isHiddenSourcePage } from "./source-hidden"
 
 describe("isHiddenSourcePage", () => {
   const original = process.env.SST_STAGE
@@ -18,19 +15,19 @@ describe("isHiddenSourcePage", () => {
   it("hides _-prefixed files on production", () => {
     process.env.SST_STAGE = "production"
 
-    expect(isHiddenSourcePage("en/notes/_qna.mdx")).toBe(true)
-    expect(isHiddenSourcePage("_qna")).toBe(true)
+    expect(isHiddenSourcePage("en/notes/_full-stack-qa.mdx")).toBe(true)
+    expect(isHiddenSourcePage("_full-stack-qa")).toBe(true)
   })
 
   it("shows _-prefixed files on local and dev", () => {
     delete process.env.SST_STAGE
-    expect(isHiddenSourcePage("en/notes/_qna.mdx")).toBe(false)
+    expect(isHiddenSourcePage("en/notes/_full-stack-qa.mdx")).toBe(false)
 
     process.env.SST_STAGE = "local"
-    expect(isHiddenSourcePage("en/notes/_qna.mdx")).toBe(false)
+    expect(isHiddenSourcePage("en/notes/_full-stack-qa.mdx")).toBe(false)
 
     process.env.SST_STAGE = "dev"
-    expect(isHiddenSourcePage("en/notes/_qna.mdx")).toBe(false)
+    expect(isHiddenSourcePage("en/notes/_full-stack-qa.mdx")).toBe(false)
   })
 
   it("never hides files without a _ prefix", () => {
@@ -39,5 +36,14 @@ describe("isHiddenSourcePage", () => {
     expect(isHiddenSourcePage("en/notes/core-javascript-concepts.mdx")).toBe(
       false
     )
+  })
+})
+
+describe("isFullStackQaSection", () => {
+  it("matches section files, not the combined note", () => {
+    expect(isFullStackQaSection("en/notes/_full-stack-qa-api.mdx")).toBe(true)
+    expect(isFullStackQaSection("_full-stack-qa-javascript")).toBe(true)
+    expect(isFullStackQaSection("en/notes/_full-stack-qa.mdx")).toBe(false)
+    expect(isFullStackQaSection("_full-stack-qa")).toBe(false)
   })
 })
