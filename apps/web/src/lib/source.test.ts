@@ -17,17 +17,22 @@ describe("isHiddenSourcePage", () => {
 
     expect(isHiddenSourcePage("en/notes/_full-stack-qa.mdx")).toBe(true)
     expect(isHiddenSourcePage("_full-stack-qa")).toBe(true)
+    expect(isHiddenSourcePage("en/notes/_full-stack-qa-api.mdx")).toBe(true)
+    expect(isHiddenSourcePage("_full-stack-qa-api")).toBe(true)
   })
 
   it("shows _-prefixed files on local and dev", () => {
     delete process.env.SST_STAGE
     expect(isHiddenSourcePage("en/notes/_full-stack-qa.mdx")).toBe(false)
+    expect(isHiddenSourcePage("en/notes/_full-stack-qa-api.mdx")).toBe(false)
 
     process.env.SST_STAGE = "local"
     expect(isHiddenSourcePage("en/notes/_full-stack-qa.mdx")).toBe(false)
+    expect(isHiddenSourcePage("en/notes/_full-stack-qa-api.mdx")).toBe(false)
 
     process.env.SST_STAGE = "dev"
     expect(isHiddenSourcePage("en/notes/_full-stack-qa.mdx")).toBe(false)
+    expect(isHiddenSourcePage("en/notes/_full-stack-qa-api.mdx")).toBe(false)
   })
 
   it("never hides files without a _ prefix", () => {

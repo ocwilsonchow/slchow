@@ -5,13 +5,11 @@ date: 2026-08-15
 category: backend
 ---
 
-可以每天用 Drizzle 出貨，卻仍然不清楚 Postgres 對一條 statement 做了什麼。ORM 給 query 加上類型。Database 求值的仍然是一個 **relation**：rows 進去，rows 出來，邏輯順序固定。
-
-這些筆記把 SQL 當成一條 pipeline。`FROM` 與 `JOIN` 造出工作中的 row set。`WHERE` 丟掉 rows。`GROUP BY` 與 `HAVING` 摺疊並過濾 groups。`SELECT` 給 output 命名。Window functions 在那份 output 上計算，但不摺疊它。`ORDER BY` 與 `LIMIT` 是最後一刀。Schema、RLS 與 migrations 是接線 —— [用 Hono、Drizzle、Zod OpenAPI 與 SST 打造 Backend APIs](/notes/backend-apis-hono-sst) 和 [用 Hono、Better Auth、Drizzle 與 Postgres RLS 打造 Multi-Tenant 後端](/notes/multi-tenant-backend-drizzle-hono-better-auth)。這篇 note 講的是 statement。
+ORM 給 query 加上類型。Postgres 求值的仍然是一個 **relation**：rows 進去，rows 出來，邏輯順序固定。Schema、RLS 與 migrations 是接線 —— [用 Hono、Drizzle、Zod OpenAPI 與 SST 打造 Backend APIs](/notes/backend-apis-hono-sst) 和 [用 Hono、Better Auth、Drizzle 與 Postgres RLS 打造 Multi-Tenant 後端](/notes/multi-tenant-backend-drizzle-hono-better-auth)。這篇 note 講的是 statement。
 
 <br />
 
-例子共用一家 shop：customers、orders、line items。Constraints 寫在 `CREATE TABLE` 裡。Indexes 等到講 cost 再出現。
+例子共用一家 shop。Constraints 寫在 `CREATE TABLE` 裡。Indexes 等到講 cost。
 
 <br />
 
@@ -55,31 +53,22 @@ CREATE TABLE order_items (
 
 <br />
 
-Patterns 是最後一段。Pipeline 在先。
-
-<br />
-
 ---
 
 ## 1. Relation 進去，relation 出來
 
-Table 是一個有名字的 relation：一袋 rows，每行是一組 columns 的 tuple。`SELECT` 不是一段去拜訪 table 的 procedure。它是一個表達式：吃進 relations，吐出 relation。結果的形狀 —— 哪些 columns、多少 rows —— 由 statement 決定，不是由 application code 裡的 loop 決定。
+`SELECT` 是一個吃進 relations、吐出 relation 的表達式 —— 不是一段去拜訪 table 的 procedure。
 
-<br />
-
-**Key** 是對「哪些 rows 可以存在」的 constraint，不是給 planner 的 hint。`PRIMARY KEY` 說這一列標識這行。`customers.email` 上的 `UNIQUE` 說兩個 customers 不能共用一個 email。`REFERENCES` 說 order 不能點名一個不存在的 customer。Application 裡的 `WHERE` 替代不了其中任何一條。
-
-<br />
-
-**`NULL` 不是一個值。** 它是值的缺席。`WHERE email = NULL` 永遠不為 true；predicate 是 `IS NULL`。與 `NULL` 比較得到 unknown，而 `WHERE` 只留下 true。所以 subquery 可能返回 `NULL` 時，`NOT IN (SELECT …)` 會變成陷阱；`NOT EXISTS` 才是仍然說它所聲稱之事的 anti-join。
-
-<br />
+- Table 是一個有名字的 relation：一袋 rows，每行是一組 columns 的 tuple。結果的形狀由 statement 決定。
+- **Key** 是對「哪些 rows 可以存在」的 constraint，不是給 planner 的 hint。`PRIMARY KEY` 標識這一行。`customers.email` 上的 `UNIQUE` 禁止 duplicates。`REFERENCES` 禁止點名缺失 customer 的 order。
+- **`NULL` 不是一個值。** 它是值的缺席。與 `NULL` 比較得到 unknown，而 `WHERE` 只留下 true。
+- **Failure:** `WHERE email = NULL` 永遠不為 true；predicate 是 `IS NULL`。Subquery 可能回傳 `NULL` 時，`NOT IN (SELECT …)` 會變成陷阱。`NOT EXISTS` 才是仍然說它所聲稱之事的 anti-join。
 
 ---
 
 ## 2. 邏輯求值順序
 
-Postgres 不會按書寫順序從左到右跑 statement。它跑的是一條 **logical** pipeline。物理執行 —— hash vs nested loop、index vs seq scan —— 是必須保住這層含義的後續選擇。
+Postgres 並不按書寫從左到右跑 statement。它跑一條 **logical** pipeline。Physical execution —— hash vs nested loop、index vs seq scan —— 是稍後的選擇，必須保住這個含義。
 
 <br />
 
@@ -96,56 +85,24 @@ flowchart LR
 
 <br />
 
-`FROM` / `JOIN` 造出工作中的 row set。`WHERE` 過濾 **rows**。`GROUP BY` 把 rows 摺疊成 groups；`HAVING` 過濾 **groups**。`SELECT` 給 output columns 命名。Window functions 再在那份結果上計算，而不繼續摺疊。`ORDER BY` 排序。`LIMIT` 截斷。`WITH` CTE 是插進 `FROM` 的 named subquery。它不是另一台引擎。
-
-<br />
-
-這個順序解釋了為什麼 `SELECT` alias 對 `WHERE` 不可見，以及為什麼 window function 不能出現在 `WHERE` 或 `HAVING` 裡。那些子句已經跑完了。要按 window 過濾，用 subquery 或 CTE —— 再一次 `FROM`。
-
-<br />
-
-```sql
--- legal: filter rows before grouping
-SELECT customer_id, count(*) AS order_count
-FROM orders
-WHERE status = 'shipped'
-GROUP BY customer_id
-HAVING count(*) >= 3;
-
--- illegal: alias and window are not in scope for WHERE
--- SELECT count(*) AS order_count FROM orders WHERE order_count > 0;
--- SELECT row_number() OVER (ORDER BY created_at) AS n FROM orders WHERE n = 1;
-```
-
-<br />
+- `FROM` / `JOIN` 造出工作中的 row set。`WHERE` 過濾 **rows**。`GROUP BY` 摺疊 groups；`HAVING` 過濾 **groups**。`SELECT` 給 columns 命名。Windows 計算但不繼續摺疊。`ORDER BY` 排序。`LIMIT` 切斷。
+- `WITH` CTE 是插進 `FROM` 的 named subquery。它不是另一套 engine。
+- `SELECT` alias 對 `WHERE` 不可見。Window function 不能出現在 `WHERE` 或 `HAVING` —— 那些 clauses 已經跑過了。
+- **Failure:** 對 window alias 寫 `WHERE order_count > 0` 或 `WHERE n = 1`。用 subquery 或 CTE 過濾 window —— 再來一次 `FROM`。
 
 ---
 
 ## 3. JOIN
 
-Join 是 `FROM` 造出更寬一行的方式。**Inner** 留下 matches。**Left** 留下每一行左邊，右邊沒有 match 時填 `NULL`。**Anti-join** 留下 **沒有** match 的左邊 —— 沒有 orders 的 customers，沒有 items 的 orders。
+Join 是 `FROM` 造出更寬 row 的方式。**Inner** 留下 matches。**Left** 留下每一行 left row，沒有 match 時把右側填成 `NULL`。**Anti-join** 留下 **沒有** match 的 left rows。
 
 <br />
 
 ```sql
--- inner: orders that have a customer (all of them, given the FK)
-SELECT c.email, o.id AS order_id, o.status
-FROM orders o
-JOIN customers c ON c.id = o.customer_id;
-
--- left: every customer, orders if they exist
 SELECT c.email, o.id AS order_id
 FROM customers c
 LEFT JOIN orders o ON o.customer_id = c.id;
-```
 
-<br />
-
-Left join 會按 order 的數量把 customer 複製出來。那是 cardinality 陷阱：join 之後不做 grouping 就 aggregate，會把同一個 customer 數成他們有多少張 orders。問題是「誰一張都沒有？」時，不要把 `LEFT JOIN … WHERE right.id IS NULL` 當成第一反射。`NOT EXISTS` 是不會複製、也不會被 `NULL` 弄壞的 anti-join。
-
-<br />
-
-```sql
 SELECT c.email
 FROM customers c
 WHERE NOT EXISTS (
@@ -157,15 +114,15 @@ WHERE NOT EXISTS (
 
 <br />
 
+- Left join 會按每個 order 把 customer 複製一次。Join 之後不做 grouping 就 aggregate，會把 customer 算成他們有多少 orders 那麼多次。
+- `EXISTS` / `NOT EXISTS` 在第一次 match 就停，並讓 outer row 保持完整。
+- **Failure:** 把 `LEFT JOIN … WHERE right.id IS NULL` 當成第一反應的 anti-join。它會複製，而 `NULL` 比較很容易寫錯。`JOIN` 再加 `DISTINCT` 是在撤銷你自己引入的 cardinality explosion。
+
 ---
 
 ## 4. Aggregation
 
-`GROUP BY` 是摺疊。`WHERE` 之後，剩下的 rows 按 grouping keys 分區。每個 group 變成一行 output。未分組的 columns 不能出現在 `SELECT` 裡，除非包進 aggregate —— Postgres 會拒絕這條 statement，而不是隨便挑一個值。
-
-<br />
-
-`HAVING` 是 groups 的 `WHERE`。`WHERE` 看不見 `count(*)`。`HAVING` 可以。
+`GROUP BY` 就是摺疊。`WHERE` 之後，剩下的 rows 按 grouping keys 分區。每個 group 變成一行 output。
 
 <br />
 
@@ -184,19 +141,16 @@ HAVING count(o.id) >= 1;
 
 <br />
 
-`count(o.id)` 會忽略 left join 帶來的 `NULL`，所以沒有 orders 的 customers 是 `0`，會被 `HAVING` 丟掉。`count(*)` 會把那行空的 joined row 算成一。你選的 aggregate 是在陳述哪些 rows 存在，不是「多少」的同義詞。
-
-<br />
+- 未分組的 columns 不能出現在 `SELECT`，除非包進 aggregate —— Postgres 會拒絕 statement，而不是隨便挑一個值。
+- `HAVING` 是 groups 的 `WHERE`。`WHERE` 看不見 `count(*)`。`HAVING` 可以。
+- `count(o.id)` 忽略 left join 帶來的 `NULL`s，所以沒有 orders 的 customers 是 `0`，並從 `HAVING` 掉出去。`count(*)` 會把那行空的 joined row 算成一。
+- **Failure:** 把 `count(col)` 與 `count(*)` 當成同義詞。你選的 aggregate 是在陳述哪些 rows 存在。
 
 ---
 
 ## 5. Windows
 
-Window function 在相關 rows 上計算，**但不摺疊它們**。`PARTITION BY` 是 group。`OVER` 裡的 `ORDER BY` 是這個 group 內部的順序。結果是每個 input row 一個值，不是每個 group 一行。
-
-<br />
-
-這就是與 `GROUP BY` 的差別。Aggregation 回答「這個 customer 的 sum 是多少？」Windows 回答「這一行在該 customer 的 orders 裡排第幾？」並且仍然返回每一張 order。
+Window function 跨相關 rows 計算，**但不摺疊它們**。`PARTITION BY` 是 group。`OVER` 裡的 `ORDER BY` 是那個 group 內部的順序。結果是每個 input row 一個值。
 
 <br />
 
@@ -204,38 +158,28 @@ Window function 在相關 rows 上計算，**但不摺疊它們**。`PARTITION B
 SELECT
   o.customer_id,
   o.id AS order_id,
-  o.created_at,
   row_number() OVER (
     PARTITION BY o.customer_id
     ORDER BY o.created_at DESC, o.id DESC
-  ) AS recency,
-  sum(order_total.cents) OVER (
-    PARTITION BY o.customer_id
-    ORDER BY o.created_at, o.id
-  ) AS running_cents
-FROM orders o
-JOIN (
-  SELECT order_id, sum(qty * unit_cents) AS cents
-  FROM order_items
-  GROUP BY order_id
-) order_total ON order_total.order_id = o.id;
+  ) AS recency
+FROM orders o;
 ```
 
 <br />
 
-`row_number()` 是那條 essential window。在外層 query 裡過濾 `recency = 1`，就得到每個 customer 最新的 order。Running `sum()` 是另一半：一個隨每張 order 增長的 frame。Join 先做 aggregation，line items 才不會把 window 炸開。兩個 windows 都不屬於 `WHERE`。
-
-<br />
+- Aggregation 回答「這個 customer 的 sum 是多少？」Windows 回答「這一行在該 customer 的 orders 裡排第幾？」並且仍然回傳每一筆 order。
+- `row_number()` 是最核心的 window。在 outer query 裡過濾 `recency = 1`，得到每個 customer 最新的 order。Running `sum() OVER (PARTITION BY … ORDER BY …)` 是另一半：隨每一行長大的 frame。
+- 先把 line items **aggregate 完** 再上 window，免得把 row set 炸開。Window 都不該出現在 `WHERE`。
 
 ---
 
 ## 6. Patterns
 
-開頭那張地圖是四種形狀。每一種都是 shop 上的一條短 statement。
+同一家 shop 上的四種 production 形狀：**exists**、**keyset pagination**、**upsert**、**top-N-per-group**。
 
 <br />
 
-**Exists。** 「至少有一張 shipped order」是 semi-join。`JOIN` 加 `DISTINCT` 也能答，同時會把 row count 炸開。`EXISTS` 在第一條 match 處停下，並保持 outer row 完整。
+**Exists。** 「至少有一筆 shipped order」是 semi-join。`EXISTS` 在第一次 match 就停，並讓 outer row 保持完整。
 
 <br />
 
@@ -252,7 +196,7 @@ WHERE EXISTS (
 
 <br />
 
-**Keyset pagination。** `OFFSET n` 仍然要走過 `n` 行。Keyset seek 從你已經拿到的最後一行之後開始。Sort key 必須 unique —— `(created_at, id)` —— 否則共享同一個 timestamp 的 rows 會跳過或重複。
+**Keyset pagination。** `OFFSET n` 仍會走過 `n` 行。Keyset seek 從你已經有的最後一行之後開始。Sort key 必須 unique —— `(created_at, id)` —— 否則共享同一個 timestamp 的 rows 會跳過或重複。
 
 <br />
 
@@ -266,7 +210,7 @@ LIMIT 20;
 
 <br />
 
-**Upsert。** Check-then-insert 會 race。`ON CONFLICT` 是對著 schema 已經聲明的 unique key 的一條 statement —— `customers.email`，或 `(order_id, sku)`。
+**Upsert。** Check-then-insert 會 race。`ON CONFLICT` 是對著 schema 已經宣告的 unique key 的一條 statement。
 
 <br />
 
@@ -280,7 +224,7 @@ RETURNING id;
 
 <br />
 
-**Top-N-per-group。** `GROUP BY` 沒法在一次裡留下「top」那一行的未分組 columns。給 rows 編號，再留下 `n <= 2`。
+**Top-N-per-group。** `GROUP BY` 無法在不做第二遍的情況下保住「top」那一行的非分組 columns。給 rows 編號，然後留下 `n <= 2`。
 
 <br />
 
@@ -300,28 +244,11 @@ FROM (
 WHERE n <= 2;
 ```
 
-<br />
-
 ---
 
 ## 7. Cost
 
-**Index** 是讓 lookup 變便宜、write 稍貴一點的 data structure。它不是 constraint。強制 `customers.email` 的 unique index 兩者都是；`orders.customer_id` 上的普通 index 只是 access path。
-
-<br />
-
-沒有這條 path，`WHERE customer_id = $1` 就是 sequential scan：每次每一行。筆電上瞬間返回。Production 裡隨資料線性變慢。
-
-<br />
-
-```sql
-EXPLAIN SELECT id, status
-FROM orders
-WHERE customer_id = '11111111-1111-1111-1111-111111111111';
-
--- Seq Scan on orders
---   Filter: (customer_id = '11111111-…')
-```
+**Index** 是讓 lookup 便宜、write 稍貴一點的資料結構。它不是 constraint。
 
 <br />
 
@@ -333,21 +260,22 @@ EXPLAIN SELECT id, status
 FROM orders
 WHERE customer_id = '11111111-1111-1111-1111-111111111111';
 
--- Index Scan using orders_customer_id_created_at_idx on orders
+-- Index Scan using orders_customer_id_created_at_idx
 --   Index Cond: (customer_id = '11111111-…')
 ```
 
 <br />
 
-同一個 index 也覆蓋 keyset query：`customer_id` 上的 equality，再沿 `created_at DESC, id DESC` 走。`EXPLAIN` 用來確認你寫的 statement 是你以為的 access path。`EXPLAIN (ANALYZE)` 用來對照真實 row counts。憑本地資料猜測，是 seq scan 被送上線的方式。
-
-<br />
+- 強制 `customers.email` 的 unique index 既是 constraint 也是 access path。`orders.customer_id` 上的 plain index 只是 access path。
+- 沒有那條 path，`WHERE customer_id = $1` 就是 sequential scan：筆電上瞬間完成，production 裡隨資料線性變慢。
+- 同一個 composite index 也能覆蓋 keyset seek：`customer_id` 上等值，再走 `created_at DESC, id DESC`。
+- **Failure:** 憑本地資料猜測，然後把 seq scan 送上線。`EXPLAIN` 檢查你想要的 access path。`EXPLAIN (ANALYZE)` 對照真實 row counts。
 
 ---
 
 ## 8. Failure
 
-兩個 requests 讀 `qty`，都加一，都 write。每個 transaction 看起來都正確。這一行跳過了一個數字。Isolation 沒有神秘地失敗。模式是 check-then-act，而 database 從未被要求把它做成 atomic —— 沒有 `UPDATE order_items SET qty = qty + 1`，也沒有 `UNIQUE` 去拒絕重複 insert。
+兩個 requests 讀 `qty`，都加一，都 write。每個 transaction 看起來都正確。這一行跳過了一個數字。Isolation 沒有神秘地失敗 —— database 從未被要求把這次改動做成 atomic。
 
 <br />
 
@@ -356,17 +284,80 @@ WHERE customer_id = '11111111-1111-1111-1111-111111111111';
 UPDATE order_items
 SET qty = qty + 1
 WHERE id = :id;
-
--- missing unique: two inserts of the same email both succeed
--- UNIQUE (email) on customers is the constraint; ON CONFLICT is the statement
 ```
 
 <br />
 
-忘掉 unique constraint，是再多小心的 `WHERE` 事後也修不好的 data bug。沒有 atomic update 或 constraint 的 read-modify-write，是等流量到來的 lost update。Schema 才是 API。Application filters 是習慣。
+- 忘了 unique constraint 是 data bug，事後再仔細寫 `WHERE` 也修不回來。
+- Check-then-act 是 **lost update**。用 `UPDATE … SET qty = qty + 1`，或用拒絕 duplicate insert 的 `UNIQUE`。Check-then-insert 會 race；`ON CONFLICT` 是一條 statement。
+- Schema 才是 API。Application filters 是習慣。
+- Isolation、RLS 與 tenant context：[用 Hono、Better Auth、Drizzle 與 Postgres RLS 打造 Multi-Tenant 後端](/notes/multi-tenant-backend-drizzle-hono-better-auth)。Typed schema、pool 與 migrations：[用 Hono、Drizzle、Zod OpenAPI 與 SST 打造 Backend APIs](/notes/backend-apis-hono-sst)。
 
-<br />
+---
 
-這套 stack 的 isolation 路徑 —— transactions、row-level security、tenant context —— 見 [用 Hono、Better Auth、Drizzle 與 Postgres RLS 打造 Multi-Tenant 後端](/notes/multi-tenant-backend-drizzle-hono-better-auth)。Typed schema、pool，以及作為 deploy step 的 migrations，見 [用 Hono、Drizzle、Zod OpenAPI 與 SST 打造 Backend APIs](/notes/backend-apis-hono-sst)。
+## Recap Q&A
 
-<br />
+<Accordion type="single" collapsible>
+  <AccordionItem value="sql-eval-order">
+    <AccordionTrigger>1. Postgres 按什麼邏輯順序求值一條 SELECT？</AccordionTrigger>
+    <AccordionContent>
+
+      - Postgres 並不按書寫從左到右跑 statement。它跑一條 **logical** pipeline：`FROM` / `JOIN` → `WHERE`（rows）→ `GROUP BY` → `HAVING`（groups）→ `SELECT` → **windows** → `ORDER BY` → `LIMIT`。
+      - Physical plans（hash vs nested loop、index vs seq scan）必須保住這個含義。
+      - `SELECT` alias 對 `WHERE` 不可見。Window 不能出現在 `WHERE` 或 `HAVING`。用 subquery 或 CTE 過濾 window —— 再來一次 `FROM`。
+      - **Failure:** 把 SQL 當成一段去拜訪 table 的 procedure。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="sql-join-where">
+    <AccordionTrigger>2. INNER、LEFT 與 anti-join 差在哪，為什麼 LEFT JOIN 之後在右表上寫 WHERE 是陷阱？</AccordionTrigger>
+    <AccordionContent>
+
+      - **Inner** 留下 matches。**Left** 留下每一行 left row，沒有 match 時把右側填成 `NULL`。**Anti-join** 留下 **沒有** match 的 left rows。
+      - Left join 會按每個 match 把 left row 複製一次 —— join 之後不做 grouping 就 aggregate，會把 customer 算成他們有多少 orders 那麼多次。
+      - `LEFT JOIN … WHERE right.id IS NULL` 是脆弱的 anti-join：它會複製，而 `NULL` 比較很容易寫錯。
+      - `NOT EXISTS` 在第一次 match 就停，讓 outer row 保持完整，也不會被 `NULL` 弄壞。
+      - **Failure:** `JOIN` 再加 `DISTINCT` 去撤銷你自己引入的 cardinality explosion。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="sql-group-vs-window">
+    <AccordionTrigger>3. 什麼時候 GROUP BY，什麼時候該用 window？</AccordionTrigger>
+    <AccordionContent>
+
+      - `GROUP BY` 就是摺疊：`WHERE` 之後，剩下的 rows 按 grouping keys 分區，每個 group 變成 **一行** output。未分組的 columns 不能出現在 `SELECT`，除非被 aggregated。
+      - `HAVING` 是 groups 的 `WHERE` —— `WHERE` 看不見 `count(*)`。Left join 之後，`count(o.id)` 忽略 `NULL`s；`count(*)` 把那行空的 joined row 算成一。
+      - **Window** 跨相關 rows 計算，**但不摺疊它們**。`PARTITION BY` 是 group；`OVER` 裡的 `ORDER BY` 是那個 group 內部的順序。
+      - Aggregation 回答「這個 customer 的 sum 是多少？」Windows 回答「這一行在該 customer 的 orders 裡排第幾？」並且仍然回傳每一筆 order。
+      - `row_number()` 加上 outer `WHERE n = 1` 就是 top-N-per-group。Window 都不該出現在 `WHERE`。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="sql-cost-indexes">
+    <AccordionTrigger>4. Index 是做什麼的，怎麼知道 planner 在用它？</AccordionTrigger>
+    <AccordionContent>
+
+      - **Index** 是讓 lookup 便宜、write 稍貴一點的資料結構。它不是 constraint。
+      - `customers.email` 上的 unique index 兩者都是；`orders.customer_id` 上的 plain index 只是 access path。沒有那條 path，`WHERE customer_id = $1` 就是 sequential scan：筆電上瞬間完成，production 裡隨資料線性變慢。
+      - `EXPLAIN` 檢查你寫的 statement 是不是你想要的 access path。`EXPLAIN (ANALYZE)` 對照真實 row counts。
+      - 同一個 composite index 可以覆蓋 keyset seek：`customer_id` 上等值，再走 `(created_at, id)`。優先 keyset pagination，不要 `OFFSET`。
+      - **Failure:** 憑本地資料猜測，然後把 seq scan 送上線。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="sql-failure">
+    <AccordionTrigger>5. 哪些 SQL failure modes 看起來像「query 寫對了」？</AccordionTrigger>
+    <AccordionContent>
+
+      - **`NULL` 不是一個值。** `WHERE email = NULL` 永遠不為 true；predicate 是 `IS NULL`。Subquery 可能回傳 `NULL` 時，`NOT IN (SELECT …)` 會變成陷阱。
+      - Check-then-act 是 **lost update**：兩個 sessions 讀 `qty`，都加一，都 write。用 `UPDATE … SET qty = qty + 1`，或用拒絕 duplicate insert 的 `UNIQUE`。
+      - 忘了 unique constraint 是 data bug，事後再仔細寫 `WHERE` 也修不回來。
+      - Check-then-insert 會 race；`ON CONFLICT` 是對著 schema 已經宣告的 unique key 的一條 statement。Schema 才是 API。Application filters 是習慣。
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>

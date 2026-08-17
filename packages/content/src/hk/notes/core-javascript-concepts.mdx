@@ -4,167 +4,94 @@ description: Call stack、event loop、task queues、closures、promises 與 gen
 category: frontend
 ---
 
-可以每天使用 promises 與 `async`/`await`，卻仍然不清楚 runtime 底下在做什麼。這些筆記由內而外重溫 JavaScript 的 execution model。
+同步程式碼跑在 **call stack** 上。Host 在 stack 之外處理工作。**Event loop** 協調何時可以跑佇列中的 callbacks。Closures 保留 lexical state。Promises、`async`/`await` 與 generators 暫停並恢復工作。
 
-這些概念構成一個系統：同步程式碼在 **call stack** 上執行，host environment 處理 stack 之外的工作，而 **event loop** 協調何時可以跑佇列中的 callbacks。Closures 解釋 functions 如何保留 state；promises、`async`/`await` 與 generators 則提供不同方式來暫停與恢復工作。
-
-這篇 note 講的是 code 何時執行。`class`、prototype 與 `this` 在 [TypeScript Class 與 Runtime Identity](/notes/typescript-classes-and-runtime-identity)。
+這篇 note 講的是 code 何時執行。`class`、prototype 與 `this` 在 [TypeScript Class 與 Runtime Identity](/notes/typescript-classes-and-runtime-identity)。Queues 與 `5 1 3 4 2` 謎題：[深入理解 JavaScript Event Loop](/notes/javascript-event-loop-in-depth)。
 
 <br />
 
 ![JavaScript Event Loop in the browser](./images/javascript-event-loop-browser.webp)
 
-瀏覽器 event loop 一覽：同步程式碼在 call stack 上執行，host APIs 在背景完成工作並 enqueue tasks，而 promise reactions 進入優先級更高的 microtask queue。每當 stack 清空，event loop 就把下一個 callback 推進去——先 microtasks，再一次一個 task。
+<br />
+
+- 同步程式碼跑在 stack 上。
+- Host APIs 在 stack 外做完工作並 enqueue 一個 callback。
+- 當 stack 為空，loop 排空 **microtask queue**，然後把 **一個** task 推上 stack。
 
 ---
 
 ## 1. Event Loop
 
-常見的第一印象是：event loop 只是檢查非同步工作有沒有做完。更有用的模型是：瀏覽器每次 event-loop iteration 通常會跑 **一個 task**、排空 **所有 microtasks**、給瀏覽器一次 render 機會，然後再進入另一個 task。Stack、host APIs、兩條 queues，以及 `5 1 3 4 2` 排序謎題的完整 walkthrough 在 [深入理解 JavaScript Event Loop](/notes/javascript-event-loop-in-depth)。
-
-<br />
-
-重要後果是：JavaScript 不會中斷目前在 stack 上的程式碼。Timer 可能在背景結束，但它的 callback 必須等到目前這個 task 及其 microtasks 做完。這就是為什麼零毫秒的 timer 仍然不會立刻執行。
+瀏覽器每次 iteration 通常會跑 **一個 task**、排空 **所有 microtasks**、也許 render，然後再取另一個 task。
 
 <br />
 
 ```ts
-const log: string[] = []
-
 log.push("sync start")
-
-setTimeout(() => {
-  log.push("macrotask")
-}, 0)
-
-Promise.resolve().then(() => {
-  log.push("microtask")
-})
-
+setTimeout(() => log.push("macrotask"), 0)
+Promise.resolve().then(() => log.push("microtask"))
 log.push("sync end")
-
-// After the timer runs:
 // ["sync start", "sync end", "microtask", "macrotask"]
 ```
 
 <br />
 
+- JavaScript 不會中斷目前在 stack 上的程式碼。
+- Timer 可能在背景結束；它的 callback 要等當前 task 及其 microtasks。
+- **Failure:** 零毫秒的 timer 仍然不是立刻執行。Delay 只是 **timer task** 的下限。
+
 ---
 
 ## 2. Call Stack
 
-**Call stack** 是 JavaScript 對「目前正在做什麼」的紀錄。它是後進先出結構：呼叫 function 會 push 一個 frame，return 或 throw 則移除該 frame。只有最上方的 frame 可以執行。
-
-<br />
-
-這解釋了為什麼深度遞迴即使演算法邏輯正確仍可能失敗。每一次 recursive call 都會再消耗一個 stack frame，直到 engine 碰到上限。對深度無界的輸入，iteration 或其他常數 stack 技巧更安全。ES2015 規範了 proper tail calls，可讓某些遞迴形狀變成常數空間，但主流 engines 裡只有 JavaScriptCore 實作了——recursion depth 仍是實務限制。
+**Call stack** 是 engine 目前正在執行什麼的 last-in, first-out 記錄。呼叫 function 會 push 一個 frame；return 或 throw 會把它 pop 掉。只有最頂端的 frame 在跑。
 
 <br />
 
 ```ts
 function factorialRecursive(n: number): number {
-  if (!Number.isInteger(n) || n < 0) {
-    throw new RangeError("n must be a non-negative integer")
-  }
   if (n <= 1) return 1
   return n * factorialRecursive(n - 1)
 }
 
 function factorialIterative(n: number): number {
-  if (!Number.isInteger(n) || n < 0) {
-    throw new RangeError("n must be a non-negative integer")
-  }
-
   let result = 1
-  for (let i = 2; i <= n; i++) {
-    result *= i
-  }
+  for (let i = 2; i <= n; i++) result *= i
   return result
 }
-
-// Same result; iterative keeps O(1) stack frames
-factorialRecursive(5) // 120
-factorialIterative(5) // 120
 ```
 
 <br />
+
+- 深層 recursion 每次 call 消耗一個 frame，直到 engine 撞上上限。
+- ES2015 規定了 proper tail calls；主流 engines 裡只有 JavaScriptCore 實作了。Recursion depth 仍是實務上限。
+- **Failure:** 緊密的 loop 並不分享 thread。它佔有 thread —— 在它 return 之前沒有 paint、clicks 或 timers。
 
 ---
 
 ## 3. Macrotask Queue
 
-**Macrotask** 是常見術語，而 HTML specification 通常只稱它們為 **tasks**。Timers、用戶互動與 messages 可以把工作放進 task queues。瀏覽器可能維護多條 queues，並選擇下一個可跑的 task，所以「單一全域 FIFO queue」只是簡化的 mental model。
+**Macrotask** 是非正式說法；HTML spec 通常說 **tasks**。Timers、用戶交互與 messages 會 enqueue 工作。瀏覽器可能維持多條 queues 並 **選出** 一個可跑的 task，所以「一條全域 FIFO」只是漫畫。
 
-<br />
-
-要記住的規則是：event loop 跑一個選中的 task，然後在選下一個 task 之前做 microtask checkpoint。因此巢狀的 `setTimeout` 只是排程未來的工作；它不能在父級目前這一輪裡繼續跑。
-
-<br />
-
-```ts
-const order: string[] = []
-
-setTimeout(() => {
-  order.push("timeout-1")
-  setTimeout(() => {
-    order.push("timeout-2")
-  }, 0)
-}, 0)
-
-setTimeout(() => {
-  order.push("timeout-3")
-}, 0)
-
-// Typical order: timeout-1 → timeout-3 → timeout-2
-```
-
-<br />
+- Loop 跑一個被選出的 task，然後做一次 microtask checkpoint，再跑另一個 task。
+- 嵌套的 `setTimeout` 調度的是 **未來** 的工作。典型順序：`timeout-1` → `timeout-3` → `timeout-2`。
+- **Failure:** 把 `setTimeout(fn, 0)` 當成「下一行之前」。它的意思是「一旦允許跑 timer task」。
 
 ---
 
 ## 4. Microtask Queue
 
-**Microtasks** 是理解非同步 JavaScript 時最常被漏掉的一塊。Promise handlers、`queueMicrotask` 與 `MutationObserver` callbacks 使用這條優先級更高的 queue。當一個 task 結束且 stack 為空後，runtime 會排空 microtasks，**直到 queue 清空**。
+**Microtasks** —— Promise handlers、`queueMicrotask`、`MutationObserver` —— 是 **同一條** thread 上優先級更高的 queue。一個 task 結束且 stack 為空之後，runtime 會把它們排空，**直到 queue 空掉**。
 
-<br />
-
-這解釋了為什麼 promise handlers 會在已就緒的 `setTimeout` callback 之前執行。它也帶有風險：一個 microtask 可以再 enqueue 另一個 microtask，所以無界鏈可能無限期延遲 timers、用戶輸入與 rendering。
-
-<br />
-
-```ts
-const order: string[] = []
-
-setTimeout(() => {
-  order.push("macrotask")
-}, 0)
-
-queueMicrotask(() => {
-  order.push("micro-1")
-  queueMicrotask(() => {
-    order.push("micro-2")
-  })
-})
-
-Promise.resolve().then(() => {
-  order.push("promise")
-})
-
-// Final order after the timeout runs:
-// micro-1 → promise → micro-2 → macrotask
-```
-
-<br />
+- 一個 microtask 再 queue 另一個 microtask，加進的是 **同一次** checkpoint。典型順序：`micro-1` → `promise` → `micro-2` → `macrotask`。
+- 這就是為什麼 promise handler 會在已經就緒的 `setTimeout` 之前跑。
+- **Failure:** 無界的 microtask chain 會無限推遲 timers、input 與 rendering —— 沒有 `while` 的凍結。
 
 ---
 
 ## 5. Execution Context
 
-**Execution context** 把 call stack 與 scope 連起來。當 JavaScript 進入 global code 或呼叫 function 時，它會建立執行該程式碼所需的環境：bindings、outer lexical environment，以及 `this` value。
-
-<br />
-
-每次 function call 都有自己的 context 與 stack frame。Function return 後 frame 會被移除，但若回傳的 function 對它形成 closure，其 lexical environment 仍可被觸達。Arrow functions 多了一個有用區別：它們不建立自己的 `this`；而是從周圍 context 捕捉它。
+**Execution context** 是 JavaScript 進入 global code 或呼叫 function 時建立的環境：bindings、outer lexical environment，以及 `this`。
 
 <br />
 
@@ -177,44 +104,26 @@ const obj = {
   },
 }
 
-const globalLabel = "global"
-
-function outer(prefix: string) {
-  const local = "inner"
-
-  function inner(): string {
-    // Scope chain: inner → outer → global
-    return `${prefix}:${local}:${globalLabel}`
-  }
-
-  return inner
-}
-
-// The regular method receives `obj` as `this`, and its arrow captures it.
-obj.regular() // "object"
-
-// The returned function retains `prefix` and `local`.
-outer("ctx")() // "ctx:inner:global"
+obj.regular() // "object" — arrow captures the method's `this`
 ```
 
 <br />
+
+- 每次 call 都有自己的 context 與 stack frame。
+- Function return 後 frame 被拿掉，但如果回傳的 function close over 了它，lexical environment 仍可觸達。
+- Arrow functions 不建立自己的 `this`；它們從周圍的 context 捕獲。
 
 ---
 
 ## 6. Closures
 
-**Closure** 最好不要想成某種特殊類型的 function。Function 天然帶有對建立時 lexical environment 的存取，即使它在 outer function 已經 return 之後才被呼叫。
-
-<br />
-
-這讓 private state、event handlers，以及許多 hook patterns 成為可能。Closure 保留了什麼值得刻意處理：被捕捉的 objects 會保持可達；在 loop 裡用 `var` 建立的 callbacks 會共用同一個 function-scoped binding。`let` loop variable 則為每次 iteration 建立新 binding，避免那個常見陷阱。
+**Closure** 不是一種特殊的 function。Function 帶著它被建立時的 **lexical environment** 的存取權，即使外層 function 已經 return。
 
 <br />
 
 ```ts
 function createCounter(start = 0) {
   let count = start
-
   return {
     inc(): number {
       count += 1
@@ -228,123 +137,166 @@ function createCounter(start = 0) {
 
 const counter = createCounter(10)
 counter.inc() // 11
-counter.inc() // 12
-counter.value() // 12 — `count` is private to the closure
+counter.value() // 11 — `count` is private to the closure
 ```
 
 <br />
+
+- Private state、event handlers，以及許多 hook patterns 都是 closures。
+- 被捕獲的 objects 仍可觸達。Callback close over 一棵大 tree，就可以把它 leak 住。
+- **Failure:** 在 loop 裡用 `var` 建立的 callbacks 共用一個 function-scoped binding。`let` 每次 iteration 建立一個新 binding。Closure 是活的 environment，不是值的副本。
 
 ---
 
 ## 7. Promises
 
-**Promise** 代表一個操作最終的結果。它從 `pending` 開始，然後變成 `fulfilled` 或 `rejected`。一個容易忽略的細節是：呼叫 `.then`、`.catch` 或 `.finally` 並不會立刻跑 handler；已 settled 的 promise 會把該 handler 排進 microtask queue。
-
-<br />
-
-Promise combinators 若當成不同的協調策略，會比較好選：`Promise.all` 快速失敗，`Promise.allSettled` 記錄每個結果，`Promise.race` 以第一個結果 settle。在 await 之前先啟動多個 promises，可以讓底層操作重疊進行。
+**Promise** 是 `pending`，然後變成 `fulfilled` 或 `rejected`。呼叫 `.then`、`.catch` 或 `.finally` 並不會立刻跑 handler；settled 的 promise 把它排成 **microtask**。
 
 <br />
 
 ```ts
-type User = { id: string; name: string }
-type Settings = { theme: "light" | "dark" }
-
-function delay<T>(value: T, milliseconds: number): Promise<T> {
-  return new Promise((resolve) => {
-    setTimeout(() => resolve(value), milliseconds)
-  })
+function delay<T>(value: T, ms: number): Promise<T> {
+  return new Promise((resolve) => setTimeout(() => resolve(value), ms))
 }
 
-// Both timers start immediately; neither waits for the other.
-const userPromise = delay<User>({ id: "1", name: "Ada" }, 100)
-const settingsPromise = delay<Settings>({ theme: "dark" }, 50)
+const user = delay({ name: "Ada" }, 100)
+const settings = delay({ theme: "dark" }, 50)
 
-Promise.all([userPromise, settingsPromise]).then(([user, settings]) => {
-  console.log(user.name, settings.theme)
-  // "Ada", "dark" — after roughly 100 ms, not 150 ms
+Promise.all([user, settings]).then(([u, s]) => {
+  // "Ada", "dark" — after ~100 ms, not 150 ms
+  console.log(u.name, s.theme)
 })
 ```
 
 <br />
 
+- `Promise.all` 快速失敗。`Promise.allSettled` 記錄每一個 outcome。`Promise.race` 隨第一個結果 settle。
+- 在 await 它們之前先啟動彼此獨立的 promises，讓底層工作重疊。
+- **Failure:** 把 timer 包進 Promise 並不會讓 timer 變成 microtask。`setTimeout` 仍然調度一個 **task**；`.then` 作為 microtask 跑在那個 task **之後**。
+
 ---
 
 ## 8. Async/Await
 
-`async`/`await` 是建在 promises 上的語法，而不是另一套 concurrency 系統。`async` function 永遠回傳 promise。當它碰到 `await`，該 function 會交出控制權；等 awaited promise settle 後，函式其餘部分會以 microtask 排程繼續。
-
-<br />
-
-`await` 不會阻塞 JavaScript thread，也不會讓 JavaScript 變成多執行緒。它只暫停那個 async function。彼此獨立的操作應一起啟動，而不是逐個 await。
+`async`/`await` 是 promises 上的語法，不是第二套 concurrency 系統。`async` function 永遠回傳一個 promise。碰到 `await` 就 yield；promise settle 之後，其餘部分作為 **microtask** 繼續。
 
 <br />
 
 ```ts
-type User = { id: string; name: string }
-type Settings = { theme: "light" | "dark" }
-
-async function getJson<T>(url: string): Promise<T> {
-  const response = await fetch(url)
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`)
-  }
-
-  // This assertion describes the expected shape; it does not validate it.
-  return (await response.json()) as T
-}
-
 async function loadDashboard(userId: string) {
-  // Start both independent requests before waiting.
   const userPromise = getJson<User>(`/api/users/${userId}`)
   const settingsPromise = getJson<Settings>("/api/settings")
-
-  const [user, settings] = await Promise.all([
-    userPromise,
-    settingsPromise,
-  ])
-
+  const [user, settings] = await Promise.all([userPromise, settingsPromise])
   return { user, settings }
 }
 ```
 
 <br />
 
+- `await` 不會擋住 JavaScript thread，也不會讓 JavaScript 變成多執行緒。它暫停的是 **那個** async function。連 `await Promise.resolve()` 都會 yield。
+- `response.json() as T` assertion 描述期望的形狀；它並不驗證。
+- **Failure:** 對彼此獨立的 fetches 做順序 `await` 就是 waterfall。一起啟動，再 `Promise.all`。
+
 ---
 
 ## 9. Generators
 
-**Generator**（`function*`）是暫停執行的另一個角度。呼叫 generator 不會立刻跑它的 body。它回傳一個 iterator，每次 `.next()` 會恢復執行，直到下一個 `yield` 或 function return。
-
-<br />
-
-這讓 generators 適合 lazy sequences，因為只有在被要求時才產生值。使用 **async generator** 時，`.next()` 回傳 iterator result 的 promise，而 `for await...of` 會等待每個結果。當值隨時間到來時——例如分頁 responses 或 streams——這個模式很有用。
+**Generator**（`function*`）被呼叫時並不跑 body。它回傳一個 iterator。每次 `.next()` 恢復執行，直到下一個 `yield` 或 function return。
 
 <br />
 
 ```ts
-function* range(start: number, end: number): Generator<number, void, unknown> {
-  for (let i = start; i < end; i++) {
-    console.log(`producing ${i}`)
-    yield i
-  }
+function* range(start: number, end: number): Generator<number> {
+  for (let i = start; i < end; i++) yield i
 }
 
-const values = range(0, 3) // logs nothing: the body has not run
-
-values.next() // logs "producing 0"; { value: 0, done: false }
-values.next() // logs "producing 1"; { value: 1, done: false }
+const values = range(0, 3) // body has not run
+values.next() // { value: 0, done: false }
+values.next() // { value: 1, done: false }
 // 2 is not produced unless another value is requested.
 ```
 
 <br />
 
+- 值只在被請求時才產生 —— lazy sequence，不是一次性的 eventual result。
+- **Async generator** 讓 `.next()` 回傳 promise；`for await...of` 等待每一個結果。這適合 paginated responses 與 streams。
+- **Failure:** 在非 async generator 裡把 `yield` 當成 `await`。Promises 協調一個 eventual value。Generators 協調一連串 pauses。
+
 ---
 
 ## 重點
 
-<br />
+Call stack 與 execution contexts 解釋 **目前** 在跑什麼。Task queues、microtasks 與 event loop 解釋延後的工作 **何時** 可以跑。Closures 解釋為什麼 state 仍可觸達。Promises、`async`/`await` 與 generators 組織會暫停與恢復的工作。
 
-這些不是彼此孤立的 JavaScript 功能。Call stack 與 execution contexts 解釋目前在跑什麼。Task queues、microtasks 與 event loop 解釋延後的工作何時可以跑。Closures 解釋為什麼 state 仍可觸達；promises、`async`/`await` 與 generators 則提供不同方式組織會暫停與恢復的工作。
+當 async 程式碼出乎意料時：**目前 stack 上是什麼？什麼被排成 microtask？什麼必須等下一個 task？**
 
-當 async 程式碼行為出乎意料時，三個問題能解決大多數情況：**目前 stack 上是什麼？什麼會被排成 microtask？什麼必須等下一個 task？** 這個 mental model 比背個別 event-loop 範例的輸出更有用。
+---
+
+## Recap Q&A
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="js-event-loop-stack">
+    <AccordionTrigger>1. Call stack 與 event loop 如何共用同一條 thread？</AccordionTrigger>
+    <AccordionContent>
+
+      - 同步程式碼跑在 **call stack** 上。只有最頂端的 frame 在執行。JavaScript 不會中斷目前在 stack 上的 function。
+      - Timer 可能在背景結束，但它的 callback 要等當前 task 及其 microtasks 做完。
+      - 深層 recursion 仍會消耗 frames；主流 engines 裡，recursion depth 仍是實務上限。
+      - **Event loop** 是協調者，不是第二條 thread：**一個 task**，排空 **所有 microtasks**，也許 render，再另一個 task。
+      - **Failure:** 緊密的 loop「分享 thread」—— 它佔有 thread。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="js-macro-micro">
+    <AccordionTrigger>2. Task 與 microtask 有什麼差別？</AccordionTrigger>
+    <AccordionContent>
+
+      - 非正式寫法說 **macrotasks**；HTML spec 通常說 **tasks**。Timers、用戶交互與 messages enqueue tasks。
+      - 跑完一個被選出的 task 之後，runtime 在選出下一個之前做一次 microtask checkpoint。嵌套的 `setTimeout` 不能在父級當前這一輪裡繼續。
+      - **Microtasks** —— Promise handlers、`queueMicrotask`、`MutationObserver` —— 會排空，**直到 queue 空掉**。
+      - 這就是為什麼 promise handler 會在已經就緒的 `setTimeout` 之前跑。它們是 **同一條** thread 上優先級更高的 queue，不是更快的 queue。
+      - **Failure:** 無界的 microtask chain 會無限推遲 timers、input 與 rendering。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="js-closures">
+    <AccordionTrigger>3. Closure 是什麼，它保留了什麼？</AccordionTrigger>
+    <AccordionContent>
+
+      - **Closure** 不是一種特殊的 function。Function 帶著它被建立時的 **lexical environment** 的存取權，即使外層 function 已經 return。
+      - 這就是 private state、event handlers，以及許多 hook patterns 之所以可能。
+      - 被捕獲的 objects 仍可觸達，所以 callback close over 一棵大 tree，就可以把它 leak 住。
+      - 在 loop 裡用 `var` 建立的 callbacks 共用一個 function-scoped binding；`let` loop 變數每次 iteration 建立一個新 binding。
+      - **Failure:** 把 closure 當成值的副本，而不是活的 environment。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="js-promises-await">
+    <AccordionTrigger>4. Promises 與 async/await 實際上如何暫停工作？</AccordionTrigger>
+    <AccordionContent>
+
+      - **Promise** 是 `pending`，然後變成 `fulfilled` 或 `rejected`。呼叫 `.then` 並不會立刻跑 handler；settled 的 promise 把它排成 **microtask**。
+      - `Promise.all` 快速失敗，`allSettled` 記錄每一個 outcome，`race` 隨第一個結果 settle。在 await 它們之前先啟動彼此獨立的 promises，讓工作重疊。
+      - `async`/`await` 是 promises 上的語法。`async` function 永遠回傳一個 promise。`await` 會 yield；settle 之後，其餘部分作為 microtask 繼續。
+      - 它不會擋住 thread，也不會讓 JavaScript 變成多執行緒。
+      - **Failure:** 對彼此獨立的 fetches 做順序 `await` 就是 waterfall。把 timer 包進 Promise，`resolve` 仍然走 **task**。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="js-generators">
+    <AccordionTrigger>5. 什麼時候該用 generator 而不是 Promise？</AccordionTrigger>
+    <AccordionContent>
+
+      - 呼叫 **generator**（`function*`）並不跑 body。它回傳一個 iterator；每次 `.next()` 恢復執行，直到下一個 `yield` 或 function return。
+      - 值只在被請求時才產生 —— lazy sequence，不是一次性的 eventual result。
+      - **Async generator** 讓 `.next()` 回傳 promise；`for await...of` 等待每一個。這適合 paginated responses 或 streams。
+      - Promises 協調一個 eventual value。Generators 協調一連串 pauses。
+      - **Failure:** 在非 async generator 裡把 `yield` 當成 `await`。
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>

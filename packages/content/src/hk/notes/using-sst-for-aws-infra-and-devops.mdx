@@ -7,15 +7,13 @@ category: devops
 
 在 AWS 上交付全端應用時，最好不要把 AWS Console 當成真相來源。**Frontend**、**secrets**、**domains** 與 **stage rules** 都應該用 TypeScript 寫在應用旁邊，經 pull request 審視，並在每個環境以同樣方式套用。
 
-這正是 [SST](https://sst.dev/docs/) 提供的模型。整個應用以程式碼定義——通常從單一 `sst.config.ts` 開始——而 SST 會自動化底層 AWS resources。這篇筆記說明本站的 **infrastructure 與 DevOps** 模型：Bun + Turborepo monorepo、OpenNext 上的 Next.js，以及 local、shared preview 與 production 的 stages。
+[SST](https://sst.dev/docs/) 用程式碼定義應用——通常從單一 `sst.config.ts` 開始——並自動化底層 AWS resources。本站是 Bun + Turborepo monorepo，Next.js 跑在 OpenNext 上，並有 local、shared preview 與 production 的 stages。
 
-三種 infra 故事很容易混在一起，所以這裡分開處理：
+三種 infra 故事分開處理：
 
 1. **目前已部署** — `sst.config.ts` 只 import Next.js / OpenNext stack。
 2. **已在 repo 裡定義，但尚未 import** — container API infra（`Vpc` → `Cluster` → `Service` + `Router`）放在 `packages/infra`，並在 `run()` 裡保持註解，直到該 stack 需要部署。
 3. **其他地方的相關模式** — 用 Lambda + API Gateway 做 Hono API 見 [用 Hono、Drizzle、Zod OpenAPI 與 SST 打造 Backend APIs](/notes/backend-apis-hono-sst)。那篇筆記並不是本站 `sst.config.ts` 正在跑的內容。
-
-這篇筆記負責這些邊界周圍的 infra 佈局與 DevOps loop。
 
 <br />
 
@@ -23,13 +21,13 @@ category: devops
 
 ## 1. 為什麼這套 stack 選 SST
 
-SST 的設計讓開發者可以用 **Components** 定義應用功能，而不必親手組裝每一個低階 resource。對這套 stack 來說，最重要的有三點——也是 SST 在跟 Pulumi 或 CDK for Terraform 這類通用 IaC 工具比較時強調的三點（[SST FAQ](https://sst.dev/docs/)）：
+SST 讓開發者可以用 **Components** 定義應用功能，而不必親手組裝每一個低階 resource。
 
-1. **較高階的 components**，這裡用到：`sst.aws.Nextjs`、`sst.Secret`，以及（當 API module 接上時）`sst.aws.Service`、`sst.aws.Router`、`sst.aws.Vpc` 與 `sst.aws.Cluster`。
-2. **Resource linking**，讓 runtime 程式碼透過 typed `Resource` SDK 讀取基礎設施，而不是 hardcoded names 與 ARNs。
-3. **`sst dev`** 作為統一的本地環境：infra watcher、來自同一 CLI 的 frontend（以及之後的 container）`dev` processes，再加上當 stage 裡有 Lambda handlers 時的 [Live](https://sst.dev/docs/live/)。
+- **較高階的 components**，這裡用到：`sst.aws.Nextjs`、`sst.Secret`，以及（當 API module 接上時）`sst.aws.Service`、`sst.aws.Router`、`sst.aws.Vpc` 與 `sst.aws.Cluster`。
+- **Resource linking**，讓 runtime 程式碼透過 typed `Resource` SDK 讀取基礎設施，而不是 hardcoded names 與 ARNs。
+- **`sst dev`** 作為統一的本地環境：infra watcher、來自同一 CLI 的 frontend（以及之後的 container）`dev` processes，再加上當 stage 裡有 Lambda handlers 時的 [Live](https://sst.dev/docs/live/)。
 
-在本站，這對應到選定 AWS region 裡經 OpenNext 部署的 Next.js、以 stage 為基礎的 domains（`example.com`、`dev.example.com`、`{stage}.example.com`）、非 prod 的 edge Basic Auth secrets，以及應用 packages 與 `packages/infra` 分開的 monorepo。
+本站：經 OpenNext 的 Next.js、以 stage 為基礎的 domains、非 prod 的 edge Basic Auth，以及與 `packages/infra` 分開的應用 packages。SST 與 Pulumi 或 CDK for Terraform 的比較見 [SST FAQ](https://sst.dev/docs/)。
 
 <br />
 
@@ -37,9 +35,7 @@ SST 的設計讓開發者可以用 **Components** 定義應用功能，而不必
 
 ## 2. SST 與其他 IaC 的比較
 
-這些工具的目標相同：**infrastructure as code**。差別在主要受眾與日常摩擦。SST 自己的定位在這裡很有用：SST 面向 **developers**，而 CDKTF 與 Pulumi 主要面向 **DevOps engineers**。SST 底層仍使用 open-source Pulumi 與 bridged Terraform providers；它不需要 Pulumi account，應用 state 也留在團隊自己的 cloud account（[SST docs](https://sst.dev/docs/)）。
-
-Terraform 與 Vercel 在其他專案仍然有用。對*這*個全端 AWS 應用，SST 是預設選擇。這是 workflow 選擇，不是主張每個組織都該放棄 Terraform。
+這些工具都共享 **infrastructure as code**。SST 面向 **developers**；CDKTF 與 Pulumi 主要面向 **DevOps engineers**。SST 底層仍使用 open-source Pulumi 與 bridged Terraform providers；它不需要 Pulumi account，應用 state 也留在團隊自己的 cloud account（[SST docs](https://sst.dev/docs/)）。
 
 | Tool | Mental model | Strength | 為什麼 SST 適合這裡的 app stacks |
 | --- | --- | --- | --- |
@@ -49,9 +45,13 @@ Terraform 與 Vercel 在其他專案仍然有用。對*這*個全端 AWS 應用�
 | **Serverless Framework** | 聚焦 serverless apps 的 framework | 熟悉的 Lambda packaging | 比這裡用到的全端 Next/OpenNext、containers 與 stage workflows 更窄 |
 | **Vercel / PaaS** | Git push → hosted platform | 快速 frontend DX，幾乎不用碰 AWS 表面 | 只需要 managed frontend 時很強；當需要以 TypeScript 擁有 AWS resources、domains、secrets 與可選的 ECS/API 時選 SST |
 
-表格之外：SST components 編碼常見 app patterns，仍允許在需要更低階控制時使用 [`transform`](https://sst.dev/docs/components#transforms) 加上 [150+ providers](https://sst.dev/docs/all-providers#directory)。Linking 補上 Terraform 或 CDK 通常靠手寫 env vars 與 IAM 填補的 runtime 缺口。`sst dev` 是產品功能，而不是自己組裝的本地 stack。SST 仍然有 state——本地加上 backup bucket——所以 managed resources 不應在 Console 人手編輯（[Basics](https://sst.dev/docs/basics/)）。
+<br />
 
-當 platform team 已經用 Terraform 或 OpenTofu 擁有 shared networking、當 Pulumi 或 Terraform 是團隊多雲 control planes 的語言，或當 CloudFormation-native CDK construct libraries 是招聘與 review 表面時，SST 並不適合當唯一答案。那些情況下，SST 仍可很好地做 app delivery，而組織級 IaC 留在團隊已有槓桿的地方。
+- SST components 編碼常見 app patterns，仍允許在需要更低階控制時使用 [`transform`](https://sst.dev/docs/components#transforms) 加上 [150+ providers](https://sst.dev/docs/all-providers#directory)。
+- Linking 補上 Terraform 或 CDK 通常靠手寫 env vars 與 IAM 填補的 runtime 缺口。`sst dev` 是產品功能，而不是自己組裝的本地 stack。
+- SST 仍然有 state——本地加上 backup bucket——所以 managed resources 不應在 Console 人手編輯（[Basics](https://sst.dev/docs/basics/)）。
+
+當 platform team 已經用 Terraform 或 OpenTofu 擁有 shared networking、當 Pulumi 或 Terraform 是團隊多雲 control planes 的語言，或當 CloudFormation-native CDK construct libraries 是招聘與 review 表面時，SST 並不適合。
 
 <br />
 
@@ -97,14 +97,12 @@ export default $config({
 
 <br />
 
-`packages/infra` 放著會被組合起來的零件：
-
-- `nextjs` — OpenNext deployment 與 domains（今天已 import）
-- `secrets` — stage secrets，例如 edge Basic Auth credentials，以及 API 路徑用的 database 與 auth secrets
-- `domain` / `edge` — apex domain 與非 prod 在 edge 的 Basic Auth
+- `nextjs` — OpenNext 部署與 domains（今天已 import）
+- `secrets` — stage secrets，例如 edge Basic Auth credentials，以及 API 路徑的 database 與 auth secrets
+- `domain` / `edge` — apex domain 與非 prod 的 edge Basic Auth
 - `api` / `router` / `vpc` / `cluster` — container API 路徑，已定義但尚未 import
 
-Business logic 不放進這些檔案。Infra modules 建立並 link resources；application packages 消費它們。
+業務邏輯不放在這些檔案裡。Infra modules 建立並 link resources；應用 packages 消費它們。
 
 <br />
 
@@ -112,9 +110,7 @@ Business logic 不放進這些檔案。Infra modules 建立並 link resources；
 
 ## 4. 這套 Stack 裡的 Components
 
-### 搭配 OpenNext 的 Next.js
-
-網站以 [`sst.aws.Nextjs`](https://sst.dev/docs/component/aws/nextjs/) 部署。Production 用 apex domain；其他 stages 用 `{stage}.example.com`。Production 保留一個 warm server instance；非 prod 用 `warm: 0`。`edge` prop 掛上非 prod Basic Auth。`dev` block 告訴 `sst dev` 如何啟動本地 Next process。
+本站用 [`sst.aws.Nextjs`](https://sst.dev/docs/component/aws/nextjs/) 部署。Production 用 apex domain；其他 stages 用 `{stage}.example.com`。
 
 <br />
 
@@ -134,7 +130,6 @@ export const nextjs = new sst.aws.Nextjs("Web", {
     SST_STAGE: $app.stage,
   },
   openNextVersion: "4.0.3",
-  // buildCommand: sync assets, then OpenNext build
   edge,
   dev: {
     command: "bun run dev",
@@ -146,27 +141,10 @@ export const nextjs = new sst.aws.Nextjs("Web", {
 
 <br />
 
-### Secrets
-
-Secrets 是 first-class resources，不是從未進入 deployment model 的鬆散 `.env` 檔案。Edge Basic Auth 在非 prod 使用 username/password secrets。Database 與 auth secrets 為 API 路徑定義：
-
-<br />
-
-```ts title="packages/infra/secrets.ts"
-export const username = new sst.Secret("Username")
-export const password = new sst.Secret("Password")
-export const databaseUrl = new sst.Secret("DatabaseUrl")
-export const betterAuthSecret = new sst.Secret("BetterAuthSecret")
-export const aiGatewayApiKey = new sst.Secret("AiGatewayApiKey")
-```
-
-<br />
-
-### Container API（已定義，未 import）
-
-當 API module 被 import 時，路徑是 `Vpc` → `Cluster` → `Service`，並以 `Router` 處理 `api.example.com` 或 `{stage}.api.example.com`。Database、Better Auth 與 AI Gateway secrets 會 link 進該 service。在 `sst.config.ts` 啟用 `await import("./infra/api")` 之前，那個 stack 不會部署。
-
-另一種形狀——API Gateway 後面的 Lambda，加上 Lambda authorizer——是 [用 Hono、Drizzle、Zod OpenAPI 與 SST 打造 Backend APIs](/notes/backend-apis-hono-sst) 裡的模式。那裡用 `sst.aws.Function` 與 `sst.aws.ApiGatewayV2`。這是 Hono APIs 的相關 SST 做法，不是本站 config 目前載入的基礎設施。
+- Production 保留一個 warm server instance；非 prod 用 `warm: 0`。`edge` prop 接上非 prod Basic Auth。`dev` block 告訴 `sst dev` 如何啟動本地 Next process。
+- Secrets 是 first-class resources，不是鬆散的 `.env` 檔案：`sst.Secret("Username")`、`Password`、`DatabaseUrl`、`BetterAuthSecret`、`AiGatewayApiKey`。
+- 當 API module 被 import 時，路徑是 `Vpc` → `Cluster` → `Service`，再用 `Router` 做 `api.example.com` 或 `{stage}.api.example.com`。在啟用 `await import("./infra/api")` 之前，那個 stack 不會部署。
+- 另一種形狀——Lambda 在 API Gateway 後面，加上 Lambda authorizer——是 [用 Hono、Drizzle、Zod OpenAPI 與 SST 打造 Backend APIs](/notes/backend-apis-hono-sst) 裡的模式。那用 `sst.aws.Function` 與 `sst.aws.ApiGatewayV2`。它不是本站 config 目前載入的基礎設施。
 
 <br />
 
@@ -174,11 +152,11 @@ export const aiGatewayApiKey = new sst.Secret("AiGatewayApiKey")
 
 ## 5. 用 Linking 取代 Hardcoded Env
 
-[Resource linking](https://sst.dev/docs/linking/) 是基礎設施與 runtime 之間的橋。建立 resource、放進 `link`，再用 SDK 讀取。Linking 會注入 values、產生 types（`sst-env.d.ts`），並在 component 支援時授予 permissions。
+[Resource linking](https://sst.dev/docs/linking/) 是基礎設施與 runtime 之間的橋。建立一個 resource，放進 `link`，再用 SDK 讀取。
 
-**本站今天**，Next.js stack 透過 `edge` configuration 取得 edge Basic Auth credentials（username/password secrets）。Web app 本身並不為 database 讀取 `Resource.*`。
-
-**當 API module 被 import 時**，secrets 會 link 進 container service，應用程式碼可以這樣讀：
+- Linking 注入 values、產生 types（`sst-env.d.ts`），並在 component 支援的地方授予 permissions。
+- 本站今天，Next.js stack 透過 `edge` configuration 拉取 edge Basic Auth credentials。Web app 本身並不為 database 讀取 `Resource.*`。
+- 當 API module 被 import 時，secrets 會被 link 進 container service。
 
 <br />
 
@@ -192,9 +170,8 @@ const client = postgres(Resource.DatabaseUrl.value, {
 
 <br />
 
-對 frontends 來說，linked values 只在 **server** 端可用。Client components 只看得到明確傳進去的內容。
-
-對需要 stage secrets 的 CLIs——Drizzle migrations、Better Auth schema generation——`sst shell` 會載入 linked stage environment，不必再發明第二條 secrets 路徑。
+- Linked values 只在 **server** 側可用。Client components 只能看見明確傳進去的東西。
+- 對需要 stage secrets 的 CLIs——Drizzle migrations、Better Auth schema generation——`sst shell` 載入 linked stage environment，不必發明第二條 secrets 路徑。
 
 <br />
 
@@ -202,19 +179,19 @@ const client = postgres(Resource.DatabaseUrl.value, {
 
 ## 6. Stages 作為 DevOps 單位
 
-在 SST 裡，[stage](https://sst.dev/docs/basics/) 就是一個環境：應用的 namespaced 副本。本站實務上的對應大致如下：
+在 SST 裡，[stage](https://sst.dev/docs/basics/) 是一個環境：應用的一份 namespaced copy。
 
 | Stage | Purpose | Domain pattern |
 | --- | --- | --- |
-| `local` / personal | 日常 `sst dev` | local Next URL；該 stage 的 cloud resources |
+| `local` / personal | 日常 `sst dev` | 本地 Next URL；該 stage 的 cloud resources |
 | `dev` | Shared preview | `dev.example.com` |
 | `production` | Live site | `example.com` |
 
-Production 受保護。意外的 `sst remove` 不應抹掉關鍵資料，所以 config 在 production 使用 `protect` 與 `removal: "retain"`，符合 SST 建議的 template pattern（[removal policies](https://sst.dev/docs/reference/config/#removal)）。
+<br />
 
-非 production stages 還有一項實務 ops 細節：透過 edge `viewerRequest` injection 做 CloudFront **Basic Auth**，讓 preview URLs 預設不公開。
-
-日常指令保持簡短：
+- Production 受保護。意外的 `sst remove` 不應抹掉關鍵資料，所以 config 在 production 上用 `protect` 與 `removal: "retain"`（[removal policies](https://sst.dev/docs/reference/config/#removal)）。
+- 非 production stages 透過 edge `viewerRequest` injection 拿到 CloudFront **Basic Auth**，所以 preview URLs 預設不公開。
+- Credentials 留在本地 AWS credential chain（profile 或 SSO session）。SST 部署進那個 account 與 region。Next.js 與 secret resources 不是靠在 Console 點出來的。
 
 <br />
 
@@ -227,25 +204,20 @@ sst deploy --stage production
 
 <br />
 
-Credentials 留在本地 AWS credential chain（profile 或 SSO session）。SST 部署進該 account 與 region。Next.js 與 secret resources 不是靠人手在 Console 點出來的。
-
-<br />
-
 ---
 
 ## 7. 本地 Workflow：`sst dev`、Live 與 Mode Discipline
 
-[`sst dev`](https://sst.dev/docs/reference/cli/#dev) 是本地 control plane。對本站已接上的 Next.js stack，日常最有價值的部分是：
+[`sst dev`](https://sst.dev/docs/reference/cli/#dev) 是本地 control plane。
 
-1. 部署 infrastructure 變更的 watcher。
-2. Next.js `dev` block——本地 Next，連結到該 stage 已部署的 resources。
-3. 之後當 API module 被 import 時，container `dev` command，以及可選的 [tunnel](https://sst.dev/docs/reference/cli#tunnel) 連到 VPC resources。
+- 一個會部署基礎設施變更的 watcher。
+- Next.js `dev` block——本地 Next，link 到該 stage 已部署的 resources。
+- 之後，當 API module 被 import 時，container `dev` command，以及可選的 [tunnel](https://sst.dev/docs/reference/cli#tunnel) 到 VPC resources。
+- [Live](https://sst.dev/docs/live/)——AWS 裡把請求 proxy 到本機的 stub Lambdas——對 Lambda-heavy stages 最重要，包括 backend APIs 筆記裡的 Function / API Gateway 模式。在本站只 import OpenNext 時，它沒那麼核心。
 
-[Live](https://sst.dev/docs/live/)——AWS 裡的 stub Lambdas 代理回本機——對 Lambda-heavy stages 最重要，包括 backend APIs 筆記裡的 Function / API Gateway 模式。當本站只 import OpenNext 時它較不核心，不過 OpenNext server paths 依部署形狀仍可能在底層用到 Lambda。
+`sst dev` 屬於 **personal** 或 `local` stage。Shared `dev` 與 `production` 用 `sst deploy`。Shared URL 意味著部署一個真正的 stage。用 breakpoints 除錯 Lambda handler 意味著在 personal stage 上用 Live——除錯 Node handlers 時搭配 VS Code Auto Attach。
 
-`sst dev` 應放在 **personal** 或 `local` stage。Shared `dev` 與 `production` 用 `sst deploy`。把同一個 stage 在 Live stubs 與真實 deploys 之間切換既慢又混亂：若 CLI 被殺掉，stubs 可能留下，而遠端 invokes 會一直等本機超時（[Live quirks](https://sst.dev/docs/live/)）。
-
-需要 shared URL 就部署真實 stage。要用 breakpoints 除錯 Lambda handler，就在 personal stage 上用 Live——除錯 Node handlers 時可用 VS Code Auto Attach。
+**Failure：** 在同一個 stage 上在 Live stubs 與真正 deploys 之間翻轉。若 CLI 被殺掉，stubs 可能留下，remote invokes 會逾時等待本機（[Live quirks](https://sst.dev/docs/live/)）。
 
 <br />
 
@@ -256,12 +228,12 @@ Credentials 留在本地 AWS credential chain（profile 或 SSO session）。SST
 IaC 只有在 state 與流程保持誠實時才有用。
 
 - **不要在 Console 編輯** SST 管理的 resources。SST 會依 config 對 state 套用 diffs；人手編輯會讓 state drift（[Basics](https://sst.dev/docs/basics/)）。
-- **保護 production**：用 `protect` 與 `removal: "retain"`，避免意外 production remove 抹掉 SST-managed stateful resources。API 路徑用的 Postgres 是經 `sst.Secret` 的外部 URL，不是這個 config 建立的 `sst.aws.Postgres` database。
-- **先驗證，再在 CI 部署。** GitHub Actions 先跑 install、lint、format check、typecheck、tests 與 build。只有這些 checks 成功後，workflow 才對目標 stage（`dev` 或 `production`）跑 `sst deploy`。本地 `deploy:dev` / `deploy` scripts 仍適合刻意的一次性 deploys，但預設路徑是 CI：checks 全綠，再 deploy。
+- **保護 production**：用 `protect` 與 `removal: "retain"`。API 路徑用的 Postgres 是經 `sst.Secret` 的外部 URL，不是這個 config 建立的 `sst.aws.Postgres`。
+- **先驗證，再在 CI 部署。** GitHub Actions 先跑 install、lint、format check、typecheck、tests 與 build。只有這些 checks 成功後，workflow 才對 `dev` 或 `production` 跑 `sst deploy`。
+- 本地 `deploy:dev` / `deploy` scripts 仍適合刻意的一次性 deploys。預設路徑是 CI：checks 全綠，再 deploy。
+- [SST Console](https://sst.dev/docs/console/) 是另一種取得 git-push autodeploy 的方式。本站用 GitHub Actions 做 verify-then-`sst deploy` 序列。
 
-[SST Console](https://sst.dev/docs/console/) 是另一種取得 git-push autodeploy、preview environments 與 monitoring 的方式。本站用 GitHub Actions 做 verify-then-`sst deploy` 序列，而不是依賴 Console 跑這個 loop。
-
-Tenant isolation 與 SaaS 邊界設計是另一個問題——當問題是那個時，見 [用 Hono、Better Auth、Drizzle 與 Postgres RLS 打造 Multi-Tenant 後端](/notes/multi-tenant-backend-drizzle-hono-better-auth)。
+Tenant isolation 與 SaaS 邊界設計是另一個問題——見 [用 Hono、Better Auth、Drizzle 與 Postgres RLS 打造 Multi-Tenant 後端](/notes/multi-tenant-backend-drizzle-hono-better-auth)。
 
 <br />
 
@@ -286,21 +258,72 @@ ci: checks → tests → build → sst deploy --stage …
 
 <br />
 
-營運 loop 保持精簡：
-
-1. 改 infra TypeScript 或 application code。
-2. 在 personal stage 用 `sst dev` 迭代。
-3. 開 pull request；GitHub Actions 跑 checks、tests 與 build。
-4. 成功後，CI 對目標 stage（`dev` 或 `production`）跑 `sst deploy`。
-
-<br />
+SST 讓 AWS infrastructure 成為可 review 的 TypeScript，並放在應用旁邊。當問題是組織級 platform ownership 時，Terraform、CDK 或 Pulumi 仍然更合適。目前的 component 與 CLI 細節，從 [SST docs](https://sst.dev/docs/) 開始。關於 Lambda 或 Fargate 上的 Hono API，繼續看 [用 Hono、Drizzle、Zod OpenAPI 與 SST 打造 Backend APIs](/notes/backend-apis-hono-sst)。
 
 ---
 
-## 結語
+## Recap Q&A
 
-SST 讓 AWS infrastructure 成為可 review 的 TypeScript，並放在應用旁邊。Components 編碼常見的交付功能。Linking 拿掉一類 env-var 與 IAM glue。Stages 把環境變成 first-class DevOps 單位。`sst dev` 把本地 stack 收成一條指令。
+<Accordion type="single" collapsible>
+  <AccordionItem value="sst-why">
+    <AccordionTrigger>1. 為什麼這套 stack 選 SST，而不是親手組裝 CDK 或 Terraform？</AccordionTrigger>
+    <AccordionContent>
 
-當問題是組織級 platform ownership，或團隊已在那裡標準化時，Terraform、CDK 或 Pulumi 仍然更合適。對一個跑在 OpenNext 上的 Next.js site——有 stage-based domains、secrets，以及需要時可用的 container 或 Lambda API 路徑——SST 是很強的預設，因為它優化的是 developer loop，而不只是 resource graph。
+      - AWS Console 不是真相來源。Frontend、secrets、domains 與 stage rules 都應該用 TypeScript 寫在應用旁邊。
+      - SST 在這裡有用的部分是 **較高階的 components**（`Nextjs`、`Secret`，之後是 `Service` / `Router` / `Vpc` / `Cluster`）、**resource linking**，以及 **`sst dev`**。
+      - SST 面向 **developers**；底層仍使用 Pulumi 與 bridged Terraform。應用 state 留在團隊自己的 cloud account。
+      - 三種故事分開處理：`sst.config.ts` **今天 import 的**（OpenNext）、**已定義但尚未 import 的**（`packages/infra` API），以及 Hono 筆記裡的 Lambda + API Gateway 模式。
 
-關於 Lambda 或 Fargate 上的 Hono API——包括 authorizer wiring、WAF 與 alarms——繼續看 [用 Hono、Drizzle、Zod OpenAPI 與 SST 打造 Backend APIs](/notes/backend-apis-hono-sst)。目前的 component 與 CLI 細節，從 [SST docs](https://sst.dev/docs/) 開始。
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="sst-linking">
+    <AccordionTrigger>2. Linking 取代了什麼，誰能讀 `Resource.*`？</AccordionTrigger>
+    <AccordionContent>
+
+      - 建立一個 resource，放進 `link`，再用 SDK 讀取。Linking 注入 values、產生 types（`sst-env.d.ts`），並在 component 支援的地方授予 permissions。
+      - 應用程式碼讀 `Resource.DatabaseUrl.value`，而不是 hardcoded names 與 ARNs。
+      - 對 CLIs——Drizzle migrations、Better Auth schema generation——`sst shell` 載入 linked stage，不必第二條 secrets 路徑。
+      - Linked values 只在 **server** 側可用。Client components 只能看見明確傳進去的東西。
+      - 本站今天，Next.js stack 透過 `edge` configuration 拉取 edge Basic Auth。在 API module 被 import 之前，web app 不為 database 讀取 `Resource.*`。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="sst-stages">
+    <AccordionTrigger>3. 什麼是 stage，production 如何被保護？</AccordionTrigger>
+    <AccordionContent>
+
+      - **Stage** 是應用的一份 namespaced copy：`local` / personal 做日常 `sst dev`，`dev` 做 shared preview（`dev.example.com`），`production` 做 live site。
+      - Production 用 `protect` 與 `removal: "retain"`，避免意外的 `sst remove` 抹掉關鍵資料。
+      - 非 prod 拿到 CloudFront **Basic Auth**，所以 preview URLs 預設不公開。
+      - Credentials 留在本地 AWS credential chain。SST 部署進那個 account 與 region。Next.js 與 secrets 不是靠在 Console 點出來的。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="sst-dev">
+    <AccordionTrigger>4. `sst dev` 該用在哪裡，若跟 shared stage 混用會出什麼問題？</AccordionTrigger>
+    <AccordionContent>
+
+      - `sst dev` 是本地 control plane：infra watcher、link 到該 stage 已部署 resources 的 Next.js `dev` block，之後還有 container `dev` 與可選的 VPC tunnel。
+      - **Live**——AWS 裡把請求 proxy 到本機的 stub Lambdas——在除錯 handlers 時屬於 **personal** stage。
+      - Shared `dev` 與 `production` 用 `sst deploy`。Shared URL 意味著部署一個真正的 stage。
+      - **Failure：** 在同一個 stage 上在 Live stubs 與真正 deploys 之間翻轉。若 CLI 被殺掉，stubs 可能留下，remote invokes 會逾時等待本機。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="sst-ci">
+    <AccordionTrigger>5. CI 邊界是什麼，為什麼不要在 Console 編輯 SST resources？</AccordionTrigger>
+    <AccordionContent>
+
+      - SST 會依 config 對 state 套用 diffs。人手 Console 編輯會讓 state **drift**。
+      - 先驗證，再在 CI 部署：先跑 install、lint、format、typecheck、tests 與 build；然後才對 `dev` 或 `production` 跑 `sst deploy`。
+      - 本地 deploy scripts 仍留給刻意的一次性操作。預設路徑是 checks 全綠，再 deploy。
+      - API 路徑用的 Postgres 是經 `sst.Secret` 的外部 URL，不是這個 config 建立的 `sst.aws.Postgres`。
+      - Tenant isolation 是跟 DevOps loop 不同的問題。
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>

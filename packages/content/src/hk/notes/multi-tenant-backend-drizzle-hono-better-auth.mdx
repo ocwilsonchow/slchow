@@ -7,13 +7,9 @@ category: backend
 
 當 isolation 只剩 `WHERE organization_id = ?` 的習慣時，multi-tenancy 在 production 就會失效。少一個 filter、workspaces 之間出現 confused deputy，或某個 background job 忘了帶 tenant context，都足以洩漏資料。
 
-一個 production-grade 的服務需要三層彼此一致：
+一個 production-grade 的服務需要三層彼此一致：**identity / membership**（Better Auth organization plugin）、**request context**（每個受保護的 Hono handler 都收到已驗證的 `userId` 與 `organizationId`，絕不能只靠 client 可控的 header），以及 **data boundary**（即使 application code 忘了 filter，PostgreSQL row-level security 也會拒絕跨 tenant 的 rows）。
 
-1. **Identity / membership** — 用戶是誰、屬於哪些 organizations、哪個 org 是 active、持有什麼 role（**Better Auth** organization plugin）
-2. **Request context** — 每個受保護的 **Hono** handler 都收到已驗證的 `userId` 與 `organizationId`（絕不能只靠 client 可控的 header）
-3. **Data boundary** — 即使 application code 忘了 filter，**PostgreSQL** row-level security 也會拒絕跨 tenant 的 rows
-
-這篇 note 假設你已有 typed backend：**Hono**、**Better Auth** sessions、**Drizzle** 與 **PostgreSQL**。這套基礎 stack 見 [用 Hono、Drizzle、Zod OpenAPI 與 SST 打造 Backend APIs](/notes/backend-apis-hono-sst)。這裡聚焦 **tenant isolation**。
+這篇 note 假設 typed stack 見 [用 Hono、Drizzle、Zod OpenAPI 與 SST 打造 Backend APIs](/notes/backend-apis-hono-sst)。這裡聚焦 **tenant isolation**。
 
 <br />
 
@@ -21,12 +17,9 @@ category: backend
 
 ## 1. 這裡所說的 Production Multi-Tenant 是什麼
 
-在這個架構裡，**tenant** 就是一個 **organization**：帶有 members、roles，以及自己業務資料的 SaaS workspace。用戶可以屬於多個 organizations。Session 會追蹤哪個 organization 是 **active**。
+**Tenant** 就是一個 **organization**：帶有 members、roles，以及自己業務資料的 SaaS workspace。用戶可以屬於多個 organizations。Session 會追蹤哪個 organization 是 **active**。
 
-做法是用 **shared database** 與 **shared schema**。每個 tenant 擁有的 row 都帶 `organization_id`。這是常見的 SaaS 模型，也直接對應 **Better Auth** 的 organization plugin。
-
-Isolation 有軟硬之分：
-
+- 做法是用 **shared database** 與 **shared schema**。每個 tenant 擁有的 row 都帶 `organization_id`。這是常見的 SaaS 模型，也直接對應 Better Auth 的 organization plugin。
 - **Soft isolation** — application code 一律以 `organizationId` filter。上手快，壓力一上來就容易出錯。
 - **Database-enforced isolation** — **Postgres RLS** 在受信任的 tenant-context path 下強制同一條規則。忘了 `WHERE` 時回傳零 rows，而不是另一個 tenant 的資料。
 
@@ -38,7 +31,7 @@ Isolation 有軟硬之分：
 - Connection pooling 重用仍帶著另一個 tenant settings 的 session
 - Break-glass admin paths 在 production 悄悄關掉 isolation
 
-這篇 note 的非目標：schema-per-tenant、database-per-tenant，以及 billing 或 metering。那些是另一套架構。Better Auth 裡有 teams 與 dynamic access control；v1 先停在 **static roles**。
+非目標：schema-per-tenant、database-per-tenant，以及 billing 或 metering。Better Auth 裡有 teams 與 dynamic access control；v1 先停在 **static roles**。
 
 <br />
 
@@ -46,7 +39,7 @@ Isolation 有軟硬之分：
 
 ## 2. 架構
 
-Request path 在一般 session auth 之上，再加上 tenant resolution 與 RLS-scoped transaction：
+Request path 在一般 session auth 之上，再加上 tenant resolution 與 RLS-scoped transaction。
 
 <br />
 
@@ -65,14 +58,14 @@ Client
 
 <br />
 
-職責保持狹窄：
-
 - **Better Auth organization** 管理 orgs、members、invitations、`activeOrganizationId`，以及 roles 或 permissions。
-- **Hono middleware** 掛上 typed tenant context，並拒絕對 route 裡明確指定的 organization 沒有 membership 的請求。
-- **Drizzle schema** 在每個 tenant-owned table 放上 `organization_id` 與 RLS policies。
+- **Hono middleware** 掛上 typed tenant context，並拒絕沒有 explicit route organization membership 的 requests。
+- **Drizzle schema** 在每個 tenant-owned table 上放 `organization_id` 與 RLS policies。
 - **PostgreSQL** 是最後一道防線。
 
-若使用基礎 note 裡的 API Gateway Lambda authorizer 模式，只傳遞小型 identity identifiers，例如 `userId` 與 `sessionId`。業務 route 仍提供 `organizationId`，API 在開啟 RLS transaction 前，為那個確切的 organization 驗證 membership。絕不要在未經該驗證的情況下，從 client 可控的 header 複製 identity 或 tenant。
+如果用了基礎筆記裡的 API Gateway Lambda authorizer 模式，只傳遞小的 identity identifiers，例如 `userId` 與 `sessionId`。Business route 仍然提供 `organizationId`，API 在打開 RLS transaction 之前，為那個確切的 organization 驗證 membership。
+
+**Failure:** 未做那次驗證，就把 identity 或 tenant 從 client 可控的 header 拷過來。
 
 <br />
 
@@ -80,7 +73,7 @@ Client
 
 ## 3. Better Auth Organization 作為 Tenancy Control Plane
 
-**organization** plugin 是 membership 與 workspace 層。安裝 `@better-auth/drizzle-adapter`，在 server 與 client 啟用 plugin，然後 generate 並 apply migration，讓 `organization`、`member`、`invitation` 與 `session.activeOrganizationId` 存在於 PostgreSQL。
+**Organization** plugin 是 membership 與 workspace 層。安裝 `@better-auth/drizzle-adapter`，在 server 與 client 上啟用 plugin，然後 generate 並 apply migration，讓 `organization`、`member`、`invitation` 與 `session.activeOrganizationId` 存在於 PostgreSQL。
 
 <br />
 
@@ -120,26 +113,12 @@ export const auth = betterAuth({
 
 <br />
 
-```ts title="src/auth-client.ts"
-import { createAuthClient } from "better-auth/client"
-import { organizationClient } from "better-auth/client/plugins"
-import { ac, owner, admin, member } from "./permissions"
+- 在 client 上啟用 `organizationClient`，用同一套 `ac` 與 roles。
+- Invitation callback 必須只把 opaque invitation ID 交給預定收件人。Acceptance 需要 authenticated session，且 email 與 invitation 吻合。
+- 要求 email verification，並關掉直接刪除 organization，讓 deletion 走明確的 archival workflow。
+- Lifecycle：create organization → invite member → accept invitation → set-active organization → 在那個 tenant 裡工作 → 經明確 workflow leave 或 archive。
 
-export const authClient = createAuthClient({
-  plugins: [
-    organizationClient({
-      ac,
-      roles: { owner, admin, member },
-    }),
-  ],
-})
-```
-
-<br />
-
-Invitation callback 只能把 opaque invitation ID 送到預定收件人。Acceptance 需要一個 authenticated session，且其 email 與 invitation 相符。要求 email verification，並停用直接刪除 organization，讓刪除走明確的 archival workflow。
-
-新增或更改 plugin 之後，generate Better Auth Drizzle schema、generate SQL migration、review，再 apply：
+加了或改了 plugin 之後，generate Better Auth Drizzle schema，generate SQL migration，審閱它，然後 apply：
 
 <br />
 
@@ -151,28 +130,10 @@ npx drizzle-kit migrate
 
 <br />
 
-第一條指令寫入 schema definitions；它**不會**改動 PostgreSQL。在 CI 裡，把 CLI pin 到應用實際使用的 Better Auth 版本，不要讓 `@latest` 獨立漂移。
+- 第一條命令寫 schema definitions；它 **不會** 改 PostgreSQL。
+- 在 CI 裡把 CLI pin 到應用使用的 Better Auth 版本，不要讓 `@latest` 自己往前走。
 
-### Lifecycle
-
-Happy path 很短：
-
-<br />
-
-```text
-create organization
-  → invite member
-  → accept invitation
-  → set-active organization
-  → work inside that tenant
-  → leave or archive through an explicit workflow
-```
-
-<br />
-
-**Active organization 是 session state**，但應視為 UI preference，而不是業務 mutations 的 authorization input。Clients 呼叫 `organization.setActive`；server 把 `activeOrganizationId` 存到 session。業務 routes 仍攜帶明確的 organization ID，並為那個確切 ID 驗證 membership。
-
-若要在 session 建立時 seed 一個 active org，在同一個 auth configuration 加上 database hook：
+**Active organization 是 session state**，但把它當成 UI preference，而不是業務 mutations 的 authorization input。Clients 呼叫 `organization.setActive`；server 把 `activeOrganizationId` 存在 session 上。Business routes 仍然帶明確的 organization ID，並為那個確切 ID 驗證 membership。
 
 <br />
 
@@ -183,12 +144,7 @@ export const auth = betterAuth({
       create: {
         before: async (session) => {
           const organization = await getInitialOrganization(session.userId)
-          return {
-            data: {
-              ...session,
-              activeOrganizationId: organization?.id,
-            },
-          }
+          return { data: { ...session, activeOrganizationId: organization?.id } }
         },
       },
     },
@@ -199,9 +155,7 @@ export const auth = betterAuth({
 
 <br />
 
-### Roles and permissions
-
-預設 roles 是 **owner**、**admin** 與 **member**。對 domain actions，定義 access controller 並傳入 plugin：
+預設 roles 是 **owner**、**admin** 與 **member**。對 domain actions，定義 access controller 並傳進 plugin：
 
 <br />
 
@@ -239,32 +193,8 @@ export const owner = ac.newRole({
 
 <br />
 
-Route handlers 與 middleware 用 request headers，以及與 route 相同的明確 organization ID，呼叫 `auth.api.hasPermission`：
-
-<br />
-
-```ts
-const result = await auth.api.hasPermission({
-  headers: c.req.raw.headers,
-  body: {
-    organizationId,
-    permissions: {
-      project: ["create"],
-    },
-  },
-})
-
-if (!result.success) {
-  return c.json(
-    { code: "FORBIDDEN", message: "Missing project:create permission." },
-    403
-  )
-}
-```
-
-<br />
-
-當產品超出 static roles 時，才啟用 teams 與 dynamic access control。第一天先關掉它們。
+- Route handlers 與 middleware 呼叫 `auth.api.hasPermission`，帶上 request headers 以及 route 使用的 **同一個** explicit organization ID。
+- 產品超出 static roles 時，再打開 teams 與 dynamic access control。第一天先關掉。
 
 <br />
 
@@ -272,11 +202,11 @@ if (!result.success) {
 
 ## 4. Domain Schema：每一列業務資料都屬於 Tenant
 
-Auth tables 保持 **global**：user、account、session、verification、organization、member、invitation。業務 tables 是 **tenant-owned**。
+Auth tables 保持 **global**：user、account、session、verification、organization、member、invitation。Business tables 是 **tenant-owned**。
 
-規則很簡單：若 row 屬於某個 workspace，它就有一個非 null 的 `organization_id` foreign key 指向 `organization.id`，在需要處加上 tenant-scoped uniqueness，以及圍繞真實 tenant access paths 設計的 indexes。
-
-Better Auth organization IDs 是 strings，所以 domain foreign keys 應是 `text` 而非 `uuid`，除非已自訂 ID generation。
+- 如果這列屬於一個 workspace，它就有非空的 `organization_id` foreign key 指向 `organization.id`，需要時做 tenant-scoped uniqueness，以及圍繞真實 tenant access paths 設計的 indexes。
+- Better Auth organization IDs 是 strings，所以 domain foreign keys 應該是 `text`，不是 `uuid`，除非 ID generation 已被自訂。
+- Uniqueness 是 `(organization_id, slug)`，不是 global slug。
 
 <br />
 
@@ -296,11 +226,7 @@ import { organization } from "./auth-schema"
 
 // Provisioned by infrastructure as a restricted, non-owner login role.
 export const appUser = pgRole("app_user").existing()
-```
 
-<br />
-
-```ts title="src/db/schema.ts"
 export const projects = pgTable(
   "projects",
   {
@@ -340,53 +266,41 @@ export const projects = pgTable(
 
 <br />
 
-加入 policy 會在 Drizzle 為該 table 啟用 RLS。若需要 RLS 但尚未有 policies，使用 `pgTable.withRLS(...)` — 沒有 policy 時，Postgres 預設拒絕 row access。
+- 加上 policy 會在 Drizzle 裡為 table 啟用 RLS。如果需要 RLS 但還沒有 policies，用 `pgTable.withRLS(...)` —— 沒有 policy 時，Postgres 預設拒絕 row access。
+- Permissive policy 允許正常操作。Restrictive policy 會用 `AND` 與每一條適用 policy 組合，所以將來的 permissive support policy 不能把 tenant isolation 變成可選。
+- Table owners 預設繞過 RLS；`FORCE ROW LEVEL SECURITY` 讓 owner 也受 policies 約束。Superusers 以及帶 `BYPASSRLS` 的 roles 即使有 `FORCE` 也永遠繞過。
 
-Permissive policy 允許正常操作，而 restrictive policy 會以 `AND` 與每個適用的 policy 合併。這能防止日後 permissive 的 support policy 意外讓 tenant isolation 變成可選。
-
-**重要的 Postgres caveat：** table owners 預設會 bypass RLS；`FORCE ROW LEVEL SECURITY` 會讓 owner 也受 policies 約束。Superusers 與帶 `BYPASSRLS` 的 roles 即使有 `FORCE` 也永遠 bypass。
-
-在 Drizzle 之外 provision 產品 runtime role，不要讓它擁有 schemas 或 tables，並在經 review 的 custom migration 裡加上 grants 與 `FORCE`：
+在 Drizzle 之外 provision 產品 runtime role，不要讓它擁有 schemas 或 tables，並在審閱過的 custom migration 裡加上 grants 與 `FORCE`：
 
 <br />
 
 ```sql
 ALTER ROLE app_user
   NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
-
 GRANT USAGE ON SCHEMA public TO app_user;
-
 GRANT SELECT, INSERT, UPDATE, DELETE
-  ON TABLE "user", account, session, verification,
-    member, invitation, projects
+  ON TABLE "user", account, session, verification, member, invitation, projects
   TO app_user;
-
-GRANT SELECT, INSERT, UPDATE
-  ON TABLE organization
-  TO app_user;
-
+GRANT SELECT, INSERT, UPDATE ON TABLE organization TO app_user;
 ALTER TABLE projects FORCE ROW LEVEL SECURITY;
 ```
 
 <br />
 
-Login credential 由 infrastructure 或 secret manager 提供，不要 commit 進 migration。Policies 不會授予 table privileges，所以每次 migration 只 grant runtime 需要的 DML。不要 grant `TRUNCATE`、DDL、寬鬆的 `REFERENCES`，或 role-management privileges。RLS 不管 `TRUNCATE`，而 unique/foreign-key checks 會 bypass row filtering，所以按 tenant 收窄 constraints，並避免暴露 raw conflict details。若日後某個 table 使用 identity 或 serial sequences，請另外 review 其 sequence grants。
+- Login credential 由 infrastructure 或 secret manager 提供，不要 commit 進 migration。Policies 不授予 table privileges：只 grant runtime 需要的 DML。不要 grant `TRUNCATE`、DDL、寬泛的 `REFERENCES`，或 role-management privileges。
+- RLS 不管 `TRUNCATE`。Unique 與 foreign-key checks 會繞過 row filtering，所以按 tenant 限定 constraints，並避免暴露原始 conflict details。如果 table 用 identity 或 serial，審閱 sequence grants。
+- 對已有 table，用 expand and contract：加上 tenant column、backfill、強制 `NOT NULL`、加上 policies 與 grants、在 `app_user` 下驗證，再部署依賴這條邊界的程式碼。Drizzle `entities.roles` 替代不了 attributes、grants、membership、default privileges 或 `FORCE RLS` 的 custom SQL。
 
-Migration discipline 仍然重要。對既有 table，用 expand and contract：加入 tenant column、backfill、強制 `NOT NULL`、加上 policies 與 grants、在 `app_user` 下驗證，再部署依賴此 boundary 的程式碼。像 `entities.roles` 這類 Drizzle role discovery，不能取代 attributes、grants、membership、default privileges 或 `FORCE RLS` 的 custom SQL。
+<br />
 
 ---
 
 ## 5. 用 Drizzle 做 Postgres RLS
 
-RLS 只有在 **request path** 以受限 role 連線時才有用。分開 credentials：
+RLS 只有在 **request path** 以 restricted role 連線時才有用。分開 credentials：**migration owner**（擁有 schema changes，從不服務產品流量）、**`app_user`**（Better Auth 與業務 queries 使用的 non-owner login；沒有 `BYPASSRLS`），以及 **backup role**（嚴格控制的 read access 加上 `BYPASSRLS`，用於完整 logical backups）。
 
-- **Migration owner** — 擁有 schema changes，絕不拿來跑產品流量
-- **`app_user`** — Better Auth 與業務 queries 使用的非 owner login；在 tenant tables 上受 policies 約束；沒有 `BYPASSRLS`
-- **Backup role** — 嚴格控管的 read access，加上 `BYPASSRLS`，用於完整 logical backups
-
-Request pool 直接以 `app_user` 連線。意思是：意外在 tenant wrapper 外執行的 query 會 fail closed——它有普通 DML privileges，但 `current_setting(..., true)` 回傳 `NULL`，restrictive tenant policy 就不放行任何 rows。
-
-Wrapper 在 **transaction-local** setting 裡設定 tenant，並在同一個 transaction 裡跑每一個 tenant query：
+- Request pool 直接以 `app_user` 連線。意外跑在 tenant wrapper 之外的 query 會 fail closed：它有普通 DML privileges，但 `current_setting(..., true)` 回傳 `NULL`，所以 restrictive tenant policy 不放行任何 rows。
+- Wrapper 在 **transaction-local** setting 裡設置 tenant，並在同一條 transaction 裡跑每一條 tenant query。
 
 <br />
 
@@ -412,33 +326,24 @@ export async function withTenant<T>(
 
 <br />
 
-面對 **pooled connections** 時，transaction-local settings 很重要。Neon、PgBouncer 與 warm Lambda environments 會重用 connections。`set_config(..., true)` 會在 commit 或 rollback 時由 PostgreSQL 還原；不要在 `finally` 裡發 reset SQL，因為失敗的 statement 會讓 transaction aborted，cleanup SQL 可能掩蓋原始錯誤。絕不要用 `ALTER ROLE`、`ALTER DATABASE` 或 session-level `SET` 定義 `app.organization_id`，也不要依賴 pool reset hooks。
+- 面對 **pooled connections** 時，transaction-local settings 很重要。Neon、PgBouncer 與 warm Lambda environments 會重用 connections。`set_config(..., true)` 會在 commit 或 rollback 時被 PostgreSQL 還原。
+- 不要在 `finally` 裡發 reset SQL：失敗的 statement 會讓 transaction aborted，cleanup SQL 可能蓋掉原來的 error。
+- 永遠不要用 `ALTER ROLE`、`ALTER DATABASE` 或 session-level `SET` 定義 `app.organization_id`，也不要依賴 pool reset hooks。
+- Application code 仍然要寫明確的 filters。RLS 是 defense in depth，不是寫 ambient queries 的許可證。
 
-Application code 仍然要寫明確的 filters：
+**Failure:** 把 RLS 當成對抗 SQL injection 的保護，或當成對抗能用另一個 tenant ID 呼叫 `set_config` 的被攻破 runtime。它只保護受信任的 context-propagation path 下漏掉的 filters。
 
-<br />
+在稱系統 production-ready 之前先測：
 
-```ts
-const rows = await withTenant(organizationId, (tx) =>
-  tx.select().from(projects).where(eq(projects.organizationId, organizationId))
-)
-```
-
-<br />
-
-RLS 是 defense in depth，不是讓你寫 ambient queries 的許可。這條 policy 防護的是在受信任的 context-propagation path 下漏掉 filters。它**不**防護 SQL injection，也不防護能以另一個 tenant ID 呼叫 `set_config` 的 compromised runtime。
-
-在宣稱系統 production-ready 之前的測試清單：
-
-- 同一用戶、兩個 organizations — 在 A 建立後呼叫 org B 的 list route — A 的 project 不可出現
-- 並行切換 session 的 active org — 明確指定 org A 的請求必須仍綁定 A
-- 以 `app_user` query 但不設定 `app.organization_id` — 零 rows
-- 以不匹配的 `organization_id` insert — 被 `withCheck` 拒絕
-- Membership 被撤銷 — 明確的 membership check 失敗
-- Commit 與 roll back tenant A，重用 pooled connection 給 tenant B — 沒有 A 的 rows
-- 在 `withTenant` 內拋出 SQL error — 保留原始錯誤
-- 以帶 `FORCE RLS` 的 migration owner 執行 — rows 仍被 filter
-- 以 `app_user` 嘗試 `TRUNCATE` — permission denied
+- 同一用戶、兩個 organizations —— 在 A 建立後呼叫 org B 的 list route —— A 的 project 不得出現
+- 並發切換 session 的 active org —— 明確的 org A request 必須仍綁定到 A
+- 以 `app_user` query 但不設 `app.organization_id` —— 零 rows
+- Insert 帶不匹配的 `organization_id` —— 被 `withCheck` 拒絕
+- Membership 被撤銷 —— explicit membership check 失敗
+- Commit 與 roll back tenant A，重用 pooled connection 給 tenant B —— 沒有 A 的 rows
+- 在 `withTenant` 裡拋 SQL error —— 保住原來的 error
+- 以 migration owner 跑並開著 `FORCE RLS` —— rows 仍被過濾
+- 以 `app_user` 嘗試 `TRUNCATE` —— permission denied
 
 <br />
 
@@ -446,21 +351,7 @@ RLS 是 defense in depth，不是讓你寫 ambient queries 的許可。這條 po
 
 ## 6. Hono Request Pipeline
 
-Tenant routes 上的 middleware 順序：
-
-<br />
-
-```text
-CORS
-  → require session + explicit organization membership
-  → validate path and JSON body
-  → check permission for the same organization
-  → handler
-```
-
-<br />
-
-Typed context 讓 handlers 保持誠實：
+Tenant routes 上的 middleware 順序：CORS → 要求 session + explicit organization membership → validate path 與 JSON body → 為同一個 organization 檢查 permission → handler。
 
 <br />
 
@@ -479,36 +370,21 @@ type Variables = {
 export const requireTenant = createMiddleware<{ Variables: Variables }>(
   async (c, next) => {
     const session = await auth.api.getSession({ headers: c.req.raw.headers })
-
     if (!session) {
-      return c.json(
-        { code: "UNAUTHORIZED", message: "Authentication is required." },
-        401
-      )
+      return c.json({ code: "UNAUTHORIZED", message: "Authentication is required." }, 401)
     }
 
     const organizationId = c.req.param("organizationId")
     if (!organizationId) {
-      return c.json(
-        {
-          code: "ORGANIZATION_REQUIRED",
-          message: "An organization ID is required.",
-        },
-        400
-      )
+      return c.json({ code: "ORGANIZATION_REQUIRED", message: "An organization ID is required." }, 400)
     }
 
     const denied = await bindTenant(c, session.user.id, organizationId)
     if (denied) return denied
-
     await next()
   }
 )
-```
 
-<br />
-
-```ts title="src/middleware/tenant.ts"
 async function bindTenant(
   c: Context<{ Variables: Variables }>,
   userId: string,
@@ -519,22 +395,14 @@ async function bindTenant(
       headers: c.req.raw.headers,
       query: { organizationId },
     })
-
     c.set("userId", userId)
     c.set("organizationId", organizationId)
     c.set("memberRole", role)
     return null
   } catch (error) {
     if (error instanceof APIError && error.statusCode < 500) {
-      return c.json(
-        {
-          code: "FORBIDDEN",
-          message: "You cannot access this organization.",
-        },
-        403
-      )
+      return c.json({ code: "FORBIDDEN", message: "You cannot access this organization." }, 403)
     }
-
     throw error
   }
 }
@@ -542,50 +410,11 @@ async function bindTenant(
 
 <br />
 
-優先用 `POST /organizations/:organizationId/projects`，而不是 ambient tenant state。另一個分頁可能在請求進行中改掉 session 的 active organization；明確的 route ID 對該請求保持不可變。Middleware 為該 ID 驗證 membership，permission checks 用同一個 ID，`withTenant` 也收到同一個 ID。
+- 優先用 `POST /organizations/:organizationId/projects`，而不是 ambient tenant state。另一個 tab 可能在 request 進行中改掉 session 的 active organization；explicit route ID 對該 request 保持不可變。
+- Middleware 為那個 ID 驗證 membership，permission checks 用同一個 ID，`withTenant` 收到同一個 ID。
+- Organization 或 membership 無效時，`getActiveMemberRole` 拋 Better Auth `APIError`；它不回傳 `null`。把預期的 membership failures 映射成安全的 `403`，讓意外 errors 到達 centralized error handler。
 
-當 organization 或 membership 無效時，`getActiveMemberRole` 會拋出 Better Auth `APIError`；它不會回傳 `null`。把預期的 membership failures 映射成安全的 `403`，讓非預期錯誤到達 centralized error handler。
-
-Zod OpenAPI route 同時驗證 organization path parameter 與 JSON body。Handler 只讀已驗證的資料：
-
-<br />
-
-```ts title="src/routes/projects.ts"
-import { APIError } from "better-auth/api"
-import { createRoute, z } from "@hono/zod-openapi"
-
-const CreateProjectSchema = z.object({
-  name: z.string().trim().min(1).max(120),
-  slug: z
-    .string()
-    .trim()
-    .min(1)
-    .max(80)
-    .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
-})
-
-const createProjectRoute = createRoute({
-  method: "post",
-  path: "/organizations/{organizationId}/projects",
-  middleware: [requireTenant] as const,
-  request: {
-    params: z.object({ organizationId: z.string().min(1) }),
-    body: {
-      content: {
-        "application/json": { schema: CreateProjectSchema },
-      },
-      required: true,
-    },
-  },
-  responses: {
-    201: { description: "Project created" },
-    400: { description: "Invalid request" },
-    401: { description: "Authentication required" },
-    403: { description: "Membership or permission denied" },
-    409: { description: "Project slug already exists" },
-  },
-})
-```
+Zod OpenAPI route 同時 validate organization path parameter 與 JSON body。Handler 只讀已驗證的資料：
 
 <br />
 
@@ -594,40 +423,21 @@ app.openapi(createProjectRoute, async (c) => {
   const { organizationId } = c.req.valid("param")
   const body = c.req.valid("json")
 
-  try {
-    const allowed = await auth.api.hasPermission({
-      headers: c.req.raw.headers,
-      body: {
-        organizationId,
-        permissions: { project: ["create"] },
-      },
-    })
-
-    if (!allowed.success) {
-      return c.json(
-        { code: "FORBIDDEN", message: "Missing project:create permission." },
-        403
-      )
-    }
-  } catch (error) {
-    if (error instanceof APIError && error.statusCode < 500) {
-      return c.json(
-        { code: "FORBIDDEN", message: "Permission check failed." },
-        403
-      )
-    }
-
-    throw error
+  const allowed = await auth.api.hasPermission({
+    headers: c.req.raw.headers,
+    body: { organizationId, permissions: { project: ["create"] } },
+  })
+  if (!allowed.success) {
+    return c.json(
+      { code: "FORBIDDEN", message: "Missing project:create permission." },
+      403
+    )
   }
 
   const [project] = await withTenant(organizationId, (tx) =>
     tx
       .insert(projects)
-      .values({
-        organizationId,
-        name: body.name,
-        slug: body.slug,
-      })
+      .values({ organizationId, name: body.name, slug: body.slug })
       .returning()
   )
 
@@ -637,25 +447,29 @@ app.openapi(createProjectRoute, async (c) => {
 
 <br />
 
-共用的 error handler 應把 malformed 或 invalid requests 映射為 `400`、authentication 為 `401`、已知的 authorization failures 為 `403`、對呼叫端隱藏的 tenant resource lookups 為 `404`、PostgreSQL unique violation `23505` 為 `409`，以及非預期失敗為附帶 request ID 的 sanitized `500`。對已知但呼叫端不能執行的操作，`403` 是合適的；對未知 resource ID 回傳 `404`，可避免洩露它屬於另一個 tenant。
+- 共享的 error handler 應把 malformed requests 映射到 `400`，authentication 到 `401`，已知 authorization failures 到 `403`，被 tenant 藏起的 resource lookups 到 `404`，PostgreSQL unique violation `23505` 到 `409`，意外 failures 到帶 request ID 的 sanitized `500`。
+- 呼叫者不能執行的已知操作適合 `403`；未知 resource ID 回傳 `404`，避免洩漏它屬於另一個 tenant。
+- Membership 與 permission 在業務 transaction 正前方檢查。把 `hasPermission` 裡 `statusCode < 500` 的 `APIError` 映射到 `403`。預設 revocation contract 允許已經授權的 in-flight request 做完；revocation 擋住後續 requests。
 
-Membership 與 permission 在業務 transaction 正前方檢查。預設的 revocation 契約允許已授權、進行中的請求完成；撤銷會擋住後續請求。若產品需要立即撤銷，必須在與 mutation 同一個 database transaction 裡重新檢查或鎖定 membership。
+**Failure:** 要求立刻 revocation，卻不在與 mutation 同一條 database transaction 裡重新檢查或鎖定 membership。
+
+<br />
 
 ---
 
 ## 7. 會破壞 Isolation 的 Production Edge Cases
 
-這些情況在 demo 裡看起來沒問題，在真實流量下卻會失敗：
+這些是 demo 裡看起來沒問題、真實流量下會失敗的情況。
 
-- **Stale active org** — client UI 在 `setActive` 切到 B 之後仍可能顯示 org A。只把它當 display/navigation state；明確的業務 routes 才是權威來源。
-- **Organization deletion** — Better Auth 會 hard-delete organization membership 與 invitation rows。其他 sessions 可能仍保留過期的 active ID。這個例子停用直接刪除，並使用 `ON DELETE RESTRICT`；archival workflow 必須撤銷 sessions、處理 domain retention，並按明確順序刪除。
-- **Invitation security** — 接受 invitation 需要匹配的 authenticated email。只把 opaque IDs 送到收件人、要求 email verification、讓 invitations 過期，且絕不 log action URLs。
-- **Cross-tenant IDs in URLs** — `GET /projects/:id` 必須在 tenant transaction 內按 id 載入。有了 RLS，錯誤的 tenant 得到 not found，而不是另一個 org 的 row。Query 裡仍要按 `organizationId` filter。
-- **Background jobs and webhooks** — 沒有 session cookie。使用 authenticated 或 signed payloads，enqueue 前授權 tenant scope，記錄 actor 與 operation，讓 retries idempotent，然後跑同一個 `withTenant` wrapper。單獨的 tenant ID 不是 authorization。
-- **Support break-glass** — 使用獨立、可審計的 admin connection 或工具，不要在產品程式碼裡到處灑 `SET ROLE` bypass。
-- **Connection pooling** — 只在帶 local settings 的 transactions 內設定 tenant context。安全性來自 transaction 結束，而不是 pooler 的 reset hook。對 transaction poolers 遵循 provider 的 prepared-statement 指引。
-- **Backups and restores** — `pg_dump` 設定 `row_security=off` 不會 bypass RLS；當 rows 會被 filter 時它會報錯。完整 logical backups 使用專用的 read + `BYPASSRLS` role。另外備份 cluster roles（例如 `pg_dumpall --globals-only`），並測試 restore 能重建 grants、policies、`ENABLE RLS` 與 `FORCE RLS`。
-- **Lambda authorizer caching** — identity 只可在產品接受的 revocation 保證範圍內快取。Tenant membership 與 permission 仍要在 API 裡，針對明確的 route organization 檢查。
+- **Stale active org** — client UI 在 `setActive` 切到 B 之後仍可能顯示 org A。只把它當成 display/navigation state；explicit business routes 才是權威。
+- **Organization deletion** — Better Auth 會 hard-delete organization membership 與 invitation rows。其他 sessions 可能留下 stale active ID。這個例子關掉直接刪除，並用 `ON DELETE RESTRICT`；archival workflow 必須 revoke sessions、處理 domain retention，並按明確順序刪除。
+- **Invitation security** — 接受 invitation 需要吻合的 authenticated email。只把 opaque IDs 發給收件人，要求 email verification，讓 invitations 過期，永遠不要 log action URLs。
+- **URL 裡的跨 tenant IDs** — `GET /projects/:id` 必須在 tenant transaction 裡按 id 載入。有了 RLS，錯誤的 tenant 得到 not found，而不是另一個 org 的 row。Query 裡仍然要按 `organizationId` filter。
+- **Background jobs 與 webhooks** — 沒有 session cookie。用 authenticated 或 signed payloads，enqueue 之前授權 tenant scope，記錄 actor 與 operation，讓 retries idempotent，然後跑同一套 `withTenant` wrapper。單獨一個 tenant ID 不是 authorization。
+- **Support break-glass** — 用單獨、被審計的 admin connection 或 tool，不要在產品程式碼裡灑 `SET ROLE` bypass。
+- **Connection pooling** — 只在帶 local settings 的 transactions 裡設 tenant context。安全來自 transaction 結束，不是 pooler 的 reset hook。對 transaction poolers 遵循 provider 的 prepared-statement 指引。
+- **Backups 與 restores** — `pg_dump` 設 `row_security=off` 並不會繞過 RLS；rows 會被過濾時它會 error。完整 logical backups 用專用的 read + `BYPASSRLS` role。Cluster roles 分開備份（例如 `pg_dumpall --globals-only`），並測試 restore 會重建 grants、policies、`ENABLE RLS` 與 `FORCE RLS`。
+- **Lambda authorizer caching** — identity 只能在產品接受的 revocation guarantees 內被 cache。Tenant membership 與 permission 仍要對照 API 裡 explicit route organization 檢查。
 
 <br />
 
@@ -663,7 +477,7 @@ Membership 與 permission 在業務 transaction 正前方檢查。預設的 revo
 
 ## 8. 最小架構切片
 
-目標資料夾形狀：
+先定 folder 形狀，然後端到端實作並 integration-test 這條 path，再加 teams、dynamic roles 或花哨的 admin tooling。
 
 <br />
 
@@ -684,17 +498,15 @@ src/
 
 <br />
 
-在加入 teams、dynamic roles 或華麗的 admin tooling 之前，先端到端實作並 integration-test 這條路徑：
-
 1. Sign up / sign in
 2. Create an organization
 3. Invite a member
-4. Set the active organization for UI navigation
-5. `POST /organizations/:organizationId/projects` inside `withTenant`
-6. List the same explicit organization — another org's projects remain hidden
-7. Call an admin-only organization route as a member — `403`
+4. 為 UI navigation 設 active organization
+5. 在 `withTenant` 裡 `POST /organizations/:organizationId/projects`
+6. List 同一個 explicit organization —— 另一個 org 的 projects 保持隱藏
+7. 以 member 呼叫 admin-only organization route —— `403`
 
-若步驟 6 或 7 失敗，系統還不是 multi-tenant。它只是一個帶 organization table 的 single-tenant 應用。只有當 invitation delivery、list/admin routes 與 isolation tests 都可執行時，這個切片才算完成。
+如果第 6 或第 7 步失敗，系統還不是 multi-tenant。它只是帶一張 organization table 的 single-tenant app。只有 invitation delivery、list/admin routes 與 isolation tests 都能跑時，這個切片才算完成。
 
 <br />
 
@@ -702,9 +514,11 @@ src/
 
 ## 9. 結語
 
-**Better Auth** organizations 提供 membership UX：建立、邀請、roles、active workspace。**Postgres RLS** 提供不信任每位 query 作者都會記得 tenant filter 的 data plane。**Hono** 是兩者交會之處 — typed context、明確的 middleware，以及在碰業務 tables 前開啟 tenant-scoped transaction 的 handlers。
+**Better Auth** organizations 提供 membership UX。**Postgres RLS** 提供不信任每位 query 作者都會記得 tenant filter 的 data plane。**Hono** 是兩者交會之處 — typed context、明確的 middleware，以及在碰業務 tables 前開啟 tenant-scoped transaction 的 handlers。
 
-從 shared schema、static roles，以及每個 tenant-owned table 上的 RLS 開始。當真實產品需求出現時，再加入 teams 或 dynamic access control。Deploy、OpenAPI 與 Lambda 細節留在 [Backend APIs 筆記](/notes/backend-apis-hono-sst)；這篇 note 只談 isolation contract。
+- 從 shared schema、static roles，以及每個 tenant-owned table 上的 RLS 開始。
+- 當真實產品需求出現時，再加入 teams 或 dynamic access control。
+- Deploy、OpenAPI 與 Lambda 細節留在 [Backend APIs 筆記](/notes/backend-apis-hono-sst)；這篇 note 只談 isolation contract。
 
 Production 門檻很簡單：忘了 `WHERE` clause，絕不能變成跨 tenant 事故。
 
@@ -720,3 +534,74 @@ Production 門檻很簡單：忘了 `WHERE` clause，絕不能變成跨 tenant �
 - [PostgreSQL row security policies](https://www.postgresql.org/docs/current/ddl-rowsecurity.html)
 - [PostgreSQL configuration functions](https://www.postgresql.org/docs/current/functions-admin.html#FUNCTIONS-ADMIN-SET)
 - [PostgreSQL logical backups with pg_dump](https://www.postgresql.org/docs/current/app-pgdump.html)
+
+---
+
+## Recap Q&A
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="tenant-means">
+    <AccordionTrigger>1. 這裡所說的 production multi-tenant 是什麼，為什麼一條 WHERE clause 不夠？</AccordionTrigger>
+    <AccordionContent>
+
+      - **Tenant** 就是一個 **organization**：帶有 members、roles，以及自己業務資料的 SaaS workspace。用戶可以屬於多個 organizations。Session 會追蹤哪個 organization 是 **active**。
+      - 做法是 **shared database** 與 **shared schema**。每個 tenant 擁有的 row 都帶 `organization_id`。
+      - Soft isolation —— application code 一律以 `organizationId` filter —— 上手快，壓力一上來就容易出錯。
+      - **Database-enforced isolation**（Postgres RLS）意味著忘了 `WHERE` 時回傳零 rows，而不是另一個 tenant 的資料。
+      - **Failure:** 少一個 filter、一次 confused deputy，或某個 background job 忘了 tenant context，都足以洩漏。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="tenant-better-auth">
+    <AccordionTrigger>2. Better Auth organization 如何成為 tenancy control plane？</AccordionTrigger>
+    <AccordionContent>
+
+      - Organization plugin 是 membership 與 workspace：`organization`、`member`、`invitation` 與 `session.activeOrganizationId`。
+      - Roles（owner、admin、member）活在 access-control config 裡。
+      - Invitation 只把 opaque ID 交給預定收件人；acceptance 需要 authenticated session，且 email 吻合。要求 email verification。關掉直接刪除 organization，讓 deletion 走 archival。
+      - Auth tables 保持 **global**。加了 plugin 之後，generate schema、generate SQL、審閱，然後 migrate。把 CLI pin 到應用使用的 Better Auth 版本。
+      - `npx auth generate` **不會** 改 PostgreSQL。Active organization 是 session/UI state，不是業務 mutations 的 authorization input。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="tenant-rows">
+    <AccordionTrigger>3. 哪些 rows 必須是 tenant-owned？</AccordionTrigger>
+    <AccordionContent>
+
+      - 如果這列屬於一個 workspace，它就有非空的 `organization_id` foreign key、需要時做 tenant-scoped uniqueness，以及圍繞真實 tenant access paths 的 indexes。
+      - Better Auth organization IDs 是 strings，所以 domain foreign keys 應該是 `text`，除非 ID generation 已被自訂。
+      - URL 裡屬於另一個 org 的 resource IDs（`/projects/:id`）是 object-level access control。
+      - Uniqueness 是 `(organization_id, slug)`，不是 global slug。
+      - **Failure:** 未驗證 membership 就接受 `X-Organization-Id`。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="tenant-rls">
+    <AccordionTrigger>4. RLS 什麼時候才真正有用，tenant context 怎麼設？</AccordionTrigger>
+    <AccordionContent>
+
+      - RLS 只有在 **request path** 以 restricted role 連線時才有用。**Migration owner** 從不服務產品流量。**`app_user`** 沒有 `BYPASSRLS`。
+      - Request pool 以 `app_user` 連線，所以跑在 tenant wrapper 之外的 query 會 **fail closed**：`current_setting` 是 `NULL`，policy 不放行任何 rows。
+      - `withTenant` 用 **transaction-local** 的 `set_config(..., true)` 設置 `app.organization_id`，並在那條 transaction 裡跑每一條 tenant query。
+      - Pooled connections 會重用 sessions。不要 `ALTER ROLE` 那個 setting，也不要在 aborted transaction 之後於 `finally` 裡 reset。
+      - Application code 仍然要寫明確的 filters。RLS 是後盾，不是丟掉 `WHERE` 的許可證。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="tenant-pipeline">
+    <AccordionTrigger>5. Tenant routes 上的 Hono pipeline 是什麼？</AccordionTrigger>
+    <AccordionContent>
+
+      - 三層必須彼此一致：**identity / membership**（Better Auth）、**request context**（已驗證的 `userId` 與 `organizationId` —— 絕不能只靠 client 可控的 header），以及 **data boundary**（RLS）。
+      - Middleware 順序：CORS → 要求 session + explicit organization membership → validate path 與 JSON → 為 **同一個** organization 檢查 permission → handler。
+      - Typed context 讓 handlers 誠實。優先用 explicit route organization ID，而不是 ambient session state。
+      - 在 production 悄悄關掉 isolation 的 break-glass admin paths，以及仍握著另一個 tenant settings 的 connection pools，是會破壞 isolation 的 edge cases。
+      - Production 預設是 fail closed。
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>

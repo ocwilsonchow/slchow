@@ -4,11 +4,13 @@ description: Precise TypeScript implementations of core algorithm patterns — h
 category: computer-science
 ---
 
-A small set of algorithm patterns shows up again and again: searching, traversing graphs, shrinking windows, caching, and trading memory for time. Recognizing the pattern matters more than memorizing problem names.
+A small set of algorithm patterns shows up again and again: searching, traversing graphs, shrinking windows, caching, and trading memory for time.
 
 <br />
 
-This note collects the patterns that show up most often, each with a precise TypeScript implementation and a complexity note. The goal is a working mental map — when you see an input shape, you already know which tool fits.
+- Recognizing the **pattern** matters more than memorizing problem names.
+- The **input shape** usually names the tool.
+- Each pattern below has a precise TypeScript implementation and a complexity note.
 
 <br />
 
@@ -39,7 +41,7 @@ This note collects the patterns that show up most often, each with a precise Typ
 
 ## Hash Map — Two Sum
 
-A hash map turns an expensive scan into constant-time lookups. Use it when you would otherwise nest loops to find a complement, count frequencies, or remember “has this been seen?”
+A **hash map** turns an expensive scan into constant-time lookups.
 
 <br />
 
@@ -62,11 +64,10 @@ twoSum([2, 7, 11, 15], 9) // [0, 1]
 
 <br />
 
-**Complexity:** O(n) time, O(n) space.
-
-<br />
-
-Variant: the same idea powers anagram checks (`Map` of character counts) and first-unique-character problems.
+- Reach for it when you would otherwise nest loops to find a complement, count frequencies, or remember “has this been seen?”
+- **Complexity:** O(n) time, O(n) space.
+- The same idea powers anagram checks (`Map` of character counts) and first-unique-character problems.
+- **Failure:** nested loops over data that could have been keyed.
 
 <br />
 
@@ -74,7 +75,7 @@ Variant: the same idea powers anagram checks (`Map` of character counts) and fir
 
 ## Two Pointers — Pair With Target (Sorted)
 
-When an array is sorted, two indices can move inward (or both forward) instead of searching with a nested loop. Move the pointer that reduces the error relative to the target.
+When an array is **sorted**, two indices can move inward (or both forward) instead of searching with a nested loop.
 
 <br />
 
@@ -98,7 +99,9 @@ twoSumSorted([1, 2, 3, 4, 6], 6) // [1, 3] -> 2 + 4
 
 <br />
 
-**Complexity:** O(n) time, O(1) extra space (assuming the array is already sorted).
+- Move the pointer that reduces the error relative to the target.
+- **Complexity:** O(n) time, O(1) extra space (assuming the array is already sorted).
+- **Failure:** applying inward pointers on an unsorted array — the movement rule assumes order.
 
 <br />
 
@@ -106,7 +109,7 @@ twoSumSorted([1, 2, 3, 4, 6], 6) // [1, 3] -> 2 + 4
 
 ## Sliding Window — Longest Substring Without Repeating Characters
 
-A window is a contiguous segment `[left, right]` that you expand and shrink while maintaining an invariant (unique characters, sum ≤ K, at most K distinct values).
+A **window** is a contiguous segment `[left, right]` that you expand and shrink while maintaining an invariant.
 
 <br />
 
@@ -134,7 +137,9 @@ lengthOfLongestSubstring("abcabcbb") // 3 ("abc")
 
 <br />
 
-**Complexity:** O(n) time, O(min(n, alphabet)) space.
+- Use it for unique characters, sum ≤ K, or at most K distinct values — grow and shrink a range instead of restarting.
+- **Complexity:** O(n) time, O(min(n, alphabet)) space.
+- **Failure:** shrinking `left` without checking the last occurrence is still inside the window.
 
 <br />
 
@@ -142,7 +147,7 @@ lengthOfLongestSubstring("abcabcbb") // 3 ("abc")
 
 ## Binary Search — Lower Bound
 
-Binary search repeatedly cuts a monotonic search space in half. The careful version returns the first index where `nums[i] >= target` (lower bound / insertion point).
+**Binary search** repeatedly cuts a monotonic search space in half.
 
 <br />
 
@@ -176,11 +181,10 @@ lowerBound([1, 3, 3, 5, 7], 4) // 3 (insert before 5)
 
 <br />
 
-**Complexity:** O(log n) time, O(1) space.
-
-<br />
-
-Variant: when the array itself is not sorted but the *answer* is monotonic (e.g. minimum capacity that works), binary search on the answer instead.
+- The careful version returns the first index where `nums[i] >= target` (**lower bound** / insertion point).
+- When the array itself is not sorted but the *answer* is monotonic (e.g. minimum capacity that works), binary search on the **answer** instead.
+- **Complexity:** O(log n) time, O(1) space.
+- **Failure:** mixing inclusive and exclusive bounds — `hi = nums.length` is exclusive; `hi = mid` (not `mid - 1`) keeps the invariant.
 
 <br />
 
@@ -188,7 +192,7 @@ Variant: when the array itself is not sorted but the *answer* is monotonic (e.g.
 
 ## Stack — Valid Parentheses
 
-A stack stores “still open” work. Matching brackets, path simplification, and monotonic next-greater problems all push and pop in LIFO order.
+A **stack** stores “still open” work and pops in LIFO order.
 
 <br />
 
@@ -220,7 +224,9 @@ isValidParentheses("(]") // false
 
 <br />
 
-**Complexity:** O(n) time, O(n) space.
+- Matching brackets, path simplification, and monotonic **next-greater** problems all push and pop.
+- **Complexity:** O(n) time, O(n) space.
+- **Failure:** returning true because every closer matched without checking the stack is empty — leftover openers are invalid.
 
 <br />
 
@@ -228,7 +234,7 @@ isValidParentheses("(]") // false
 
 ## Linked List — Reverse and Cycle Detection
 
-Linked-list problems are usually about careful pointer rewiring. Two classics: reverse the list in place, and detect a cycle with Floyd’s tortoise and hare.
+Linked-list problems are usually about careful **pointer rewiring**.
 
 <br />
 
@@ -268,7 +274,9 @@ function hasCycle(head: ListNode | null): boolean {
 
 <br />
 
-**Complexity:** reverse is O(n) time, O(1) space; cycle detection is O(n) time, O(1) space.
+- Two classics: reverse the list in place, and detect a cycle with **Floyd’s tortoise and hare**.
+- **Complexity:** reverse is O(n) time, O(1) space; cycle detection is O(n) time, O(1) space.
+- **Failure:** rewiring `curr.next` before saving `next` — the rest of the list is gone.
 
 <br />
 
@@ -276,7 +284,7 @@ function hasCycle(head: ListNode | null): boolean {
 
 ## Tree DFS and BFS — Depth and Level Order
 
-Trees are graphs without cycles. **DFS** goes deep (recursion or an explicit stack). **BFS** walks level by level with a queue — the usual choice for shortest path in an unweighted tree.
+Trees are graphs without cycles. **DFS** goes deep; **BFS** walks level by level.
 
 <br />
 
@@ -318,10 +326,6 @@ function levelOrder(root: TreeNode | null): number[][] {
 
 <br />
 
-**Complexity:** both O(n) time and O(n) space in the worst case (skewed tree or wide level).
-
-<br />
-
 ```mermaid
 flowchart TD
   root[Root] --> L1A[Level1]
@@ -333,7 +337,10 @@ flowchart TD
 
 <br />
 
-BFS visits each level fully before the next; DFS follows one branch to a leaf before backtracking.
+- DFS uses recursion or an explicit stack. BFS uses a **queue** — the usual choice for shortest path in an unweighted tree.
+- BFS visits each level fully before the next; DFS follows one branch to a leaf before backtracking.
+- **Complexity:** both O(n) time and O(n) space in the worst case (skewed tree or wide level).
+- **Failure:** using DFS when the question is shortest path in an unweighted tree — that is BFS.
 
 <br />
 
@@ -341,7 +348,7 @@ BFS visits each level fully before the next; DFS follows one branch to a leaf be
 
 ## Graph — Number of Islands
 
-A grid is a graph: each cell is a node, and 4-directional neighbors are edges. Flood-fill with DFS or BFS counts connected components of land.
+A grid is a graph: each cell is a node, and 4-directional neighbors are edges.
 
 <br />
 
@@ -385,7 +392,9 @@ numIslands([
 
 <br />
 
-**Complexity:** O(rows × cols) time and O(rows × cols) space for the recursion stack in the worst case.
+- **Flood-fill** with DFS or BFS counts connected components of land.
+- **Complexity:** O(rows × cols) time and O(rows × cols) space for the recursion stack in the worst case.
+- **Failure:** counting cells instead of connected components — flood-fill must mark a whole island as visited.
 
 <br />
 
@@ -393,7 +402,7 @@ numIslands([
 
 ## Topological Sort — Course Schedule
 
-When tasks have prerequisites, model them as a directed graph and produce an order where every edge `u → v` means `u` comes before `v`. Kahn’s algorithm uses indegrees and a queue.
+When tasks have prerequisites, model them as a **directed graph** and produce an order where every edge `u → v` means `u` comes before `v`.
 
 <br />
 
@@ -435,7 +444,9 @@ canFinish(2, [
 
 <br />
 
-**Complexity:** O(V + E) time, O(V + E) space.
+- **Kahn’s algorithm** uses indegrees and a queue.
+- **Complexity:** O(V + E) time, O(V + E) space.
+- **Failure:** assuming every directed graph has an order — `taken !== numCourses` means a cycle.
 
 <br />
 
@@ -443,7 +454,7 @@ canFinish(2, [
 
 ## Heap — Top K Frequent Elements
 
-A heap keeps the current extreme efficiently. For “top K,” a size-K min-heap of frequencies avoids sorting the whole map.
+A **heap** keeps the current extreme efficiently. For “top K,” a size-K min-heap of frequencies avoids sorting the whole map.
 
 <br />
 
@@ -498,7 +509,9 @@ topKFrequent([1, 1, 1, 2, 2, 3], 2) // [1, 2] (order among ties may vary)
 
 <br />
 
-**Complexity:** O(n log k) time, O(n) space for the frequency map (heap holds at most k items).
+- Reach for it on a stream or “top K” when you need extremes without a full sort.
+- **Complexity:** O(n log k) time, O(n) space for the frequency map (heap holds at most k items).
+- **Failure:** sorting the whole frequency map when a size-K heap is enough.
 
 <br />
 
@@ -506,7 +519,7 @@ topKFrequent([1, 1, 1, 2, 2, 3], 2) // [1, 2] (order among ties may vary)
 
 ## Union-Find — Connected Components
 
-Union-Find (Disjoint Set Union) maintains a partition of elements into components. `find` returns a representative; `union` merges two sets. Path compression + union by rank makes operations nearly O(1) amortized.
+**Union-Find** (Disjoint Set Union) maintains a partition of elements into components.
 
 <br />
 
@@ -561,7 +574,10 @@ countComponents(5, [
 
 <br />
 
-**Complexity:** effectively O(n + m α(n)) for n nodes and m edges — α is the inverse Ackermann function (tiny in practice).
+- `find` returns a representative; `union` merges two sets.
+- **Path compression** + union by rank makes operations nearly O(1) amortized.
+- **Complexity:** effectively O(n + m α(n)) for n nodes and m edges — α is the inverse Ackermann function (tiny in practice).
+- **Failure:** union without `find` first — you merge nodes, not their roots, and the partition breaks.
 
 <br />
 
@@ -569,7 +585,7 @@ countComponents(5, [
 
 ## Backtracking — Subsets
 
-Backtracking builds candidates incrementally and undoes the last choice (the “backtrack”) when exploring the next branch. Use it for subsets, permutations, combinations, and constraint search.
+**Backtracking** builds candidates incrementally and undoes the last choice when exploring the next branch.
 
 <br />
 
@@ -598,7 +614,9 @@ subsets([1, 2, 3])
 
 <br />
 
-**Complexity:** O(n · 2ⁿ) time to generate and copy all subsets, O(n) extra space for the recursion path (excluding the output).
+- Use it for subsets, permutations, combinations, and constraint search.
+- **Complexity:** O(n · 2ⁿ) time to generate and copy all subsets, O(n) extra space for the recursion path (excluding the output).
+- **Failure:** forgetting `path.pop()` — later branches share a mutated path.
 
 <br />
 
@@ -606,7 +624,12 @@ subsets([1, 2, 3])
 
 ## Dynamic Programming — Climbing Stairs and Unique Paths
 
-DP applies when a problem has **optimal substructure** and **overlapping subproblems**: solve smaller pieces once, reuse them. Start from the base cases and build up.
+**Dynamic programming** applies when a problem has **optimal substructure** and **overlapping subproblems**: solve smaller pieces once, reuse them.
+
+<br />
+
+- Start from the **base cases** and build up.
+- **Failure:** recursing without reuse when subproblems overlap — that is exponential, not DP.
 
 <br />
 
@@ -637,7 +660,7 @@ climbStairs(5) // 8
 
 <br />
 
-**Complexity:** O(n) time, O(1) space.
+- **Complexity:** O(n) time, O(1) space.
 
 <br />
 
@@ -665,7 +688,7 @@ uniquePaths(3, 7) // 28
 
 <br />
 
-**Complexity:** O(m · n) time, O(m · n) space (compressible to O(n) with a rolling row).
+- **Complexity:** O(m · n) time, O(m · n) space (compressible to O(n) with a rolling row).
 
 <br />
 
@@ -673,7 +696,7 @@ uniquePaths(3, 7) // 28
 
 ## LRU Cache
 
-An LRU cache returns values in O(1) and evicts the least recently used key when full. In modern JavaScript, `Map` preserves insertion order, so moving a key to the end on each access implements LRU without a hand-rolled doubly linked list.
+An **LRU** cache returns values in O(1) and evicts the least recently used key when full.
 
 <br />
 
@@ -715,7 +738,9 @@ cache.get(2) // -1
 
 <br />
 
-**Complexity:** O(1) amortized get and put; O(capacity) space.
+- In modern JavaScript, `Map` preserves insertion order, so moving a key to the end on each access implements LRU without a hand-rolled doubly linked list.
+- **Complexity:** O(1) amortized get and put; O(capacity) space.
+- **Failure:** `get` that reads without `delete` + `set` — insertion order no longer tracks recency.
 
 <br />
 
@@ -723,7 +748,7 @@ cache.get(2) // -1
 
 ## Choosing a Pattern
 
-A quick decision guide:
+Pick the pattern whose **invariant** is clearest, then state time and space before coding.
 
 <br />
 
@@ -742,10 +767,6 @@ A quick decision guide:
 
 <br />
 
-If two patterns seem plausible, pick the one with the clearer invariant and state its time and space before coding.
-
-<br />
-
 ---
 
 ## Takeaways
@@ -754,12 +775,73 @@ Master these patterns before chasing exotic algorithms. Most day-to-day problems
 
 <br />
 
-For every solution, be ready to state:
+- For every solution, be ready to state the **pattern**, **time** and **space** complexity, and what changes if the input is sorted, streaming, or too large for memory.
+- Specialized tools (KMP, Bloom filters, consistent hashing) matter in narrower domains. The patterns above are the shared baseline.
+- **Failure:** optimizing nested loops while the actual bottleneck is a network round trip that was never measured. Complexity is a decision tool, not a sport.
 
-- the **pattern** you used
-- **time** and **space** complexity
-- what changes if the input is sorted, streaming, or too large for memory
+---
 
-<br />
+## Recap Q&A
 
-Specialized tools (KMP, Bloom filters, consistent hashing) matter in narrower domains. The patterns above are the shared baseline.
+<Accordion type="single" collapsible>
+  <AccordionItem value="algo-map">
+    <AccordionTrigger>1. Why does recognizing the pattern matter more than the problem name?</AccordionTrigger>
+    <AccordionContent>
+
+      - A small set of patterns shows up again and again: searching, traversing graphs, shrinking windows, caching, trading memory for time.
+      - The **input shape** usually names the tool: hash map for unsorted lookups, two pointers on a sorted array, sliding window for a contiguous segment, binary search when the answer space is monotonic.
+      - Specialized tools (KMP, Bloom filters, consistent hashing) matter in narrower domains.
+      - Hash maps, windows, binary search, graph traversal, heaps, and DP are the shared baseline. Most day-to-day problems are recombinations of those.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="algo-linear">
+    <AccordionTrigger>2. When do you reach for a hash map, two pointers, or a sliding window?</AccordionTrigger>
+    <AccordionContent>
+
+      - **Hash map** when you need O(1) lookups or frequency counts on an unsorted array — Two Sum is the prototype.
+      - **Two pointers** when a linear scan on a sorted array (or a pair from the ends) can replace nested loops.
+      - **Sliding window** when the constraint is a contiguous subarray or substring: grow and shrink a range instead of restarting.
+      - If two patterns seem plausible, pick the one with the **clearer invariant** and state time and space before coding.
+      - **Failure:** nested loops over data that could have been keyed.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="algo-search-stack">
+    <AccordionTrigger>3. What are binary search and a stack actually for?</AccordionTrigger>
+    <AccordionContent>
+
+      - **Binary search** halves a sorted array or a monotonic answer space each step — including “search on the answer” (lower bound).
+      - The invariant is that everything left of the bound fails the predicate and everything right of it passes.
+      - A **stack** is latest-open / next-greater: matching parentheses, nested structure.
+      - Linked-list reverse and cycle detection are constant-space pointer walks, not a different family of math.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="algo-graphs-dp">
+    <AccordionTrigger>4. How do you choose among BFS, DFS, topo sort, Union-Find, heaps, and DP?</AccordionTrigger>
+    <AccordionContent>
+
+      - **BFS** for shortest path in an unweighted graph or level-order trees. **DFS** to explore all paths, components, or hierarchies.
+      - **Topological sort** when ordering has prerequisites on a DAG. **Union-Find** for undirected connectivity with many merges.
+      - A **heap** for top K or a running extreme without a full sort. **DP** when overlapping subproblems have optimal reuse. **Backtracking** to generate all valid candidates.
+      - LRU is O(1) get/put with eviction: a hash map plus insertion-order recency.
+      - Complexity marks which work will fall over at twenty thousand. It does not dictate micro-optimizing twenty items.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="algo-choose">
+    <AccordionTrigger>5. What should you be ready to state for every solution?</AccordionTrigger>
+    <AccordionContent>
+
+      - The **pattern** you used, **time** and **space** complexity, and what changes if the input is sorted, streaming, or too large for memory.
+      - The same map that solves Two Sum is the map that de-duplicates in-flight requests.
+      - **Failure:** optimizing nested loops while the actual bottleneck is a network round trip that was never measured. Complexity is a decision tool, not a sport.
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>

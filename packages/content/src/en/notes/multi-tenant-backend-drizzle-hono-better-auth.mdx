@@ -7,13 +7,9 @@ category: backend
 
 Multi-tenancy fails in production when isolation is only a `WHERE organization_id = ?` habit. One missed filter, one confused deputy between workspaces, or one background job that forgets the tenant context is enough to leak data.
 
-A production-grade service needs three layers that agree:
+A production-grade service needs three layers that agree: **identity / membership** (Better Auth organization plugin), **request context** (every protected Hono handler receives a verified `userId` and `organizationId`, never from a client-controlled header alone), and a **data boundary** (PostgreSQL row-level security denies cross-tenant rows even if application code forgets a filter).
 
-1. **Identity / membership** — who the user is, which organizations they belong to, which org is active, and what role they hold (**Better Auth** organization plugin)
-2. **Request context** — every protected **Hono** handler receives a verified `userId` and `organizationId` (never from a client-controlled header alone)
-3. **Data boundary** — **PostgreSQL** row-level security denies cross-tenant rows even if application code forgets a filter
-
-This note assumes a typed backend with **Hono**, **Better Auth** sessions, **Drizzle**, and **PostgreSQL**. That base stack is covered in [Backend APIs with Hono, Drizzle, Zod OpenAPI, and SST](/notes/backend-apis-hono-sst). Here the focus is **tenant isolation**.
+This note assumes the typed stack in [Backend APIs with Hono, Drizzle, Zod OpenAPI, and SST](/notes/backend-apis-hono-sst). Here the focus is **tenant isolation**.
 
 <br />
 
@@ -21,24 +17,21 @@ This note assumes a typed backend with **Hono**, **Better Auth** sessions, **Dri
 
 ## 1. What Production Multi-Tenant Means Here
 
-In this architecture, a **tenant** is an **organization**: a SaaS workspace with members, roles, and its own business data. Users can belong to many organizations. The session tracks which organization is **active**.
+A **tenant** is an **organization**: a SaaS workspace with members, roles, and its own business data. Users can belong to many organizations. The session tracks which organization is **active**.
 
-The approach uses a **shared database** and a **shared schema**. Every tenant-owned row carries an `organization_id`. That is the common SaaS model, and it fits **Better Auth**'s organization plugin directly.
-
-There are softer and harder forms of isolation:
-
+- The approach uses a **shared database** and a **shared schema**. Every tenant-owned row carries an `organization_id`. That is the common SaaS model, and it fits Better Auth’s organization plugin directly.
 - **Soft isolation** — application code always filters by `organizationId`. Fast to start, easy to get wrong under pressure.
-- **Database-enforced isolation** — **Postgres RLS** enforces the same rule under a trusted tenant-context path. A forgotten `WHERE` returns zero rows instead of another tenant's data.
+- **Database-enforced isolation** — **Postgres RLS** enforces the same rule under a trusted tenant-context path. A forgotten `WHERE` returns zero rows instead of another tenant’s data.
 
 Threats this design addresses:
 
 - Missing tenant filters in a new query or admin script
 - Resource IDs leaked in URLs (`/projects/:id`) that belong to another org
 - Accepting `X-Organization-Id` without verifying membership
-- Connection pooling reusing a session that still has another tenant's settings
+- Connection pooling reusing a session that still has another tenant’s settings
 - Break-glass admin paths that quietly disable isolation in production
 
-Non-goals for this note: schema-per-tenant, database-per-tenant, and billing or metering. Those are different architectures. Teams and dynamic access control exist in Better Auth; v1 stays on **static roles**.
+Non-goals: schema-per-tenant, database-per-tenant, and billing or metering. Teams and dynamic access control exist in Better Auth; v1 stays on **static roles**.
 
 <br />
 
@@ -46,7 +39,7 @@ Non-goals for this note: schema-per-tenant, database-per-tenant, and billing or 
 
 ## 2. The Architecture
 
-The request path adds tenant resolution and an RLS-scoped transaction on top of normal session auth:
+The request path adds tenant resolution and an RLS-scoped transaction on top of normal session auth.
 
 <br />
 
@@ -65,14 +58,14 @@ Client
 
 <br />
 
-Responsibilities stay narrow:
-
 - **Better Auth organization** manages orgs, members, invitations, `activeOrganizationId`, and roles or permissions.
 - **Hono middleware** attaches typed tenant context and rejects requests without membership in the explicit route organization.
 - **Drizzle schema** puts `organization_id` and RLS policies on every tenant-owned table.
 - **PostgreSQL** is the last line of defense.
 
-If the API Gateway Lambda authorizer pattern from the base note is in use, pass only small identity identifiers such as `userId` and `sessionId`. The business route still supplies `organizationId`, and the API verifies membership for that exact organization before opening the RLS transaction. Never copy identity or tenant from a client-controlled header without that verification.
+If the API Gateway Lambda authorizer pattern from the base note is in use, pass only small identity identifiers such as `userId` and `sessionId`. The business route still supplies `organizationId`, and the API verifies membership for that exact organization before opening the RLS transaction.
+
+**Failure:** copying identity or tenant from a client-controlled header without that verification.
 
 <br />
 
@@ -120,24 +113,10 @@ export const auth = betterAuth({
 
 <br />
 
-```ts title="src/auth-client.ts"
-import { createAuthClient } from "better-auth/client"
-import { organizationClient } from "better-auth/client/plugins"
-import { ac, owner, admin, member } from "./permissions"
-
-export const authClient = createAuthClient({
-  plugins: [
-    organizationClient({
-      ac,
-      roles: { owner, admin, member },
-    }),
-  ],
-})
-```
-
-<br />
-
-The invitation callback must deliver the opaque invitation ID only to the intended recipient. Acceptance requires an authenticated session whose email matches the invitation. Require email verification and disable direct organization deletion so deletion goes through an explicit archival workflow.
+- Enable `organizationClient` on the client with the same `ac` and roles.
+- The invitation callback must deliver the opaque invitation ID only to the intended recipient. Acceptance requires an authenticated session whose email matches the invitation.
+- Require email verification and disable direct organization deletion so deletion goes through an explicit archival workflow.
+- Lifecycle: create organization → invite member → accept invitation → set-active organization → work inside that tenant → leave or archive through an explicit workflow.
 
 After adding or changing a plugin, generate the Better Auth Drizzle schema, generate a SQL migration, review it, then apply it:
 
@@ -151,28 +130,10 @@ npx drizzle-kit migrate
 
 <br />
 
-The first command writes schema definitions; it does **not** change PostgreSQL. In CI, pin the CLI to the Better Auth version used by the application instead of allowing `@latest` to move independently.
+- The first command writes schema definitions; it does **not** change PostgreSQL.
+- In CI, pin the CLI to the Better Auth version used by the application instead of allowing `@latest` to move independently.
 
-### Lifecycle
-
-The happy path is short:
-
-<br />
-
-```text
-create organization
-  → invite member
-  → accept invitation
-  → set-active organization
-  → work inside that tenant
-  → leave or archive through an explicit workflow
-```
-
-<br />
-
-**Active organization is session state**, but it should be treated as a UI preference rather than authorization input for business mutations. Clients call `organization.setActive`; the server stores `activeOrganizationId` on the session. Business routes still carry an explicit organization ID and verify membership for that exact ID.
-
-To seed an active org when a session is created, add a database hook to the same auth configuration:
+**Active organization is session state**, but treat it as a UI preference rather than authorization input for business mutations. Clients call `organization.setActive`; the server stores `activeOrganizationId` on the session. Business routes still carry an explicit organization ID and verify membership for that exact ID.
 
 <br />
 
@@ -183,12 +144,7 @@ export const auth = betterAuth({
       create: {
         before: async (session) => {
           const organization = await getInitialOrganization(session.userId)
-          return {
-            data: {
-              ...session,
-              activeOrganizationId: organization?.id,
-            },
-          }
+          return { data: { ...session, activeOrganizationId: organization?.id } }
         },
       },
     },
@@ -198,8 +154,6 @@ export const auth = betterAuth({
 ```
 
 <br />
-
-### Roles and permissions
 
 Default roles are **owner**, **admin**, and **member**. For domain actions, define an access controller and pass it into the plugin:
 
@@ -239,32 +193,8 @@ export const owner = ac.newRole({
 
 <br />
 
-Route handlers and middleware call `auth.api.hasPermission` with the request headers and the same explicit organization ID used by the route:
-
-<br />
-
-```ts
-const result = await auth.api.hasPermission({
-  headers: c.req.raw.headers,
-  body: {
-    organizationId,
-    permissions: {
-      project: ["create"],
-    },
-  },
-})
-
-if (!result.success) {
-  return c.json(
-    { code: "FORBIDDEN", message: "Missing project:create permission." },
-    403
-  )
-}
-```
-
-<br />
-
-Teams and dynamic access control are available when the product outgrows static roles. Leave them disabled on day one.
+- Route handlers and middleware call `auth.api.hasPermission` with the request headers and the **same** explicit organization ID used by the route.
+- Teams and dynamic access control are available when the product outgrows static roles. Leave them disabled on day one.
 
 <br />
 
@@ -274,9 +204,9 @@ Teams and dynamic access control are available when the product outgrows static 
 
 Auth tables stay **global**: user, account, session, verification, organization, member, invitation. Business tables are **tenant-owned**.
 
-The rule is simple: if the row belongs to a workspace, it has a non-null `organization_id` foreign key to `organization.id`, tenant-scoped uniqueness where needed, and indexes designed around real tenant access paths.
-
-Better Auth organization IDs are strings, so domain foreign keys should be `text`, not `uuid`, unless ID generation has been customized.
+- If the row belongs to a workspace, it has a non-null `organization_id` foreign key to `organization.id`, tenant-scoped uniqueness where needed, and indexes designed around real tenant access paths.
+- Better Auth organization IDs are strings, so domain foreign keys should be `text`, not `uuid`, unless ID generation has been customized.
+- Uniqueness is `(organization_id, slug)`, not a global slug.
 
 <br />
 
@@ -296,11 +226,7 @@ import { organization } from "./auth-schema"
 
 // Provisioned by infrastructure as a restricted, non-owner login role.
 export const appUser = pgRole("app_user").existing()
-```
 
-<br />
-
-```ts title="src/db/schema.ts"
 export const projects = pgTable(
   "projects",
   {
@@ -340,11 +266,9 @@ export const projects = pgTable(
 
 <br />
 
-Adding a policy enables RLS on the table in Drizzle. If RLS is needed with no policies yet, use `pgTable.withRLS(...)` — with no policy, Postgres default-denies row access.
-
-The permissive policy admits normal operations, while the restrictive policy is combined with every applicable policy using `AND`. That prevents a future permissive support policy from accidentally making tenant isolation optional.
-
-**Important Postgres caveat:** table owners bypass RLS by default; `FORCE ROW LEVEL SECURITY` subjects the owner to policies. Superusers and roles with `BYPASSRLS` always bypass them, even with `FORCE`.
+- Adding a policy enables RLS on the table in Drizzle. If RLS is needed with no policies yet, use `pgTable.withRLS(...)` — with no policy, Postgres default-denies row access.
+- The permissive policy admits normal operations. The restrictive policy is combined with every applicable policy using `AND`, so a future permissive support policy cannot make tenant isolation optional.
+- Table owners bypass RLS by default; `FORCE ROW LEVEL SECURITY` subjects the owner to policies. Superusers and roles with `BYPASSRLS` always bypass them, even with `FORCE`.
 
 Provision the product runtime role outside Drizzle, keep it from owning schemas or tables, and add grants plus `FORCE` in a reviewed custom migration:
 
@@ -353,40 +277,30 @@ Provision the product runtime role outside Drizzle, keep it from owning schemas 
 ```sql
 ALTER ROLE app_user
   NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
-
 GRANT USAGE ON SCHEMA public TO app_user;
-
 GRANT SELECT, INSERT, UPDATE, DELETE
-  ON TABLE "user", account, session, verification,
-    member, invitation, projects
+  ON TABLE "user", account, session, verification, member, invitation, projects
   TO app_user;
-
-GRANT SELECT, INSERT, UPDATE
-  ON TABLE organization
-  TO app_user;
-
+GRANT SELECT, INSERT, UPDATE ON TABLE organization TO app_user;
 ALTER TABLE projects FORCE ROW LEVEL SECURITY;
 ```
 
 <br />
 
-The login credential is supplied by infrastructure or a secret manager, not committed in a migration. Policies do not grant table privileges, so each migration grants only the DML the runtime needs. Do not grant `TRUNCATE`, DDL, broad `REFERENCES`, or role-management privileges. RLS does not govern `TRUNCATE`, and unique/foreign-key checks bypass row filtering, so scope constraints by tenant and avoid exposing raw conflict details. If a future table uses identity or serial sequences, review its sequence grants separately.
+- The login credential is supplied by infrastructure or a secret manager, not committed in a migration. Policies do not grant table privileges: grant only the DML the runtime needs. Do not grant `TRUNCATE`, DDL, broad `REFERENCES`, or role-management privileges.
+- RLS does not govern `TRUNCATE`. Unique and foreign-key checks bypass row filtering, so scope constraints by tenant and avoid exposing raw conflict details. Review sequence grants if a table uses identity or serial.
+- For an existing table, expand and contract: add the tenant column, backfill it, enforce `NOT NULL`, add policies and grants, verify them under `app_user`, then deploy code that depends on the boundary. Drizzle `entities.roles` does not replace custom SQL for attributes, grants, membership, default privileges, or `FORCE RLS`.
 
-Migration discipline still matters. For an existing table, expand and contract: add the tenant column, backfill it, enforce `NOT NULL`, add policies and grants, verify them under `app_user`, then deploy code that depends on the boundary. Drizzle role discovery such as `entities.roles` does not replace custom SQL for attributes, grants, membership, default privileges, or `FORCE RLS`.
+<br />
 
 ---
 
 ## 5. Postgres RLS with Drizzle
 
-RLS is useful only if the **request path** connects as a restricted role. Keep separate credentials:
+RLS is useful only if the **request path** connects as a restricted role. Keep separate credentials: **migration owner** (owns schema changes, never used for product traffic), **`app_user`** (non-owner login used by Better Auth and business queries; no `BYPASSRLS`), and a **backup role** (tightly controlled read access plus `BYPASSRLS` for complete logical backups).
 
-- **Migration owner** — owns schema changes and is never used for product traffic
-- **`app_user`** — non-owner login used by Better Auth and business queries; subject to policies on tenant tables; no `BYPASSRLS`
-- **Backup role** — tightly controlled read access plus `BYPASSRLS` for complete logical backups
-
-The request pool connects directly as `app_user`. That means a query which accidentally runs outside the tenant wrapper fails closed: it has ordinary DML privileges, but `current_setting(..., true)` returns `NULL`, so the restrictive tenant policy admits no rows.
-
-The wrapper sets the tenant in a **transaction-local** setting and runs every tenant query in the same transaction:
+- The request pool connects directly as `app_user`. A query that accidentally runs outside the tenant wrapper fails closed: it has ordinary DML privileges, but `current_setting(..., true)` returns `NULL`, so the restrictive tenant policy admits no rows.
+- The wrapper sets the tenant in a **transaction-local** setting and runs every tenant query in the same transaction.
 
 <br />
 
@@ -412,26 +326,17 @@ export async function withTenant<T>(
 
 <br />
 
-Transaction-local settings matter with **pooled connections**. Neon, PgBouncer, and warm Lambda environments reuse connections. `set_config(..., true)` is reverted by PostgreSQL at commit or rollback; do not issue reset SQL in `finally`, because a failed statement leaves the transaction aborted and cleanup SQL can mask the original error. Never define `app.organization_id` with `ALTER ROLE`, `ALTER DATABASE`, or session-level `SET`, and do not depend on pool reset hooks.
+- Transaction-local settings matter with **pooled connections**. Neon, PgBouncer, and warm Lambda environments reuse connections. `set_config(..., true)` is reverted by PostgreSQL at commit or rollback.
+- Do not issue reset SQL in `finally`: a failed statement leaves the transaction aborted and cleanup SQL can mask the original error.
+- Never define `app.organization_id` with `ALTER ROLE`, `ALTER DATABASE`, or session-level `SET`, and do not depend on pool reset hooks.
+- Still write explicit filters in application code. RLS is defense in depth, not a license to write ambient queries.
 
-Still write explicit filters in application code:
+**Failure:** treating RLS as protection against SQL injection or a compromised runtime that can call `set_config` with another tenant ID. It only protects against omitted filters under a trusted context-propagation path.
 
-<br />
+Test before calling the system production-ready:
 
-```ts
-const rows = await withTenant(organizationId, (tx) =>
-  tx.select().from(projects).where(eq(projects.organizationId, organizationId))
-)
-```
-
-<br />
-
-RLS is defense in depth, not a license to write ambient queries. This policy protects against omitted filters under a trusted context-propagation path. It does **not** protect against SQL injection or a compromised runtime that can call `set_config` with another tenant ID.
-
-Test checklist before calling the system production-ready:
-
-- Same user, two organizations — call org B's list route after creating in A — A's project must not appear
-- Switch the session's active org concurrently — an explicit org A request must remain bound to A
+- Same user, two organizations — call org B’s list route after creating in A — A’s project must not appear
+- Switch the session’s active org concurrently — an explicit org A request must remain bound to A
 - Query as `app_user` without setting `app.organization_id` — zero rows
 - Insert with a mismatched `organization_id` — rejected by `withCheck`
 - Membership revoked — the explicit membership check fails
@@ -446,21 +351,7 @@ Test checklist before calling the system production-ready:
 
 ## 6. The Hono Request Pipeline
 
-Middleware order on tenant routes:
-
-<br />
-
-```text
-CORS
-  → require session + explicit organization membership
-  → validate path and JSON body
-  → check permission for the same organization
-  → handler
-```
-
-<br />
-
-Typed context keeps handlers honest:
+Middleware order on tenant routes: CORS → require session + explicit organization membership → validate path and JSON body → check permission for the same organization → handler.
 
 <br />
 
@@ -479,36 +370,21 @@ type Variables = {
 export const requireTenant = createMiddleware<{ Variables: Variables }>(
   async (c, next) => {
     const session = await auth.api.getSession({ headers: c.req.raw.headers })
-
     if (!session) {
-      return c.json(
-        { code: "UNAUTHORIZED", message: "Authentication is required." },
-        401
-      )
+      return c.json({ code: "UNAUTHORIZED", message: "Authentication is required." }, 401)
     }
 
     const organizationId = c.req.param("organizationId")
     if (!organizationId) {
-      return c.json(
-        {
-          code: "ORGANIZATION_REQUIRED",
-          message: "An organization ID is required.",
-        },
-        400
-      )
+      return c.json({ code: "ORGANIZATION_REQUIRED", message: "An organization ID is required." }, 400)
     }
 
     const denied = await bindTenant(c, session.user.id, organizationId)
     if (denied) return denied
-
     await next()
   }
 )
-```
 
-<br />
-
-```ts title="src/middleware/tenant.ts"
 async function bindTenant(
   c: Context<{ Variables: Variables }>,
   userId: string,
@@ -519,22 +395,14 @@ async function bindTenant(
       headers: c.req.raw.headers,
       query: { organizationId },
     })
-
     c.set("userId", userId)
     c.set("organizationId", organizationId)
     c.set("memberRole", role)
     return null
   } catch (error) {
     if (error instanceof APIError && error.statusCode < 500) {
-      return c.json(
-        {
-          code: "FORBIDDEN",
-          message: "You cannot access this organization.",
-        },
-        403
-      )
+      return c.json({ code: "FORBIDDEN", message: "You cannot access this organization." }, 403)
     }
-
     throw error
   }
 }
@@ -542,50 +410,11 @@ async function bindTenant(
 
 <br />
 
-Prefer `POST /organizations/:organizationId/projects` over ambient tenant state. Another tab can change the session's active organization while a request is running; an explicit route ID remains immutable for that request. Middleware verifies membership for that ID, permission checks use the same ID, and `withTenant` receives the same ID.
-
-`getActiveMemberRole` throws a Better Auth `APIError` when the organization or membership is invalid; it does not return `null`. Map expected membership failures to a safe `403` and let unexpected errors reach the centralized error handler.
+- Prefer `POST /organizations/:organizationId/projects` over ambient tenant state. Another tab can change the session’s active organization while a request is running; an explicit route ID remains immutable for that request.
+- Middleware verifies membership for that ID, permission checks use the same ID, and `withTenant` receives the same ID.
+- `getActiveMemberRole` throws a Better Auth `APIError` when the organization or membership is invalid; it does not return `null`. Map expected membership failures to a safe `403` and let unexpected errors reach the centralized error handler.
 
 The Zod OpenAPI route validates both the organization path parameter and JSON body. The handler reads only validated data:
-
-<br />
-
-```ts title="src/routes/projects.ts"
-import { APIError } from "better-auth/api"
-import { createRoute, z } from "@hono/zod-openapi"
-
-const CreateProjectSchema = z.object({
-  name: z.string().trim().min(1).max(120),
-  slug: z
-    .string()
-    .trim()
-    .min(1)
-    .max(80)
-    .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
-})
-
-const createProjectRoute = createRoute({
-  method: "post",
-  path: "/organizations/{organizationId}/projects",
-  middleware: [requireTenant] as const,
-  request: {
-    params: z.object({ organizationId: z.string().min(1) }),
-    body: {
-      content: {
-        "application/json": { schema: CreateProjectSchema },
-      },
-      required: true,
-    },
-  },
-  responses: {
-    201: { description: "Project created" },
-    400: { description: "Invalid request" },
-    401: { description: "Authentication required" },
-    403: { description: "Membership or permission denied" },
-    409: { description: "Project slug already exists" },
-  },
-})
-```
 
 <br />
 
@@ -594,40 +423,21 @@ app.openapi(createProjectRoute, async (c) => {
   const { organizationId } = c.req.valid("param")
   const body = c.req.valid("json")
 
-  try {
-    const allowed = await auth.api.hasPermission({
-      headers: c.req.raw.headers,
-      body: {
-        organizationId,
-        permissions: { project: ["create"] },
-      },
-    })
-
-    if (!allowed.success) {
-      return c.json(
-        { code: "FORBIDDEN", message: "Missing project:create permission." },
-        403
-      )
-    }
-  } catch (error) {
-    if (error instanceof APIError && error.statusCode < 500) {
-      return c.json(
-        { code: "FORBIDDEN", message: "Permission check failed." },
-        403
-      )
-    }
-
-    throw error
+  const allowed = await auth.api.hasPermission({
+    headers: c.req.raw.headers,
+    body: { organizationId, permissions: { project: ["create"] } },
+  })
+  if (!allowed.success) {
+    return c.json(
+      { code: "FORBIDDEN", message: "Missing project:create permission." },
+      403
+    )
   }
 
   const [project] = await withTenant(organizationId, (tx) =>
     tx
       .insert(projects)
-      .values({
-        organizationId,
-        name: body.name,
-        slug: body.slug,
-      })
+      .values({ organizationId, name: body.name, slug: body.slug })
       .returning()
   )
 
@@ -637,23 +447,27 @@ app.openapi(createProjectRoute, async (c) => {
 
 <br />
 
-A shared error handler should map malformed or invalid requests to `400`, authentication to `401`, known authorization failures to `403`, tenant-hidden resource lookups to `404`, PostgreSQL unique violation `23505` to `409`, and unexpected failures to a sanitized `500` with a request ID. A `403` is appropriate for a known operation the caller cannot perform; returning `404` for an unknown resource ID avoids revealing that another tenant owns it.
+- A shared error handler should map malformed requests to `400`, authentication to `401`, known authorization failures to `403`, tenant-hidden resource lookups to `404`, PostgreSQL unique violation `23505` to `409`, and unexpected failures to a sanitized `500` with a request ID.
+- A `403` is appropriate for a known operation the caller cannot perform; returning `404` for an unknown resource ID avoids revealing that another tenant owns it.
+- Membership and permission are checked immediately before the business transaction. Map `hasPermission` `APIError` with `statusCode < 500` to `403`. The default revocation contract allows an already-authorized in-flight request to finish; revocation blocks subsequent requests.
 
-Membership and permission are checked immediately before the business transaction. The default revocation contract allows an already-authorized in-flight request to finish; revocation blocks subsequent requests. A product requiring immediate revocation must re-check or lock membership inside the same database transaction as the mutation.
+**Failure:** requiring immediate revocation without re-checking or locking membership inside the same database transaction as the mutation.
+
+<br />
 
 ---
 
 ## 7. Production Edge Cases That Break Isolation
 
-These are the cases that look fine in a demo and fail under real traffic:
+These are the cases that look fine in a demo and fail under real traffic.
 
 - **Stale active org** — the client UI can still show org A after `setActive` switched to B. Treat it as display/navigation state only; explicit business routes remain authoritative.
 - **Organization deletion** — Better Auth hard-deletes organization membership and invitation rows. Other sessions can retain a stale active ID. This example disables direct deletion and uses `ON DELETE RESTRICT`; an archival workflow must revoke sessions, handle domain retention, and delete in an explicit order.
 - **Invitation security** — accepting an invitation requires a matching authenticated email. Send opaque IDs only to their recipient, require email verification, expire invitations, and never log action URLs.
-- **Cross-tenant IDs in URLs** — `GET /projects/:id` must load by id inside the tenant transaction. With RLS, the wrong tenant gets not found, not another org's row. Still filter by `organizationId` in the query.
+- **Cross-tenant IDs in URLs** — `GET /projects/:id` must load by id inside the tenant transaction. With RLS, the wrong tenant gets not found, not another org’s row. Still filter by `organizationId` in the query.
 - **Background jobs and webhooks** — there is no session cookie. Use authenticated or signed payloads, authorize tenant scope before enqueueing, record the actor and operation, make retries idempotent, then run the same `withTenant` wrapper. A tenant ID alone is not authorization.
 - **Support break-glass** — use a separate audited admin connection or tool, not `SET ROLE` bypass sprinkled through product code.
-- **Connection pooling** — set tenant context only inside transactions with local settings. Safety comes from transaction end, not a pooler's reset hook. Follow the provider's prepared-statement guidance for transaction poolers.
+- **Connection pooling** — set tenant context only inside transactions with local settings. Safety comes from transaction end, not a pooler’s reset hook. Follow the provider’s prepared-statement guidance for transaction poolers.
 - **Backups and restores** — `pg_dump` setting `row_security=off` does not bypass RLS; it errors when rows would be filtered. Complete logical backups use a dedicated read + `BYPASSRLS` role. Back up cluster roles separately (for example with `pg_dumpall --globals-only`) and test that restores recreate grants, policies, `ENABLE RLS`, and `FORCE RLS`.
 - **Lambda authorizer caching** — identity can be cached only within the revocation guarantees the product accepts. Tenant membership and permission are still checked against the explicit route organization in the API.
 
@@ -663,7 +477,7 @@ These are the cases that look fine in a demo and fail under real traffic:
 
 ## 8. A Minimal Architecture Slice
 
-Target folder shape:
+Target folder shape, then implement and integration-test this path end to end before adding teams, dynamic roles, or fancy admin tooling.
 
 <br />
 
@@ -684,14 +498,12 @@ src/
 
 <br />
 
-Implement and integration-test this path end to end before adding teams, dynamic roles, or fancy admin tooling:
-
 1. Sign up / sign in
 2. Create an organization
 3. Invite a member
 4. Set the active organization for UI navigation
 5. `POST /organizations/:organizationId/projects` inside `withTenant`
-6. List the same explicit organization — another org's projects remain hidden
+6. List the same explicit organization — another org’s projects remain hidden
 7. Call an admin-only organization route as a member — `403`
 
 If step 6 or 7 fails, the system is not multi-tenant yet. It is a single-tenant app with an organization table. The slice is complete only when invitation delivery, list/admin routes, and isolation tests are executable.
@@ -702,9 +514,11 @@ If step 6 or 7 fails, the system is not multi-tenant yet. It is a single-tenant 
 
 ## 9. Final Thoughts
 
-**Better Auth** organizations provide membership UX: create, invite, roles, active workspace. **Postgres RLS** provides a data plane that does not trust every query author to remember the tenant filter. **Hono** is the place those two meet — typed context, explicit middleware, and handlers that open a tenant-scoped transaction before touching business tables.
+**Better Auth** organizations provide membership UX. **Postgres RLS** provides a data plane that does not trust every query author to remember the tenant filter. **Hono** is the place those two meet — typed context, explicit middleware, and handlers that open a tenant-scoped transaction before touching business tables.
 
-Start with a shared schema, static roles, and RLS on every tenant-owned table. Add teams or dynamic access control when a real product requirement appears. Keep deploy, OpenAPI, and Lambda details in the [backend API note](/notes/backend-apis-hono-sst); keep this note about the isolation contract.
+- Start with a shared schema, static roles, and RLS on every tenant-owned table.
+- Add teams or dynamic access control when a real product requirement appears.
+- Keep deploy, OpenAPI, and Lambda details in the [backend API note](/notes/backend-apis-hono-sst); keep this note about the isolation contract.
 
 The production bar is simple: forgetting a `WHERE` clause must not become a cross-tenant incident.
 
@@ -720,3 +534,74 @@ The production bar is simple: forgetting a `WHERE` clause must not become a cros
 - [PostgreSQL row security policies](https://www.postgresql.org/docs/current/ddl-rowsecurity.html)
 - [PostgreSQL configuration functions](https://www.postgresql.org/docs/current/functions-admin.html#FUNCTIONS-ADMIN-SET)
 - [PostgreSQL logical backups with pg_dump](https://www.postgresql.org/docs/current/app-pgdump.html)
+
+---
+
+## Recap Q&A
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="tenant-means">
+    <AccordionTrigger>1. What does production multi-tenant mean here, and why is a WHERE clause not enough?</AccordionTrigger>
+    <AccordionContent>
+
+      - A **tenant** is an **organization**: a SaaS workspace with members, roles, and its own business data. Users can belong to many organizations. The session tracks which organization is **active**.
+      - The approach is a **shared database** and a **shared schema**. Every tenant-owned row carries an `organization_id`.
+      - Soft isolation — always filter by `organizationId` in application code — is fast to start and easy to get wrong under pressure.
+      - **Database-enforced isolation** (Postgres RLS) means a forgotten `WHERE` returns zero rows instead of another tenant’s data.
+      - **Failure:** one missed filter, one confused deputy, or one background job that forgets tenant context is enough to leak.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="tenant-better-auth">
+    <AccordionTrigger>2. How is Better Auth organization the tenancy control plane?</AccordionTrigger>
+    <AccordionContent>
+
+      - The organization plugin is membership and workspace: `organization`, `member`, `invitation`, and `session.activeOrganizationId`.
+      - Roles (owner, admin, member) live in the access-control config.
+      - Invitation delivers an opaque ID only to the intended recipient; acceptance requires an authenticated session whose email matches. Require email verification. Disable direct organization deletion so deletion goes through archival.
+      - Auth tables stay **global**. After adding a plugin, generate schema, generate SQL, review, then migrate. Pin the CLI to the Better Auth version the app uses.
+      - `npx auth generate` does **not** change PostgreSQL. Active organization is session/UI state, not authorization input for business mutations.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="tenant-rows">
+    <AccordionTrigger>3. Which rows must be tenant-owned?</AccordionTrigger>
+    <AccordionContent>
+
+      - If the row belongs to a workspace, it has a non-null `organization_id` foreign key, tenant-scoped uniqueness where needed, and indexes around real tenant access paths.
+      - Better Auth organization IDs are strings, so domain foreign keys should be `text` unless ID generation was customized.
+      - Resource IDs in URLs (`/projects/:id`) that belong to another org are object-level access control.
+      - Uniqueness is `(organization_id, slug)`, not a global slug.
+      - **Failure:** accepting `X-Organization-Id` without verifying membership.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="tenant-rls">
+    <AccordionTrigger>4. When is RLS actually useful, and how do you set tenant context?</AccordionTrigger>
+    <AccordionContent>
+
+      - RLS is useful only if the **request path** connects as a restricted role. **Migration owner** never serves product traffic. **`app_user`** has no `BYPASSRLS`.
+      - The request pool connects as `app_user`, so a query outside the tenant wrapper **fails closed**: `current_setting` is `NULL` and the policy admits no rows.
+      - `withTenant` sets `app.organization_id` with **transaction-local** `set_config(..., true)` and runs every tenant query in that transaction.
+      - Pooled connections reuse sessions. Do not `ALTER ROLE` the setting, and do not reset in `finally` after an aborted transaction.
+      - Still write explicit filters in application code. RLS is the backstop, not a license to drop `WHERE`.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="tenant-pipeline">
+    <AccordionTrigger>5. What is the Hono pipeline on tenant routes?</AccordionTrigger>
+    <AccordionContent>
+
+      - Three layers must agree: **identity / membership** (Better Auth), **request context** (verified `userId` and `organizationId` — never from a client-controlled header alone), and **data boundary** (RLS).
+      - Middleware order: CORS → require session + explicit organization membership → validate path and JSON → check permission for the **same** organization → handler.
+      - Typed context keeps handlers honest. Prefer an explicit route organization ID over ambient session state.
+      - Break-glass admin paths that quietly disable isolation in production, and connection pools that still hold another tenant’s settings, are the edge cases that break isolation.
+      - The production default is fail closed.
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>

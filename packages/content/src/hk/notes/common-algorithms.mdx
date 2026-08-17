@@ -4,11 +4,13 @@ description: 核心 algorithm patterns 的精確 TypeScript 實作：hash maps�
 category: computer-science
 ---
 
-一小組 algorithm patterns 會反覆出現：搜尋、遍歷 graphs、收縮 windows、caching，以及用 memory 換 time。認出 pattern，比背問題名稱更重要。
+一小組 algorithm patterns 會反覆出現：搜索、遍歷 graphs、收縮 windows、caching，以及用 memory 換 time。
 
 <br />
 
-這篇 note 收集最常出現的 patterns，每一個都附上精確的 TypeScript 實作與 complexity 說明。目標是一份能用的心智地圖：當你看到一種 input 形狀，就已經知道該用哪把工具。
+- 認出 **pattern**，比背問題名稱更重要。
+- **Input 形狀** 通常已經點名了工具。
+- 下面每個 pattern 都附上精確的 TypeScript 實作與 complexity 說明。
 
 <br />
 
@@ -27,7 +29,7 @@ category: computer-science
 | Tree DFS / BFS | Binary / n-ary tree | Depth vs level-order 問題 |
 | Graph search | Grid or adjacency list | Connectivity、paths、components |
 | Topological sort | Directed acyclic graph | 帶 prerequisites 的排序 |
-| Heap | Stream or “top K” | 要 extremes 但不想完整 sort |
+| Heap | Stream or 「top K」 | 要 extremes 但不想完整 sort |
 | Union-Find | Undirected connectivity | Merge components、detect cycles |
 | Backtracking | Combinatorial search | 建立所有 valid candidates |
 | Dynamic programming | Overlapping subproblems | 可重用的 optimal count / path |
@@ -39,7 +41,7 @@ category: computer-science
 
 ## Hash Map：Two Sum
 
-Hash map 把昂貴的 scan 變成 constant-time lookups。當你本來會 nest loops 去找 complement、數 frequencies，或記住「是否已經見過？」時，就用它。
+**Hash map** 把昂貴的 scan 變成 constant-time lookups。
 
 <br />
 
@@ -62,11 +64,10 @@ twoSum([2, 7, 11, 15], 9) // [0, 1]
 
 <br />
 
-**Complexity:** O(n) time, O(n) space.
-
-<br />
-
-Variant：同一個想法支撐 anagram checks（character counts 的 `Map`）以及 first-unique-character 問題。
+- 當你本來會 nest loops 去找 complement、數 frequencies，或記住「是否已經見過？」時，就用它。
+- **Complexity:** O(n) time, O(n) space.
+- 同一個想法支撐 anagram checks（character counts 的 `Map`）以及 first-unique-character 問題。
+- **Failure：** 對本來可以 keyed 的 data 做 nested loops。
 
 <br />
 
@@ -74,7 +75,7 @@ Variant：同一個想法支撐 anagram checks（character counts 的 `Map`）�
 
 ## Two Pointers：Pair With Target (Sorted)
 
-當 array 已 sorted，兩個 indices 可以向內（或一起向前）移動，而不必用 nested loop 搜尋。移動那個能相對 target 減少 error 的 pointer。
+當 array 已 **sorted**，兩個 indices 可以向內（或一起向前）移動，而不必用 nested loop 搜索。
 
 <br />
 
@@ -98,7 +99,9 @@ twoSumSorted([1, 2, 3, 4, 6], 6) // [1, 3] -> 2 + 4
 
 <br />
 
-**Complexity:** O(n) time, O(1) extra space（假設 array 已經 sorted）。
+- 移動那個能相對 target 減少 error 的 pointer。
+- **Complexity:** O(n) time, O(1) extra space（假設 array 已經 sorted）。
+- **Failure：** 在 unsorted array 上套 inward pointers——移動規則假定有序。
 
 <br />
 
@@ -106,7 +109,7 @@ twoSumSorted([1, 2, 3, 4, 6], 6) // [1, 3] -> 2 + 4
 
 ## Sliding Window：Longest Substring Without Repeating Characters
 
-Window 是一段 contiguous segment `[left, right]`，你在維持 invariant 的同時擴張與收縮（unique characters、sum ≤ K、最多 K 個 distinct values）。
+**Window** 是一段 contiguous segment `[left, right]`，你一邊 expand 一邊 shrink，同時維持一個 invariant。
 
 <br />
 
@@ -134,7 +137,9 @@ lengthOfLongestSubstring("abcabcbb") // 3 ("abc")
 
 <br />
 
-**Complexity:** O(n) time, O(min(n, alphabet)) space.
+- 用於 unique characters、sum ≤ K，或最多 K 個 distinct values——grow 與 shrink 一段 range，而不是從頭開始。
+- **Complexity:** O(n) time, O(min(n, alphabet)) space.
+- **Failure：** shrink `left` 時沒有檢查 last occurrence 是否仍在 window 裡。
 
 <br />
 
@@ -142,7 +147,7 @@ lengthOfLongestSubstring("abcabcbb") // 3 ("abc")
 
 ## Binary Search：Lower Bound
 
-Binary search 反覆把 monotonic search space 切成一半。謹慎的版本回傳第一個滿足 `nums[i] >= target` 的 index（lower bound / insertion point）。
+**Binary search** 反覆把 monotonic search space 切成兩半。
 
 <br />
 
@@ -176,11 +181,10 @@ lowerBound([1, 3, 3, 5, 7], 4) // 3 (insert before 5)
 
 <br />
 
-**Complexity:** O(log n) time, O(1) space.
-
-<br />
-
-Variant：當 array 本身未 sorted，但 *answer* 是 monotonic 時（例如能用的 minimum capacity），改對 answer 做 binary search。
+- 仔細的版本返回第一個滿足 `nums[i] >= target` 的 index（**lower bound** / insertion point）。
+- 當 array 本身未 sorted，但 *answer* 是 monotonic 的（例如能用的最小 capacity），就對 **answer** 做 binary search。
+- **Complexity:** O(log n) time, O(1) space.
+- **Failure：** 混用 inclusive 與 exclusive bounds——`hi = nums.length` 是 exclusive；`hi = mid`（不是 `mid - 1`）才能保住 invariant。
 
 <br />
 
@@ -188,7 +192,7 @@ Variant：當 array 本身未 sorted，但 *answer* 是 monotonic 時（例如�
 
 ## Stack：Valid Parentheses
 
-Stack 存放「仍然 open」的工作。Matching brackets、path simplification，以及 monotonic next-greater 問題，都以 LIFO 順序 push 與 pop。
+**Stack** 存放「仍未關閉」的工作，並按 LIFO 順序 pop。
 
 <br />
 
@@ -220,7 +224,9 @@ isValidParentheses("(]") // false
 
 <br />
 
-**Complexity:** O(n) time, O(n) space.
+- Matching brackets、path simplification，以及 monotonic **next-greater** 問題，都會 push 與 pop。
+- **Complexity:** O(n) time, O(n) space.
+- **Failure：** 因為每個 closer 都匹配了就 return true，卻沒檢查 stack 是否為空——剩下的 openers 仍然無效。
 
 <br />
 
@@ -228,7 +234,7 @@ isValidParentheses("(]") // false
 
 ## Linked List：Reverse and Cycle Detection
 
-Linked-list 問題通常關乎小心的 pointer rewiring。兩個經典：in place reverse list，以及用 Floyd’s tortoise and hare 偵測 cycle。
+Linked-list 問題通常是小心的 **pointer rewiring**。
 
 <br />
 
@@ -268,7 +274,9 @@ function hasCycle(head: ListNode | null): boolean {
 
 <br />
 
-**Complexity:** reverse 是 O(n) time, O(1) space；cycle detection 是 O(n) time, O(1) space。
+- 兩個經典：in place reverse 整條 list，以及用 **Floyd’s tortoise and hare** 偵測 cycle。
+- **Complexity:** reverse 是 O(n) time, O(1) space；cycle detection 是 O(n) time, O(1) space.
+- **Failure：** 在保存 `next` 之前就 rewire `curr.next`——list 的其餘部分就沒了。
 
 <br />
 
@@ -276,7 +284,7 @@ function hasCycle(head: ListNode | null): boolean {
 
 ## Tree DFS and BFS：Depth and Level Order
 
-Trees 是沒有 cycles 的 graphs。**DFS** 往深處走（recursion 或 explicit stack）。**BFS** 用 queue 一層一層走，通常是 unweighted tree 上 shortest path 的選擇。
+Trees 是沒有 cycles 的 graphs。**DFS** 往深處走；**BFS** 一層一層走。
 
 <br />
 
@@ -318,10 +326,6 @@ function levelOrder(root: TreeNode | null): number[][] {
 
 <br />
 
-**Complexity:** 兩者最壞情況都是 O(n) time 與 O(n) space（skewed tree 或寬的 level）。
-
-<br />
-
 ```mermaid
 flowchart TD
   root[Root] --> L1A[Level1]
@@ -333,7 +337,10 @@ flowchart TD
 
 <br />
 
-BFS 在進入下一層之前先走完當層；DFS 沿著一條 branch 走到 leaf 再 backtracking。
+- DFS 用 recursion 或顯式 stack。BFS 用 **queue**——unweighted tree 上 shortest path 的通常選擇。
+- BFS 在進入下一層之前走完當前層；DFS 沿一條 branch 走到 leaf 再 backtrack。
+- **Complexity:** 兩者最壞都是 O(n) time 與 O(n) space（skewed tree 或很寬的 level）。
+- **Failure：** 問題是 unweighted tree 上的 shortest path 卻用 DFS——那是 BFS。
 
 <br />
 
@@ -341,7 +348,7 @@ BFS 在進入下一層之前先走完當層；DFS 沿著一條 branch 走到 lea
 
 ## Graph：Number of Islands
 
-Grid 是 graph：每個 cell 是 node，4-directional neighbors 是 edges。用 DFS 或 BFS 做 flood-fill，就能數 land 的 connected components。
+Grid 是一張 graph：每個 cell 是 node，四方向 neighbors 是 edges。
 
 <br />
 
@@ -385,7 +392,9 @@ numIslands([
 
 <br />
 
-**Complexity:** O(rows × cols) time，以及最壞情況 recursion stack 的 O(rows × cols) space。
+- 用 DFS 或 BFS 做 **flood-fill**，計算 land 的 connected components。
+- **Complexity:** O(rows × cols) time，最壞 O(rows × cols) space 給 recursion stack。
+- **Failure：** 數 cells 而不是 connected components——flood-fill 必須把整座 island 標成 visited。
 
 <br />
 
@@ -393,7 +402,7 @@ numIslands([
 
 ## Topological Sort：Course Schedule
 
-當 tasks 有 prerequisites，把它們建成 directed graph，並產出一個順序，讓每條 edge `u → v` 代表 `u` 在 `v` 之前。Kahn’s algorithm 使用 indegrees 與 queue。
+當 tasks 有 prerequisites 時，把它們建成 **directed graph**，並產出一個順序，使得每條 edge `u → v` 都表示 `u` 在 `v` 之前。
 
 <br />
 
@@ -435,7 +444,9 @@ canFinish(2, [
 
 <br />
 
-**Complexity:** O(V + E) time, O(V + E) space.
+- **Kahn’s algorithm** 用 indegrees 與 queue。
+- **Complexity:** O(V + E) time, O(V + E) space.
+- **Failure：** 假定每張 directed graph 都有順序——`taken !== numCourses` 表示有 cycle。
 
 <br />
 
@@ -443,7 +454,7 @@ canFinish(2, [
 
 ## Heap：Top K Frequent Elements
 
-Heap 能有效率地保住當前的 extreme。對「top K」來說，一個 size-K 的 frequencies min-heap 可以避免 sort 整個 map。
+**Heap** 高效地保住當前的 extreme。對「top K」來說，一個 size-K 的 frequencies min-heap，可以避免 sort 整張 map。
 
 <br />
 
@@ -498,7 +509,9 @@ topKFrequent([1, 1, 1, 2, 2, 3], 2) // [1, 2] (order among ties may vary)
 
 <br />
 
-**Complexity:** O(n log k) time，frequency map 佔 O(n) space（heap 最多持有 k items）。
+- 在 stream 或「top K」上，當你需要 extremes 卻不想完整 sort 時，就用它。
+- **Complexity:** O(n log k) time，frequency map 佔 O(n) space（heap 最多持有 k 個 items）。
+- **Failure：** 當 size-K heap 就夠時，卻去 sort 整張 frequency map。
 
 <br />
 
@@ -506,7 +519,7 @@ topKFrequent([1, 1, 1, 2, 2, 3], 2) // [1, 2] (order among ties may vary)
 
 ## Union-Find：Connected Components
 
-Union-Find (Disjoint Set Union) 維護 elements 切成 components 的 partition。`find` 回傳 representative；`union` 合併兩個 sets。Path compression + union by rank 讓 operations 接近 amortized O(1)。
+**Union-Find**（Disjoint Set Union）維護一份把 elements 分成 components 的 partition。
 
 <br />
 
@@ -561,7 +574,10 @@ countComponents(5, [
 
 <br />
 
-**Complexity:** n nodes 與 m edges 時實質上是 O(n + m α(n))；α 是 inverse Ackermann function（實務上極小）。
+- `find` 返回 representative；`union` 合併兩個 sets。
+- **Path compression** + union by rank 讓 operations 接近 amortized O(1)。
+- **Complexity:** n 個 nodes 與 m 條 edges 實際上是 O(n + m α(n))——α 是 inverse Ackermann function（實務上很小）。
+- **Failure：** union 之前沒有先 `find`——你合併的是 nodes 而不是它們的 roots，partition 就破了。
 
 <br />
 
@@ -569,7 +585,7 @@ countComponents(5, [
 
 ## Backtracking：Subsets
 
-Backtracking 增量建立 candidates，並在探索下一條 branch 時 undo 上一個選擇（就是「backtrack」）。用在 subsets、permutations、combinations 與 constraint search。
+**Backtracking** 增量建立 candidates，並在探索下一條 branch 時撤銷上一次選擇。
 
 <br />
 
@@ -598,7 +614,9 @@ subsets([1, 2, 3])
 
 <br />
 
-**Complexity:** 產生並 copy 所有 subsets 是 O(n · 2ⁿ) time；recursion path 額外 O(n) space（不含 output）。
+- 用於 subsets、permutations、combinations，以及 constraint search。
+- **Complexity:** 產生並 copy 所有 subsets 是 O(n · 2ⁿ) time，recursion path 額外 O(n) space（不含 output）。
+- **Failure：** 忘了 `path.pop()`——後面的 branches 會共享一份被 mutate 的 path。
 
 <br />
 
@@ -606,7 +624,12 @@ subsets([1, 2, 3])
 
 ## Dynamic Programming：Climbing Stairs and Unique Paths
 
-當問題有 **optimal substructure** 與 **overlapping subproblems** 時，DP 適用：較小的片段解一次、再重用。從 base cases 開始往上建。
+當問題有 **optimal substructure** 與 **overlapping subproblems** 時，用 **dynamic programming**：較小的 pieces 只解一次，再重用。
+
+<br />
+
+- 從 **base cases** 出發往上建。
+- **Failure：** 子問題重疊時卻 recurse 而不 reuse——那是 exponential，不是 DP。
 
 <br />
 
@@ -637,13 +660,13 @@ climbStairs(5) // 8
 
 <br />
 
-**Complexity:** O(n) time, O(1) space.
+- **Complexity:** O(n) time, O(1) space.
 
 <br />
 
 ### 2D：unique paths
 
-在 `m × n` grid 上，你只能向右或向下。到達 `(r, c)` 的 paths = 從上面來的 paths + 從左邊來的 paths。
+在 `m × n` grid 上，你只能向右或向下。到 `(r, c)` 的 paths = 從上方來的 paths + 從左方來的 paths。
 
 <br />
 
@@ -665,7 +688,7 @@ uniquePaths(3, 7) // 28
 
 <br />
 
-**Complexity:** O(m · n) time, O(m · n) space（可用 rolling row 壓成 O(n)）。
+- **Complexity:** O(m · n) time, O(m · n) space（用 rolling row 可壓到 O(n)）。
 
 <br />
 
@@ -673,7 +696,7 @@ uniquePaths(3, 7) // 28
 
 ## LRU Cache
 
-LRU cache 以 O(1) 回傳 values，並在滿了時 eviction 最久未使用的 key。在現代 JavaScript 裡，`Map` 保留 insertion order，所以每次 access 把 key 移到末尾，就能實作 LRU，不必手寫 doubly linked list。
+**LRU** cache 以 O(1) 返回 values，滿了就驅逐 least recently used key。
 
 <br />
 
@@ -715,7 +738,9 @@ cache.get(2) // -1
 
 <br />
 
-**Complexity:** amortized O(1) get 與 put；O(capacity) space。
+- 在現代 JavaScript 裡，`Map` 保留 insertion order，所以每次 access 把 key 移到末尾，就能實作 LRU，而不必手寫 doubly linked list。
+- **Complexity:** amortized O(1) get 與 put；O(capacity) space.
+- **Failure：** `get` 只讀卻沒有 `delete` + `set`——insertion order 就不再追蹤 recency。
 
 <br />
 
@@ -723,7 +748,7 @@ cache.get(2) // -1
 
 ## 選擇 Pattern
 
-一份快速決策指南：
+選 **invariant** 最清楚的那個 pattern，然後在寫 code 之前先說出 time 與 space。
 
 <br />
 
@@ -742,24 +767,81 @@ cache.get(2) // -1
 
 <br />
 
-如果兩個 patterns 看起來都合理，選 invariant 更清楚的那個，並在寫 code 之前先說出它的 time 與 space。
-
-<br />
-
 ---
 
-## 重點
+## 要點
 
 先掌握這些 patterns，再去追 exotic algorithms。大多數日常問題都是 hash maps、windows、binary search、graph traversal、heaps 與 DP 的重組。
 
 <br />
 
-對每一個解，要能說出：
+- 對每一個解，要能說出 **pattern**、**time** 與 **space** complexity，以及如果 input 是 sorted、streaming，或大到放不進 memory，會怎麼變。
+- 專門工具（KMP、Bloom filters、consistent hashing）在更窄的領域才重要。上面這些 patterns 才是共享的 baseline。
+- **Failure：** 優化 nested loops，而真正的瓶頸是從未被衡量過的 network round trip。Complexity 是決策工具，不是競技。
 
-- 你用的 **pattern**
-- **time** 與 **space** complexity
-- 如果 input 是 sorted、streaming，或大到放不進 memory，會怎麼變
+---
 
-<br />
+## Recap Q&A
 
-專門工具（KMP、Bloom filters、consistent hashing）在更窄的領域才重要。上面這些 patterns 才是共享的 baseline。
+<Accordion type="single" collapsible>
+  <AccordionItem value="algo-map">
+    <AccordionTrigger>1. 為什麼認出 pattern 比問題名稱更重要？</AccordionTrigger>
+    <AccordionContent>
+
+      - 一小組 patterns 會反覆出現：搜索、遍歷 graphs、收縮 windows、caching，用 memory 換 time。
+      - **Input 形狀** 通常已經點名了工具：unsorted lookups 用 hash map，sorted array 上用 two pointers，contiguous segment 用 sliding window，answer space 是 monotonic 時用 binary search。
+      - 專門工具（KMP、Bloom filters、consistent hashing）在更窄的領域才重要。
+      - Hash maps、windows、binary search、graph traversal、heaps 與 DP 是共享的 baseline。大多數日常問題都是這些的重組。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="algo-linear">
+    <AccordionTrigger>2. 什麼時候該用 hash map、two pointers，或 sliding window？</AccordionTrigger>
+    <AccordionContent>
+
+      - 在 unsorted array 上需要 O(1) lookups 或 frequency counts 時用 **hash map**——Two Sum 是原型。
+      - 當 sorted array 上的 linear scan（或從兩端取 pair）可以取代 nested loops 時，用 **two pointers**。
+      - 當約束是 contiguous subarray 或 substring 時，用 **sliding window**：grow 與 shrink 一段 range，而不是從頭開始。
+      - 如果兩個 patterns 看起來都合理，選 **invariant 更清楚** 的那個，並在寫 code 之前先說出 time 與 space。
+      - **Failure：** 對本來可以 keyed 的 data 做 nested loops。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="algo-search-stack">
+    <AccordionTrigger>3. Binary search 與 stack 實際用來做什麼？</AccordionTrigger>
+    <AccordionContent>
+
+      - **Binary search** 每一步把 sorted array 或 monotonic answer space 減半——包括「對 answer 搜索」（lower bound）。
+      - Invariant 是 bound 左邊的一切讓 predicate 失敗，右邊的一切讓它透過。
+      - **Stack** 是 latest-open / next-greater：matching parentheses、nested structure。
+      - Linked-list reverse 與 cycle detection 是 constant-space pointer walks，不是另一族數學。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="algo-graphs-dp">
+    <AccordionTrigger>4. 如何在 BFS、DFS、topo sort、Union-Find、heaps 與 DP 之間選擇？</AccordionTrigger>
+    <AccordionContent>
+
+      - Unweighted graph 的 shortest path 或 level-order trees 用 **BFS**。探索所有 paths、components 或 hierarchies 用 **DFS**。
+      - DAG 上帶 prerequisites 的 ordering 用 **topological sort**。大量 merges 的 undirected connectivity 用 **Union-Find**。
+      - 要 top K 或 running extreme 卻不想完整 sort 時用 **heap**。Overlapping subproblems 有 optimal reuse 時用 **DP**。產生所有 valid candidates 用 **backtracking**。
+      - LRU 是帶 eviction 的 O(1) get/put：hash map 加上 insertion-order recency。
+      - Complexity 標出哪份工作會在兩萬時倒下。它並不要求對二十個 items 做 micro-optimize。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="algo-choose">
+    <AccordionTrigger>5. 每一個解，你都該能說出什麼？</AccordionTrigger>
+    <AccordionContent>
+
+      - 你用的 **pattern**、**time** 與 **space** complexity，以及如果 input 是 sorted、streaming，或大到放不進 memory，會怎麼變。
+      - 解開 Two Sum 的同一張 map，也是把 in-flight requests 去重的那張 map。
+      - **Failure：** 優化 nested loops，而真正的瓶頸是從未被衡量過的 network round trip。Complexity 是決策工具，不是競技。
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>

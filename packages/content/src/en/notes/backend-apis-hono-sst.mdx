@@ -15,7 +15,7 @@ Stages and the deploy loop live in [Using SST for AWS Infra and DevOps](/notes/u
 
 ## 1. Architecture
 
-Default shape: one **Hono API Lambda** behind **API Gateway**, with a second Lambda as the **Better Auth authorizer**. Rejected sessions never invoke the API function. Same Hono app can run on Fargate with `serve({ fetch: app.fetch })` instead of `handle(app)`.
+Default shape: one **Hono API Lambda** behind **API Gateway**, with a second Lambda as the **Better Auth authorizer**. Rejected sessions never invoke the API function. The same Hono app can run on Fargate with `serve({ fetch: app.fetch })` instead of `handle(app)`.
 
 <br />
 
@@ -36,7 +36,11 @@ Client
   → logs / metrics / alarms
 ```
 
-On Lambda, identity is an infrastructure boundary. On Fargate, it runs in-process after the request hits the task. Both still need edge controls.
+<br />
+
+- Keep the entrypoint thin. Business logic does not need to know about Lambda or ECS.
+- On Lambda, identity is an infrastructure boundary. On Fargate, it runs in-process after the request hits the task.
+- Both still need edge controls.
 
 <br />
 
@@ -44,7 +48,7 @@ On Lambda, identity is an infrastructure boundary. On Fargate, it runs in-proces
 
 ## 2. Hono
 
-Keep the entrypoint thin. Business logic does not need to know about Lambda or ECS.
+Keep the entrypoint thin. Routes, Zod schemas, and services stay the same on either runtime.
 
 <br />
 
@@ -63,7 +67,8 @@ export const handler = handle(app)
 
 <br />
 
-On Fargate the same app is served with `serve({ fetch: app.fetch })`. Routes, Zod schemas, and services stay the same.
+- On Fargate the same app is served with `serve({ fetch: app.fetch })`.
+- `OPTIONS` and `/api/health` stay public. Everything else goes through auth at the right boundary.
 
 <br />
 
@@ -71,13 +76,12 @@ On Fargate the same app is served with `serve({ fetch: app.fetch })`. Routes, Zo
 
 ## 3. Contract with Zod OpenAPI
 
-The contract is what a route accepts, returns, and how errors look. One Zod definition drives validation, TypeScript types, and OpenAPI.
+The contract is what a route accepts, returns, and how errors look. One Zod definition drives **validation**, **TypeScript types**, and **OpenAPI**.
 
 <br />
 
 ```ts
 import { createRoute, z } from "@hono/zod-openapi"
-import { ErrorSchema, GatewayErrorSchema } from "./schemas"
 
 app.openAPIRegistry.registerComponent("securitySchemes", "CookieAuth", {
   type: "apiKey",
@@ -87,87 +91,52 @@ app.openAPIRegistry.registerComponent("securitySchemes", "CookieAuth", {
 })
 
 const UserSchema = z
-  .object({
-    id: z.string().uuid(),
-    email: z.string().email(),
-    name: z.string(),
-  })
+  .object({ id: z.string().uuid(), email: z.string().email(), name: z.string() })
   .openapi("User")
 
 const CreateUserSchema = z
-  .object({
-    email: z.string().email(),
-    name: z.string().min(1).max(100),
-  })
+  .object({ email: z.string().email(), name: z.string().min(1).max(100) })
   .openapi("CreateUser")
-```
 
-<br />
-
-```ts
 const createUserRoute = createRoute({
   method: "post",
   path: "/users",
   security: [{ CookieAuth: [] }],
   request: {
-    body: {
-      content: {
-        "application/json": {
-          schema: CreateUserSchema,
-        },
-      },
-    },
+    body: { content: { "application/json": { schema: CreateUserSchema } } },
   },
   responses: {
     201: {
       description: "User created",
-      content: {
-        "application/json": {
-          schema: UserSchema,
-        },
-      },
+      content: { "application/json": { schema: UserSchema } },
     },
     400: {
       description: "Invalid request",
-      content: {
-        "application/json": {
-          schema: ErrorSchema,
-        },
-      },
+      content: { "application/json": { schema: ErrorSchema } },
     },
     401: {
       description: "Authentication cookie is missing",
-      content: {
-        "application/json": {
-          schema: GatewayErrorSchema,
-        },
-      },
+      content: { "application/json": { schema: GatewayErrorSchema } },
     },
     403: {
       description: "The session is invalid or not authorized",
-      content: {
-        "application/json": {
-          schema: GatewayErrorSchema,
-        },
-      },
+      content: { "application/json": { schema: GatewayErrorSchema } },
     },
   },
 })
-```
 
-<br />
-
-```ts
 app.openapi(createUserRoute, async (c) => {
   const input = c.req.valid("json")
-  const user = await createUser(input)
-  return c.json(user, 201)
+  return c.json(await createUser(input), 201)
 })
 ```
 
 <br />
 
-Shared error shapes keep `400` / `404` / `409` consistent. API Gateway authorizer failures use a smaller gateway shape for `401` / `403` — document both.
+- Register security schemes once. `createRoute` names method, path, request body, and response codes.
+- Shared error shapes keep `400` / `404` / `409` consistent. API Gateway authorizer failures use a smaller gateway shape for `401` / `403` — document both.
+- Attach a **request ID** early and include it in logs and error responses.
+- Validate shape **before** the handler thinks. TypeScript on the form is not a parser.
 
 <br />
 
@@ -215,44 +184,13 @@ const app = new OpenAPIHono({
 
 <br />
 
-Attach a **request ID** early and include it in logs and error responses.
-
-<br />
-
 ---
 
 ## 4. Drizzle and PostgreSQL
 
-PostgreSQL is the durable authority. Drizzle keeps schema and queries typed without hiding SQL. The statement model is [Core SQL Concepts](/notes/core-sql-concepts). Prefer database constraints over check-then-insert under concurrency.
+PostgreSQL is the durable authority. Drizzle keeps schema and queries typed without hiding SQL. The statement model is [Core SQL Concepts](/notes/core-sql-concepts). Prefer **database constraints** (unique email, `timestamptz`) over check-then-insert under concurrency.
 
-<br />
-
-```ts
-import {
-  pgTable,
-  text,
-  timestamp,
-  uniqueIndex,
-  uuid,
-} from "drizzle-orm/pg-core"
-
-export const users = pgTable(
-  "users",
-  {
-    id: uuid("id").defaultRandom().primaryKey(),
-    email: text("email").notNull(),
-    name: text("name").notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true })
-      .defaultNow()
-      .notNull(),
-  },
-  (table) => [uniqueIndex("users_email_idx").on(table.email)]
-)
-```
-
-<br />
-
-On Lambda, create the client outside the handler so warm environments reuse it, and keep the pool tiny:
+On Lambda, create the client **outside** the handler so warm environments reuse it, and keep the pool tiny:
 
 <br />
 
@@ -273,9 +211,11 @@ export const db = drizzle(client)
 
 <br />
 
-Reuse per warm environment is not global pooling. Cap concurrency, set timeouts, and use a pooler or RDS Proxy at scale. Disable prepared statements (`prepare: false`) when a transaction-mode pooler requires it.
-
-Migrations are a **deploy step**, never part of the request path. Generate SQL with Drizzle Kit, review it, test on a disposable DB, apply before code depends on the new shape. Use expand-and-contract when a change cannot ship atomically.
+- Reuse per warm environment is not global pooling. Cap concurrency, set timeouts, and use a pooler or RDS Proxy at scale.
+- Disable prepared statements (`prepare: false`) when a transaction-mode pooler requires it.
+- Migrations are a **deploy step**, never part of the request path. Generate SQL with Drizzle Kit, review it, test on a disposable DB, apply before code depends on the new shape.
+- Use expand-and-contract when a change cannot ship atomically.
+- Secrets come from **linked** SST resources, not hardcoded env.
 
 <br />
 
@@ -304,15 +244,11 @@ export const auth = betterAuth({
 
 <br />
 
-Mount auth on a public route. Keep `/api/health` and `/api/auth/*` off the authorizer.
-
-<br />
-
-```ts
-app.on(["GET", "POST"], "/api/auth/*", (c) => auth.handler(c.req.raw))
-```
-
-<br />
+- Mount auth on a public route: `app.on(["GET", "POST"], "/api/auth/*", (c) => auth.handler(c.req.raw))`.
+- Keep `/api/health` and `/api/auth/*` **off** the authorizer.
+- `trustedOrigins` is part of the auth config, not a comment. CORS names the app origin with credentials — a wildcard origin with cookies is a misconfiguration.
+- Prefer same-site domains (`app.example.com` / `api.example.com`) with secure HTTP-only cookies.
+- Start with authorizer caching disabled so revoked sessions do not linger.
 
 The Lambda authorizer validates the session before the API function runs:
 
@@ -358,34 +294,12 @@ export const handler: APIGatewayRequestSimpleAuthorizerHandlerV2WithContext<
 
 <br />
 
-Missing cookie → `401`. Authorizer deny → `403`. Neither invokes the API Lambda. On success, Hono reads identity from authorizer context — never from a client `X-User-Id`.
+- Missing cookie → `401`. Authorizer deny → `403`. Neither invokes the API Lambda.
+- On success, Hono reads identity from authorizer context — never from a client `X-User-Id`: `c.env.event.requestContext.authorizer.lambda`.
+- Authentication answers *who*. Authorization (roles, org membership, RLS) stays in the app — see the [multi-tenant note](/notes/multi-tenant-backend-drizzle-hono-better-auth).
+- On Fargate, the same Better Auth session check runs as Hono middleware after the request reaches the task.
 
-<br />
-
-```ts
-app.get("/users/me", (c) => {
-  const identity = (
-    c.env.event.requestContext as {
-      authorizer?: { lambda?: { userId: string; sessionId: string } }
-    }
-  ).authorizer?.lambda
-
-  if (!identity) {
-    return c.json(
-      { code: "UNAUTHORIZED", message: "Authentication is required." },
-      401
-    )
-  }
-
-  return c.json({ userId: identity.userId })
-})
-```
-
-<br />
-
-Authentication answers *who*. Authorization (roles, org membership, RLS) stays in the app — see the [multi-tenant note](/notes/multi-tenant-backend-drizzle-hono-better-auth). Prefer same-site domains (`app.example.com` / `api.example.com`) with secure HTTP-only cookies. Start with authorizer caching disabled so revoked sessions do not linger.
-
-On Fargate, the same Better Auth session check runs as Hono middleware after the request reaches the task.
+**Failure:** trusting a client `X-User-Id` header, or a wildcard CORS origin with credentials.
 
 <br />
 
@@ -393,26 +307,10 @@ On Fargate, the same Better Auth session check runs as Hono middleware after the
 
 ## 6. OpenAPI and Scalar
 
-<br />
+The OpenAPI JSON is the portable artifact (CI, typed clients, breaking-change checks). Scalar is the presentation layer.
 
-```ts
-app.doc("/openapi.json", {
-  openapi: "3.0.0",
-  info: { title: "Example API", version: "1.0.0" },
-})
-
-app.get(
-  "/docs",
-  Scalar({
-    url: "/openapi.json",
-    theme: "kepler",
-  })
-)
-```
-
-<br />
-
-Stage-gate or authenticate docs in production. A public reference is free reconnaissance. The OpenAPI JSON is the portable artifact (CI, typed clients, breaking-change checks); Scalar is the presentation layer.
+- `app.doc("/openapi.json", { openapi: "3.0.0", info: { title: "Example API", version: "1.0.0" } })` and `app.get("/docs", Scalar({ url: "/openapi.json", theme: "kepler" }))`.
+- Stage-gate or authenticate docs in production. A public reference is free reconnaissance.
 
 <br />
 
@@ -471,7 +369,10 @@ api.route("$default", apiFunction.arn, {
 
 <br />
 
-Explicit public `OPTIONS` matters: a `$default` with an authorizer would reject browser preflight. Put functions in a VPC only when they must reach private resources.
+- Explicit public `OPTIONS` matters: a `$default` with an authorizer would reject browser preflight.
+- Put functions in a VPC only when they must reach private resources.
+- App hardening that stays runtime-agnostic: strict CORS, secure cookies, request IDs, structured logs (no tokens), app-level rate limits on `/api/auth/*` under the WAF, Zod validation, and invite-only signup in production when needed.
+- Production stages use `protect` and `removal: "retain"` ([SST config](https://sst.dev/docs/reference/config/#removal)).
 
 For the container path: `Vpc` → `Cluster` → `Service`, with TLS and WAF on [`sst.aws.Router`](https://sst.dev/docs/component/aws/router).
 
@@ -522,17 +423,11 @@ router.route("/", service.url)
 
 <br />
 
-App hardening that stays runtime-agnostic: strict CORS, secure cookies, request IDs, structured logs (no tokens), app-level rate limits on `/api/auth/*` under the WAF, Zod validation, and invite-only signup in production when needed.
-
-Production stages use `protect` and `removal: "retain"` ([SST config](https://sst.dev/docs/reference/config/#removal)).
-
-<br />
-
 ---
 
 ## 8. Monitor and Recover
 
-Logs, metrics, and traces should share a request id.
+Logs, metrics, and traces should share a request id. Alert on symptoms. SNS is the “tell a human” bus.
 
 <br />
 
@@ -541,10 +436,6 @@ Logs, metrics, and traces should share a request id.
 | Logs | Service `logging.retention` → CloudWatch | Function `logging.retention` |
 | Metrics | ALB 5xx / latency, ECS CPU / memory | Errors, duration, throttles, concurrency |
 | Alarms | Unhealthy hosts, p99, CPU | Error rate, throttles, timeout proximity |
-
-<br />
-
-Alert on symptoms. SNS is the “tell a human” bus:
 
 <br />
 
@@ -572,36 +463,17 @@ new aws.cloudwatch.MetricAlarm("Api5xx", {
     LoadBalancer: service.nodes.loadBalancer.arnSuffix,
   },
 })
-
-new aws.cloudwatch.MetricAlarm("ApiLambdaErrors", {
-  alarmName: `${$app.name}-${$app.stage}-api-lambda-errors`,
-  comparisonOperator: "GreaterThanThreshold",
-  evaluationPeriods: 1,
-  metricName: "Errors",
-  namespace: "AWS/Lambda",
-  period: 60,
-  statistic: "Sum",
-  threshold: 5,
-  treatMissingData: "notBreaching",
-  alarmActions: [alerts.arn],
-  dimensions: {
-    FunctionName: apiFunction.name,
-  },
-})
 ```
 
 <br />
 
-CloudTrail and GuardDuty stay at the account level — verify they are on; do not Console-edit SST-managed resources.
+- CloudTrail and GuardDuty stay at the account level — verify they are on; do not Console-edit SST-managed resources.
+- Mirror the same alarm for Lambda: namespace `AWS/Lambda`, metric `Errors`, dimension `FunctionName`.
+- Durable state is almost entirely **Postgres**. Compute is redeployable from git + SST.
+- Write **RPO** and **RTO** first, then: automated backups with retention that matches RPO; cross-region snapshot copy when the product matters; versioned Drizzle migrations so a restored DB can catch up.
+- A restore drill: snapshot → non-prod `DATABASE_URL` → migrate → `/api/health` + one critical path → record the real RTO.
 
-Durable state is almost entirely **Postgres**. Compute is redeployable from git + SST. Write **RPO** and **RTO** first, then:
-
-- Automated backups with retention that matches RPO
-- Cross-region snapshot copy when the product matters
-- Versioned Drizzle migrations so a restored DB can catch up
-- A restore drill: snapshot → non-prod `DATABASE_URL` → migrate → `/api/health` + one critical path → record the real RTO
-
-Multi-AZ is high availability inside one region, not cross-region disaster recovery.
+**Failure:** calling Multi-AZ “disaster recovery.” It is high availability inside one region, not cross-region DR.
 
 <br />
 
@@ -611,9 +483,10 @@ Multi-AZ is high availability inside one region, not cross-region disaster recov
 
 For `POST /users` on Lambda: API Gateway → authorizer (Better Auth session) → Hono adapter → request ID middleware → Zod → service → Drizzle → Postgres → `201`. The same route schema appears in `/openapi.json`.
 
-Test mostly **below** the Lambda adapter with `app.request` and a mock authorizer context. Use a real disposable Postgres for queries and migrations. Reserve deployed tests for authorizer decisions, CORS, linked secrets, and domains.
-
-Accepted trade-offs: OpenAPI response repetition, cold starts, deliberate connection limits, and the fact that TypeScript disappears at runtime — Zod and Postgres constraints still matter. Each layer stays replaceable.
+- Test mostly **below** the Lambda adapter with `app.request` and a mock authorizer context.
+- Use a real disposable Postgres for queries and migrations.
+- Reserve deployed tests for authorizer decisions, CORS, linked secrets, and domains.
+- Accepted trade-offs: OpenAPI response repetition, cold starts, deliberate connection limits, and the fact that TypeScript disappears at runtime — Zod and Postgres constraints still matter. Each layer stays replaceable.
 
 <br />
 
@@ -633,11 +506,77 @@ Recover    → RPO/RTO → backups → restore drills → sst deploy + DNS
 
 <br />
 
----
-
-## Final Thoughts
-
 Keep the path short: validated request, trusted identity, typed query, durable constraint, generated docs, reviewable infra. Pick **Lambda** or **Fargate** from traffic shape, put WAF and identity at the right boundary, alarm on symptoms, and do not call it production-ready until a restore drill matches the RPO/RTO you wrote down.
 
 For stages and the CI deploy loop, continue with [Using SST for AWS Infra and DevOps](/notes/using-sst-for-aws-infra-and-devops). For tenant isolation, see the [multi-tenant backend note](/notes/multi-tenant-backend-drizzle-hono-better-auth).
-)
+
+---
+
+## Recap Q&A
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="hono-arch">
+    <AccordionTrigger>1. What is the default architecture, and when do you pick Lambda vs Fargate?</AccordionTrigger>
+    <AccordionContent>
+
+      - Default shape: one **Hono API Lambda** behind **API Gateway**, with a second Lambda as the **Better Auth authorizer**. Rejected sessions never invoke the API function.
+      - The same Hono app can run on Fargate with `serve({ fetch: app.fetch })` instead of `handle(app)`. Keep the entrypoint thin. Business logic does not need to know about Lambda or ECS.
+      - Choose **Lambda** for spiky or idle traffic, short handlers, and authorizer-first reject.
+      - Choose **Fargate** for steady traffic, long requests, streaming, agents, and connection reuse.
+      - On Lambda, identity is an infrastructure boundary. On Fargate, it runs in-process after the request hits the task. Both still need edge controls.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="hono-zod-openapi">
+    <AccordionTrigger>2. What does one Zod definition drive, and why is that the contract?</AccordionTrigger>
+    <AccordionContent>
+
+      - The contract is what a route accepts, returns, and how errors look. One Zod definition drives **validation**, **TypeScript types**, and **OpenAPI**.
+      - Register security schemes once. `createRoute` names method, path, request body, and response codes. Scalar reads the generated OpenAPI JSON.
+      - Validate shape **before** the handler thinks. TypeScript on the form is not a parser.
+      - A public OpenAPI/Scalar surface is reconnaissance — stage-gate it in production.
+      - The production default is one catch-all Hono function so middleware, errors, OpenAPI, and DB setup stay in one place.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="hono-drizzle">
+    <AccordionTrigger>3. How should Drizzle sit on Lambda, and when do migrations run?</AccordionTrigger>
+    <AccordionContent>
+
+      - PostgreSQL is the durable authority. Drizzle keeps schema and queries typed without hiding SQL. Prefer **database constraints** over check-then-insert under concurrency.
+      - On Lambda, create the client **outside** the handler so warm environments reuse it, and keep the pool tiny (`max: 1`). Reuse per warm environment is not global pooling.
+      - Cap concurrency, set timeouts, use a pooler or RDS Proxy at scale. Disable prepared statements when a transaction-mode pooler requires it.
+      - Migrations are a **deploy step**, never part of the request path. Generate SQL with Drizzle Kit, review it, test on a disposable DB, apply before code depends on the new shape.
+      - Use expand-and-contract when a change cannot ship atomically. Secrets come from **linked** SST resources, not hardcoded env.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="hono-auth">
+    <AccordionTrigger>4. Where does Better Auth run, and what does the authorizer keep off the API function?</AccordionTrigger>
+    <AccordionContent>
+
+      - Better Auth runs inside the API: sign-up, sign-in, sessions, accounts in Postgres via the Drizzle adapter. Mount it on a public route.
+      - Keep `/api/health` and `/api/auth/*` **off** the authorizer. The Lambda authorizer validates the session from the Cookie header **before** the API function runs.
+      - `trustedOrigins` is part of the auth config, not a comment. CORS names the app origin with credentials — a wildcard origin with cookies is a misconfiguration.
+      - Split functions only for operational reasons (permissions, timeouts, async work), not because paths differ.
+      - **Failure:** trusting a client `X-User-Id`, or enabling authorizer caching so revoked sessions linger.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="hono-sst">
+    <AccordionTrigger>5. How does SST wire the API, and what stays a security boundary?</AccordionTrigger>
+    <AccordionContent>
+
+      - One Hono API Lambda behind a catch-all. The **authorizer stays separate**. Link `DatabaseUrl` and `BetterAuthSecret`.
+      - Route `/api/auth/{proxy+}` and `OPTIONS` without auth; `$default` through the authorizer. Domain, CORS, and logging retention live in the same TypeScript as the function.
+      - Stages, `sst dev`, and the CI boundary belong in the SST DevOps note. This note is the typed API through production protect, monitor, and recover.
+      - Tenant isolation is a different note: identity, request context, and RLS have to agree.
+      - Do not call it production-ready until a restore drill matches the RPO/RTO you wrote down.
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>

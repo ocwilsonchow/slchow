@@ -6,8 +6,6 @@ category: computer-science
 
 大多數 on-chain applications 都由同一小撮零件組成：**wallets**、**smart contracts**、**tokens** 與 **dApps**。搞清楚它們如何串連，以及每一塊建立什麼 trust model，就足以讀懂多數 Web3 architectures，而不必淹沒在 cryptography 裡。
 
-<br />
-
 這篇 note 用 Ethereum / EVM 作為框架，因為 ERC token standards 住在那裡。同樣的想法可以轉移到其他 chains，即使名稱不同。
 
 <br />
@@ -16,16 +14,12 @@ category: computer-science
 
 ## Blockchain 基礎
 
-Blockchain 是一份由許多獨立 nodes 共同同意的 shared ledger。一旦 transaction 被確認，改寫歷史在設計上就是昂貴的。那份 shared state 讓陌生人可以轉移 assets，中間不必有中央銀行。
+Blockchain 是一份由許多獨立 nodes 共同同意的 shared ledger。一旦 transaction 被確認，改寫歷史在設計上就是昂貴的。
 
-<br />
-
-對 application 工作真正重要的零件：
-
-- **Accounts**：chain 上的身份。Externally owned accounts (EOAs) 由 private keys 控制。Contract accounts 由 code 控制。
-- **Transactions**：已簽署的 messages，提出一次 state change：送 value、呼叫 contract、deploy code。
-- **Consensus**：網絡同意哪些 transactions 有效、以及順序為何的方式。
-- **Gas**：在 on-chain 執行工作所付的 fee。每次 write 都有成本；透過 RPC node 的 reads 通常沒有。
+- **Accounts** — chain 上的身份。Externally owned accounts (EOAs) 由 private keys 控制。Contract accounts 由 code 控制。
+- **Transactions** — 已籤署的 messages，提出一次 state change：送 value、呼叫 contract、deploy code。
+- **Consensus** — 網絡同意哪些 transactions 有效、以及順序為何的方式。
+- **Gas** — 在 on-chain 執行工作所付的 fee。每次 write 都有成本；透過 RPC node 的 reads 通常沒有。
 
 <br />
 
@@ -46,7 +40,7 @@ chain 是 **programmable settlement layer**：跟普通 database 相比又慢又
 
 ## Wallets
 
-Wallet 是持有 cryptographic keys、並幫你簽署 transactions 的軟件（或硬件）。它不是銀行帳戶。Chain 存 balances；wallet 存你控制某個 address 的證明。
+Wallet 是持有 cryptographic keys、並幫你籤署 transactions 的軟件（或硬件）。它不是銀行帳戶。Chain 存 balances；wallet 存你控制某個 address 的證明。
 
 <br />
 
@@ -59,25 +53,17 @@ flowchart LR
 
 <br />
 
-核心想法：
-
 - **Private key** 證明控制權。任何人拿到它，就可以從該 address 移走 assets。
 - **Public key / address** 是別人用來送你 assets，或在 on-chain 識別你的東西。
 - **Signing** 代表授權一筆特定 transaction，而不廣播 private key 本身。
 - **Custody** 是誰持有 keys。Self-custody 代表你自己持有。Custodial wallets 代表服務代表你持有。
-
-<br />
-
-Browser extensions 與 mobile wallets 主要是 keys 周圍的 UX：連到一個 site、檢視一筆 transaction、批准或拒絕。Hardware wallets 把 private key 留在 offline，只暴露 signatures。
-
-<br />
+- Browser extensions 與 mobile wallets 主要是 keys 周圍的 UX。Hardware wallets 把 private key 留在 offline，只暴露 signatures。
 
 當 dApp 說「connect wallet」，它是在要一個 address 與一條 signing channel，而不是要你登入某間公司 database 的密碼：
 
 <br />
 
 ```ts
-// EIP-1193 provider injected by an extension wallet (e.g. window.ethereum)
 const accounts = (await window.ethereum.request({
   method: "eth_requestAccounts",
 })) as string[]
@@ -88,7 +74,7 @@ const address = accounts[0]
 
 <br />
 
-這個區別會出現在每一次 security review：phishing sites 要你簽署錯的東西，而不是 Web2 意義上的「登入」。
+**Failure：** 把「connect」當成 Web2 login。Phishing sites 要你籤錯東西，而不是輸入密碼。
 
 <br />
 
@@ -96,20 +82,12 @@ const address = accounts[0]
 
 ## Smart Contracts
 
-Smart contract 是 deploy 到 blockchain 上的程式。在 Ethereum 上通常用 Solidity 寫，跑在 EVM 上。一旦 deployed，它的 code 與 storage 住在一個 contract address。
+Smart contract 是部署在 blockchain 上的 program。在 Ethereum 上通常用 Solidity 寫，跑在 EVM 上。一旦 deployed，它的 code 與 storage 就住在一個 contract address。
 
-<br />
-
-Contracts 跟普通 backend 不同的地方：
-
-- **Public state**：任何人都可以讀 balances、ownership，常常還能讀 bytecode。
-- **Deterministic execution**：相同 inputs 與 state，在誠實 nodes 上產生相同結果。
-- **Permissionless calling**：任何付了 gas 的人都可以呼叫 public function，但受 contract 自己的 access checks 約束。
-- **Hard to change**：upgrades 需要明確 pattern（proxy、governance、migration）。Immutable code 沒有 silent hotfix。
-
-<br />
-
-最小形狀看起來像這樣：
+- **Public state** — 任何人都可以讀 balances、ownership，常常也能讀 bytecode。
+- **Deterministic execution** — 同樣的 inputs 與 state，在誠實 nodes 上產生同樣的結果。
+- **Permissionless calling** — 任何付得起 gas 的人都可以呼叫 public function，仍受 contract 自己的 access checks 約束。
+- **Hard to change** — upgrades 需要明確 pattern（proxy、governance、migration）。Immutable code 上沒有靜默 hotfix。
 
 <br />
 
@@ -138,11 +116,10 @@ contract Escrow {
 
 <br />
 
-Contracts 編碼規則：誰可以呼叫什麼、在什麼條件下、以及什麼 state changes。Bugs 很昂貴，因為 funds 與 ownership 往往就坐在 contract 本身裡面。
+- Contracts 編碼規則：誰能呼叫什麼、在什麼條件下、以及 state 如何改變。
+- Smart contract 是一份 **開放、按 fee 計量的 API，database 就是 chain**。UI 可以撒謊；真正結算的是 contract 的 state。
 
-<br />
-
-smart contract 是 **一套開放、按 fee 計量的 API，而其 database 就是 chain**。UI 可以說謊；真正 settle 的是 contract 的 state。
+**Failure：** 把 UI 當成 source of truth。Bugs 很貴，因為 funds 與 ownership 常常就坐在 contract 裡面。
 
 <br />
 
@@ -150,13 +127,9 @@ smart contract 是 **一套開放、按 fee 計量的 API，而其 database 就�
 
 ## Tokens
 
-Tokens 是由遵循共享 interfaces 的 smart contracts 所代表的 assets。Wallets、explorers 與 dApps 不必為每個專案寫自訂 code 就能支援它們，這正是 ERC standards 重要的原因。
+Tokens 是由遵循共享 interfaces 的 smart contracts 表示的 assets。Wallets、explorers 與 dApps 不必為每個 project 寫自定義 code 就能支持它們——這就是 ERC standards 重要的原因。
 
-<br />
-
-### ERC-20：fungible tokens
-
-**ERC-20** 是 fungible tokens 的 standard：每個單位都可互換，像貨幣或 points。
+**ERC-20** 是 fungible tokens 的標準：每一單位都可以互換。心智模型是 **balances**，不是獨特物品。`approve` + `transferFrom` 是 protocol 代表你花 tokens 的方式。
 
 <br />
 
@@ -171,60 +144,9 @@ interface IERC20 {
 
 <br />
 
-`approve` + `transferFrom` 是 protocol 代表你花費 tokens 的方式：你授權一個 spender，然後那個 contract 把金額拉走。
+**ERC-721** 是 unique tokens 的標準。每個 `tokenId` 都是自己的 asset，只有一個 owner。Collectibles、tickets 與 on-chain deeds 是常見用途。同一份 contract 裡的兩個 tokens，只要 IDs 不同，就 **不可**互換。
 
-<br />
-
-Stablecoins、governance tokens 與 in-game currencies 通常是 ERC-20。重要的心智模型是 **balances**，不是 unique items。
-
-<br />
-
-### ERC-721：non-fungible tokens (NFTs)
-
-**ERC-721** 是 unique tokens 的 standard。每個 `tokenId` 都是自己的 asset，只有一個 owner。
-
-<br />
-
-```solidity
-interface IERC721 {
-    function ownerOf(uint256 tokenId) external view returns (address);
-    function safeTransferFrom(address from, address to, uint256 tokenId) external;
-    function tokenURI(uint256 tokenId) external view returns (string memory);
-}
-```
-
-<br />
-
-Collectibles、tickets 與 on-chain deeds 是常見的 ERC-721 用途。同一個 contract 的兩個 tokens，只要 IDs 不同，就 **不可** 互換。
-
-<br />
-
-### ERC-1155：multi-token standard
-
-**ERC-1155** 讓一個 contract 管理多種 token types（fungible、non-fungible，或兩者），並支援 batch transfers。
-
-<br />
-
-```solidity
-interface IERC1155 {
-    function balanceOf(address account, uint256 id) external view returns (uint256);
-    function safeBatchTransferFrom(
-        address from,
-        address to,
-        uint256[] calldata ids,
-        uint256[] calldata amounts,
-        bytes calldata data
-    ) external;
-}
-```
-
-<br />
-
-Games 與 marketplaces 在單一 collection 混了 gold coins（fungible）、unique swords（supply 為一）與 limited skins（supply 為 N）時，往往偏好 ERC-1155。更少 deployments，更便宜的 batch operations。
-
-<br />
-
-### 比較
+**ERC-1155** 讓一份 contract 管理多種 token types——fungible、non-fungible，或兩者都有——並支持 batch transfers。Games 與 marketplaces 在單一 collection 混了 gold coins（fungible）、unique swords（supply 為一）與 limited skins（supply 為 N）時，往往偏好它。更少 deployments，更便宜的 batch operations。
 
 | Standard | Fungibility | Identity model | Common uses |
 | --- | --- | --- | --- |
@@ -242,14 +164,12 @@ Games 與 marketplaces 在單一 collection 混了 gold coins（fungible）、un
 
 ## Decentralized Applications (dApps)
 
-**dApp** 是 critical logic 或 ownership 住在 on-chain 的應用。熟悉的形狀是：
+**dApp** 是 critical logic 或 ownership 住在 on-chain 的應用。
 
-<br />
-
-1. 一個 **frontend**（常常是普通 web app）負責 UX
-2. 一個 **wallet** 負責 identity 與 transaction signing
-3. **Smart contracts** 作為 assets 與規則的 source of truth
-4. 一個 **RPC provider**，讓 frontend 能讀 chain state 並廣播已簽署的 transactions
+- 一個 **frontend**（常常是普通 web app）負責 UX
+- 一個 **wallet** 負責 identity 與 transaction signing
+- **Smart contracts** 作為 assets 與規則的 source of truth
+- 一個 **RPC provider**，讓 frontend 能讀 chain state 並廣播已籤署的 transactions
 
 <br />
 
@@ -266,34 +186,8 @@ flowchart LR
 
 <br />
 
-Reads 可以免費且頻繁。Writes 需要 signature 與 gas。搭配 typed client，一次 read 常常長這樣：
-
-<br />
-
-```ts
-import { createPublicClient, http, parseAbi } from "viem"
-import { mainnet } from "viem/chains"
-
-const client = createPublicClient({
-  chain: mainnet,
-  transport: http(),
-})
-
-const erc20Abi = parseAbi([
-  "function balanceOf(address owner) view returns (uint256)",
-])
-
-const balance = await client.readContract({
-  address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", // USDC
-  abi: erc20Abi,
-  functionName: "balanceOf",
-  args: ["0xYourAddress"],
-})
-```
-
-<br />
-
-許多 dApps 仍然使用 centralized pieces：indexers、APIs、IPFS gateways、admin keys。「Decentralized」是一個光譜。重要的是哪些部分可以失敗或審查，而不拿走用戶的 assets。
+- Reads 可以免費且頻繁。Writes 需要 signature 與 gas。
+- 許多 dApps 仍使用中心化零件——indexers、APIs、IPFS gateways、admin keys。「Decentralized」是一條光譜。真正重要的是：哪些部分失敗或審查時，不會奪走用戶的 assets。
 
 <br />
 
@@ -301,7 +195,7 @@ const balance = await client.readContract({
 
 ## 它們如何組合
 
-許多產品共享的具體流程：
+許多產品共用的一條具體流程：
 
 <br />
 
@@ -327,39 +221,27 @@ sequenceDiagram
 
 <br />
 
-1. 用戶打開 dApp 並 **connects a wallet**。App 得知他們的 address。
-2. UI 透過 RPC **reads** balances 與 ownership（`balanceOf`、`ownerOf` 等）。
-3. 用戶要把 ERC-20 deposit 進 protocol。他們先 **approve** contract 作為 spender，再呼叫 deposit function：兩次 signatures、兩筆 transactions（除非被更高層 pattern 批次處理）。
-4. **Smart contract** 更新 on-chain state。
-5. UI 從 chain（或 indexer）刷新，並顯示新的 balances。
-
-<br />
-
-在 TypeScript 搭配 wallet client 時，write 這一側大致是：
+- User 打開 dApp 並 **connect wallet**。App 得知他們的 address。
+- UI 透過 RPC **讀取** balances 與 ownership（`balanceOf`、`ownerOf`）。
+- 要 deposit 一筆 ERC-20，他們先 **approve** contract 作為 spender，再呼叫 deposit——兩次 signatures、兩筆 transactions，除非被更高層 pattern batch。
+- **Smart contract** 更新 on-chain state。UI 從 chain 或 indexer 刷新。
 
 <br />
 
 ```ts
 import { parseAbi, parseUnits } from "viem"
 
-const erc20Abi = parseAbi([
-  "function approve(address spender, uint256 amount) returns (bool)",
-])
-
-const protocol = "0xProtocolAddress"
 const amount = parseUnits("100", 6) // 100 USDC (6 decimals)
 
-// 1) User signs: allow the protocol to pull tokens
 await walletClient.writeContract({
   address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
-  abi: erc20Abi,
+  abi: parseAbi(["function approve(address spender, uint256 amount) returns (bool)"]),
   functionName: "approve",
-  args: [protocol, amount],
+  args: ["0xProtocolAddress", amount],
 })
 
-// 2) User signs: protocol pulls and records the deposit
 await walletClient.writeContract({
-  address: protocol,
+  address: "0xProtocolAddress",
   abi: parseAbi(["function deposit(uint256 amount)"]),
   functionName: "deposit",
   args: [amount],
@@ -368,21 +250,86 @@ await walletClient.writeContract({
 
 <br />
 
-把那個 ERC-20 換成 ERC-721 mint，或 ERC-1155 batch claim，wallet / contract / RPC 的形狀仍然一樣。改變的只有 token interface 與 contract 的 business rules。
+把那筆 ERC-20 換成 ERC-721 mint，或 ERC-1155 batch claim，wallet / contract / RPC 的形狀仍然一樣。變的只有 token interface 與 contract 的業務規則。
 
 <br />
 
 ---
 
-## 重點
+## 要點
 
-有用的心智模型很精簡：
-
-- **Wallet 持有 keys**，不是 ledger 本身；custody 關乎誰可以簽署。
+- **Wallet 持有 keys**，不是 ledger 本身——custody 講的是誰能籤。
 - **Smart contract** 是公開、按 fee 計量的 logic，其 state 結算 ownership。
-- **ERC-20**、**ERC-721** 與 **ERC-1155** 的差異，主要在 fungibility 以及 identity 如何被建模。
-- **dApp** 組合 frontend、wallet signatures、RPC 與 contracts；對 assets 來說，source of truth 是 chain，不是 UI。
+- **ERC-20**、**ERC-721** 與 **ERC-1155** 的主要差別在 fungibility，以及 identity 如何建模。
+- **dApp** 組合 frontend、wallet signatures、RPC 與 contracts——對 assets 來說，source of truth 是 chain，不是 UI。
 
-<br />
+其他一切——L2s、account abstraction、indexers、bridges——都建立在這個底座上。
 
-其餘一切（L2s、account abstraction、indexers、bridges）都建立在這個基礎上。
+---
+
+## Recap Q&A
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="chain-wallet">
+    <AccordionTrigger>1. Wallet 持有什麼，「connect wallet」實際在要什麼？</AccordionTrigger>
+    <AccordionContent>
+
+      - Wallet 持有 **cryptographic keys**，並幫你 **籤署** transactions。它不是銀行帳戶。
+      - Chain 存 balances；wallet 存你控制某個 address 的證明。
+      - **Private key** 證明控制權。任何人拿到它，就可以移走 assets。**Signing** 授權一筆特定 transaction，而不廣播 key。**Custody** 是誰持有 keys。
+      - 「Connect wallet」要的是一個 **address** 與一條 **signing channel**——不是某間公司 database 的密碼。Private key 從不離開 wallet。
+      - Hardware wallets 把 key 留在 offline，只暴露 signatures。
+      - **Failure：** phishing sites 要你籤錯東西，而不是 Web2 意義上的「登入」。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="chain-contracts">
+    <AccordionTrigger>2. Smart contract 與普通 backend 有何不同？</AccordionTrigger>
+    <AccordionContent>
+
+      - Smart contract 是部署在 chain 上的 program。**Public state**、**deterministic execution**、**permissionless calling**（任何付得起 gas 的人，仍受 contract 自己的 checks 約束），以及 **hard to change**。
+      - Upgrades 需要明確 pattern。Immutable code 上沒有靜默 hotfix。
+      - 它是一份 **開放、按 fee 計量的 API，database 就是 chain**。UI 可以撒謊；真正結算的是 contract 的 state。
+      - Bugs 很貴，因為 funds 與 ownership 常常就坐在 contract 裡面。
+      - EOAs 由 keys 控制。Contract accounts 由 code 控制。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="chain-tokens">
+    <AccordionTrigger>3. ERC-20 與 ERC-721 實際標準化了什麼？</AccordionTrigger>
+    <AccordionContent>
+
+      - Tokens 是由遵循共享 interfaces 的 contracts 表示的 assets，所以 wallets 與 dApps 不必為每個 project 寫自定義 code 就能支持它們。
+      - **ERC-20** 是 fungible：每一單位都可以互換。心智模型是 **balances**。`approve` + `transferFrom` 是 protocol 代表你花 tokens 的方式。
+      - **ERC-721** 是 unique tokens。每個 `tokenId` 只有一個 owner。同一份 contract 裡的兩個 tokens，只要 IDs 不同，就 **不可**互換。
+      - Collectibles、tickets、deeds。Gas 計量 writes；透過 RPC 的 reads 通常不消耗 on-chain gas。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="chain-dapp">
+    <AccordionTrigger>4. dApp 由哪些零件組成，哪一塊才是 source of truth？</AccordionTrigger>
+    <AccordionContent>
+
+      - **dApp** 的 critical logic 或 ownership 住在 on-chain：一個負責 UX 的 **frontend**、一個負責 identity 與 signing 的 **wallet**、作為 source of truth 的 **smart contracts**，以及一個用來讀 state 並廣播已籤署 transactions 的 **RPC provider**。
+      - Reads 可以免費且頻繁。Writes 需要 signature 與 gas。
+      - Accounts、transactions、consensus 與 gas 是 ledger primitives。
+      - 一旦 transaction 被確認，改寫歷史在設計上就是昂貴的。那份 shared state 讓陌生人可以轉移 assets，中間不必有中央銀行。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="chain-fit">
+    <AccordionTrigger>5. 一次典型 deposit 裡，它們如何組合？</AccordionTrigger>
+    <AccordionContent>
+
+      - User connect wallet；app 得知他們的 address。UI 透過 RPC **讀取** balances。
+      - 要 deposit 一筆 ERC-20，他們先 **approve** contract 作為 spender，再呼叫 deposit——兩次 signatures、兩筆 transactions，除非被 batch。
+      - Contract 更新 on-chain state。UI 從 chain 或 indexer 刷新。
+      - 用 Ethereum / EVM 作為框架，因為 ERC standards 住在那裡。同樣的想法可以轉移到其他 chains，即使名稱不同。
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>

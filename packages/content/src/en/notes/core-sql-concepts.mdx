@@ -5,13 +5,11 @@ date: 2026-08-15
 category: backend
 ---
 
-It is possible to ship Drizzle every day without a clear picture of what Postgres does with a statement. The ORM types the query. The database still evaluates a **relation**: rows in, rows out, in a fixed logical order.
-
-These notes treat SQL as one pipeline. `FROM` and `JOIN` build a working row set. `WHERE` drops rows. `GROUP BY` and `HAVING` collapse and filter groups. `SELECT` names the output. Window functions compute across that output without collapsing it. `ORDER BY` and `LIMIT` are the last cut. Schema, RLS, and migrations are the wiring — [Backend APIs with Hono, Drizzle, Zod OpenAPI, and SST](/notes/backend-apis-hono-sst) and [Building a Multi-Tenant Backend with Hono, Better Auth, Drizzle, and Postgres RLS](/notes/multi-tenant-backend-drizzle-hono-better-auth). This note is the statement.
+The ORM types the query. Postgres still evaluates a **relation**: rows in, rows out, in a fixed logical order. Schema, RLS, and migrations are the wiring — [Backend APIs with Hono, Drizzle, Zod OpenAPI, and SST](/notes/backend-apis-hono-sst) and [Building a Multi-Tenant Backend with Hono, Better Auth, Drizzle, and Postgres RLS](/notes/multi-tenant-backend-drizzle-hono-better-auth). This note is the statement.
 
 <br />
 
-The examples share one shop: customers, orders, and line items. Constraints live in the `CREATE TABLE`. Indexes wait until cost.
+The examples share one shop. Constraints live in the `CREATE TABLE`. Indexes wait until cost.
 
 <br />
 
@@ -55,25 +53,16 @@ CREATE TABLE order_items (
 
 <br />
 
-The patterns are the last stretch. The pipeline comes first.
-
-<br />
-
 ---
 
 ## 1. Relation in, relation out
 
-A table is a named relation: a bag of rows, each row a tuple of columns. A `SELECT` is not a procedure that visits a table. It is an expression that takes relations and returns a relation. The shape of the result — which columns, how many rows — is decided by the statement, not by a loop in application code.
+A `SELECT` is an expression that takes relations and returns a relation — not a procedure that visits a table.
 
-<br />
-
-A **key** is a constraint on which rows can exist, not a hint to the planner. `PRIMARY KEY` says this column identifies the row. `UNIQUE` on `customers.email` says two customers cannot share an email. `REFERENCES` says an order cannot name a customer that does not exist. Application `WHERE` clauses do not replace any of that.
-
-<br />
-
-**`NULL` is not a value.** It is the absence of one. `WHERE email = NULL` is never true; the predicate is `IS NULL`. Comparison with `NULL` yields unknown, and `WHERE` keeps only true. That is why `NOT IN (SELECT …)` becomes a trap when the subquery can return `NULL`, and why `NOT EXISTS` is the anti-join that still means what it says.
-
-<br />
+- A table is a named relation: a bag of rows, each row a tuple of columns. The shape of the result is decided by the statement.
+- A **key** is a constraint on which rows can exist, not a hint to the planner. `PRIMARY KEY` identifies the row. `UNIQUE` on `customers.email` forbids duplicates. `REFERENCES` forbids an order that names a missing customer.
+- **`NULL` is not a value.** It is the absence of one. Comparison with `NULL` yields unknown, and `WHERE` keeps only true.
+- **Failure:** `WHERE email = NULL` is never true; the predicate is `IS NULL`. `NOT IN (SELECT …)` becomes a trap when the subquery can return `NULL`. `NOT EXISTS` is the anti-join that still means what it says.
 
 ---
 
@@ -96,56 +85,24 @@ flowchart LR
 
 <br />
 
-`FROM` / `JOIN` produce the working row set. `WHERE` filters **rows**. `GROUP BY` collapses rows into groups; `HAVING` filters **groups**. `SELECT` names the output columns. Window functions then compute over that result without collapsing it further. `ORDER BY` sorts. `LIMIT` cuts. A `WITH` CTE is a named subquery plugged into `FROM`. It is not a different engine.
-
-<br />
-
-This order is why a `SELECT` alias is invisible to `WHERE`, and why a window function cannot appear in `WHERE` or `HAVING`. Those clauses have already run. Filter on a window with a subquery or a CTE — another `FROM`.
-
-<br />
-
-```sql
--- legal: filter rows before grouping
-SELECT customer_id, count(*) AS order_count
-FROM orders
-WHERE status = 'shipped'
-GROUP BY customer_id
-HAVING count(*) >= 3;
-
--- illegal: alias and window are not in scope for WHERE
--- SELECT count(*) AS order_count FROM orders WHERE order_count > 0;
--- SELECT row_number() OVER (ORDER BY created_at) AS n FROM orders WHERE n = 1;
-```
-
-<br />
+- `FROM` / `JOIN` produce the working row set. `WHERE` filters **rows**. `GROUP BY` collapses groups; `HAVING` filters **groups**. `SELECT` names columns. Windows compute without collapsing further. `ORDER BY` sorts. `LIMIT` cuts.
+- A `WITH` CTE is a named subquery plugged into `FROM`. It is not a different engine.
+- A `SELECT` alias is invisible to `WHERE`. A window function cannot appear in `WHERE` or `HAVING` — those clauses have already run.
+- **Failure:** `WHERE order_count > 0` or `WHERE n = 1` on a window alias. Filter on a window with a subquery or a CTE — another `FROM`.
 
 ---
 
 ## 3. JOIN
 
-A join is how `FROM` builds a wider row. **Inner** keeps matches. **Left** keeps every left row and fills the right side with `NULL` when there is no match. **Anti-join** keeps left rows that have **no** match — customers with no orders, orders with no items.
+A join is how `FROM` builds a wider row. **Inner** keeps matches. **Left** keeps every left row and fills the right side with `NULL` when there is no match. **Anti-join** keeps left rows that have **no** match.
 
 <br />
 
 ```sql
--- inner: orders that have a customer (all of them, given the FK)
-SELECT c.email, o.id AS order_id, o.status
-FROM orders o
-JOIN customers c ON c.id = o.customer_id;
-
--- left: every customer, orders if they exist
 SELECT c.email, o.id AS order_id
 FROM customers c
 LEFT JOIN orders o ON o.customer_id = c.id;
-```
 
-<br />
-
-The left join duplicates a customer once per order. That is the cardinality trap: aggregating after a join without grouping will count the customer as many times as they have orders. When the question is “who has none?”, do not `LEFT JOIN … WHERE right.id IS NULL` as the first reflex. `NOT EXISTS` is the anti-join that does not duplicate, and it does not break on `NULL`.
-
-<br />
-
-```sql
 SELECT c.email
 FROM customers c
 WHERE NOT EXISTS (
@@ -157,15 +114,15 @@ WHERE NOT EXISTS (
 
 <br />
 
+- A left join duplicates a customer once per order. Aggregating after that join without grouping counts the customer as many times as they have orders.
+- `EXISTS` / `NOT EXISTS` stop at the first match and leave the outer row intact.
+- **Failure:** `LEFT JOIN … WHERE right.id IS NULL` as the first-reflex anti-join. It duplicates, and `NULL` comparison is easy to get wrong. `JOIN` plus `DISTINCT` undoes a cardinality explosion you introduced.
+
 ---
 
 ## 4. Aggregation
 
-`GROUP BY` is the collapse. After `WHERE`, remaining rows are partitioned by the grouping keys. Each group becomes one output row. Ungrouped columns cannot appear in `SELECT` unless they are wrapped in an aggregate — Postgres will reject the statement rather than pick an arbitrary value.
-
-<br />
-
-`HAVING` is `WHERE` for groups. `WHERE` cannot see `count(*)`. `HAVING` can.
+`GROUP BY` is the collapse. After `WHERE`, remaining rows are partitioned by the grouping keys. Each group becomes one output row.
 
 <br />
 
@@ -184,19 +141,16 @@ HAVING count(o.id) >= 1;
 
 <br />
 
-`count(o.id)` ignores `NULL`s from the left join, so customers with no orders are `0` and drop out of `HAVING`. `count(*)` would count the empty joined row as one. The aggregate you pick is a statement about which rows exist, not a synonym for “how many.”
-
-<br />
+- Ungrouped columns cannot appear in `SELECT` unless they are wrapped in an aggregate — Postgres rejects the statement rather than pick an arbitrary value.
+- `HAVING` is `WHERE` for groups. `WHERE` cannot see `count(*)`. `HAVING` can.
+- `count(o.id)` ignores `NULL`s from the left join, so customers with no orders are `0` and drop out of `HAVING`. `count(*)` would count the empty joined row as one.
+- **Failure:** treating `count(col)` and `count(*)` as synonyms. The aggregate you pick is a statement about which rows exist.
 
 ---
 
 ## 5. Windows
 
-A window function computes across related rows **without collapsing them**. `PARTITION BY` is the group. `ORDER BY` inside `OVER` is the order inside that group. The result is one value per input row, not one row per group.
-
-<br />
-
-That is the difference from `GROUP BY`. Aggregation answers “what is the sum for this customer?” Windows answer “what is this row’s rank among that customer’s orders?” and still return every order.
+A window function computes across related rows **without collapsing them**. `PARTITION BY` is the group. `ORDER BY` inside `OVER` is the order inside that group. The result is one value per input row.
 
 <br />
 
@@ -204,38 +158,28 @@ That is the difference from `GROUP BY`. Aggregation answers “what is the sum f
 SELECT
   o.customer_id,
   o.id AS order_id,
-  o.created_at,
   row_number() OVER (
     PARTITION BY o.customer_id
     ORDER BY o.created_at DESC, o.id DESC
-  ) AS recency,
-  sum(order_total.cents) OVER (
-    PARTITION BY o.customer_id
-    ORDER BY o.created_at, o.id
-  ) AS running_cents
-FROM orders o
-JOIN (
-  SELECT order_id, sum(qty * unit_cents) AS cents
-  FROM order_items
-  GROUP BY order_id
-) order_total ON order_total.order_id = o.id;
+  ) AS recency
+FROM orders o;
 ```
 
 <br />
 
-`row_number()` is the essential window. Filter `recency = 1` in an outer query to get the latest order per customer. The running `sum()` shows the other half: a frame that grows with each order. The join is aggregated first so line items do not explode the window. Neither window belongs in `WHERE`.
-
-<br />
+- Aggregation answers “what is the sum for this customer?” Windows answer “what is this row’s rank among that customer’s orders?” and still return every order.
+- `row_number()` is the essential window. Filter `recency = 1` in an outer query to get the latest order per customer. A running `sum() OVER (PARTITION BY … ORDER BY …)` is the other half: a frame that grows with each row.
+- Aggregate line items **before** the window so they do not explode the row set. Neither window belongs in `WHERE`.
 
 ---
 
 ## 6. Patterns
 
-The map at the top is four shapes. Each is a short statement on the shop.
+Four production shapes on the same shop: **exists**, **keyset pagination**, **upsert**, **top-N-per-group**.
 
 <br />
 
-**Exists.** “Has at least one shipped order” is a semi-join. `JOIN` plus `DISTINCT` can answer it and also explode the row count. `EXISTS` stops at the first match and leaves the outer row intact.
+**Exists.** “Has at least one shipped order” is a semi-join. `EXISTS` stops at the first match and leaves the outer row intact.
 
 <br />
 
@@ -266,7 +210,7 @@ LIMIT 20;
 
 <br />
 
-**Upsert.** Check-then-insert races. `ON CONFLICT` is one statement against a unique key the schema already declared — `customers.email`, or `(order_id, sku)`.
+**Upsert.** Check-then-insert races. `ON CONFLICT` is one statement against a unique key the schema already declared.
 
 <br />
 
@@ -300,28 +244,11 @@ FROM (
 WHERE n <= 2;
 ```
 
-<br />
-
 ---
 
 ## 7. Cost
 
-An **index** is a data structure that makes a lookup cheap and a write a little more expensive. It is not a constraint. The unique index that enforces `customers.email` is both; a plain index on `orders.customer_id` is only an access path.
-
-<br />
-
-Without that path, `WHERE customer_id = $1` is a sequential scan: every row, every time. Instant on a laptop. Linear in production.
-
-<br />
-
-```sql
-EXPLAIN SELECT id, status
-FROM orders
-WHERE customer_id = '11111111-1111-1111-1111-111111111111';
-
--- Seq Scan on orders
---   Filter: (customer_id = '11111111-…')
-```
+An **index** is a data structure that makes a lookup cheap and a write a little more expensive. It is not a constraint.
 
 <br />
 
@@ -333,21 +260,22 @@ EXPLAIN SELECT id, status
 FROM orders
 WHERE customer_id = '11111111-1111-1111-1111-111111111111';
 
--- Index Scan using orders_customer_id_created_at_idx on orders
+-- Index Scan using orders_customer_id_created_at_idx
 --   Index Cond: (customer_id = '11111111-…')
 ```
 
 <br />
 
-The same index covers the keyset query: equality on `customer_id`, walk `created_at DESC, id DESC`. `EXPLAIN` is how you check that the statement you wrote is the access path you meant. `EXPLAIN (ANALYZE)` is how you check it against real row counts. Guessing from local data is how a seq scan ships.
-
-<br />
+- The unique index that enforces `customers.email` is both constraint and access path. A plain index on `orders.customer_id` is only an access path.
+- Without that path, `WHERE customer_id = $1` is a sequential scan: instant on a laptop, linear in production.
+- The same composite index covers a keyset seek: equality on `customer_id`, walk `created_at DESC, id DESC`.
+- **Failure:** guessing from local data and shipping a seq scan. `EXPLAIN` checks the access path you meant. `EXPLAIN (ANALYZE)` checks it against real row counts.
 
 ---
 
 ## 8. Failure
 
-Two requests read `qty`, both add one, both write. Each transaction looks correct. The row skipped a number. Isolation did not fail mysteriously. The pattern is check-then-act, and the database was never told to make it atomic — no `UPDATE order_items SET qty = qty + 1`, no `UNIQUE` to reject the duplicate insert.
+Two requests read `qty`, both add one, both write. Each transaction looks correct. The row skipped a number. Isolation did not fail mysteriously — the database was never told to make the change atomic.
 
 <br />
 
@@ -356,17 +284,80 @@ Two requests read `qty`, both add one, both write. Each transaction looks correc
 UPDATE order_items
 SET qty = qty + 1
 WHERE id = :id;
-
--- missing unique: two inserts of the same email both succeed
--- UNIQUE (email) on customers is the constraint; ON CONFLICT is the statement
 ```
 
 <br />
 
-A forgotten unique constraint is a data bug that no amount of careful `WHERE` will fix after the fact. A read-modify-write without an atomic update or a constraint is a lost update waiting for traffic. The schema is the API. Application filters are a habit.
+- A forgotten unique constraint is a data bug that no amount of careful `WHERE` will fix after the fact.
+- Check-then-act is a **lost update**. Use `UPDATE … SET qty = qty + 1`, or a `UNIQUE` that rejects the duplicate insert. Check-then-insert races; `ON CONFLICT` is one statement.
+- The schema is the API. Application filters are a habit.
+- Isolation, RLS, and tenant context: [Building a Multi-Tenant Backend with Hono, Better Auth, Drizzle, and Postgres RLS](/notes/multi-tenant-backend-drizzle-hono-better-auth). Typed schema, pool, and migrations: [Backend APIs with Hono, Drizzle, Zod OpenAPI, and SST](/notes/backend-apis-hono-sst).
 
-<br />
+---
 
-The isolation path in this stack — transactions, row-level security, tenant context — is [Building a Multi-Tenant Backend with Hono, Better Auth, Drizzle, and Postgres RLS](/notes/multi-tenant-backend-drizzle-hono-better-auth). The typed schema, the pool, and migrations as a deploy step are [Backend APIs with Hono, Drizzle, Zod OpenAPI, and SST](/notes/backend-apis-hono-sst).
+## Recap Q&A
 
-<br />
+<Accordion type="single" collapsible>
+  <AccordionItem value="sql-eval-order">
+    <AccordionTrigger>1. In what order does Postgres logically evaluate a SELECT?</AccordionTrigger>
+    <AccordionContent>
+
+      - Postgres does not run a statement left to right as written. It runs a **logical** pipeline: `FROM` / `JOIN` → `WHERE` (rows) → `GROUP BY` → `HAVING` (groups) → `SELECT` → **windows** → `ORDER BY` → `LIMIT`.
+      - Physical plans (hash vs nested loop, index vs seq scan) must preserve that meaning.
+      - A `SELECT` alias is invisible to `WHERE`. A window cannot appear in `WHERE` or `HAVING`. Filter on a window with a subquery or a CTE — another `FROM`.
+      - **Failure:** treating SQL as a procedure that visits a table.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="sql-join-where">
+    <AccordionTrigger>2. How do INNER, LEFT, and anti-joins differ, and why is WHERE on the right table after a LEFT JOIN a trap?</AccordionTrigger>
+    <AccordionContent>
+
+      - **Inner** keeps matches. **Left** keeps every left row and fills the right side with `NULL` when there is no match. **Anti-join** keeps left rows that have **no** match.
+      - A left join duplicates a left row once per match — aggregating after that join without grouping counts the customer as many times as they have orders.
+      - `LEFT JOIN … WHERE right.id IS NULL` is a fragile anti-join: it duplicates, and `NULL` comparison is easy to get wrong.
+      - `NOT EXISTS` stops at the first match, leaves the outer row intact, and does not break on `NULL`.
+      - **Failure:** `JOIN` plus `DISTINCT` to undo a cardinality explosion you introduced.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="sql-group-vs-window">
+    <AccordionTrigger>3. When do you GROUP BY, and when is a window the right tool?</AccordionTrigger>
+    <AccordionContent>
+
+      - `GROUP BY` is the collapse: after `WHERE`, remaining rows are partitioned by grouping keys and each group becomes **one** output row. Ungrouped columns cannot appear in `SELECT` unless they are aggregated.
+      - `HAVING` is `WHERE` for groups — `WHERE` cannot see `count(*)`. After a left join, `count(o.id)` ignores `NULL`s; `count(*)` counts the empty joined row as one.
+      - A **window** computes across related rows **without collapsing them**. `PARTITION BY` is the group; `ORDER BY` inside `OVER` is order inside that group.
+      - Aggregation answers “what is the sum for this customer?” Windows answer “what is this row’s rank among that customer’s orders?” and still return every order.
+      - `row_number()` plus an outer `WHERE n = 1` is top-N-per-group. Neither window belongs in `WHERE`.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="sql-cost-indexes">
+    <AccordionTrigger>4. What is an index for, and how do you know the planner is using it?</AccordionTrigger>
+    <AccordionContent>
+
+      - An **index** is a data structure that makes a lookup cheap and a write a little more expensive. It is not a constraint.
+      - The unique index on `customers.email` is both; a plain index on `orders.customer_id` is only an access path. Without that path, `WHERE customer_id = $1` is a sequential scan: instant on a laptop, linear in production.
+      - `EXPLAIN` checks that the statement you wrote is the access path you meant. `EXPLAIN (ANALYZE)` checks it against real row counts.
+      - The same composite index can cover a keyset seek: equality on `customer_id`, walk `(created_at, id)`. Prefer keyset pagination, not `OFFSET`.
+      - **Failure:** guessing from local data and shipping a seq scan.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="sql-failure">
+    <AccordionTrigger>5. Which SQL failure modes show up as “the query looked correct”?</AccordionTrigger>
+    <AccordionContent>
+
+      - **`NULL` is not a value.** `WHERE email = NULL` is never true; the predicate is `IS NULL`. `NOT IN (SELECT …)` becomes a trap when the subquery can return `NULL`.
+      - Check-then-act is a **lost update**: two sessions read `qty`, both add one, both write. Use `UPDATE … SET qty = qty + 1`, or a `UNIQUE` that rejects the duplicate insert.
+      - A forgotten unique constraint is a data bug no amount of careful `WHERE` will fix after the fact.
+      - Check-then-insert races; `ON CONFLICT` is one statement against a unique key the schema already declared. The schema is the API. Application filters are a habit.
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>
