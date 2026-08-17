@@ -1,0 +1,675 @@
+---
+title: "Full-Stack Q&A: Database"
+description: Spoken-length answers to database questions
+category: full-stack
+---
+
+## Database
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="db-btree">
+    <AccordionTrigger>1. How does a B-Tree index work internally, and why does it make equality and range lookups fast?</AccordionTrigger>
+    <AccordionContent>
+      A B-Tree is the thing to name first, because "it's logarithmic" is not an
+      answer. In Postgres the default index is a **B-Tree**: a balanced tree of
+      pages, usually 8KB. Internal pages hold separator keys and child pointers.
+      Leaf pages hold the indexed values plus heap tuple pointers, and those leaves
+      are linked in key order so a range can walk forward without climbing back to
+      the root.
+
+      That shape is why **equality** and **range** are both fast.
+
+      - **Equality.** Descent from the root, one page per level, until the leaf
+        that contains the key. Fanout is large, so height is usually three
+        or four even on a big table — a handful of page reads, not a heap scan.
+      - **Range.** Find the first matching leaf the same way, then follow
+        sibling links. `BETWEEN`, ordered inequality, `ORDER BY` on the indexed
+        column, and `LIMIT` can ride that walk.
+      - **What it is not.** It is not a hash index. Hash helps equality only. It is
+        also not free: inserts, key updates, and deletes maintain the tree.
+
+      The production practice is to prove the access path with `EXPLAIN`. A
+      B-Tree does not help if the column is wrapped in a function, if the type does
+      not match, or if the predicate skips the leftmost columns of a composite key.
+      How the planner chooses an index versus a sequential scan is in [Core SQL
+      Concepts](/notes/core-sql-concepts).
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="db-composite-index">
+    <AccordionTrigger>2. For a composite index on (tenant_id, status, created_at), which queries can use it? Explain leftmost-prefix matching.</AccordionTrigger>
+    <AccordionContent>
+      `(tenant_id, status, created_at)` is one sorted key, not three
+      independent indexes. **Leftmost-prefix matching** means the planner can walk
+      the tree only while the predicate is a prefix of that key, with equality on
+      the earlier columns before a range on a later one.
+
+      Queries that can use it:
+
+      - **Equality on `tenant_id`.** `WHERE tenant_id = $1` is a prefix. The index
+        is a per-tenant directory even if the query never mentions `status`.
+      - **`tenant_id` plus `status`.** `WHERE tenant_id = $1 AND status = $2` is a
+        tighter prefix.
+      - **All three.** Equality on `tenant_id` and `status`, then a range or sort
+        on `created_at` — `created_at >= $3`, `ORDER BY created_at`, keyset
+        pagination. The range is valid **only** because the prior columns are
+        equality.
+      - **What is inefficient without a prefix.** Skipping `tenant_id` and filtering only `status` is not a contiguous slice. Postgres 18 **skip scan** can still probe a B-Tree when a leading column is omitted, but only when that column has **low cardinality** — it is not a substitute for putting `tenant_id` first. A range on `created_at` without equality on the columns before it is also not a tight slice.
+      - **Keyset pagination.** Duplicate `created_at` values skip or repeat unless the cursor includes a unique tail — `(tenant_id, status, created_at, id)`.
+
+      In a multi-tenant app that is why `organization_id` or `tenant_id` goes
+      first: almost every hot query already equals that column. `EXPLAIN` still
+      has to show the condition as an `Index Cond`, not a filter after a
+      scan. The same leftmost-prefix idea shows up in [Core SQL
+      Concepts](/notes/core-sql-concepts) on `(customer_id, created_at, id)`.
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="db-seq-scan">
+    <AccordionTrigger>3. Read this query plan: when is a sequential scan actually the right choice over an index scan?</AccordionTrigger>
+    <AccordionContent>
+      A plan that says `Seq Scan on orders` with a
+      `Filter` is not a bug by default. The planner is
+      cost-based. A sequential scan is the right choice when reading the heap in
+      order is cheaper than bouncing through an index and then to random heap
+      pages.
+
+      **Row counts** matter, not the node name.
+
+      - **Small table.** A few pages of heap plus an index is extra work.
+      - **Low selectivity.** If the predicate matches most rows — `status = 'active'`
+        at 90% — an index scan becomes a random read of nearly the whole table.
+        Sequential I/O wins.
+      - **The query already needs most of the table.** Aggregations without a
+        selective `WHERE`, or a report that returns a large fraction of rows, often
+        should seq-scan. A bitmap heap scan is the middle ground when the index
+        finds many pages and Postgres wants to visit them in heap order.
+      - **Stale stats.** `ANALYZE` lag can make a seq scan look "wrong" when the
+        index would win, or the reverse. `EXPLAIN (ANALYZE, BUFFERS)` is checked
+        against production-like counts, not a fixture of 50 rows.
+
+      `SET enable_seqscan = off` is not a production fix. The
+      predicate, the index shape, or the correlation of the column is what to fix. [Core SQL
+      Concepts](/notes/core-sql-concepts) is explicit: guessing from local data is
+      how a seq scan ships, but a seq scan on purpose is still a valid plan.
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="db-ignored-index">
+    <AccordionTrigger>4. Give four reasons Postgres ignores your index (function on column, type mismatch, low selectivity, leading-wildcard LIKE).</AccordionTrigger>
+    <AccordionContent>
+      The index can be present and the planner still seq-scans for four boring
+      reasons, and those four come before anyone talks about "tuning
+      random_page_cost."
+
+      - **Function on the column.** `WHERE lower(email) = $1` cannot use a B-Tree
+        on `email`. The stored keys are the raw values; an expression is applied at
+        query time. The fix is an expression index on `lower(email)`, or store
+        the canonical form and compare equality. Same trap with wrapping a
+        timestamp in `date_trunc` or casting in the `WHERE`.
+      - **Type mismatch.** Keep the parameter type aligned with the column. The
+        usual miss is `id::text = $1` (function on the indexed side) versus
+        `$1::uuid`. An unknown literal is often coerced; a real type mismatch
+        on the column is what skips the index.
+      - **Low selectivity.** An index on `status` where 95% of rows are `'active'`
+        is a directory to almost the whole heap. The planner correctly prefers a
+        sequential scan. Partial indexes — `WHERE status = 'open'` — are how to
+        index the rare slice.
+      - **Leading-wildcard `LIKE`.** `LIKE '%acme%'` cannot walk a B-Tree on the
+        column. `LIKE 'acme%'` can, with a compatible collation or
+        `text_pattern_ops`. For contains-search the tools are `pg_trgm` and a GIN
+        index.
+
+      `EXPLAIN` proves it. If the predicate is a `Filter` and not an
+      `Index Cond`, the index is decoration.
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="db-gin">
+    <AccordionTrigger>5. When do you reach for a GIN index instead of B-Tree — e.g., JSONB containment or full-text search?</AccordionTrigger>
+    <AccordionContent>
+      **GIN** is the index when the lookup is "does this value contain this key,"
+      not "walk this ordered column." A B-Tree stores sortable scalars. GIN is an
+      inverted index: each token, array element, or JSONB key points at the rows
+      that contain it. That is a different access path and a heavier write.
+
+      Cases that use it:
+
+      - **JSONB containment.** `WHERE metadata @> $1::jsonb` is the textbook GIN
+        query. `jsonb_ops` is the default; `jsonb_path_ops` is
+        smaller if only containment is needed. B-Treeing the whole JSONB
+        document and hoping is not the path.
+      - **Full-text search.** `to_tsvector(...) @@ to_tsquery(...)` wants a GIN
+        (or GiST) on the `tsvector`. A B-Tree on the raw text does not tokenize.
+      - **Arrays.** Overlap and membership — `tags && ARRAY['rx']` — are GIN
+        territory.
+      - **Trigram contains.** Leading-wildcard `LIKE` and fuzzy match with
+        `pg_trgm` are GIN (or GiST), which is how the B-Tree `LIKE '%x%'`
+        failure from the previous question is fixed.
+
+      The trade-off to name: GIN updates are more expensive, they do not
+      give `ORDER BY` on the document, and they bloat if JSONB churns. For a
+      tenant-scoped JSONB column `tenant_id` still belongs in a B-Tree for the hot
+      equality path, with GIN added only for the containment predicate. GIN does not
+      replace `(tenant_id, created_at)`. Ordered pagination stays on a
+      B-Tree.
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="db-normalization">
+    <AccordionTrigger>6. Explain 1NF–3NF briefly, then give a case where deliberate denormalization is the right call.</AccordionTrigger>
+    <AccordionContent>
+      The three forms are constraints on what a row is allowed to mean,
+      and 3NF is the default for OLTP, not a religion.
+
+      - **1NF.** Atomic cells, no repeating groups. Three NDCs do not belong in
+        one text column split in the app. A line-item table is the
+        repeating group done properly.
+      - **2NF.** Non-key attributes depend on the **whole** composite key. If the
+        key is `(order_id, sku)` and `customer_email` lives on the line, that
+        email depends only on the order, not on the sku — it belongs on `orders`.
+      - **3NF.** No transitive dependence. `department_id` determines
+        `department_name`; the name is not copied onto every order unless there is
+        a reason. (ZIP does **not** uniquely determine city — that example is
+        folklore.)
+
+      **Deliberate denormalization** is right when the read path is the incident.
+      A pharmacy dashboard that shows fills-per-day per tenant should not join
+      `prescription_fills` to `prescriptions` to `patients` on every page load. A
+      `fill_stats_daily` row keyed by `(organization_id, day)` is kept and updated
+      from the write path or a job. Same idea as storing `total_cents` on an
+      order so every list view does not re-sum line items.
+
+      The update anomaly is accepted and the write is owned: trigger, one transaction
+      that updates both, or a rebuild job that can be rerun. Denormalize when
+      `EXPLAIN` says the join is the product, and keep the normalized tables as
+      the source of truth.
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="db-isolation">
+    <AccordionTrigger>7. Walk through the four isolation levels and the read phenomena (dirty, non-repeatable, phantom) each prevents. What does Postgres default to?</AccordionTrigger>
+    <AccordionContent>
+      The three **read phenomena** come first, then the levels, because the
+      names are easy to mix up.
+
+      - **Dirty read.** Another transaction's uncommitted write is visible. If it
+        rolls back, the reader acted on data that never existed.
+      - **Non-repeatable read.** A row is read, another transaction commits an
+        update to that row, a second read shows the values changed.
+      - **Phantom.** A predicate is re-run — `WHERE tenant_id = $1 AND status = 'open'`
+        — and new rows appear that were not in the first result.
+
+      Classic SQL:
+
+      - **Read Uncommitted** allows all three.
+      - **Read Committed** prevents dirty reads only.
+      - **Repeatable Read** prevents dirty and non-repeatable; **phantoms still
+        allowed** in the textbook definition.
+      - **Serializable** prevents all three.
+
+      **Postgres default is Read Committed.** Two Postgres-specific points:
+      it will not actually dirty-read — `READ UNCOMMITTED` is treated
+      as Read Committed because of MVCC. And **Postgres Repeatable Read is
+      snapshot isolation**, so rows that committed after the
+      snapshot are not visible. That blocks the textbook phantom-read case. It does **not** block
+      write skew. **Serializable** uses SSI: it watches for a cycle and aborts one
+      session with a serialization failure that must be retried.
+
+      In production the usual stance is Read Committed for most request transactions, a
+      single atomic `UPDATE` for inventory, and Serializable only for short
+      transactions that would otherwise write-skew.
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="db-long-tx">
+    <AccordionTrigger>8. What makes long-running transactions dangerous in production (lock contention, vacuum bloat)?</AccordionTrigger>
+    <AccordionContent>
+      A long transaction is not "a slow query." It is **locks plus, at
+      Repeatable Read or Serializable, a held snapshot** until `COMMIT`. At
+      **Read Committed** the snapshot is statement-scoped; the danger is still
+      an `idle in transaction` session holding locks or an assigned XID.
+      That combination is how a reporting job takes down OLTP.
+
+      Two production failures to name:
+
+      - **Lock contention.** `UPDATE`, `SELECT ... FOR UPDATE`, and some
+        `ALTER`s hold row or table locks for the life of the transaction. Other
+        sessions queue. The queue looks like "the database is stuck" when the
+        actual problem is one session that started a transaction, then waited on
+        a downstream HTTP call, a user prompt, or a giant batch. `idle in transaction`
+        is the smoking gun in `pg_stat_activity`.
+      - **VACUUM bloat.** Autovacuum cannot reclaim dead tuples that are still
+        visible to some transaction's snapshot. The oldest `xmin` horizon holds
+        the garbage. Tables and indexes grow, cache hit ratio drops, and the
+        same queries get slower even after the long transaction finally ends,
+        because the bloat remains until vacuum can actually run. On a replica,
+        `hot_standby_feedback` can create the same horizon from a long read-only
+        query.
+
+      The production practice: keep transactions tiny, never wait on the network inside one,
+      batch updates in separate commits, set a statement timeout and an idle-in-
+      transaction timeout, and watch `n_dead_tup` plus the age of the oldest
+      transaction. A long `BEGIN` is a production incident with a delayed fuse,
+      not a style choice.
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="db-deadlocks">
+    <AccordionTrigger>9. How do deadlocks occur between two transactions, and what coding practices prevent them?</AccordionTrigger>
+    <AccordionContent>
+      A deadlock is two sessions waiting on each other, and neither can make
+      progress.
+
+      Transaction A updates row 1, then waits for row 2. Transaction B already
+      updated row 2, then waits for row 1. Each holds a lock the other needs.
+      Postgres detects the cycle and aborts one transaction with `40P01`. The
+      loser must retry. That is not a crash; it is the database picking a victim
+      so the other can finish.
+
+      It is not only two rows. A deadlock can involve a foreign-key check, a
+      unique index insert, or a lock on a parent order while another session
+      locks the child fill first. The shape is the same: **inconsistent lock
+      order**.
+
+      Practices that prevent them:
+
+      - **Lock rows in a stable order.** Sort ids and update lowest-to-highest
+        every time, in every code path, including triggers.
+      - **Keep the transaction short.** Take locks, write, commit. Do not call
+        Stripe or wait on a user inside `BEGIN`.
+      - **Prefer one statement.** `UPDATE inventory SET qty = qty - 1 WHERE ...`
+        grabs the row once. Read-compute-write with two statements widens the
+        deadlock window.
+      - **`FOR UPDATE SKIP LOCKED`** for work queues so workers do not wait on
+        the same batch of rows.
+      - **Retry on `40P01`** with backoff. Deadlock prevention reduces the rate;
+        it does not make the error impossible.
+
+      If two features touch overlapping rows, lock order is part of the
+      API, the same way unique constraints are.
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="db-n-plus-one">
+    <AccordionTrigger>10. How do you detect and fix N+1 queries — joins, batching, DataLoader-style patterns?</AccordionTrigger>
+    <AccordionContent>
+      N+1 is one query for the parent list, then one query per row for children.
+      Twenty prescriptions on a page become twenty-one round trips.
+
+      **Detection.** The query log, `pg_stat_statements`, or an APM
+      trace that shows a fan-out of identical `SELECT ... WHERE patient_id = $1`
+      under one request. ORMs hide it: a loop of `prescription.patient` looks
+      like a field access. If request latency grows linearly with page size,
+      assume N+1 until traces **count** the queries. `EXPLAIN` then tells
+      whether each of those queries is cheap — it cannot prove the request only
+      ran one of them. DataLoader caches are **per request and per tenant**.
+
+      **Fixes**, in this order:
+
+      - **A join.** One statement: prescriptions plus patients in a single
+        `FROM` / `JOIN`, or `SELECT` with a nested relation if the ORM can do it
+        without exploding cardinality. For "has at least one" use `EXISTS`,
+        not a join plus `DISTINCT` — that is the [Core SQL
+        Concepts](/notes/core-sql-concepts) version of the same bug.
+      - **Batching.** Load the page of prescriptions, collect patient ids, then
+        `WHERE id = ANY($1)` or `inArray` once. Stitch in memory. That is the
+        DataLoader pattern: coalesce keys in one tick, issue one `IN` query,
+        memoize.
+      - **Not a cache of the world.** Caching each child row still does N lookups
+        on a cold path. Batch first.
+
+      In GraphQL, DataLoader keeps resolvers from accidentally N+1. In Hono
+      handlers the join or the `inArray` is written directly. Turning up the pool
+      is not a fix for N+1.
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="db-for-update">
+    <AccordionTrigger>11. Compare SELECT ... FOR UPDATE with a version-column optimistic lock. Which fits a high-contention inventory decrement?</AccordionTrigger>
+    <AccordionContent>
+      Both are answers to lost updates. They fail in different traffic shapes.
+
+      **`SELECT ... FOR UPDATE`** is pessimistic. The row is read, a lock is held
+      until commit, then written. Another session that wants that row waits. It
+      is the right tool when several rows must be read and computed — reserve
+      two SKUs, or lock a prescription and its fills together. `SKIP LOCKED` is
+      the variant for queues: do not wait, take the next free row.
+
+      **A version column** is optimistic. Read `version`, write
+      `WHERE id = $1 AND version = $2`, and bump the version. Zero rows updated
+      means someone else won; retry. Under low contention that is fewer locks
+      and nicer to replicas. Under high contention it becomes a retry storm:
+      everyone fails, everyone rereads, CPU goes to retries instead of decrements.
+
+      **High-contention inventory decrement** is not a good optimistic-lock
+      problem. Read-then-`FOR UPDATE`-then-subtract in the
+      app is also the weaker path if it can be avoided. One atomic statement is the fit:
+
+      `UPDATE inventory SET qty = qty - 1 WHERE sku = $1 AND qty >= 1 RETURNING qty`
+
+      A returned row means the decrement happened. No row means
+      out of stock. No separate read, no version dance, no retry loop except for
+      deadlocks. `FOR UPDATE` still wins when the business rule cannot be
+      expressed as that `WHERE`. Optimistic versioning wins on documents that
+      rarely collide. Inventory at flash-sale traffic is the pessimistic or
+      atomic-update case.
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="db-pooling">
+    <AccordionTrigger>12. Why does connection pooling matter, and how do PgBouncer's transaction vs session modes differ?</AccordionTrigger>
+    <AccordionContent>
+      A Postgres connection is a **backend process**, not a cheap socket. Memory
+      and process table grow with each one. An app fleet of 40 tasks times 20
+      connections is 800 backends before a traffic spike. The database falls
+      over on connection count while CPU is idle. **Pooling** multiplexes many
+      client sessions onto fewer server connections.
+
+      **PgBouncer session mode** pins a server connection to the client for the
+      whole client session. Session features work: prepared statements, session
+      `SET`, temp tables, session-level advisory locks, `LISTEN`. It caps
+      connection storms but it does not reuse a backend between clients until
+      disconnect. Useful for a few long-lived clients; not why most production
+      setups run PgBouncer.
+
+      **Transaction mode** returns the server connection at `COMMIT` or
+      `ROLLBACK`. That is the mode that actually **reuses** backends under fan-out
+      — it does not magically multiply throughput; excess demand queues. It also
+      breaks anything that assumes session affinity:
+
+      - **SQL `PREPARE`**, session `SET`, temp tables, and **session advisory
+        locks** leak or vanish. Protocol-level named prepares can work in
+        transaction mode if PgBouncer's `max_prepared_statements` is on (1.21+);
+        that is not the same as session-scoped SQL `PREPARE`.
+      - **`SET LOCAL`** and transaction-scoped `set_config(..., true)` are safe
+        because they die at commit — that is why RLS tenant context belongs
+        inside the transaction, not on the session.
+
+      The production practice is transaction mode, tenant GUCs kept transaction-local,
+      and no open transaction that then waits on the network while holding
+      a borrowed backend.
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="db-zero-downtime">
+    <AccordionTrigger>13. Design a zero-downtime migration: adding a NOT NULL column with a default to a 100M-row table. Why CONCURRENTLY for indexes?</AccordionTrigger>
+    <AccordionContent>
+      Adding a default does not always rewrite the table. That is the
+      pre-11 story.
+
+      In modern Postgres, `ALTER TABLE ... ADD COLUMN ... DEFAULT` with a
+      **non-volatile** constant is a **catalog change**. The default is stored
+      in metadata and applied when old rows are read. New rows get it on insert.
+      `now()` is **STABLE**, not VOLATILE, and can still use that fast-default
+      path. `gen_random_uuid()` is volatile and rewrites, so it is not the
+      fast-path default on 100M rows.
+
+      **`NOT NULL` still needs a rollout.** A catalog default does not mean
+      `NOT NULL` belongs in the same statement on a huge table as a walk-away change.
+      For stored values, backfill in **batches**, each its own
+      transaction, then `CHECK (col IS NOT NULL) NOT VALID`, `VALIDATE CONSTRAINT`,
+      then `SET NOT NULL`. On Postgres 12+ a validated check can skip a second
+      full verification.
+
+      **`CREATE INDEX CONCURRENTLY`** is the index counterpart. A plain
+      `CREATE INDEX` takes a lock that **blocks writes** for the whole build. On 100M rows that
+      is an outage. `CONCURRENTLY` uses weaker locks and two scans. It cannot
+      run inside a transaction, and it can fail leaving an invalid index that must
+      be dropped.
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="db-offset">
+    <AccordionTrigger>14. Why does OFFSET 100000 get slow, and how does keyset (cursor) pagination fix it at the SQL level?</AccordionTrigger>
+    <AccordionContent>
+      `OFFSET 100000` is slow because Postgres still **finds and discards** those
+      100000 rows. The `LIMIT` applies after. Page 500 is not a seek to a
+      bookmark; it is "walk the ordered result until you have thrown away
+      100000, then return the next 20." Cost grows with page number. Deep pages
+      also go weird under concurrent inserts: rows shift, you skip or repeat.
+
+      **Keyset pagination** seeks to the last row already returned. The sort
+      key must be unique — `(created_at, id)` — or two rows with the same
+      timestamp will skip or duplicate. SQL looks like:
+
+      `WHERE (created_at, id) < ($cursor_created_at, $cursor_id) ORDER BY created_at DESC, id DESC LIMIT 20`
+
+      That tuple comparison is the cursor. With an index on
+      `(created_at DESC, id DESC)`, or a tenant-scoped
+      `(tenant_id, created_at DESC, id DESC)`, this is an index range starting
+      **after** the cursor, not a walk from the beginning of the table.
+
+      `OFFSET` "just for page numbers" does not belong on a hot path. If the UI
+      needs page 7 of 200, the options are keyset with a "load more" cursor or
+      precomputed ranks in a table. [Core SQL Concepts](/notes/core-sql-concepts)
+      uses the same `(created_at, id)` seek on `orders`. The planner should show
+      an `Index Cond` on that tuple, not a `Seq Scan` plus a huge offset.
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="db-replication">
+    <AccordionTrigger>15. How does streaming replication work, and what bugs does read-replica lag cause for read-your-writes?</AccordionTrigger>
+    <AccordionContent>
+      Streaming replication is WAL shipping. The primary writes changes to the
+      write-ahead log. A WAL sender streams those records to the replica. The
+      replica replays them into its own data files. In the usual **asynchronous**
+      setup, `COMMIT` on the primary returns before the replica has flushed or
+      replayed that commit. Synchronous replication waits for a replica to
+      **confirm** — `remote_write` or flush is not the same as **`remote_apply`**.
+      Only replay acknowledgement means a following read on that replica can see
+      the write. Sync commit buys durability; it does not automatically bound
+      query-visible lag.
+
+      The replica is a **replay machine**, not a second primary. It is great for
+      read-mostly traffic and failover. It is a bad place to send a read that
+      must see the write just committed.
+
+      **Read-your-writes bugs** from lag:
+
+      - An `INSERT` of a prescription on the primary, then the next `GET` redirected to a
+        replica, returns 404. The user thinks save failed and retries.
+        Duplicate submits follow.
+      - Inventory is decremented on the primary, then stock is listed from the replica
+        and the old quantity shows. The UI flickers backwards.
+      - Uniqueness and existence checks against the replica are stale: "email
+        is free" on a replica while the primary already committed it.
+
+      The production practice: **session stickiness** to the primary for the request that
+      mutated, or a "read your writes" rule — after a write in this session, go
+      to the primary for a short window. The check-then-insert of a
+      unique email does not belong on a replica. Lag is not a bug in Postgres; it is the
+      contract of async replication, and the application has to honor it.
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="db-partition-shard">
+    <AccordionTrigger>16. Partitioning vs sharding: what problem does each solve, and when is a table "big enough" to partition?</AccordionTrigger>
+    <AccordionContent>
+      The words need separating because people say "shard" when they mean a
+      partitioned table in one cluster.
+
+      **Partitioning** is still one Postgres. A table is split into child
+      partitions — range on `created_at`, list on a status, hash on
+      `organization_id` — and the parent is what the app queries. The win is
+      operational: autovacuum per partition, drop a month of fills with `DROP TABLE`
+      instead of a 100M-row `DELETE`, **partition pruning** so a
+      date-bounded query does not touch old partitions. Constraint exclusion is
+      the older planner path; declarative partitioning uses pruning. The failure
+      domain is still one primary, one WAL stream, one backup story.
+
+      **Sharding** is multiple databases. Routing is by a key — tenant, or hash of
+      patient id — to different primaries. That is how **writes and
+      storage** scale past one machine. Cross-shard joins, unique constraints, and
+      transactions become application problems. Sharding is not the move because a table
+      is "a bit large." Sharding is the move when one primary cannot take the write load or
+      the disk, and a key exists that almost never needs cross-shard work.
+
+      **Big enough to partition** is not a row-count slogan. Partition when
+      vacuum, bloat, or bulk delete is the incident, and a **stable
+      partition key** exists that queries actually constrain — usually time. Tens of
+      millions of narrow rows can be fine unpartitioned. A billion-row fill
+      history that everyone queries by month is the partition case. A 2M-row
+      patients table is not partitioned "for scale." Indexes
+      and archival come first.
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="db-oltp-olap">
+    <AccordionTrigger>17. OLTP vs OLAP: why would you pipe Postgres data into Redshift rather than running analytics on the primary?</AccordionTrigger>
+    <AccordionContent>
+      **OLTP** is the primary's job: many small reads and writes, indexed point
+      lookups, short transactions, normalized tables. **OLAP** is the opposite:
+      scan a large slice, aggregate, group, maybe hash-join facts to dimensions.
+      Row-store Postgres can do that work. That work still does not belong on the
+      primary.
+
+      Why the pipe into **Redshift** (or another warehouse) instead of
+      `SELECT date_trunc, count(*)` on production:
+
+      - **Buffer cache.** A sequential scan of fills evicts the hot OLTP pages.
+        Checkout queries start hitting disk because a dashboard warmed the cache
+        with last year's rows.
+      - **CPU and I/O.** Hash aggregates and sorts compete with `UPDATE inventory`.
+        Tail latency on the API is the bill.
+      - **Snapshots.** A 20-minute report is a long-running transaction in
+        spirit: it holds a snapshot, delays vacuum, and bloats the same tables
+        checkout needs. That is the long-tx problem wearing a BI tool.
+      - **Shape of the data.** Warehouses are columnar, compressed, and built
+        for wide scans. Postgres is built for the row just written.
+
+      A **read replica** is a middle ground for light operational reports. It
+      still replays every primary write and still uses a row store. It fits
+      "fills today for this tenant," not last-year SKU affinity. CDC or a
+      nightly unload into Redshift isolates analytics hardware from the OLTP
+      commit path. The primary stays boring on purpose.
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="db-rls">
+    <AccordionTrigger>18. Compare Postgres Row-Level Security with application-level tenant filtering. What are the failure modes of each?</AccordionTrigger>
+    <AccordionContent>
+      Application filtering is `WHERE organization_id = $1` on every query.
+      **RLS** is the same rule attached to the table, enforced by Postgres for
+      the role the app connects as. **Both** belong together. RLS is defense in depth; it
+      is not a license to write ambient queries. That is the contract in
+      [Building a Multi-Tenant Backend with Hono, Better Auth, Drizzle, and
+      Postgres RLS](/notes/multi-tenant-backend-drizzle-hono-better-auth).
+
+      **App-level failure modes.** Someone ships a new list endpoint and forgets
+      the filter. An admin script or a JOIN uses the wrong alias. A background
+      job has no session and loads by primary key across tenants. The bug is
+      silent: another tenant's rows are returned.
+
+      **RLS failure modes** — the ones that show up in an interview:
+
+      - **Table owner bypass.** Owners skip RLS unless `FORCE ROW LEVEL SECURITY`.
+        The migration role used as the runtime user is a leak.
+      - **`SECURITY DEFINER`** functions run as the owner and can bypass
+        policies unless written carefully.
+      - **Missing tenant GUC.** Policies that use `current_setting('app.organization_id')`
+        fail closed only if written that way — `current_setting(..., true)`
+        returning NULL should match no rows. If the policy treats a missing
+        setting as "allow," forgetting `set_config` is fail-open.
+      - **`BYPASSRLS`**, superuser, and `TRUNCATE` (RLS does not apply). Unique
+        and FK checks also bypass row filters, so unique indexes are still scoped
+        by tenant.
+
+      The `WHERE` is still written in Drizzle. Forgetting a filter must not become
+      a cross-tenant incident; RLS is how that sentence stays true.
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="db-soft-delete">
+    <AccordionTrigger>19. Soft delete vs hard delete: implications for unique constraints, indexes (partial indexes), and data-retention compliance.</AccordionTrigger>
+    <AccordionContent>
+      **Soft delete** is `deleted_at timestamptz` (or a flag) and every read adds
+      `WHERE deleted_at IS NULL`. **Hard delete** is `DELETE` and the row is
+      gone.
+
+      **Unique constraints.** A unique index on `email` still sees soft-deleted
+      rows. A patient who leaves cannot re-register with the same email until a
+      purge. The fix is a **partial unique index**: unique on
+      `(organization_id, email) WHERE deleted_at IS NULL`. The live slice stays
+      unique; historical rows can share the email. Forgetting the partial
+      predicate is how "deleted" users lock a unique key forever.
+
+      **Indexes.** A full B-Tree on a table full of tombstones wastes space and
+      cache on rows the app never reads. **Partial indexes** cover the hot
+      path — `WHERE deleted_at IS NULL` — and a separate index if the admin
+      undelete UI actually queries the deleted slice.
+
+      **Retention and compliance.** Soft delete is not erasure. GDPR-style
+      deletion, pharmacy record retention, and legal hold are different clocks.
+      If the requirement is "remove personal data," a `deleted_at` flag fails
+      the requirement until a purge job hard-deletes or anonymizes, and backups
+      still hold the old row. If the requirement is "keep the prescription for
+      N years," nothing in that window is hard-deleted and the audit trail
+      belongs on an append-only table. `deleted_at` is not
+      a compliance strategy. It is a product undo. Retention is a purge
+      policy plus backups.
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="db-design-pharmacy">
+    <AccordionTrigger>20. Design exercise: schema for a multi-tenant pharmacy system — prescriptions, an immutable audit trail, and fast per-tenant reporting.</AccordionTrigger>
+    <AccordionContent>
+      The isolation contract starts from [Building a Multi-Tenant Backend
+      with Hono, Better Auth, Drizzle, and Postgres RLS](/notes/multi-tenant-backend-drizzle-hono-better-auth):
+      shared schema, `organization_id` on every tenant-owned row, RLS plus
+      explicit filters, runtime role not the table owner, `FORCE RLS`.
+
+      **Core tables.** `organization` and membership stay global. Tenant-owned:
+      `patients`, `prescribers`, `medications`, `prescriptions`,
+      `prescription_fills`. Every one has `organization_id NOT NULL`, FKs, and
+      tenant-scoped uniqueness — `(organization_id, mrn)` for patients,
+      `(organization_id, rx_number)` for prescriptions. Hot indexes are
+      leftmost-prefix: `(organization_id, status, created_at)` for work queues,
+      `(organization_id, patient_id, created_at)` for charts.
+
+      **Prescriptions** are a state machine (`draft`, `signed`, `voided`), not a
+      mutable Word doc. A signed Rx is not silently overwritten; an amendment is
+      a new row or an event. Fills are append-only facts: who dispensed what,
+      `qty`, `filled_at`. Inventory decrement is the atomic
+      `UPDATE ... WHERE qty >= 1`, not a version column.
+
+      **Immutable audit.** `audit_events`: `organization_id`, `actor_id`,
+      `action`, `entity_type`, `entity_id`, `payload` JSONB, `created_at`. Grant
+      `INSERT` and `SELECT` only — no `UPDATE` or `DELETE` for `app_user`. That
+      is append-only **for that role**, not physics: the table owner, a
+      superuser, or DDL can still rewrite. For tamper-evidence add a separate
+      writer role, hash chaining or WORM export, and no ORM update path. B-Tree
+      on `(organization_id, created_at)`; GIN on `payload` only if searches go
+      inside it.
+
+      **Fast per-tenant reporting.** Fills are not aggregated on the primary for
+      dashboards. `fill_stats_daily (organization_id, day, fill_count, ...)` is
+      the denormalized read model, maintained in the same transaction as a fill
+      or by a job that can be rebuilt. Heavy analytics go to a replica or a warehouse.
+      Partition fills by month only when vacuum or drop-old-data is the
+      incident, not because the table exists.
+    </AccordionContent>
+
+  </AccordionItem>
+</Accordion>
+
+<br />

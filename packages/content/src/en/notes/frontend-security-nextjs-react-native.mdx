@@ -2,7 +2,7 @@
 title: Frontend Security in Next.js and React Native
 description: How Next.js App Router and React Native / Expo fail as two different hosts — origin vs device, cookies vs Keychain, RSC vs the extractable bundle — and the defenses this stack ships
 date: 2026-08-14
-category: frontend
+category: security
 ---
 
 "Frontend security" is not one threat model. A **Next.js** document lives in a browser **origin**. A **React Native** screen lives in a **device**, behind a JavaScript bundle that anyone with the IPA or APK can read. Both UIs are untrusted. Both still talk to the same Hono / Better Auth API. Authorization does not move into the component tree because the renderer changed.

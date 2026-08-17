@@ -8,7 +8,7 @@ import { RenderMdxBlockByPath } from "@/features/mdx/components/render-mdx-block
 import { Toc } from "@/features/mdx/components/toc"
 import { publicResumeSlug } from "@/features/resume/variants"
 import { buildPageMetadata } from "@/lib/metadata"
-import { getMdxContent } from "@/lib/source"
+import { getMdxContent, loadMdxCompiled } from "@/lib/source"
 
 type Props = {
   params: Promise<{ locale: Locale }>
@@ -35,7 +35,7 @@ const Page = async ({ params }: Props) => {
 
   const t = await getTranslations({ locale, namespace: "metadata" })
   const page = getMdxContent("blocks", resumeSlug, locale)
-  const toc = page?.data.toc ?? []
+  const toc = page ? ((await loadMdxCompiled(page)).toc ?? []) : []
 
   return (
     <PageLayout className="grid lg:grid-cols-2 items-start content-start">

@@ -159,7 +159,10 @@
       "frontend": "前端",
       "backend": "后端",
       "ai": "AI",
+      "security": "安全",
+      "devops": "DevOps",
       "computer-science": "计算机科学",
+      "full-stack": "全栈",
       "personal": "个人"
     }
   },

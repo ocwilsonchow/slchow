@@ -1,7 +1,7 @@
 import { cn } from "@repo/ds"
 import type { ComponentProps } from "react"
 import Markdown, { type Components } from "react-markdown"
-import { getMdxContent } from "@/lib/source"
+import { getMdxContent, loadMdxCompiled } from "@/lib/source"
 import { getMDXComponents } from "."
 
 type RenderMdxBlockProps = {
@@ -10,14 +10,15 @@ type RenderMdxBlockProps = {
   locale: string
 }
 
-export const RenderMdxBlockByPath = ({
+export const RenderMdxBlockByPath = async ({
   category,
   slug,
   locale,
   ...props
 }: RenderMdxBlockProps & ComponentProps<"div">) => {
   const content = getMdxContent(category, slug, locale)
-  const MDX = content?.data.body
+  const compiled = content ? await loadMdxCompiled(content) : undefined
+  const MDX = compiled?.body
 
   if (!MDX) return null
 

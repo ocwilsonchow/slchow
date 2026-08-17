@@ -10,12 +10,23 @@ export const docs = defineCollections({
   type: "doc",
   dir: "../../packages/content/src",
   files: ["**/*.mdx"],
+  // Lazy-compile MDX bodies so the notes route does not load every file at once.
+  async: true,
   schema: pageSchema.extend({
     author: z.string().optional(),
     date: z.iso.date().or(z.date()).optional(),
     pinned: z.boolean().optional(),
     category: z
-      .enum(["frontend", "backend", "ai", "computer-science", "personal"])
+      .enum([
+        "frontend",
+        "backend",
+        "ai",
+        "security",
+        "devops",
+        "computer-science",
+        "full-stack",
+        "personal",
+      ])
       .optional(),
   }),
 })

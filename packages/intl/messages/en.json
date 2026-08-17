@@ -159,7 +159,10 @@
       "frontend": "Frontend",
       "backend": "Backend",
       "ai": "AI",
+      "security": "Security",
+      "devops": "DevOps",
       "computer-science": "Computer Science",
+      "full-stack": "Full Stack",
       "personal": "Personal"
     }
   },

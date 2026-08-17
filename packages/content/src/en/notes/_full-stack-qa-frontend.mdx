@@ -1,0 +1,408 @@
+---
+title: "Full-Stack Q&A: Frontend"
+description: Spoken-length answers to frontend engineering questions
+category: full-stack
+---
+
+## Frontend Engineering
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="fe-rerender">
+    <AccordionTrigger>1. What triggers a re-render in React? Explain reconciliation and why key choice matters in lists.</AccordionTrigger>
+    <AccordionContent>
+
+      A re-render is React asking a component for a new **description**, not the DOM updating. An update is scheduled when `state`, `props`, or `context` change, when a parent renders and this child is not bailed out, or when something like `useSyncExternalStore` reports a new snapshot. Rendering can be abandoned in concurrent mode. **Committing** is the later step that mutates the host tree and runs Effects. Those two words stay separate in interviews.
+
+      Reconciliation then matches the new elements to existing Fibers by **type**, **position**, and `key`:
+
+      - Same type and a compatible `key`: reuse the Fiber and **preserve its state**.
+      - Different type: tear the subtree down and mount a new one.
+      - Different `key`: treat it as a new identity even when the type matches.
+      - Index keys: safe only when identity really is position. A reorder attaches leftover local state to the wrong row.
+
+      That is why `key` is identity, not a performance hint. In a list, a stable id among siblings is the identity. Sorting with index keys leaves the Fiber at position zero with its checkbox, and the checked row appears to jump. A `key` can also reset state on purpose — an editor keyed by document id remounts when the document changes, which is cleaner than an Effect that tries to wipe every field.
+
+      Not every function invocation is "a re-render," including paint. Profile scheduled updates, render work, and commits separately. Model: [Understanding React in Depth](/notes/understanding-react-in-depth).
+
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="fe-useeffect">
+    <AccordionTrigger>2. What's the correct mental model for useEffect? Give examples of effects that should be derived state or event handlers instead.</AccordionTrigger>
+    <AccordionContent>
+
+      `useEffect` is **synchronization with an external system after commit**, not "run this whenever values change." It usually runs after paint. Cleanup runs before the next setup and on unmount. Dependencies name that closure's reactive inputs. Omitting one does not freeze the latest value — it keeps an **old closure**. Include the input, use a functional updater, or move the work into an event handler rather than disable the lint rule.
+
+      These do **not** belong in Effects:
+
+      - **Derived values:** a filtered list from `query` plus `items`, or `fullName` from first and last. Compute during render.
+      - **Resetting state when a prop changes:** key the subtree by document id instead of an Effect that clears fields.
+      - **User actions:** form submit, "Buy," analytics on click. Those belong in the handler so they run once per intent.
+      - **Copying props into state on every change:** a second source of truth that drifts.
+
+      Effects that belong have a real external lifetime: a WebSocket keyed by `roomId`, `document.title`, a third-party widget on a ref. Fetching in `useEffect` as the default data path is the model left behind in App Router. A client Effect is still appropriate when the browser owns the credential or the socket. If it can be calculated from props and state already in hand, it is not an Effect. See [Understanding React in Depth](/notes/understanding-react-in-depth).
+
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="fe-usememo">
+    <AccordionTrigger>3. When do useMemo and useCallback actually help, and when do they add cost for nothing?</AccordionTrigger>
+    <AccordionContent>
+
+      `useMemo` and `useCallback` are **performance tools, not semantic guarantees**. They skip work or keep a reference stable while dependencies stay equal. The calculation still has to be correct if React recomputes it, and the component still has to be correct if it renders again. Memoization cannot make an impure render safe.
+
+      They actually help when:
+
+      - The work is **measurably expensive** — a heavy filter, a large derived table model — and the inputs change less often than the parent renders.
+      - A child wrapped in `memo` would otherwise see a new object or function identity every time and skip its bailout.
+      - A hook dependency would churn: a callback passed into `useEffect` that should not re-subscribe every render.
+
+      They add cost for nothing when every literal and every click handler is wrapped "just in case." Each hook still allocates, compares dependencies, and occupies a Hook slot. Cheap work is often cheaper than the bookkeeping. Nested `useMemo` that returns a new object because of a spread into it is an empty win. Memoization also cannot hide a render that mutates.
+
+      The **React Compiler** can auto-memoize eligible components, which raises the bar for hand-written memo. It does not replace Server Components, cache policy, or a `key` mistake. The questions that still matter: was an update scheduled, which components rendered, and which host changes committed? Wrapping `useCallback` around a handler does not answer that. See [Understanding React in Depth](/notes/understanding-react-in-depth).
+
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="fe-state-split">
+    <AccordionTrigger>4. How do you split local state, server state, and global client state? Why do React Query/SWR often replace Redux?</AccordionTrigger>
+    <AccordionContent>
+
+      Split state by **who owns the source of truth and how it goes stale**, not by "is this used in two components."
+
+      - **Local UI state:** modal open, which accordion item, a hover target, an input before submit. `useState` or a small machine next to the widget. Lifting it to global is how trees start re-rendering for no product reason.
+      - **Server state:** prescriptions, inventory, the current user payload. It is async, shared, cacheable, and can be wrong the moment a fetch returns. Give it a **query key** that includes tenant, id, and filters, plus a freshness policy.
+      - **Global client state:** theme, sidebar collapsed, a wizard step that is not the server record. This is a small store. It is not a copy of the API.
+
+      **TanStack Query** and **SWR** often replace Redux because most of what used to live in Redux was a hand-rolled server cache: loading flags, retries, deduping, invalidation, pagination. Those libraries keep the cache outside the render tree so a fetch does not become twelve connected components. Redux still earns its keep for complex client workflows, undo, or a domain model that is not a remote resource.
+
+      The failure mode is **duplicating** server data into Redux and fighting which copy is newer. On App Router, first paint loads on the server, then a query client hydrates for mutable workspace data. Authorization still belongs on the API. The client cache is a hint, not a permission boundary.
+
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="fe-rsc">
+    <AccordionTrigger>5. What do React Server Components change about data fetching and bundle size? Where's the client/server boundary in Next.js App Router?</AccordionTrigger>
+    <AccordionContent>
+
+      In the App Router, **Server Components are the default**. Their implementation stays in the server module graph. They can await data during render, talk to a database through a server-only function, and send the **rendered result** to the client instead of the component source. That cuts the JavaScript shipped to the browser: secret-handling code and query builders never become a browser chunk just because a page used them.
+
+      The payload is **Flight**, not HTML. HTML is an initial picture so the browser can paint. Flight is the authoritative server-rendered React tree, Suspense holes, Client Component references, and serializable values. Later navigations ask for Flight and reconcile it; they do not re-download a full document. Hydration applies to **Client Components**, not to Server Component function bodies.
+
+      The client/server boundary is a **`"use client"` module**, not a file named `client.tsx` and not "a component that cannot SSR." The directive marks a module-graph entry: that module and its transitive imports must be browser-reachable. It does **not** mean the component skips HTML, and it does not let a Client Component import server secrets because its parent was a Server Component. Keep the directive on **narrow interactive leaves**. Putting it on the shell pulls providers into the client bundle.
+
+      Values crossing the boundary must serialize. Pass children slots so a Client wrapper can host already-rendered server output. A Flight endpoint is not a public JSON API. See [Understanding Next.js in Depth](/notes/understanding-next-js-in-depth).
+
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="fe-rendering-modes">
+    <AccordionTrigger>6. Choose between SSR, SSG, ISR, and CSR for: a marketing page, a pharmacist dashboard, and a patient-facing prescription page. Justify each.</AccordionTrigger>
+    <AccordionContent>
+
+      SSR, SSG, ISR, and CSR remain **outcomes**, but App Router composes them per subtree. The question to answer is: when is the HTML or Flight allowed to be produced, and may a CDN reuse it.
+
+      - **Marketing page:** **SSG**, or **ISR** if editors publish through the day. No cookies, no tenant, same bytes for everyone. Prerender at build or revalidate by tag when the CMS webhook fires. CSR-only would waste LCP on a page that should be a static document plus a little hydration.
+      - **Pharmacist dashboard:** **request-time SSR** / dynamic Server Components. The tree reads session cookies, tenant, and live queues. PHI or another pharmacy's board must not be SSG'd. CSR after a spinner is acceptable for widgets that poll, but the shell still benefits from a server first paint and from keeping secrets off the client.
+      - **Patient-facing prescription page:** **SSR for the personalized payload**, never a shared CDN cache of that patient's drugs. Public chrome — header, legal copy — can be static. The PHI region waits on auth. ISR is the wrong tool for "this exact prescription for this session."
+
+      CSR remains right for browser-owned work: a canvas editor, a socket, offline IndexedDB. "Server first" is a default for credentials and waterfalls, not a ban on client fetching. Do not force-static a route that calls `cookies()`. Do not cache personalized HTML under a single URL. The spectrum is in [Understanding Next.js in Depth](/notes/understanding-next-js-in-depth).
+
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="fe-waterfalls">
+    <AccordionTrigger>7. What are request waterfalls, and how do you parallelize or hoist data fetching to eliminate them?</AccordionTrigger>
+    <AccordionContent>
+
+      A **request waterfall** is latency that exists only because work waited to **start**. The network round trips are independent, but the code made them sequential. Users feel the sum, not the max.
+
+      On the server the classic shape is sequential awaits in a Server Component: wait for the product, then start inventory, then start recommendations. Start independent promises first, then `await Promise.all`, or put sibling fetches in sibling components each under `Suspense` so they stream without a parent await gating the next constructor. If inventory truly needs the product row, that dependency is real. If it exists only because the parent awaited one child before creating the next, that waterfall is architectural.
+
+      On the client the waterfall is worse: render, hydrate, `useEffect` fetch, then a child mounts and fetches again. Hoist to a Server Component, or start both queries in the parent so the child does not wait on "enabled when parent data exists" unless the id is actually unknown.
+
+      How to eliminate them:
+
+      - Kick off independent `fetch` or loader calls **before** the first await.
+      - Deduplicate with request-scoped memoization; do not confuse that with a persistent cache.
+      - Do not hop Server Component to this app's own Route Handler just to load page data — that adds a serial HTTP trip.
+      - Prefetch on intent for the next navigation, but keep render free of mutations.
+
+      Streaming does not fix a self-inflicted chain. Write-up: [Understanding Next.js in Depth](/notes/understanding-next-js-in-depth).
+
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="fe-optimistic">
+    <AccordionTrigger>8. Implement an optimistic update: what happens on mutation failure, and how do you roll back cleanly?</AccordionTrigger>
+    <AccordionContent>
+
+      An optimistic update shows the **expected result immediately**, then reconciles with the server. It belongs only when the success shape is obvious and failure is easy to explain — marking a prescription as "in review," not deleting a legal record with no undo.
+
+      The clean rollback is a **snapshot**, not "set loading false." Sequence with a cache like TanStack Query:
+
+      - **`onMutate`:** cancel in-flight reads for that key, snapshot the current cache, write the optimistic value, return the snapshot in context.
+      - **Mutation runs.** The UI already looks done. Disable double-submit on that row.
+      - **`onError`:** restore the snapshot, show an error the pharmacist can retry, and do not leave a fake "success" chip on the row.
+      - **`onSettled`:** invalidate so the server remains the authority even if another tab won.
+
+      React 19 `useOptimistic` is the same idea tied to an Action: the optimistic value is **temporary**. When the Action finishes, React falls back to real state or props, so the source of truth still updates on success. If the Action throws, the optimistic layer drops and the previous UI returns. That is not "error handling done" — the failure still has to be surfaced.
+
+      Failure modes: applying the optimistic patch twice, rolling back the wrong key, and ignoring a 409 when the server rejected a stale version. Mutations should be **idempotent** where possible, so a retry after rollback does not create a second order. Destructive actions get a confirm, not an optimistic disappear.
+
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="fe-forms">
+    <AccordionTrigger>9. Controlled vs uncontrolled form inputs: tradeoffs, and how do you keep a 50-field clinical form performant?</AccordionTrigger>
+    <AccordionContent>
+
+      **Controlled** means React state is the source of truth: `value` plus `onChange` on every keystroke. That yields instant validation, field-level disable, and a single submit snapshot. The cost is a re-render of whoever owns that state, which at fifty clinical fields is a real budget if one parent object updates on every character.
+
+      **Uncontrolled** means the DOM holds the value until it is read through a ref or `FormData`. `defaultValue` paints the initial HTML. That yields cheaper typing and native browser features. The cost is that the React tree can disagree with what is on screen unless discipline is strict.
+
+      For a 50-field clinical form, do **not** keep one giant controlled object at the page root. Prefer:
+
+      - Default to **uncontrolled fields** with React Hook Form, which reads via refs and re-renders the field that changed.
+      - Validate on blur and submit, not every keypress, except safety-critical fields like dose.
+      - Isolate expensive widgets — allergy search, a signature pad — behind their own state.
+      - Persist a versioned draft on the **authenticated server**. Browser `sessionStorage` is XSS-readable and is a poor place for PHI; if a local draft exists at all it is minimized, encrypted at rest by the OS if possible, expired, and wiped on logout.
+      - Key the form by `encounterId` so switching patients remounts instead of leaking values.
+
+      Accessibility stays first-class: labelled inputs, error text tied with `aria-describedby`, a submit error summary. Missing a keystroke of live validation is better than dropping frames while a pharmacist enters a dose.
+
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="fe-web-vitals">
+    <AccordionTrigger>10. Explain LCP, CLS, and INP. For each, name two concrete fixes.</AccordionTrigger>
+    <AccordionContent>
+
+      These are user-timed paints and interactions, not lab vanity scores. A page can have a fast LCP and a poor INP if hydration then occupies the main thread. Split LCP into TTFB, resource discovery delay, download, and element render delay, as in [The Critical Rendering Path in the Browser](/notes/critical-rendering-path-in-the-browser).
+
+      - **LCP** — when the **largest visible content** appears. Fix 1: do **not** lazy-load the LCP image; put `src` and dimensions in the initial HTML and preload if it is a CSS background the parser would discover late. Fix 2: shrink and CDN the asset, and unblock paint — critical CSS, font-display that does not hide text forever, less main-thread JS before first paint.
+      - **CLS** — **unexpected movement**. Fix 1: width and height (or aspect-ratio) on images, embeds, and ad slots so the layout is reserved. Fix 2: font fallback metrics or `size-adjust` so swapping from fallback to webfont does not shove the heading; do not inject banners above content after paint.
+      - **INP** — interaction until the **next paint**. Fix 1: break long tasks; yield or move CPU work to a **Web Worker**. `startTransition` only deprioritizes interruptible React rendering — it does not take a 200ms loop off the handler. Fix 2: ship less JS to the interaction path — narrower `"use client"` trees, defer third-party tags, avoid a 200ms hydration on every button.
+
+      Watch field data, not only Lighthouse. Marketing pages are LCP/CLS problems. Dashboards are INP problems. If TTFB dominates LCP, stop compressing PNGs and look at the origin and cache instead.
+
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="fe-bundle">
+    <AccordionTrigger>11. How do you approach bundle size: code splitting, route-level lazy loading, and finding what to cut with bundle analysis?</AccordionTrigger>
+    <AccordionContent>
+
+      Start from a **trace of what the user downloaded to do one job**, not from a single "main.js is too big" feeling. App Router already splits by route. The mistakes are pulling the world into the **shared layout** and putting `"use client"` too high so a markdown parser, a date library, or a chart SDK rides into every page.
+
+      How the work goes:
+
+      - Run a **bundle analyzer** (`@next/bundle-analyzer` or the equivalent) on the client graph. Sort by parsed size. Hunt duplicated copies of the same library and surprise locales from a date package.
+      - Keep data access and MDX compilation on the **server**. Server Components are a bundle-size tool, not only a data-fetching tool.
+      - Route-level split is the default; add `next/dynamic` or `import()` for heavy leaves — a PDF viewer, a rich text editor, a chart — that most sessions never open.
+      - Cut the actual culprits: moment with all locales, a full icon pack imported from the root, a polyfill that is no longer needed. Tree-shaking only works if the import path is one that can shake.
+
+      Do not lazy-load the LCP hero to "save JS." That trades bundle for Web Vitals. Do not split a 3 KB helper into its own chunk. After a cut, verify with the analyzer and a cold-load waterfall. Boundary placement: [Understanding Next.js in Depth](/notes/understanding-next-js-in-depth).
+
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="fe-virtualization">
+    <AccordionTrigger>12. A table must render 10,000 rows smoothly — walk through list virtualization and its tradeoffs.</AccordionTrigger>
+    <AccordionContent>
+
+      Ten thousand DOM rows will not stay at sixty frames. **Virtualization** mounts a window: visible rows plus a small **overscan**, and it recycles or replaces cells as the user scrolls. Libraries like TanStack Virtual or `react-window` do the math. The table body becomes a tall spacer with absolutely positioned rows, or a translate on a slice. Measure row height or use a fixed height if the design allows it.
+
+      Tradeoffs to name in the interview:
+
+      - **Variable height** rows need measurement and can jump if the estimate is wrong.
+      - **Keyboard and find-in-page** only see mounted nodes. Jump-to-row needs an explicit search, not the browser finder.
+      - **Screen readers** may announce an incomplete table unless real `table` semantics and a row count are kept.
+      - **Sticky columns** fight the virtualizer's positioning. Budget time for the frozen NDC column.
+      - **SSR** should not mount ten thousand rows on the server either.
+
+      Do not virtualize a 40-row page, and do not `map` ten thousand into the DOM and hope `memo` saves the frame budget. Pair virtualization with a query that **pages on the server** so ten thousand JSON objects are not shipped to render twenty. The RN analog in these notes is FlashList; same budget, different renderer.
+
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="fe-a11y">
+    <AccordionTrigger>13. What does accessibility mean beyond ARIA? Cover semantic HTML, keyboard navigation, and focus management in modals.</AccordionTrigger>
+    <AccordionContent>
+
+      Accessibility is **can this person complete the task with the device they have**, not "ARIA sprinkled on divs." ARIA is a last resort when native HTML cannot express the widget. The first pass is semantics, keyboard, and focus. A `div` with `role="button"` that is not in the tab order and has no Enter/Space handler is worse than a real `button`.
+
+      Semantic HTML that matters:
+
+      - Headings in order, one `h1` for the page job, landmarks (`header`, `nav`, `main`).
+      - `button` for actions, `a` for navigation, `label` tied to inputs, `table` for tabular data.
+      - Visible name that matches the accessible name so voice control works.
+
+      Keyboard: a logical tab order that follows the visual order, `:focus-visible` that is not `outline: none`'d away, Escape to close, skip links for repeat nav. Arrow keys only when the composite-widget pattern is implemented.
+
+      Modals are where products fail. Requirements:
+
+      - Move focus into the dialog when it opens, preferably the title or the first field.
+      - **Trap focus** inside; background gets `inert` so Tab cannot reach it.
+      - Restore focus to the trigger on close.
+      - Use `role="dialog"`, `aria-modal`, and labelled-by the title. The user must be able to close from the keyboard.
+
+      Test with keyboard only and a screen reader on the critical path, not by grepping for ARIA. Design-system primitives exist so focus traps are not reimplemented per feature.
+
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="fe-tokens">
+    <AccordionTrigger>14. Where should auth tokens live — localStorage vs httpOnly cookies? Connect your answer to XSS and CSRF risk.</AccordionTrigger>
+    <AccordionContent>
+
+      Session credentials belong in an **`HttpOnly` + `Secure` + `SameSite` cookie** set by the server, not in `localStorage`. Any script on the origin can read Web Storage. That includes XSS. Stealing a long-lived bearer token is enough to replay it from another machine. `HttpOnly` means `document.cookie` and the Cookie Store API cannot read the value. `Secure` keeps it on HTTPS. `SameSite=Lax` or `Strict` is the default for a first-party app. Authenticated **cross-site** POSTs need `SameSite=None; Secure` **plus** CSRF tokens and Origin checks — Lax and Strict will not send the cookie on those POSTs.
+
+      The classic SPA pattern — JWT in `localStorage`, send `Authorization` by hand — often **skips CSRF** because the browser will not auto-attach that header on a cross-site form. The trade is that **XSS becomes a full session steal**. That is not a security win. Prefer taking CSRF seriously on a cookie session — SameSite, anti-CSRF on state-changing routes, origin checks — and keep the token out of JavaScript.
+
+      `localStorage` is still right for a theme, a dismissed banner, a draft that is not a credential. `sessionStorage` is the same XSS story with a shorter lifetime; it is not a safer vault. Cookies that are not `HttpOnly` are readable by scripts and still go out on matching requests, which is the worst mix.
+
+      Do not put PHI or refresh tokens in Web Storage "because it is easier for Axios." The server owns the session, rotates it, and expires it. Practical rules: [Local Storage, Session Storage, and Cookies](/notes/browser-storage-localstorage-sessionstorage-cookies).
+
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="fe-offline">
+    <AccordionTrigger>15. How do service workers and the Cache API enable offline support? Explain stale-while-revalidate.</AccordionTrigger>
+    <AccordionContent>
+
+      A **service worker** sits between the page and the network. Once activated, it can intercept `fetch`, read and write the **Cache API**, and answer with a `Response` even when the radio is off. The Cache API is a request-to-response store keyed by URL. It is not `localStorage`. It lives off the main thread and can be versioned by cache name when a new worker ships.
+
+      **Stale-while-revalidate** means: if a cached response exists, **return it immediately**, then fetch in the background, and if the fresh response differs, **update the cache**. The user sees last-known UI without waiting. A later visit, or a `postMessage` / query invalidation, shows the new bytes. Workbox names this strategy; it can be implemented with `caches.match` then `fetch`.
+
+      Pair it with a policy, not one global cache:
+
+      - App shell and hashed static assets: cache-first, versioned by build.
+      - List endpoints that may be stale: stale-while-revalidate.
+      - Mutations: network-first or network-only; queue POSTs only with a clear replay story.
+      - Personalized PHI: do not cache across users; isolate by session.
+
+      Offline is also UX: a banner, last-updated time, writes that do not look successful when they failed. Caching an old HTML shell forever is how a stuck app ships. Bump the cache name so tabs do not mix two versions.
+
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="fe-boundaries">
+    <AccordionTrigger>16. How do error boundaries and Suspense boundaries compose? What belongs in global error reporting?</AccordionTrigger>
+    <AccordionContent>
+
+      **Suspense** is a **pending** boundary: a child is not ready yet, so React shows the fallback. An **error boundary** is a **failed** boundary: a child threw during render, and `componentDidCatch` or Next.js `error.tsx` shows recovery UI. Wrap a Suspense island in an error boundary so a thrown fetch does not take down the dashboard, and keep a higher boundary around the route so a layout bug still has a way out.
+
+      Order matters. If the error boundary is inside Suspense, a render throw is caught locally while siblings still stream. One root-only error boundary turns a bad widget into a full-page crash. App Router `error.tsx` and `loading.tsx` are the same two concepts, file-system shaped.
+
+      Error boundaries do **not** catch event-handler errors, `setTimeout` failures, or a rejected promise that never re-enters render. Rethrow into the tree or handle those at the call site.
+
+      Global reporting gets **unexpected** failures: render throws, unhandled rejections, server 500s, with request ids. Scrub PHI and tokens. Do **not** report every 404 or failed validation. Those are product states. A boundary that swallows and never reports is how a white screen arrives from a pharmacist, not from telemetry.
+
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="fe-testing">
+    <AccordionTrigger>17. What do you test at each level — unit (Vitest), component (Testing Library), e2e (Playwright) — and what do you deliberately not test?</AccordionTrigger>
+    <AccordionContent>
+
+      Test by **blast radius**, at the cheapest layer that still proves the behavior. Do not chase coverage on chrome.
+
+      - **Unit, Vitest:** pure functions — query-key builders, dose parsers, reducers, URL helpers, the fetch state union. Fast, no DOM. If it is a formula, it is a unit test.
+      - **Component, Testing Library:** user-observable contracts. Query by role and name, `userEvent`, assert the next thing the user can see. "Keeps draft when network fails" beats "sets `isError`." Mock the network at the boundary (MSW), not by poking internal store fields.
+      - **E2E, Playwright:** journeys that need a real browser, real navigation, cookies, and a running app: login, tenant isolation, submit a prescription, pay. One path per critical risk, not a screenshot of every story.
+
+      Deliberately do **not** test: implementation details (function names, CSS class lists, Redux action types), third-party library internals, every presentational tweak, or the same fact at all three layers. Do not snapshot a whole page to "lock the design." Do not unit-test that React's `useState` works.
+
+      The published playbook on this site uses Cypress for the e2e slot; Playwright fills the same job here. Name tests after the regression they protect. If a real browser is required to trust the result, go e2e. Otherwise stay in Vitest. Details: [Frontend Regression Tests](/notes/frontend-regression-test).
+
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="fe-design-system">
+    <AccordionTrigger>18. Design a component API for a shared design system: props vs compound components, theming via tokens, versioning across teams.</AccordionTrigger>
+    <AccordionContent>
+
+      A shared kit is **behavior plus tokens**, not a dump of screenshots. The API question is who owns composition.
+
+      - **Variant props** (`variant`, `size`, `tone`) for small leaves: Button, Badge, Input. A finite union, defaults that match the product, no boolean soup like `isPrimary` plus `isLarge` plus `isDanger`.
+      - **Compound components** for widgets with slots and focus: `Dialog.Root`, `Trigger`, `Content`, `Title`. Teams can order the header and inject a form without a new `renderFooter`. This is the Radix pattern already wrapped.
+      - Avoid a mega-prop `config` object that cannot be typed or changelogged.
+
+      Theming is **tokens**, not a `theme="pharmacyBlue"` prop on every leaf. Color, space, radius, and type live as CSS variables or a typed theme. Products map brand to tokens; components consume tokens. Dark mode is a token set, not a second component library. Do not expose raw hex in app code.
+
+      Versioning across teams is where design systems die. Practice:
+
+      - Semver: visual tweaks patch, new optional props minor, removed props and changed defaults **major**.
+      - Ship a **codemod** and a deprecation window on a rename.
+      - One package version in the monorepo; no silent "just copy Button into the app."
+      - Storybook and MDX as the contract, plus a11y checks on the primitives.
+
+      If fifteen apps fork the button, there was no system. Adoption and regression metrics matter more than component count. A small, boring API that versions cleanly beats a clever render-prop maze nobody can upgrade.
+
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="fe-fetch-state">
+    <AccordionTrigger>19. Show how you'd use TypeScript generics and discriminated unions to model a fetch state machine (idle | loading | success | error) safely.</AccordionTrigger>
+    <AccordionContent>
+
+      Model fetch as a **discriminated union**, not as independent booleans. `isLoading` plus `isError` plus optional `data` lets TypeScript accept `data` on the error branch and `error` while idle. One `status` field is the tag; a generic `TData` is the success payload. Say this out loud as four mutually exclusive states, then show the type:
+
+      ```ts
+      type FetchState<TData> =
+        | { status: "idle" }
+        | { status: "loading" }
+        | { status: "success"; data: TData }
+        | { status: "error"; error: Error }
+
+      function readData<TData>(state: FetchState<TData>): TData | undefined {
+        if (state.status === "success") return state.data
+        return undefined
+      }
+      ```
+
+      Narrowing is the point. After `state.status === "success"`, `state.data` exists and `state.error` does not. After `"error"`, a prescription cannot be rendered from `undefined`. `idle` versus `loading` keeps "not asked yet" distinct from "the spinner should show," which matters for skip buttons and for SSR hydration.
+
+      Do not add `data` as optional on every branch "for convenience." That convenience is the bug. For mutations, use a second union, or keep the last successful payload in a parent cache and let the mutation machine be pending or failed. An exhaustive `switch` with a `never` default makes a new status a compile error. TanStack Query already encodes this; if a store is hand-rolled, this is the type to reach for first.
+
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="fe-design-dashboard">
+    <AccordionTrigger>20. Design exercise: a real-time prescription-status dashboard with live updates, reconnection handling, and graceful offline behavior.</AccordionTrigger>
+    <AccordionContent>
+
+      Split **first paint** from **live movement**. A Server Component loads the pharmacist's tenant-scoped queue with cookie auth and renders the table shell. That payload is not CDN-cached. A `"use client"` leaf then opens the realtime channel. Pick **SSE** if the server is the only publisher; **WebSockets** if techs type into a shared board. The event is a small patch: id, status, version, timestamp — not a full Flight tree.
+
+      Reconnection: on `onerror` or `offline`, show a **stale** banner with last-updated time, backoff with jitter, and resume from a cursor or `Last-Event-ID`. On `visibilitychange`, reconnect when the tab is alive. Multiple instances need **pub/sub** behind the socket so a change on node A reaches the pharmacist on node B.
+
+      Offline: cache the shell and last successful list with stale-while-revalidate. Mutations go into an IndexedDB **outbox** and replay with idempotency keys so double-tap does not double-dispense. A 409 drops the optimistic row and keeps the server version.
+
+      Tenancy: every query key and channel includes `tenant_id`; the server checks the session. Error and Suspense boundaries wrap the live table. Do not put the session JWT in `localStorage` to "make the socket auth easier."
+
+    </AccordionContent>
+
+  </AccordionItem>
+</Accordion>
+
+<br />

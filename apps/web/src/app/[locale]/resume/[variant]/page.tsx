@@ -14,7 +14,7 @@ import {
 } from "@/features/resume/variants"
 import { routing } from "@/i18n/routing"
 import { buildPageMetadata } from "@/lib/metadata"
-import { getMdxContent, getPageLocales } from "@/lib/source"
+import { getMdxContent, getPageLocales, loadMdxCompiled } from "@/lib/source"
 
 type Props = {
   params: Promise<{ locale: Locale; variant: string }>
@@ -49,7 +49,7 @@ const Page = async ({ params }: Props) => {
   const page = getMdxContent("blocks", slug, locale)
   if (!page) notFound()
 
-  const toc = page.data.toc ?? []
+  const toc = (await loadMdxCompiled(page)).toc ?? []
 
   return (
     <PageLayout className="grid lg:grid-cols-2 items-start content-start">

@@ -8,14 +8,23 @@ import { isSstProduction } from "@/lib/stage"
 
 const NOTES_CATEGORY = "notes"
 
-/** Generated `.source/server` is `@ts-nocheck`, so assert the doc entry shape for loader inference. */
-type DocsEntry = DocData &
-  DocMethods &
+/** Generated `.source/server` is `@ts-nocheck`, so assert the async doc entry shape for loader inference. */
+type DocsEntry = DocMethods &
   PageData & {
+    load: () => Promise<DocData>
+    structuredData: () => Promise<DocData["structuredData"]>
     author?: string
     date?: string | Date
     pinned?: boolean
-    category?: "frontend" | "backend" | "ai" | "computer-science" | "personal"
+    category?:
+      | "frontend"
+      | "backend"
+      | "ai"
+      | "security"
+      | "devops"
+      | "computer-science"
+      | "full-stack"
+      | "personal"
   }
 
 export const content = loader({
@@ -155,6 +164,10 @@ export function getMdxContent(category: string, slug: string, locale: string) {
   const page = content.getPage([category, slug], locale)
   if (!page || isHiddenSourcePage(page.path)) return
   return page
+}
+
+export async function loadMdxCompiled(page: NotesPage) {
+  return page.data.load()
 }
 
 const getPageDate = (date?: string | Date) => {

@@ -1,0 +1,390 @@
+---
+title: "Full-Stack Q&A: Backend"
+description: Spoken-length answers to backend engineering questions
+category: full-stack
+---
+
+## Backend Engineering
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="be-event-loop">
+    <AccordionTrigger>1. Walk through the Node.js event loop phases. Where do setTimeout, setImmediate, process.nextTick, and resolved promises run?</AccordionTrigger>
+    <AccordionContent>
+
+    Node is not the browser. The walk is not HTML’s task, microtask, then render. Node is **libuv phases**. One iteration is roughly **timers**, pending callbacks, idle/prepare, **poll**, **check**, then close callbacks. `setTimeout` and `setImmediate` sit on phases. `process.nextTick` and resolved Promises sit on extra queues that drain **after the current operation**, between those phases — not as a phase of their own.
+
+    - **`setTimeout` / `setInterval`**: **timers** phase, once the delay has elapsed. The delay is a lower bound, not a promise of “now.”
+    - **`setImmediate`**: **check** phase, after **poll**.
+    - **`process.nextTick`**: drains **before** Promise jobs, after the current operation. Higher priority than Promise `.then`. A nextTick loop **starves I/O** the way a browser microtask loop starves rendering.
+    - **Promise `.then` / `queueMicrotask`**: microtask queue **after** `nextTick`.
+
+    From the main module, `setTimeout(fn, 0)` versus `setImmediate` is famously unordered. From an I/O callback, `setImmediate` usually wins because check follows poll in the same iteration.
+
+    ```
+    process.nextTick(() => console.log("nextTick"))
+    Promise.resolve().then(() => console.log("promise"))
+    setImmediate(() => console.log("immediate"))
+    setTimeout(() => console.log("timeout"), 0)
+    ```
+
+    In production, `nextTick` is never spun to “yield.” A Promise or `queueMicrotask` is the after-this-stack choice without jumping the Promise queue. The common pitfall is porting a browser ordering puzzle to Node and trusting the log. Full map: [The JavaScript Event Loop in Depth](/notes/javascript-event-loop-in-depth).
+
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="be-nodejs-wrong">
+    <AccordionTrigger>2. When is Node.js the wrong choice? How do you handle CPU-bound work in a Node service?</AccordionTrigger>
+    <AccordionContent>
+
+    Node is a strong default for **I/O-bound** APIs: many open sockets, JSON in and out, waiting on Postgres and HTTP. Node is the wrong default when the **event-loop thread** is the product. One hot `while`, a sync hash, a huge JSON parse, or an in-process image pipeline stalls **every** connection on that process. Extra replicas do not fix a handler that pegs a core; they multiply the bill. If the domain is CPU-first — transcode, ML inference, tight crypto, bulk transforms — the production choice is a runtime or a worker fleet that matches, rather than hiding a thread pool behind an Express facade.
+
+    CPU-bound work **inside** a Node service:
+
+    - keep HTTP handlers **short** and I/O-ish; accept, persist, return
+    - **`worker_threads`** or a child process for bounded in-process CPU, with a **pool cap**
+    - better: **enqueue** the job and let workers own it — often not Node: Go, a native addon, or a managed transcode API
+    - watch **event-loop delay**, not only request rate
+
+    Production looks like “202 and a job id,” not “await the pixels in the POST.” `async` does not make arithmetic concurrent. The common pitfall is shipping CPU as `await tightLoop()` and calling it scalable because the framework is async. Health checks on that process lie until the loop runs again. If the stack must stay on Node, isolate CPU so a crashed worker is not the API process.
+
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="be-stateless">
+    <AccordionTrigger>3. What does "stateless service" mean, and why does it matter for horizontal scaling behind a load balancer?</AccordionTrigger>
+    <AccordionContent>
+
+    A **stateless service** means any replica can handle any request without local memory of the last one. Session, uploads, cart, job progress — those live in **Postgres, Redis, S3, or the token**, not in the process. The process still has RAM: JIT, connection pools, LRU. That memory must be **discardable**. If this instance dies, the user is not stuck on a machine that no longer exists.
+
+    It matters behind a load balancer because the fleet can **scale out** with round-robin, replace tasks on deploy, and skip sticky sessions. Sticky sessions are a confession that something was stored on the box. Horizontal scaling is then a lie: a task cannot drain without dropping people, and capacity cannot be added without hashing users to new empty memory.
+
+    In production, sessions live in Redis or a signed JWT, files in object storage, rate-limit counters in Redis, and WebSocket fan-out on a pub/sub backplane. Local cache is a performance hint, not a source of truth. The design is that a replica can vanish mid-flight and the next request still has enough durable state to continue.
+
+    The common pitfall is half-stateless: auth in Redis, but uploads in `/tmp`, or in-memory maps of socket ids. It works on one ECS task and breaks at two. Another: sticky sessions that hide the bug until the balancer drains a task mid-session and “random” users log out.
+
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="be-async-queue">
+    <AccordionTrigger>4. When should a request be handled asynchronously via a queue instead of synchronously in the request cycle?</AccordionTrigger>
+    <AccordionContent>
+
+    Work comes off the request cycle when the **HTTP response does not need the finished result**, or when the work is slow, bursty, or must **retry after this process is gone**. Email, outbound webhooks, thumbnails, invoices, search indexing, anything that talks to a flaky third party — that is a **queue**. The request authenticates, authorizes, **persists the intent**, enqueues, and returns **202** with an id the client can poll. The load balancer’s timeout is no longer the workflow timeout.
+
+    It stays synchronous when the user cannot continue without the answer: password check, a price that must be correct on screen, a payment **authorization** the UI is about to display. Even then the handler stays thin. A five-step saga does not fold into one POST just because it is easier to read in one file.
+
+    Production rules: an **idempotency key** on the enqueue, a worker that can fail loudly, and a status row the user can read. Timeouts and backoff belong to the worker. If it must happen even when the queue is down, the **database write in the request** is the source of truth; the queue is a relay.
+
+    The common pitfall is **sync-over-async**: enqueue then block the socket until the worker finishes. The broker was paid for and the connection is still held. The other is queueing work that has not been durably recorded — crash equals lost intent. If the business said it happened, it hit disk in the request, then the queue.
+
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="be-delivery-semantics">
+    <AccordionTrigger>5. Explain at-least-once vs at-most-once delivery. How do you build an idempotent consumer given at-least-once semantics?</AccordionTrigger>
+    <AccordionContent>
+
+    **At-most-once** means send and forget: duplicates are rare, **loss is allowed**. **At-least-once** means retry until ack: **duplicates are allowed**, loss is not. Most brokers in production are at-least-once. “Exactly-once” in application space is usually at-least-once **plus an idempotent consumer**, not a broker checkbox that can be trusted across HTTP, queues, and process crashes.
+
+    Given at-least-once, processing twice is a no-op:
+
+    - a stable **event id** from the producer (or a hash of a natural key)
+    - an **inbox** table with a unique constraint on that id
+    - **database effects and the inbox insert in one transaction**. For Stripe or email, persist an outbox/operation row and pass the provider's idempotency key **before** ack
+    - side effects as **upserts** (“status is paid”) not blind increments unless the increment is keyed by the same event id
+    - **ack after** that durable write
+
+    In production, publishers stay boring: same key, same payload, **outbox** on the write side so dual-write does not happen. Consumers stay idempotent anyway, because retries still happen.
+
+    The common pitfall is acking before the side effect, or doing the side effect without recording the id. The retry then double-charges, double-emails, or double-ships. Another: catching errors and still acking so the poison message vanishes. At-least-once only helps if failure **nacks** and success is **idempotent**. Loss and duplication are both bugs; the production choice is which one to engineer for, then the other is engineered away in the consumer.
+
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="be-retry-strategy">
+    <AccordionTrigger>6. Design a retry strategy for a failing worker: exponential backoff, jitter, max attempts, and dead-letter queues.</AccordionTrigger>
+    <AccordionContent>
+
+    A worker retry policy is how failure happens **without melting the dependency**. Classify first. Timeouts, 503s, lock contention, “connection reset” — **retry**. Validation errors, 400s, unknown event types — **do not retry**; they will not heal and they will occupy the consumer forever.
+
+    Then four controls:
+
+    - **exponential backoff**: wait `base * 2^attempt`, with a cap so attempt twenty does not sleep for hours
+    - **jitter**: full jitter, so ten thousand workers do not wake on the same millisecond after an outage
+    - **max attempts**: a hard ceiling so poison cannot loop all night
+    - **dead-letter queue**: after the ceiling, park the payload, increment a metric, page if DLQ depth rises
+
+    In production the retry lives in the **queue** (visibility timeout, built-in backoff) or a library with the same shape — not a `while` inside the handler. Attempt count is logged on every failure. Retry only **idempotent** handlers, because at-least-once plus retry is how double-charge happens.
+
+    The common pitfall is retrying a non-idempotent POST, or retrying forever with no DLQ so one bad JSON sits on a hot partition. The other is backing off **without jitter** after a shared outage — that is a thundering herd scheduled by the backoff. Alerts sit on retry rate and on DLQ, not only on HTTP 500s. A silent DLQ is a lost business event with extra steps.
+
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="be-caching">
+    <AccordionTrigger>7. Compare cache-aside, read-through, write-through, and write-behind caching. What is cache stampede and how do you prevent it?</AccordionTrigger>
+    <AccordionContent>
+
+    The cache write path is chosen on purpose. “Put Redis in front” is not a strategy.
+
+    - **Cache-aside**: the app reads Redis, on miss loads the DB and fills the cache. This is the usual production choice. The app owns TTL and invalidation.
+    - **Read-through**: the cache library loads on miss. Convenient, less control, same stampede risk.
+    - **Write-through**: every write hits cache and DB before success is returned. The cache stays warm; write latency includes both.
+    - **Write-behind**: write the cache, flush the DB later. Fast writes; **durability** is the trade. A crash can lose dirty data.
+
+    **Cache stampede** is a hot key expiring and a thousand requests missing together, all hitting Postgres. It looks like a periodic CPU cliff at TTL boundaries. Prevention: **singleflight** or a lock so one request fills and others wait; **stale-while-revalidate** so stale is served while one refresh runs; probabilistic early expiry so not every key dies at once; a tiny in-process cache in front of Redis for the hottest keys.
+
+    In production the choice is cache-aside with explicit TTLs, versioned keys, and invalidation on write when freshness matters. A permission decision is never cached under a key that omits user or tenant.
+
+    The common pitfall is stampede plus caching **transient failures** for a long TTL, or treating a dependency 500 as a cached “not found.” Short negative caching for a real miss can prevent penetration; caching a 500 is how an outage becomes sticky. Write-behind on money is another. Stampede is not “Redis is slow”; it is “every client was synchronized on expiry.”
+
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="be-saga-outbox">
+    <AccordionTrigger>8. How do you keep state consistent across two services without distributed transactions? Explain the saga and outbox patterns.</AccordionTrigger>
+    <AccordionContent>
+
+    Distributed transactions are not run across services. Two-phase commit exists, but it **blocks on in-doubt transactions** and couples availability of every participant. Each service’s database stays transactional; coordination is with messages.
+
+    A **saga** is a sequence of local transactions. If step three fails, **compensations** run for one and two — not a rollback of someone else’s DB. Choreography: each service emits events and the others react. Orchestration: a coordinator drives the steps and holds visible state. Choreography fits when the flow is short; orchestration when the graph is long and a dashboard of “where is this order stuck” is needed.
+
+    The **outbox** fixes the dual-write: update the order row and publish `OrderPlaced`. Commit then publish, and the process can die and the event never leaves. Publish then commit, and consumers see an order that rolled back. Outbox: in the **same Postgres transaction**, the business row and an outbox row are written. A relay publishes outbox rows to the broker. Delivery is still at-least-once, so consumers stay idempotent.
+
+    The common pitfall is treating compensation as undo. A payment compensation is a **refund**, with its own audit, not a time machine — and the compensation itself must be durable and retryable because it can fail. The other is skipping the outbox and hoping a send after `COMMIT` is good enough. It is not, at the first crash. Consistency here means “the system can explain and repair,” not “both DBs locked as one.”
+
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="be-eventual-consistency">
+    <AccordionTrigger>9. What is eventual consistency, and how do you give users read-your-writes behavior on top of it?</AccordionTrigger>
+    <AccordionContent>
+
+    **Eventual consistency** means replicas or services **converge** if writes stop; it does not mean the next read sees the write that just landed. Cross-region replicas, search indexes, materialized views, and other services’ projections are eventually consistent. The user-facing bug is: a POST creates a resource, a GET of the list misses it, so the user clicks again and now there are two.
+
+    **Read-your-writes** is a session guarantee on top of that, for the actor who just mutated:
+
+    - send that user’s subsequent reads to the **primary** for a short window
+    - return the written entity in the **POST response** and have the client merge it, so the UI does not need an immediate GET from a lagging replica
+    - a **version** or timestamp the client sends, and the read path waits until the replica is past it
+    - sticky routing to the writer when required
+
+    In production most of the product can be slightly stale — feeds, counts, search. The person who just saved cannot be. The production choice is explicit per endpoint instead of promising “the system is consistent.”
+
+    The common pitfall is hiding replica lag behind a spinner that refetches the **same replica**. Users duplicate orders. Another: caching the GET in front of the replica so even a primary-read fix never lands. Eventual consistency is fine if the UI does not treat a missing row as “please try the write again.”
+
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="be-locking">
+    <AccordionTrigger>10. Optimistic vs pessimistic locking in application code — give a concrete case for each.</AccordionTrigger>
+    <AccordionContent>
+
+    **Optimistic locking** assumes conflict is rare. The row is read with a `version` (or `updated_at`). On write the update is only `WHERE id = $1 AND version = $2` and the version is bumped. Zero rows updated means someone else won; retry or tell the user. Concrete case: two people saving a **settings document**, or a user updating a profile. Contention is low. A database lock is not held while they stare at a form.
+
+    **Pessimistic locking** assumes conflict is likely, or the check-then-act must be exclusive. `SELECT ... FOR UPDATE` in a transaction, then write. Concrete case: **decrementing inventory** for the last SKU, booking a unique seat, assigning a unique sequential invoice number. Two transactions cannot both believe they got the last item. The lock is the product.
+
+    In production the default is optimistic at the application layer — a version column on editable rows — and pessimistic for a few hot invariants inside a **short** transaction. They are never mixed accidentally on the same row without knowing which one wins.
+
+    The common pitfall: optimistic on a hot row becomes a retry storm. Pessimistic while calling Stripe inside the open transaction holds locks for hundreds of milliseconds and the pool dies. Also lock-order deadlocks: always lock rows in the same id order. A pessimistic lock is never held across an HTTP call. Locks are for the database’s truth, not for waiting on a vendor.
+
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="be-connection-pool">
+    <AccordionTrigger>11. How do you size a database connection pool? Why do serverless/ECS-scale-out architectures break naive pooling, and how does PgBouncer help?</AccordionTrigger>
+    <AccordionContent>
+
+    A pool is a **cap on Postgres sessions**, not a performance dial turned to 100. Sizing starts from the **database** backward: `max_connections` minus superuser headroom, divided by **how many app processes** will exist at peak, then a little for migrations and admin. Per Node process a typical start is around **10–20**. Watch pool wait time, not only query time. “Cores times two” is a rumor; the hard constraint is the server.
+
+    **Serverless and ECS scale-out** break naive pooling because **every task or Lambda execution environment** opens its own pool. Fifty tasks times twenty connections is a thousand sessions before traffic is interesting. Lambdas make it worse: burst concurrency times pool size, then idle environments that still hold sessions. Postgres spends its time on process overhead; queries wait, then the app opens more connections to “fix” wait.
+
+    **PgBouncer** (or RDS Proxy) sits in front and **multiplexes**. Transaction pooling: many app connections share few server connections, released at transaction end. The app still has a small pool; the bouncer absorbs fan-out.
+
+    The common pitfall is `pool_size = 100` copied from a blog into a service that autoscales to 30. Another: transaction pooling while using session features — temp tables, `SET`, some prepared-statement modes — then mysterious cross-talk. Transactions stay short, and a connection ceiling is pinned in infra tests, not only in local Docker. The pool is a budget shared with every replica.
+
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="be-graceful-shutdown">
+    <AccordionTrigger>12. What happens during a graceful shutdown? How do you drain in-flight requests and queue consumers on SIGTERM?</AccordionTrigger>
+    <AccordionContent>
+
+    **Graceful shutdown** is: stop being handed **new** work, finish **in-flight** work, close resources, then exit. On ECS or Kubernetes, **SIGTERM** arrives, then a grace period, then **SIGKILL**. If SIGTERM is ignored, the process is killed mid-query and mid-response.
+
+    On SIGTERM:
+
+    - mark **not ready** so the load balancer detaches the instance
+    - stop the HTTP server listening; wait for open requests with a **deadline** shorter than the grace period
+    - queue consumers: **stop fetching**, let current messages finish, **nack** if the deadline hits so they redeliver
+    - close the DB pool last
+    - prefer letting the event loop empty; force `process.exit` only if something hung past the deadline
+
+    In production the deadline is explicit, logged, and less than `terminationGracePeriodSeconds`. The test is SIGTERM in staging, not only SIGINT on a laptop.
+
+    The common pitfall is exiting on SIGTERM immediately: in-flight POSTs die, brokers redeliver, users see 502. The other is draining HTTP but **keeping consumers running** until kill — those offsets are a mess. Also: readiness never goes false, so the balancer keeps sending while the process is closing. SIGTERM is wired first, then the rest, with enough seconds for the slowest in-flight request still allowed.
+
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="be-observability">
+    <AccordionTrigger>13. Explain the three pillars of observability. How do correlation IDs work across services and queue hops?</AccordionTrigger>
+    <AccordionContent>
+
+    The three pillars in interviews: **logs**, **metrics**, and **traces**. Logs are events that can be grepped. Metrics are cheap aggregates for SLOs and alerts. Traces are the request as a tree of spans across services. All three are required: metrics wake the on-call, traces show where, logs show why. Profiling is a useful fourth when CPU is the mystery, but it is not the interview lead.
+
+    A **correlation id** is a string born at the edge — or taken from an inbound header — and copied everywhere that request goes. Every log line includes it. Every outbound HTTP call sends it. Every queue message puts it in **attributes**, not only in a JSON body someone might strip. **W3C `traceparent`** is the structured form: the same idea, with span parentage so a trace UI can draw the tree across hops.
+
+    In production, generate if missing, never trust it for auth, and index it. A user’s “it failed at 14:02” jumps from the gateway span through the worker that handled the SQS hop.
+
+    The common pitfall is HTTP-only ids: the consumer logs a new uuid and the trail dies at the queue. Also putting **user ids on metric labels** — cardinality explosion — or putting payloads with PII in trace attributes. Correlation is a header **propagated on purpose**, including through brokers, not a field the next service is hoped to invent.
+
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="be-probes">
+    <AccordionTrigger>14. Liveness vs readiness probes: what should each check, and what goes wrong if readiness checks your database?</AccordionTrigger>
+    <AccordionContent>
+
+    **Liveness** asks: should the platform **restart** this process? The check is that the event loop is alive — a cheap in-process heartbeat — not that Postgres is up. A deadlocked loop or a wedged runtime is a liveness failure. A database blip is not. Restarting every pod will not heal the database and will make the blip worse.
+
+    **Readiness** asks: should the balancer **send traffic**? The check is that the process is listening, warmed, and not shutting down. A cheap DB ping is reasonable **only** if the pod cannot serve useful traffic without that database, with hysteresis so a blip does not empty the fleet. Optional dependencies — email, a search sidecar — stay out of readiness and **never** go in liveness. If every pod requires a shared DB that is down, marking the fleet unready is honest; looping restarts is not.
+
+    The common pitfall is one `/health` used for both probes. Slow DB then looks like a dead process; kube kills healthy replicas during a blip — a **restart storm**. Liveness stays dumb and local, readiness about **this process’s ability to accept work it can actually do**, and dependency health on dashboards and SLOs.
+
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="be-cron-once">
+    <AccordionTrigger>15. You run a nightly cron job across 4 ECS tasks — how do you ensure it runs exactly once?</AccordionTrigger>
+    <AccordionContent>
+
+    Four ECS tasks and a nightly cron **inside the app** means four runs unless it is prevented. Four invoices, four charge sweeps, four “delete expired tokens” are the failure mode. Web fleets are for request fan-out. Schedules are not.
+
+    **One successful execution** — schedulers are usually **at-least-once**, so “start one task” is not enough:
+
+    - **best**: do not cron in the web fleet. EventBridge, a CloudWatch rule, or a Kubernetes `CronJob` starts a dedicated worker. Desired count of that worker is 1, and the **effect** is still idempotent.
+    - a durable `job_runs` row with a unique key on `(job_name, scheduled_period)` so a second starter fails the insert and exits
+    - if the job must live in the API image: **leader election** with a Redis lease that heartbeats, or a Postgres **advisory lock**, plus fencing so a stolen expired lease cannot commit
+
+    In production the preference is the external scheduler. Locks are the fallback when deploy shape cannot change. Alerts fire when **zero** runs happened for the day, not only when one threw.
+
+    The common pitfall is all four firing at midnight with no lock. The other is a lock **without TTL**: the leader dies, the lock stays, and the job never runs again. TTL sits past the expected duration, with a heartbeat if the job is long, and the unique run row still matters so a lock slip cannot double-charge. “Exactly once” is **one successful execution**, not one attempt that crashed after the side effect.
+
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="be-secrets">
+    <AccordionTrigger>16. How should secrets and config be managed and rotated in production? Why are plain env vars sometimes insufficient?</AccordionTrigger>
+    <AccordionContent>
+
+    Secrets are **credentials that rotate**; config is **behavior that deploys**. Secrets are not baked into images, git, or AMI snapshots. In production the choice is a manager — Secrets Manager, SSM, Vault — and **IAM roles** so the task does not start with a long-lived cloud key at all. RDS IAM auth or short-lived tokens beat a password in the environment rotated by editing a task definition by hand.
+
+    Rotation: change the secret in the manager, then **recycle** tasks so they fetch the new value. For DB passwords, dual-value rotation — accept old and new for a window — then drop the old. Audit who read the secret. Non-secret config (`NODE_ENV`, log level, public URLs) can live in env or a config service; it still stays out of the image when it changes per environment.
+
+    Plain **env vars** are insufficient for secrets because they leak: same-user `/proc` and crash dumps, debug “print env,” child-process inheritance, CI logs, ECS task-definition diffs copied into tickets. No versioning, no fine-grained access, no forced rotation. A casual `ps` listing does not print env; a compromised peer on the box can.
+
+    The common pitfall is `DATABASE_URL` with a password in plaintext env, or rotating Secrets Manager while **never restarting** the process so it holds the old password until 3 a.m. Another: committing `.env` because local DX was convenient. Config in env, secrets in a manager, roles over keys, recycle on rotate.
+
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="be-testing">
+    <AccordionTrigger>17. Describe your backend testing strategy: what belongs in unit vs integration vs e2e tests, and where do you draw mocking boundaries?</AccordionTrigger>
+    <AccordionContent>
+
+    Tests lock **behavior that would be dangerous to refactor**, not a coverage percentage.
+
+    - **Unit**: pure domain — pricing rules, state machines, mapping, policy. No I/O. Fast enough to run on every save. Mock **time** and randomness, not the module’s own getters.
+    - **Integration**: this process against a **real Postgres** (testcontainers) and maybe a real Redis. This is where SQL, transactions, migrations, and unique constraints fail. Mock **third-party HTTP** at the adapter boundary, not the repository.
+    - **E2E**: a small set of journeys through HTTP as a client: signup, a money path, a permission denial. Slow, flaky if overused, invaluable if few.
+
+    Mocking boundary: **process edges** — network, clock, vendor SDKs — not every internal function. The ORM is not mocked for the test that exists to catch a wrong column. Stripe is mocked. If a bug would only appear in SQL, the test must speak SQL.
+
+    In production CI: unit always, integration on PR with a real DB, e2e on main or nightly. The pyramid is a budget: many cheap tests, few expensive ones.
+
+    The common pitfall is a suite that is 90 percent mocked units and still cannot catch a missing `WHERE tenant_id`. The other is e2e for every branch, forty minutes, nobody runs it. Mocks are for things the service does not own. The database it does.
+
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="be-multi-tenancy">
+    <AccordionTrigger>18. Compare shared-schema (tenant_id column), schema-per-tenant, and database-per-tenant multi-tenancy. What breaks operationally at 1,000 tenants?</AccordionTrigger>
+    <AccordionContent>
+
+    Three models, increasing isolation and ops cost:
+
+    - **Shared schema, `tenant_id` column**: one DB, one migration train, every tenant-owned row tagged. Fastest to run. Isolation is a discipline plus **Postgres RLS** so a missed `WHERE` does not leak. This is the production model with Hono, Better Auth organizations, and Drizzle — [Building a Multi-Tenant Backend with Hono, Better Auth, Drizzle, and Postgres RLS](/notes/multi-tenant-backend-drizzle-hono-better-auth).
+    - **Schema-per-tenant**: `tenant_abc.orders`. Stronger isolation, **N migrations**, `search_path` games, connection routing per request.
+    - **Database-per-tenant**: stronger isolation and noisy-neighbor control; **N backups, N failovers, N connection setups**. Separate logical databases on one cluster still share compute and failure domains; strongest isolation is separate infrastructure when a tenant pays for it.
+
+    At **1,000 tenants**, schema-per-tenant and database-per-tenant become an **operations product**: migration fan-out, pool explosion if pooling is per tenant, provisioning time, monitoring cardinality, “which tenant is on which host.” Shared schema still works if indexes lead with `tenant_id`, jobs always carry tenant context, and quotas exist so one tenant cannot eat the CPU.
+
+    The common pitfall is shared schema **without** RLS and a background worker that forgets the tenant filter — that is a data leak, not a style issue. The other is opening a pool per tenant at 1,000 and discovering `max_connections` first. Shared schema is the default until compliance forces a step up, then isolate the few tenants who pay for a dedicated database.
+
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="be-realtime-fanout">
+    <AccordionTrigger>19. WebSockets vs SSE vs long polling — tradeoffs, and how do you broadcast events across multiple server instances?</AccordionTrigger>
+    <AccordionContent>
+
+    All three keep an HTTP conversation open. They differ in **direction and operational cost**.
+
+    - **Long polling**: client asks, server waits, client asks again. Easy behind vanilla HTTP and load balancers. Wasteful; latency is one round trip per message; still used for stubborn clients and old proxies.
+    - **SSE**: server-to-client stream over HTTP. Auto-reconnect, simple, good for notifications. **One-way**. Proxies sometimes buffer; disable buffering and send heartbeats.
+    - **WebSockets**: bidirectional, lowest overhead once up. Heartbeats, backpressure, and **stateful connections** sit on the server. Harder to put behind naive Layer-7 timeouts.
+
+    Broadcast across **multiple instances**: a connection lives on **one** process. Instance A cannot write to instance B’s sockets. Events publish to **Redis pub/sub** (or NATS, or a dedicated bus). Every instance subscribes and forwards to **its** local connections. Presence maps are local; the bus is global. Sticky sessions help reconnects; they are not a substitute for the bus.
+
+    In production the preference is SSE if the client only listens; WebSockets if both sides speak. Cap per-instance connections and scale the fleet.
+
+    The common pitfall is emitting only in-process: it works on one box, silent on the other three. Also no ping so the load balancer kills idle sockets, or storing fan-out in local memory with no bus. Scale-out without pub/sub is a demo.
+
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="be-design-webhook-ingest">
+    <AccordionTrigger>20. Design exercise: a webhook ingestion endpoint that must survive a 10x traffic spike without losing events or falling over.</AccordionTrigger>
+    <AccordionContent>
+
+    Thesis: **acknowledge fast, persist durable, process async**. The ingest endpoint is a shock absorber, not the business workflow. A 10x spike is a queue problem that should already exist, not a reason to make the POST smarter.
+
+    Design:
+
+    - `POST /webhooks/:source` verifies the **signature** first; unknown senders never touch storage
+    - treat the provider’s **delivery id** as an idempotency key
+    - in the request the **raw body** is written to something durable — SQS, Kinesis, or a `webhook_events` row — **then** return **2xx**
+    - workers parse, validate, apply, and mark processed; retries are at-least-once so apply is **idempotent**
+    - on a 10x spike, ingest scales horizontally and the **queue** absorbs; workers scale on queue depth, not inbound RPS. The HTTP tier stays cheap: auth, write, ack
+    - backpressure workers, not the provider, when possible; if the provider retries on 5xx, a falling-over app becomes a **retry storm**
+
+    Fail closed if the durable write itself is down: return 503 so the provider retries later, never 200 on an in-memory buffer.
+
+    The common pitfall is returning 200 **before** persist — crash equals lost events. The other is doing CRM sync, emails, and domain workflows **in the request** so the spike takes down the API and the provider’s retries amplify it. Ingest is a write-ahead log. Everything else is a consumer.
+
+    </AccordionContent>
+
+  </AccordionItem>
+</Accordion>
+
+<br />
