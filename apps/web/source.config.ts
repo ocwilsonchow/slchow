@@ -20,6 +20,7 @@ export const docs = defineCollections({
       .enum([
         "frontend",
         "backend",
+        "system-design",
         "ai",
         "security",
         "devops",

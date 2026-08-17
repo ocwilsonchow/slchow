@@ -88,7 +88,7 @@ category: full-stack
       - **Cache-aside**: the app reads Redis, on miss loads the DB and fills the cache. This is the usual production choice; the app owns TTL and invalidation. **Read-through**: the cache library loads on miss — convenient, less control. **Write-through**: every write hits cache and DB before success. **Write-behind**: write the cache, flush the DB later — fast writes; **durability** is the trade.
       - **Cache stampede** is a hot key expiring and a thousand requests missing together. Prevention: **singleflight** or a lock so one request fills; **stale-while-revalidate**; probabilistic early expiry; a tiny in-process cache in front of Redis for the hottest keys.
       - The production default is cache-aside with explicit TTLs, versioned keys, and invalidation on write when freshness matters. A permission decision is never cached under a key that omits user or tenant.
-      - **Failure:** stampede plus caching **transient failures** for a long TTL, or treating a dependency 500 as a cached "not found." Write-behind on money is another. Stampede is "every client was synchronized on expiry."
+      - **Failure:** stampede plus caching **transient failures** for a long TTL, or treating a dependency 500 as a cached "not found." Write-behind on money is another. Stampede is "every client was synchronized on expiry." Full map: [Caching in System Design](/notes/caching-in-system-design).
 
     </AccordionContent>
   </AccordionItem>

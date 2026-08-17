@@ -2,7 +2,7 @@
 title: System Design 裡的 Message Queues
 description: 為什麼工作要離開 request cycle —— brokers、delivery semantics、idempotent consumers，以及隨之而來的 failure modes
 date: 2026-08-17
-category: backend
+category: system-design
 ---
 
 Request cycle 不適合放慢、突發、或必須在這個 process 掛掉之後還活著的工作。**Message queue** 是 producer 與 consumer 之間的 durable buffer。HTTP handler 做完 authenticate、persist intent、enqueue，然後返回 **202**。

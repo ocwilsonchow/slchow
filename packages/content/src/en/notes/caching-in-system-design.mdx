@@ -1,0 +1,308 @@
+---
+title: Caching in System Design
+description: Why reads leave the database — cache-aside, eviction, invalidation, stampedes, hot keys, and the failure modes that follow
+date: 2026-08-17
+category: system-design
+---
+
+A **cache** is a faster, smaller copy. Disk is about a millisecond. RAM is about a hundred nanoseconds. Caching trades storage and invalidation for latency and load. The database remains the source of truth. The cache is a hint that can be wrong.
+
+This note follows [Evan's walkthrough](https://www.youtube.com/watch?v=1NngTUYPdpI). The statement model is [Core SQL Concepts](/notes/core-sql-concepts). HTTP and CDN reuse in this stack is [Understanding Next.js in Depth](/notes/understanding-next-js-in-depth). This note is the application cache.
+
+<br />
+
+---
+
+## Pattern Map
+
+| Pattern | Who talks to the DB | Reach for it when |
+| --- | --- | --- |
+| Cache-aside | The app, on miss | Default. Only requested keys live in Redis |
+| Write-through | The cache, synchronously | Reads must be fresh and slower writes are acceptable |
+| Write-behind | The cache, later | High write throughput; some loss is acceptable |
+| Read-through / CDN | The cache, on miss | A proxy fills itself — CDN edges, not Hono + Redis |
+
+<br />
+
+---
+
+## 1. Why a cache exists
+
+Name the bottleneck first. A cache without one is complexity with a TTL.
+
+<br />
+
+- **Load.** A read-heavy path that is taking Postgres down. Profile fetches, a homepage feed, a join that rebuilds on every request.
+- **Latency.** A non-functional that the disk path cannot meet. Memory sits closer to the CPU; the query does not.
+- **Cost of compute.** A personalized feed that joins posts, follows, likes. Cache the result for sixty seconds. Do not recompute it for every scroll.
+
+<br />
+
+**Failure:** dropping Redis in front of every table because "we always cache." The write path gets a dual-write. The read path gets stale keys. Postgres was never the problem.
+
+<br />
+
+---
+
+## 2. Where it lives
+
+Four places. The production default for application data is **external**.
+
+<br />
+
+```mermaid
+flowchart LR
+  client[Client] --> cdn[CDN]
+  cdn --> hono[Hono]
+  hono --> redis[Redis]
+  redis --> postgres[Postgres]
+```
+
+<br />
+
+| Layer | What it buys | What it costs |
+| --- | --- | --- |
+| **External** (Redis, Memcached) | Shared across replicas. One miss fills every Hono process. | A network hop. Another component to run. |
+| **In-process** | No hop. Fastest. Config, tiny lookup tables, a hot key in front of Redis. | Each replica has its own copy. Not coherent. Dies with the process. |
+| **CDN** | Network latency, not disk vs RAM. Media, public assets, sometimes public HTML. | Shared cache. Private responses need `Vary` and usually do not belong here. |
+| **Client** | The request never leaves the device. HTTP cache, `localStorage`, on-device. | Least control. Stale is the user's problem until they sync. |
+
+<br />
+
+- All Hono tasks share one Redis. Once one replica fills a key, the others reuse it. That is why external is the default.
+- In-process is the right extra layer for something every request needs and almost never changes — feature flags, a country table — or as a shield in front of a hot Redis key. It is not a substitute for Redis in a fleet.
+- A CDN is read-through at the edge. Origin is S3 or the API. The common interview and production use is images, video segments, static files. [Understanding Next.js in Depth](/notes/understanding-next-js-in-depth) is the HTTP/CDN story in this repo. Browser storage is [Local Storage, Session Storage, and Cookies](/notes/browser-storage-localstorage-sessionstorage-cookies).
+
+<br />
+
+**Failure:** an in-process map as the only cache, then scaling to two ECS tasks. Replica A has the new profile. Replica B still has the old one. Local cache is a performance hint, not a source of truth.
+
+<br />
+
+---
+
+## 3. Cache-aside
+
+The app owns the cache. Check Redis first. Hit: return. Miss: load Postgres, fill Redis, return. Only keys that were actually requested occupy memory.
+
+<br />
+
+```ts title="src/lib/cache.ts"
+async function getProfile(orgId: string, userId: string) {
+  const key = `profile:${orgId}:${userId}`
+  const hit = await redis.get(key)
+  if (hit) return JSON.parse(hit)
+
+  const row = await db.query.profiles.findFirst({
+    where: and(eq(profiles.organizationId, orgId), eq(profiles.id, userId)),
+  })
+  if (row) await redis.set(key, JSON.stringify(row), "EX", 60)
+  return row
+}
+```
+
+<br />
+
+- This is the production default. Redis does not need a write-through adapter. Hono talks to both. If Redis is down, reads fall through to Postgres — slower, still correct.
+- The miss is the expensive path: DB + fill + return. That is the point of keeping the cache warm, not a reason to pick another architecture.
+- The app owns TTL and invalidation. That control is why cache-aside wins over a library that hides the miss.
+
+<br />
+
+**Failure:** filling on miss without a TTL, then never deleting the key. The cache becomes a second, unbounded, stale database.
+
+<br />
+
+---
+
+## 4. Write-through, write-behind, read-through
+
+Cache-aside is how this stack reads. The other three change who writes, and when the database hears about it.
+
+<br />
+
+| Pattern | Write path | Trade |
+| --- | --- | --- |
+| **Write-through** | App (or library) writes cache **and** DB before success | Fresh reads. Slower writes. Dual-write. Cache fills with keys nobody reads. |
+| **Write-behind** | Write the cache; flush the DB later, often in batches | Fast writes. **Durability** is the trade. Cache crash before flush is loss. |
+| **Read-through** | App talks only to the cache; the cache loads the DB on miss | Cache-aside with the cache as proxy. How a CDN fills. Needs a library Redis does not provide. |
+
+<br />
+
+- Redis and Memcached do not do write-through natively. A library (or your own two writes) has to. Two writes is a dual-write: cache succeeds, DB fails, or the reverse. Perfect consistency across both is the same problem the [outbox](/notes/message-queues-in-system-design) exists to avoid on the queue path.
+- Write-behind belongs on analytics and counters where a lost batch is acceptable. View counts buffered in Redis and flushed to Postgres are this pattern. Invoices are not.
+- Read-through is the CDN miss: edge fetches origin, stores, returns. For Hono + Redis, cache-aside is the same idea without the adapter.
+
+<br />
+
+**Failure:** write-behind on money. Treating Redis as a write-through engine it is not, then wondering why a crash lost the only copy of the write.
+
+<br />
+
+---
+
+## 5. Keys, TTL, eviction
+
+Memory is smaller than the dataset. Something has to leave. Name the key before naming the policy.
+
+<br />
+
+- The key is the identity of the cached value: `profile:${orgId}:${userId}`, not `user:${userId}`. A permission decision is never cached under a key that omits user or tenant. Isolation that lives only in Hono is one forgotten filter away from a leak — [Building a Multi-Tenant Backend with Hono, Better Auth, Drizzle, and Postgres RLS](/notes/multi-tenant-backend-drizzle-hono-better-auth).
+- **LRU** evicts what has not been touched. It is the usual default. **LFU** evicts what is rarely touched, even if it was touched a second ago — right when a few keys dominate. **FIFO** is simple and rarely right. The LRU implementation is [Common Algorithms](/notes/common-algorithms).
+- **TTL** is a freshness bound, not an eviction policy that replaces LRU. Sessions, feeds, API responses get a clock. LRU still decides what leaves when the set is full *before* the clock fires.
+- Version the key when the payload shape changes (`profile:v2:...`). Invalidating "all profiles" by scanning Redis is a confession the key was too wide.
+
+<br />
+
+**Failure:** caching `canEdit:${docId}` without `userId` or `organizationId`. Every principal shares one decision. The cache did not leak. The key did.
+
+<br />
+
+---
+
+## 6. Invalidation
+
+Most systems read the cache and write the database. That window is stale data. There is no perfect fix. Freshness is a product choice.
+
+<br />
+
+```mermaid
+flowchart LR
+  write[Write Postgres] --> invalidate["DEL key"]
+  read[Read] --> redis[Redis]
+  redis -->|hit| stale[Maybe stale]
+  redis -->|miss| postgres[Postgres]
+  postgres --> fill[SET key]
+```
+
+<br />
+
+- **Invalidate on write.** `UPDATE` the row, `DEL` the key. The next read misses and fills. Prefer **delete** over update-in-place: a concurrent miss can reload the old row and `SET` it back after your write.
+- **Short TTL** when some staleness is fine. A newsfeed at 60 seconds. A profile picture at five minutes. Say the bound out loud.
+- **Accept eventual** for feeds, counts, search. The person who just saved still needs read-your-writes — return the written entity in the `POST`, or read the primary for a short window. The cache is for everyone else.
+
+<br />
+
+**Failure:** `SET` the new value in Redis from the writer while a miss that started before the `COMMIT` writes the old row back. Delete the key. Let cache-aside refill.
+
+<br />
+
+---
+
+## 7. Stampede
+
+A popular key expires. For one second every request misses. One query becomes a hundred thousand. The database is the herd.
+
+<br />
+
+- **Singleflight / request coalescing.** The first miss loads Postgres. The rest wait and read the fill. Across replicas, a short Redis lock (`SET key:lock NX EX 5`) so only one process rebuilds.
+- **Cache warming.** Refresh the homepage at 55s so the 60s TTL never fires. Warming helps TTL expiry. It does not help invalidate-on-write — that miss is the point.
+- **Stale-while-revalidate.** Serve the old value past a soft TTL while one request refreshes. Block only past a hard TTL.
+- **TTL jitter.** Do not expire every feed key on the same second. A random spread so related keys do not miss together.
+
+<br />
+
+**Failure:** stampede plus caching a **transient failure** for a long TTL — a dependency 500 stored as `"not found"`. The next minute every client is sure the profile does not exist. Stampede is "every client was synchronized on expiry."
+
+<br />
+
+---
+
+## 8. Hot keys
+
+One key takes almost all the traffic. The cluster hit rate looks fine. One shard is on fire. Caching scales reads. It does not make Taylor Swift infinite.
+
+<br />
+
+- **Replicate the hot key** across shards so Hono can pick any replica. The rest of the keyspace stays partitioned.
+- **In-process in front of Redis** for the handful of keys that would otherwise saturate a node. The app memory absorbs repeats; Redis sees a miss storm only on cold start or eviction.
+- A hot key is the same shape as a hot row. Redis did not create it. It concentrated it.
+
+<br />
+
+**Failure:** adding Redis and calling the read path solved because p99 dropped — except for one `profile:` key that now melts a single node at peak. The bottleneck moved. It did not vanish.
+
+<br />
+
+---
+
+## 9. What not to cache
+
+Not everything that is slow should be remembered.
+
+<br />
+
+- **Secrets and session tokens** in a shared cache without the same controls as the source. Crash dumps, `KEYS *`, a replica that should not see them.
+- **Authorization** under a key that omits the principal. Cache a rendered public document. Do not cache "may this user edit it."
+- **Private HTML and JSON on a shared CDN.** `Vary` is required and often still wrong. Personalized or tenant-scoped payloads stay off the edge. The Next.js note is the `Vary` and Cache Components path.
+- **Negative transients.** A 404 that is a 404 can be cached briefly. A 503 cannot.
+
+<br />
+
+**Failure:** a CDN that caches a JSON response meant to be private, or an in-process map that grows with every `organizationId` until the task OOMs. Memory does not leak because Redis has LRU. It leaks because **this process** held a reference.
+
+<br />
+
+---
+
+## Recap Q&A
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="cache-when">
+    <AccordionTrigger>1. When should a read leave the database for a cache?</AccordionTrigger>
+    <AccordionContent>
+
+      - Name the bottleneck first: a **read-heavy** path straining Postgres, an **expensive** join or feed, a latency bound the disk path cannot meet.
+      - Cache what is read often, changes slowly enough, and is expensive to fetch or compute. Not every table.
+      - The database remains the source of truth. The cache is a faster, smaller copy.
+      - **Failure:** a cache with no bottleneck — dual-writes on the write path and stale keys on the read path, while Postgres was never the problem.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="cache-aside">
+    <AccordionTrigger>2. What is cache-aside, and when do the other three patterns win?</AccordionTrigger>
+    <AccordionContent>
+
+      - **Cache-aside**: the app checks Redis, on miss loads Postgres and fills. Only requested keys occupy memory. If Redis is down, reads fall through. This is the production default.
+      - **Write-through**: cache and DB before success — fresh reads, slower writes, dual-write. **Write-behind**: write the cache, flush later — fast writes; **durability** is the trade. **Read-through**: the cache loads on miss, the way a CDN fills.
+      - Redis does not do write-through natively. Analytics counters may write-behind. Invoices may not.
+      - **Failure:** write-behind on money, or treating Redis as a write-through engine it is not.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="cache-invalidate">
+    <AccordionTrigger>3. How do you keep the cache from serving a value the database already replaced?</AccordionTrigger>
+    <AccordionContent>
+
+      - Most systems read the cache and write the database. That window is stale. Freshness is a product choice, not a checkbox.
+      - **Invalidate on write** — `DEL` the key, let cache-aside refill. Prefer delete over update-in-place. **Short TTL** when some staleness is fine. **Accept eventual** for feeds and counts; give the writer read-your-writes another way.
+      - **Failure:** `SET` from the writer while a concurrent miss writes the old row back. Delete the key.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="cache-stampede">
+    <AccordionTrigger>4. What is a cache stampede, and how do you stop it?</AccordionTrigger>
+    <AccordionContent>
+
+      - A popular key expires and a thousand requests miss together. One query becomes the herd. The database is the victim.
+      - **Singleflight** so one miss fills and the rest wait. Across replicas, a short lock. **Warm** TTL keys before they die. **Stale-while-revalidate**. **Jitter** so related keys do not expire on the same second.
+      - **Failure:** caching a transient 500 as "not found" for a long TTL. Stampede is "every client was synchronized on expiry."
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="cache-hot">
+    <AccordionTrigger>5. What is a hot key, and why does a good hit rate not save you?</AccordionTrigger>
+    <AccordionContent>
+
+      - One key takes almost all the traffic. Cluster hit rate looks fine. One shard is on fire. Caching scales reads. It does not make one profile infinite.
+      - **Replicate** the hot key across shards. Put a tiny **in-process** cache in front of Redis for that handful of keys.
+      - A permission decision is never cached under a key that omits user or tenant. Private JSON does not belong on a shared CDN.
+      - **Failure:** adding Redis and calling the path solved because p99 dropped, except for one key that now melts a node.
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>

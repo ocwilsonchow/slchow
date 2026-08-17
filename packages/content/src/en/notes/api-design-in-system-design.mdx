@@ -1,0 +1,332 @@
+---
+title: API Design in System Design
+description: Why the contract comes before the boxes — REST, resources, idempotency, pagination, versioning, and the failure modes that follow
+date: 2026-08-17
+category: system-design
+---
+
+The **API** is how clients name work. Pick a protocol, name the resources, say how data goes in and comes back. Gateways, caches, and retries believe those names. Draw the contract before the boxes.
+
+This note follows [Evan's walkthrough](https://www.youtube.com/watch?v=DQ57zYedMdQ). The typed Hono path is [Backend APIs with Hono, Drizzle, Zod OpenAPI, and SST](/notes/backend-apis-hono-sst). This note is the contract.
+
+<br />
+
+---
+
+## Pattern Map
+
+| Pattern | Shape | Reach for it when |
+| --- | --- | --- |
+| REST | Resources + HTTP methods | Default public contract. URLs, CDNs, many languages |
+| GraphQL | One endpoint, client-shaped queries | Web and mobile need different slices of the same graph |
+| gRPC | Procedures over HTTP/2 + protobuf | Internal service-to-service, type-safe, streaming |
+| SSE / WebSockets | Persistent connection | Notifications, chat, live boards — not a third CRUD style |
+
+<br />
+
+---
+
+## 1. Why the contract exists
+
+Clients retry. Caches and API Gateway believe method semantics. A timeout is not a negative acknowledgment.
+
+<br />
+
+- Name **resources** before drawing boxes. Events, tickets, bookings — not `createBooking`.
+- A **stateless** request carries what the server needs. Conversational server state is a replica that cannot scale.
+- GET that writes, POST that is treated as retry-safe, a cache that stores a private JSON body — those are the contract lying.
+
+<br />
+
+**Failure:** labeling a POST-everything RPC "REST," then being surprised when retries, caches, and gateways behave badly.
+
+<br />
+
+---
+
+## 2. REST vs GraphQL vs RPC
+
+**REST** is the production default for a public HTTP API. The others earn their keep.
+
+<br />
+
+```mermaid
+flowchart LR
+  client[Client] --> rest["REST / Hono"]
+  rest --> postgres[Postgres]
+  rest -.-> grpc["gRPC optional"]
+  grpc --> inventory[Inventory service]
+```
+
+<br />
+
+- **REST.** Resources at URLs. `GET /invoices/{id}` is cacheable. A Java partner does not need a GraphQL runtime. This stack's public surface is REST through Hono.
+- **GraphQL.** One endpoint; the client names the fields. Right when mobile wants a thin event and the dashboard wants venue + tickets in one round trip. The cost is schema, authz per field, and **N+1** unless DataLoader batches. Do not default to it.
+- **gRPC.** Action-shaped: `checkPermission(userId, resource)`. Binary + HTTP/2. Generated clients. Internal hops between booking, payment, and inventory — not the mobile URL. Public REST, internal RPC is a normal split.
+- **Realtime** is a persistent connection. SSE if the server is the only publisher; WebSockets if both sides speak. It is not REST with a longer timeout.
+
+<br />
+
+**Failure:** GraphQL as a public surface with unbounded queries and no persisted-query allowlist. One nested request becomes the N-plus-one and the outage.
+
+<br />
+
+---
+
+## 3. Resources
+
+REST resources are **things**, plural nouns. Actions live in the method, not the path.
+
+<br />
+
+```text
+GET    /events
+GET    /events/{id}
+GET    /events/{id}/tickets
+POST   /events/{id}/bookings
+GET    /bookings/{id}
+```
+
+<br />
+
+- **Nest** when the parent is required: `/events/{id}/tickets` does not make sense without the event. **Query** when the filter is optional: `/tickets?eventId=123&section=VIP`.
+- **Path** identifies the resource. **Query** modifies the retrieval — filter, sort, page. **Body** is the payload you create or replace. Sensitive and large data does not belong in the URL.
+
+<br />
+
+```ts title="src/routes/bookings.ts"
+app.post("/events/:eventId/bookings", async (c) => {
+  const { eventId } = c.req.valid("param")
+  const notify = c.req.query("notify") === "true"
+  const body = c.req.valid("json") // tickets, payment_method
+  // ...
+})
+```
+
+<br />
+
+**Failure:** `/createBooking` and `/getEventById`. The gateway cannot cache a GET it cannot name. The next engineer adds a second verb.
+
+<br />
+
+---
+
+## 4. Methods and idempotency
+
+**Idempotency** is the effect on server state: N identical requests leave the resource as the first one did. **Safe** is stricter — the client is not requesting a change.
+
+<br />
+
+| Method | Safe | Idempotent | Use |
+| --- | --- | --- | --- |
+| GET | Yes | Yes | Read. No side effects. |
+| PUT | No | Yes | Replace the whole resource, or create at a known id. |
+| DELETE | No | Yes | Remove. A second call may be 404 after 204. |
+| POST | No | No | Create. Each call is a new intent. |
+| PATCH | No | Depends | Partial update. "Set email" is; "append to list" is not. |
+
+<br />
+
+- Clients, proxies, and meshes retry. A timed-out `POST /bookings` without an **idempotency key** is two bookings. The key is a UUID per user intent; same key and body returns the stored 201; same key, different body is **409**.
+- Work that must leave the request cycle — email, webhooks, thumbnails — is **202** plus a queue, not a blocked POST. [Message Queues in System Design](/notes/message-queues-in-system-design).
+
+<br />
+
+**Failure:** treating a timeout as "the server never saw it." The server may have committed. PUT that appends, DELETE that decrements a counter — same method name, not idempotent.
+
+<br />
+
+---
+
+## 5. Status codes
+
+The code is the machine contract. The body is for humans and logs. 4xx is the client's problem. 5xx is yours.
+
+<br />
+
+| Code | Meaning |
+| --- | --- |
+| **200** | OK, body present |
+| **201** | Created, Location of the new resource |
+| **202** | Accepted, not finished — poll or wait for a worker |
+| **204** | OK, no body |
+| **400** | Malformed |
+| **401** | Not authenticated |
+| **403** | Authenticated, not allowed |
+| **404** | Missing, or hidden on purpose |
+| **409** | Conflict — duplicate intent, stale version |
+| **429** | Rate limited |
+| **500** | The handler failed |
+
+<br />
+
+- 401 vs 403 is identity vs permission. Mixing them trains clients to log in again when the answer is "never."
+- Do not invent a 2xx for a validation error so the dashboard stays green.
+
+<br />
+
+**Failure:** 200 with `{ success: false }` so every cache and every retry treats the write as done.
+
+<br />
+
+---
+
+## 6. Pagination
+
+A list that can grow is not a list. It is a window.
+
+<br />
+
+- **Offset** (`?page=2&limit=25` or `OFFSET 25`) is a page number. Easy to jump to page fifty. Postgres still walks the skipped rows. Inserts and deletes shift the window — duplicates or gaps.
+- **Cursor / keyset** returns an opaque token for the last seen row and seeks past `(created_at, id)` on an index. Each page is a range scan, not a discarded prefix. You cannot jump to page fifty. That is the point.
+- Production default: keyset for feeds, search, audit logs. Offset only for small admin screens where a page number is the product. The seek is [Core SQL Concepts](/notes/core-sql-concepts).
+
+<br />
+
+```text
+GET /events?limit=10
+→ { events: [...], next_cursor: "..." }
+
+GET /events?cursor=...&limit=10
+```
+
+<br />
+
+**Failure:** stuffing an offset inside a cursor string and calling it cursor pagination. The skip cost and skipped rows remain.
+
+<br />
+
+---
+
+## 7. Versioning
+
+APIs evolve. Clients do not, on your schedule — especially mobile.
+
+<br />
+
+- Prefer **additive** change: new optional fields, new endpoints. A version cut is a product you then run twice.
+- When a cut is real, **URL versioning** (`/v1/events`) is the explicit default. Easy to route, easy to explain, easy to test in a browser.
+- Header versioning keeps URLs clean and is less obvious. Skip it unless the interviewer or the platform already lives there.
+- This stack's OpenAPI contract is the version you actually ship — [Backend APIs with Hono, Drizzle, Zod OpenAPI, and SST](/notes/backend-apis-hono-sst).
+
+<br />
+
+**Failure:** renaming a field in place because "nobody uses the old name yet." A shipped mobile build does.
+
+<br />
+
+---
+
+## 8. Authn and authz
+
+**Authentication** answers who. **Authorization** answers what they may do. Nothing the client sends is a source of truth for either.
+
+<br />
+
+- **JWT** for user sessions: signed claims, expiry, no lookup on every hop if the verifying key is shared. Revocation is the trade — short TTL, or a denylist.
+- **API keys** for machines: `Authorization: Bearer sk_live_…`, looked up, scoped, rotatable. Users do not manage them. Internal services and partner access do.
+- Check both: valid token, then "does this principal own this booking." Tenant comes from the verified session, not `X-Organization-Id`. [Building a Multi-Tenant Backend with Hono, Better Auth, Drizzle, and Postgres RLS](/notes/multi-tenant-backend-drizzle-hono-better-auth).
+
+<br />
+
+**Failure:** a client-declared `organizationId` the API believes. The query returns another tenant's rows. Encryption in transit did not help.
+
+<br />
+
+---
+
+## 9. Rate limits
+
+Rate limits protect the system from malice and from a loop. They are not a product feature.
+
+<br />
+
+- Put them at the **gateway** or in middleware before the handler opens a pool connection. Return **429** with `Retry-After`.
+- Per-user for authenticated traffic. Per-IP for anonymous. Tighter on the hot write — booking attempts, login, password reset.
+- Algorithm details (fixed window, token bucket) wait until someone asks. The contract is the 429 and which identity you counted.
+
+<br />
+
+**Failure:** limiting only in the Hono handler after a 200ms DB read, or a 429 with no hint so the client retries immediately and becomes the herd.
+
+<br />
+
+---
+
+## 10. Cacheable GET
+
+A **safe** GET may be cached. A GET that creates an order may not. Gateways and CDNs will believe you.
+
+<br />
+
+- `Cache-Control` and `ETag` / `Last-Modified` are how bandwidth is saved. Private or tenant-scoped JSON stays off the shared edge, or uses `Vary` that actually matches the identity.
+- Cache-aside in Redis is the application copy of the same idea. The HTTP cache is someone else's process. [Caching in System Design](/notes/caching-in-system-design).
+
+<br />
+
+**Failure:** a CDN that caches a JSON response meant to be private, or an uncacheable GET that still has side effects so a prefetch books a ticket.
+
+<br />
+
+---
+
+## Recap Q&A
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="api-protocol">
+    <AccordionTrigger>1. When is REST the right default, and when do GraphQL or gRPC win?</AccordionTrigger>
+    <AccordionContent>
+
+      - **REST** is the public HTTP contract: resources at URLs, many languages, CDNs, partners. This stack's Hono surface is REST.
+      - **GraphQL** when web and mobile need different slices of one graph in a single round trip. Own N+1, field authz, and query cost. Do not default to it.
+      - **gRPC** for internal service-to-service: procedures, protobuf, HTTP/2, generated clients. Not the mobile URL.
+      - Realtime is SSE or WebSockets — a persistent connection, not a third CRUD style.
+      - **Failure:** GraphQL as a public surface with unbounded queries. One nested request becomes the outage.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="api-resources">
+    <AccordionTrigger>2. How do you name resources, and where does the data go?</AccordionTrigger>
+    <AccordionContent>
+
+      - Resources are **things**, plural nouns. `/events/{id}/bookings`, not `/createBooking`. Nest when the parent is required; query params when the filter is optional.
+      - **Path** identifies. **Query** modifies retrieval. **Body** is the create/replace payload. Secrets and large data stay out of the URL.
+      - **Failure:** verbs in the path so the gateway cannot cache a GET it cannot name.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="api-idempotency">
+    <AccordionTrigger>3. Why does a retried POST create two bookings?</AccordionTrigger>
+    <AccordionContent>
+
+      - GET, PUT, and DELETE are **idempotent**. POST is not. PATCH depends. A timeout is not a negative acknowledgment — the server may have committed.
+      - Creates carry an **idempotency key**. Same key and body returns the stored 201. Same key, different body is 409. Work that leaves the request is **202** plus a queue.
+      - **Failure:** treating "the client did not hear back" as "the write never happened."
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="api-pagination">
+    <AccordionTrigger>4. Offset or cursor — which list is which?</AccordionTrigger>
+    <AccordionContent>
+
+      - **Offset** is a page number. Easy to jump. Postgres walks skipped rows. Inserts shift the window — duplicates or gaps.
+      - **Cursor / keyset** seeks past `(created_at, id)` on an index. Feeds, search, audit logs. You cannot jump to page fifty.
+      - **Failure:** an offset stuffed inside a cursor string. The skip cost remains.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="api-auth">
+    <AccordionTrigger>5. JWT or API key — who is calling, and what may they do?</AccordionTrigger>
+    <AccordionContent>
+
+      - **Authentication** is who. **Authorization** is what they may do. Check both.
+      - **JWT** for user sessions. **API keys** for machines and partners. Tenant comes from the verified session, not a client header.
+      - **Failure:** believing `organizationId` in JSON. The query returns another tenant's rows.
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>

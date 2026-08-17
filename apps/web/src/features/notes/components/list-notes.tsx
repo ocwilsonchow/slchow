@@ -11,6 +11,7 @@ type ListNotesProps = {
 const CATEGORY_ORDER: ListNoteCategory[] = [
   "frontend",
   "backend",
+  "system-design",
   "ai",
   "security",
   "devops",

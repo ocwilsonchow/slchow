@@ -7,6 +7,7 @@ import { Link } from "@/i18n/navigation"
 export type ListNoteCategory =
   | "frontend"
   | "backend"
+  | "system-design"
   | "ai"
   | "security"
   | "devops"
@@ -53,7 +54,7 @@ export function ListNotesItems({
           </h2>
         </Link>
       )}
-      <ul className="grid list-disc list-outside ml-4 gap-px">
+      <ul className="grid list-disc list-outside ml-4 gap-0.5">
         {visibleNotes.map((page, index) => (
           <li
             key={page.url}

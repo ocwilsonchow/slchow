@@ -107,7 +107,7 @@ Network 是一条 **带可变 delay 的 lossy queue**。
 - **TCP** 试图按顺序交付 bytes。**TLS** 认证对端并加密这条管道。**HTTP** 是叠在上面的 request/response 约定。Timeout 不是 negative acknowledgment。CORS 是 browser policy，不是 server access-control system。Cookies 是 credentials 的 transport，server 仍然必须验证。
 - `fetch` 没有 timeout、API Gateway 坐在 Hono 前面、CDN cache 了一份本该 private 的 JSON response、cookie `Domain` 宽了一档——都会撞上这个模型。Latency 不是平均值。它是 tail。Rendering path 等的是关键 bytes；其他一切都可以等。
 - **Failure：** Client timeout 了，retry 一次 `POST`，并把 timeout 当成「server 从没看见它」。Server 可能已经 committed。现在有两笔 orders、两次 side effects，或两行 rows。Network 并没有以独特方式失败。失败的是「缺失的 response 意味着什么」这个假设。
-- Bytes 如何变成 first paint，见 [Browser 中的 Critical Rendering Path](/notes/critical-rendering-path-in-the-browser)。这套 stack 实际部署的 API 与 edge 形状见 [用 Hono、Drizzle、Zod OpenAPI 与 SST 打造 Backend APIs](/notes/backend-apis-hono-sst)。Cookie lifetime 与 `HttpOnly` 属于 [Local Storage、Session Storage 与 Cookies](/notes/browser-storage-localstorage-sessionstorage-cookies)。
+- Bytes 如何变成 first paint，见 [Browser 中的 Critical Rendering Path](/notes/critical-rendering-path-in-the-browser)。这套 stack 实际部署的 API 与 edge 形状见 [用 Hono、Drizzle、Zod OpenAPI 与 SST 打造 Backend APIs](/notes/backend-apis-hono-sst)。HTTP contract 见 [System Design 里的 API Design](/notes/api-design-in-system-design)。Cookie lifetime 与 `HttpOnly` 属于 [Local Storage、Session Storage 与 Cookies](/notes/browser-storage-localstorage-sessionstorage-cookies)。
 
 <br />
 
@@ -122,7 +122,7 @@ Database 不是一桶 rows。它是一组 **constraints**、**indexes** 与 **tr
 - Index 是让 lookup 变便宜、write 稍微变贵的 data structure。Isolation 是 concurrent transactions 之间的契约——一笔 transaction 被允许看见别人进行中工作的哪些部分。Schema 就是 API。Application 的 `WHERE` clauses 是习惯，不是保证。
 - 这套 stack 用 Postgres、Drizzle 与 row-level security。只活在 Hono 里的 tenant isolation，离 leak 只差一个被忘掉的 filter。在 laptop 上瞬间完成的 query，在 production 里是 sequential scan。没有 transaction 或 constraint 的 read-modify-write，是在等流量到来的 lost update。
 - **Failure：** 两个 requests 读同一行，都 increment，都 write。每笔 transaction 看起来都正确。Counter 跳过了一个数字。Isolation 并没有神秘地失败。这个 pattern 是 check-then-act，而 database 从未被告知要让它 atomic。
-- Isolation 路径见 [用 Hono、Better Auth、Drizzle 与 Postgres RLS 打造 Multi-Tenant 后端](/notes/multi-tenant-backend-drizzle-hono-better-auth)。Statement 模型见 [SQL 核心概念](/notes/core-sql-concepts)。
+- Isolation 路径见 [用 Hono、Better Auth、Drizzle 与 Postgres RLS 打造 Multi-Tenant 后端](/notes/multi-tenant-backend-drizzle-hono-better-auth)。Statement 模型见 [SQL 核心概念](/notes/core-sql-concepts)。Postgres 前面的 read path 见 [System Design 里的 Caching](/notes/caching-in-system-design)。
 
 <br />
 

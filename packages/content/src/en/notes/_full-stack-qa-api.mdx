@@ -16,7 +16,7 @@ category: full-stack
       - Teams most often violate **statelessness** (conversational server state), **cacheability** (uncacheable GET, or GET with side effects), and method semantics — verbs in paths, RPC bodies, GET that writes (a **safety** violation).
       - **HATEOAS** is skipped on purpose for internal product APIs; that is the honest statement.
       - The production default is a resource-oriented HTTP API that is stateless, uses cache headers where GET is safe, and keeps a consistent error envelope. Full hypermedia is not worth it unless the client is a generic agent.
-      - **Failure:** labeling a POST-everything RPC "REST" and then being surprised when retries, caches, and gateways behave badly.
+      - **Failure:** labeling a POST-everything RPC "REST" and then being surprised when retries, caches, and gateways behave badly. Full map: [API Design in System Design](/notes/api-design-in-system-design).
 
     </AccordionContent>
   </AccordionItem>
@@ -30,7 +30,7 @@ category: full-stack
       - By spec, GET, HEAD, PUT, DELETE, OPTIONS, and TRACE are idempotent. POST is not. PATCH is not required to be — a JSON Merge Patch of the same document can be; a JSON Patch `add` to `/-` is not.
       - Clients, proxies, and meshes retry. A timed-out create-payment retried without idempotency is a double-charge.
       - The production default is GET cacheable and side-effect free, PUT and DELETE as true replacements and removals, and never assuming POST is retry-safe without an idempotency key.
-      - **Failure:** a PUT that appends to a collection or a DELETE that decrements a counter — same method name, not idempotent.
+      - **Failure:** a PUT that appends to a collection or a DELETE that decrements a counter — same method name, not idempotent. Full map: [API Design in System Design](/notes/api-design-in-system-design).
 
     </AccordionContent>
   </AccordionItem>
@@ -69,7 +69,7 @@ category: full-stack
       - **Cursor** returns an opaque token for the last seen row and seeks past that key on an indexed sort tuple such as `created_at` plus `id`. Each page is a range scan, not a discarded prefix.
       - Offset degrades on **cost** — Postgres still walks the skipped rows — and **correctness**: inserts and deletes shift the window, so the client sees duplicates or skips.
       - The production default is keyset cursors for feeds, search, and audit logs, and offset only for small admin screens where a page number is the product.
-      - **Failure:** stuffing an offset inside a cursor string and calling it cursor pagination — the skip cost and skipped rows remain.
+      - **Failure:** stuffing an offset inside a cursor string and calling it cursor pagination — the skip cost and skipped rows remain. Full map: [API Design in System Design](/notes/api-design-in-system-design).
 
     </AccordionContent>
   </AccordionItem>
@@ -121,7 +121,7 @@ category: full-stack
       - **GraphQL** is the right choice when one product BFF serves web and mobile that need different slices of a nested graph. A dashboard that loads a project, members, and avatars in one query is the case to defend — then own query cost, persisted queries, and authz per field.
       - **tRPC** (or any typed RPC) is the right choice when client and server are TypeScript in the same repo, the API is not a public product, and the win is shared types. An internal admin app talking to a Node API is that case.
       - The production default is not to expose tRPC to third parties, and not to start a partner API in GraphQL unless the query shape is the product.
-      - **Failure:** GraphQL as a public surface with unbounded queries and no persisted-query allowlist — one nested request becomes the N-plus-one and the outage.
+      - **Failure:** GraphQL as a public surface with unbounded queries and no persisted-query allowlist — one nested request becomes the N-plus-one and the outage. Full map: [API Design in System Design](/notes/api-design-in-system-design).
 
     </AccordionContent>
   </AccordionItem>

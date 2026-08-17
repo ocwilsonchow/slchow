@@ -107,7 +107,7 @@ A network is a **lossy queue with variable delay**.
 - **TCP** tries to deliver bytes in order. **TLS** authenticates the other end and encrypts the pipe. **HTTP** is a request/response convention on top. A timeout is not a negative acknowledgment. CORS is a browser policy, not a server access-control system. Cookies are a transport for credentials the server must still verify.
 - This shows up in `fetch` with no timeout, in API Gateway sitting in front of Hono, in a CDN that caches a JSON response meant to be private, and in a cookie `Domain` that is one notch too wide. Latency is not an average. It is a tail. The rendering path waits on the critical bytes; everything else can wait.
 - **Failure:** a client times out, retries a `POST`, and the timeout is treated as “the server never saw it.” The server may have committed. There are now two orders, two side effects, or two rows. The network did not fail uniquely. The assumption about what a missing response means failed.
-- How bytes become a first paint is [The Critical Rendering Path in the Browser](/notes/critical-rendering-path-in-the-browser). The API and edge shape deployed in this stack is [Backend APIs with Hono, Drizzle, Zod OpenAPI, and SST](/notes/backend-apis-hono-sst). Cookie lifetime and `HttpOnly` belong with [Local Storage, Session Storage, and Cookies](/notes/browser-storage-localstorage-sessionstorage-cookies).
+- How bytes become a first paint is [The Critical Rendering Path in the Browser](/notes/critical-rendering-path-in-the-browser). The API and edge shape deployed in this stack is [Backend APIs with Hono, Drizzle, Zod OpenAPI, and SST](/notes/backend-apis-hono-sst). The HTTP contract is [API Design in System Design](/notes/api-design-in-system-design). Cookie lifetime and `HttpOnly` belong with [Local Storage, Session Storage, and Cookies](/notes/browser-storage-localstorage-sessionstorage-cookies).
 
 <br />
 
@@ -122,7 +122,7 @@ A database is not a bucket of rows. It is a set of **constraints**, **indexes**,
 - An index is a data structure that makes a lookup cheap and a write a little more expensive. Isolation is the contract between concurrent transactions — what one transaction is allowed to see of someone else’s in-flight work. The schema is the API. Application `WHERE` clauses are a habit, not a guarantee.
 - This stack uses Postgres, Drizzle, and row-level security. Tenant isolation that lives only in Hono is one forgotten filter away from a leak. A query that is instant on a laptop is sequential scan in production. A read-modify-write without a transaction or a constraint is a lost update waiting for traffic.
 - **Failure:** two requests read the same row, both increment, both write. Each transaction looks correct. The counter skipped a number. Isolation did not fail mysteriously. The pattern is check-then-act, and the database was never told to make it atomic.
-- The isolation path is [Building a Multi-Tenant Backend with Hono, Better Auth, Drizzle, and Postgres RLS](/notes/multi-tenant-backend-drizzle-hono-better-auth). The statement model is [Core SQL Concepts](/notes/core-sql-concepts).
+- The isolation path is [Building a Multi-Tenant Backend with Hono, Better Auth, Drizzle, and Postgres RLS](/notes/multi-tenant-backend-drizzle-hono-better-auth). The statement model is [Core SQL Concepts](/notes/core-sql-concepts). The read path in front of Postgres is [Caching in System Design](/notes/caching-in-system-design).
 
 <br />
 

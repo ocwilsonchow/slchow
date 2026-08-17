@@ -23,6 +23,7 @@ type DocsEntry = DocMethods &
     category?:
       | "frontend"
       | "backend"
+      | "system-design"
       | "ai"
       | "security"
       | "devops"

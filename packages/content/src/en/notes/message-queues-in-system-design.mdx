@@ -2,7 +2,7 @@
 title: Message Queues in System Design
 description: Why work leaves the request cycle — brokers, delivery semantics, idempotent consumers, and the failure modes that follow
 date: 2026-08-17
-category: backend
+category: system-design
 ---
 
 A request cycle is the wrong place for work that is slow, bursty, or must survive this process dying. A **message queue** is a durable buffer between a producer and a consumer. The HTTP handler authenticates, persists the intent, enqueues, and returns **202**.
