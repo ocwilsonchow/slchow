@@ -4,6 +4,7 @@ import { type InferPageType, loader, type PageData } from "fumadocs-core/source"
 import { toFumadocsSource } from "fumadocs-mdx/runtime/server"
 import type { DocData, DocMethods } from "fumadocs-mdx/runtime/types"
 import { fumadocsI18n } from "@/lib/fumadocs-i18n"
+import { isSstProduction } from "@/lib/stage"
 
 const NOTES_CATEGORY = "notes"
 
@@ -39,10 +40,10 @@ export type NotesFolderNode = {
 
 export type NotesNode = NotesPostNode | NotesFolderNode
 
-/** Drafts: MDX files whose basename starts with `_` are on disk but unpublished. */
+/** Drafts: `_`-prefixed MDX is unpublished on production; visible on local and other stages. */
 export function isHiddenSourcePage(path: string) {
   const file = path.split("/").pop() ?? ""
-  return file.startsWith("_")
+  return file.startsWith("_") && isSstProduction()
 }
 
 function isNotesFolder(node: Node): node is Folder {
@@ -137,7 +138,7 @@ export function getCategoryStaticParams(category: string) {
       (param) =>
         param.slug[0] === category &&
         param.slug.length > 1 &&
-        !param.slug.at(-1)?.startsWith("_")
+        !isHiddenSourcePage(param.slug.at(-1) ?? "")
     )
     .map((param) => ({
       locale: param.locale,

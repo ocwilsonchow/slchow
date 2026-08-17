@@ -4,7 +4,10 @@ import type { ComponentProps } from "react"
 export function h1({ className, ...props }: ComponentProps<"h1">) {
   return (
     <h1
-      className={cn("font-semibold tracking-tight text-content-ink", className)}
+      className={cn(
+        "font-semibold tracking-tight text-content-ink text-xl",
+        className
+      )}
       {...props}
     />
   )
@@ -13,7 +16,10 @@ export function h1({ className, ...props }: ComponentProps<"h1">) {
 export function h2({ className, ...props }: ComponentProps<"h2">) {
   return (
     <h2
-      className={cn("font-semibold tracking-tight text-content-ink", className)}
+      className={cn(
+        "font-semibold tracking-tight text-content-ink text-lg",
+        className
+      )}
       {...props}
     />
   )
@@ -22,7 +28,10 @@ export function h2({ className, ...props }: ComponentProps<"h2">) {
 export function h3({ className, ...props }: ComponentProps<"h3">) {
   return (
     <h3
-      className={cn("font-semibold tracking-tight text-content-ink", className)}
+      className={cn(
+        "font-semibold tracking-tight text-content-ink text-base",
+        className
+      )}
       {...props}
     />
   )
