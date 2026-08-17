@@ -52,20 +52,12 @@ SwiftUI's loop has no Fiber, no JS thread, and no Yoga. A `View` is a **value**.
 
 <br />
 
-```mermaid
-flowchart TD
-  subgraph rnFlow [React Native]
-    RNState["useState setter"] --> RNRender["React render Fibers"]
-    RNRender --> RNCommit["Commit"]
-    RNCommit --> RNFabric["Fabric mount"]
-    RNFabric --> RNHost["UIView"]
-  end
-  subgraph swiftFlow [SwiftUI]
-    SwiftState["State or Observable mutation"] --> SwiftInvalidate["Invalidate views"]
-    SwiftInvalidate --> SwiftBody["Recompute body"]
-    SwiftBody --> SwiftDiff["Diff by identity"]
-    SwiftDiff --> SwiftHost["Update UIView"]
-  end
+```text
+React Native:
+  useState setter → React render (Fibers) → Commit → Fabric mount → UIView
+
+SwiftUI:
+  State or Observable mutation → Invalidate views → Recompute body → Diff by identity → Update UIView
 ```
 
 <br />

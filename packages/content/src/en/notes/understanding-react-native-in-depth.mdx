@@ -41,23 +41,17 @@ React defines components, reconciliation, Suspense, and concurrent rendering. It
 
 <br />
 
-```mermaid
-flowchart TD
-  Source["Expo app source"] --> Prebuild["Prebuild, config plugins, autolinking"]
-  Source --> Metro["Metro + Hermes"]
-  Prebuild --> NativeBin["iOS / Android binary"]
-  Metro --> Hermes["Hermes: React render"]
-  Hermes --> JSI["JSI"]
-  JSI --> Fabric["Fabric shadow tree"]
-  Fabric --> Yoga["Yoga layout"]
-  Yoga --> Mount["Mount on UI thread"]
-  Mount --> Host["UIView / android.view.View"]
-  Host --> Events["Native events and C++ state"]
-  Events --> JSI
-  JSI --> Modules["TurboModules and Expo Modules"]
-  Modules --> Device["Camera, SecureStore, network"]
-  EAS["EAS Build / Updates"] --> NativeBin
-  EAS --> Metro
+```text
+Expo app source
+  ├→ Prebuild, config plugins, autolinking → iOS / Android binary
+  └→ Metro + Hermes
+       → Hermes: React render
+       → JSI ─┬→ Fabric shadow tree → Yoga layout → Mount on UI thread → UIView / android.view.View
+              │                         → Native events and C++ state → JSI
+              └→ TurboModules and Expo Modules → Camera, SecureStore, network
+
+EAS Build / Updates → iOS / Android binary
+EAS Build / Updates → Metro + Hermes
 ```
 
 <br />
@@ -419,7 +413,7 @@ These questions beat adding `memo` until a list stops dropping frames.
 
 Common misconceptions:
 
-- **React Native is not a WebView.** A WebView is a browser origin inside the app. Fabric mounts platform views. Mixing the two is a security boundary, covered in [Frontend Security in Next.js and React Native](/notes/frontend-security-nextjs-react-native).
+- **React Native is not a WebView.** A WebView is a browser origin inside the app. Fabric mounts platform views. Mixing the two is a security boundary, covered in [Security in React Native](/notes/security-in-react-native).
 - **Expo Go is not how production works.** Production is your EAS binary plus, optionally, an OTA JavaScript bundle that fits that binary.
 - **Managed does not mean no native.** Expo generates the native project. The app is still UIKit and Android views. Config plugins are native edits. Expo Modules are native code.
 - **The Bridge is not how JS talks to native on SDK 57.** JSI is the contract. Interop may exist for old modules.
@@ -455,7 +449,7 @@ React Native does not replace React's rendering model. Expo does not replace Rea
 
 Keep rendering pure because Fabric may restart it. Keep strings in `Text` because the host tree is not a DOM. Keep scroll and gestures off the React state tree when the UI thread already owns them. Keep config plugins in the binary, not in an EAS Update. Use native navigators so transitions do not re-enter JavaScript.
 
-For React's own queues, lanes, and commit phase, continue with [Understanding React in Depth](/notes/understanding-react-in-depth). For the web contrast, see [The Critical Rendering Path in the Browser](/notes/critical-rendering-path-in-the-browser). For Next.js as the analogous orchestrator on the server/document side, see [Understanding Next.js in Depth](/notes/understanding-next-js-in-depth). For the device threat model (extractable bundle, SecureStore, WebView bridges), see [Frontend Security in Next.js and React Native](/notes/frontend-security-nextjs-react-native).
+For React's own queues, lanes, and commit phase, continue with [Understanding React in Depth](/notes/understanding-react-in-depth). For the web contrast, see [The Critical Rendering Path in the Browser](/notes/critical-rendering-path-in-the-browser). For Next.js as the analogous orchestrator on the server/document side, see [Understanding Next.js in Depth](/notes/understanding-next-js-in-depth). For the device threat model (extractable bundle, SecureStore, WebView bridges), see [Security in React Native](/notes/security-in-react-native).
 
 Primary references: Expo's [SDK 57 changelog](https://expo.dev/changelog/sdk-57), and React Native's [architecture overview](https://reactnative.dev/architecture/overview), [render pipeline](https://reactnative.dev/architecture/render-pipeline), [threading model](https://reactnative.dev/architecture/threading-model), and [New Architecture](https://reactnative.dev/docs/the-new-architecture/landing-page) notes. Public Expo and React Native contracts are the durable API. Shadow-node internals and Metro details are debugging evidence for today's toolchain, not an API to hard-code.
 

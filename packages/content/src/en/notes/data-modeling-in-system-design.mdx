@@ -1,0 +1,269 @@
+---
+title: Data Modeling in System Design
+description: Why the schema comes before the boxes — stores, keys, relationships, indexes, normalization, sharding, and the failure modes that follow
+date: 2026-08-17
+category: system-design
+---
+
+**Data modeling** is deciding what entities exist, how they are identified, and how they connect. Tables, keys, relationships. The bar is a schema that serves the APIs — not 3NF theater. Postgres is the default.
+
+This note follows [Evan's walkthrough](https://www.youtube.com/watch?v=TUcPS6dsWx4). The statement model is [Core SQL Concepts](/notes/core-sql-concepts). Access patterns come from [API Design in System Design](/notes/api-design-in-system-design). The denormalized copy lives in [Caching in System Design](/notes/caching-in-system-design). Tenant rows are [Building a Multi-Tenant Backend with Hono, Better Auth, Drizzle, and Postgres RLS](/notes/multi-tenant-backend-drizzle-hono-better-auth). This note is the schema.
+
+<br />
+
+---
+
+## Pattern Map
+
+| Pattern | Shape | Reach for it when |
+| --- | --- | --- |
+| SQL / Postgres | Tables, FKs, ACID | Default. Clear entities and relationships |
+| Document | Nested JSON documents | Schema actually evolves; nested blobs that would explode into joins |
+| Key-value | Exact key lookup | Cache, sessions, hot feed — in front of Postgres, not instead of it |
+| Wide-column | Column families, append | Massive writes, time-series, telemetry |
+| Graph | Nodes and edges | Almost never. Even Facebook uses MySQL |
+
+<br />
+
+---
+
+## 1. Why the model exists
+
+The schema is the API the database will enforce. Draw it next to the database box, not as a separate interview.
+
+<br />
+
+- It shows up twice. Early: the **nouns** — auction, item, bid, user. Later, while serving each endpoint: columns, keys, indexes that make that GET cheap.
+- A reasonable schema sets up reads, writes, consistency, and growth. A sloppy one forces the rest of the design to apologize.
+- You are not in a data-engineering loop. Name the entities, the identifiers, and the queries. Then move.
+
+<br />
+
+**Failure:** spending the hour on 3NF proofs, or skipping the schema so sharding and caching have nothing to stand on.
+
+<br />
+
+---
+
+## 2. Pick the store
+
+**Postgres** is the production default. The others earn their keep.
+
+<br />
+
+```text
+APIs
+  → Postgres → Redis cache     (default)
+  → Document                   (evolving schema)
+  → Wide-column                (append-heavy)
+  → Graph                      (almost never)
+```
+
+<br />
+
+- **Relational.** Tables, foreign keys, ACID. Users, posts, likes. `JOIN` is how "posts by people I follow" is a query, not a product. Strong consistency — payments, inventory, a unique email — is why this stack stays on Postgres. Scale is replicas, pooling, caching, then sharding — not a different database.
+- **Document.** JSON blobs, flexible fields. Embed posts inside the user so one load returns both. Joins are weaker, so you denormalize. The usual reason is an evolving schema. A scoped design has already frozen the requirements. Unless the interviewer names rapid field change, skip it.
+- **Key-value.** Exact match. `user:123`, `feed:123`. Fast, blind. You duplicate values across keys because you cannot join. Redis in front of Postgres is the production use. DynamoDB is a key-value store with document features — still not the default source of truth here.
+- **Wide-column.** Rows with different columns, append-heavy. Telemetry, IoT, time-series. A queue and a batch into Postgres often beat reaching for Cassandra in an interview.
+- **Graph.** Nodes and edges. A social network sounds like one. Facebook still models that graph in MySQL. Reaching for Neo4j because the problem has a follow edge is a junior tell.
+
+<br />
+
+**Failure:** picking Mongo or a graph store to look sophisticated, then needing joins and a unique constraint the store will not enforce.
+
+<br />
+
+---
+
+## 3. Three drivers
+
+Volume, access patterns, consistency. Everything after this section is a tool for these three.
+
+<br />
+
+- **Volume** decides where rows can live. Millions of users may split user data and post data across stores. The schemas then have to name how they point at each other.
+- **Access patterns** are the important one. They come from the APIs. `GET /users/{id}/posts` is an index or a denormalized list. Ask what query each endpoint runs.
+- **Consistency** decides how tightly coupled the data can be. A charge stays in one ACID database. A like on a feed can land a second later in Redis.
+
+<br />
+
+**Failure:** a schema that ignores how `GET /users/{id}/posts` actually queries, then wondering why the join is the outage.
+
+<br />
+
+---
+
+## 4. Entities, keys, relationships
+
+System-generated ids. Foreign keys that make cardinality obvious. Domain names, not "Entity A."
+
+<br />
+
+```text
+organizations: id (PK), name
+users:         id (PK), email UNIQUE
+memberships:   organization_id (FK), user_id (FK)   -- PK (organization_id, user_id)
+invoices:      id (PK), organization_id (FK), created_at
+```
+
+<br />
+
+```text
+users ──────────┐
+                ├── memberships
+organizations ──┤
+                └── invoices
+```
+
+<br />
+
+- A **primary key** uniquely identifies the row. Use `id`, not email — business data changes. A **foreign key** is a field that points at another table's PK. `invoices.organization_id → organizations.id` is how a tenant owns a row.
+- Write the FKs. One user, many memberships is then obvious. A likes table with `user_id` and `post_id` is many-to-many without saying the words. Reciting 1:N vs N:M is how candidates stall.
+- One-to-one is rare. Two tables that always load together are often one table.
+- This stack puts `organization_id` on every tenant-owned row. Isolation that lives only in Hono is one forgotten filter away from a leak.
+
+<br />
+
+**Failure:** email as the primary key, then a user changes address and every child row is orphaned — or a sequential integer guessed across tenants and called access control.
+
+<br />
+
+---
+
+## 5. Constraints
+
+The schema is the API. Application `WHERE` clauses are a habit, not a guarantee.
+
+<br />
+
+- `NOT NULL`, `UNIQUE`, `CHECK` — email is unique, qty is positive, status is one of a known set. Postgres refuses the bad row. Hono never sees it.
+- Foreign keys enforce **referential integrity**: no invoice for an organization that does not exist. They cost a lookup on write. At huge write scale some shops drop them and enforce in the app. Name that trade-off. Do not skip FKs by default.
+- Drizzle can type the column. It cannot replace a constraint the database does not have.
+
+<br />
+
+**Failure:** uniqueness only in the Hono handler. Two concurrent POSTs both read "free," both insert. The unique email is now two rows.
+
+<br />
+
+---
+
+## 6. Normalization
+
+Store each fact in one place. Duplicate only for a named read that indexes cannot save.
+
+<br />
+
+- **Normalized:** user data lives in `users`. Posts hold `user_id`. A rename is one `UPDATE`. A join loads the name with the post.
+- **Denormalized:** `username` copied onto every post. The feed has no join. A rename is every post the user ever wrote. Miss one, and the system lies.
+- Start normalized. Index first. If the read is still the incident — a feed, a dashboard aggregate — denormalize. Prefer the copy in **Redis** so Postgres stays clean. Event logs and audit snapshots are the other honest exception: they capture a point in time on purpose.
+- The statement model, and when a join is the product, is [Core SQL Concepts](/notes/core-sql-concepts).
+
+<br />
+
+**Failure:** username on every post, then a rename that rewrites the table — or denormalizing first because "joins are slow," with no query that needed it.
+
+<br />
+
+---
+
+## 7. Indexes
+
+An index makes a lookup cheap and a write a little more expensive. Work backwards from the APIs.
+
+<br />
+
+- `GET /users/{id}/posts` needs an index on `posts.user_id`. Sorted by recency: composite `(user_id, created_at)`. Comments for a post: `comments.post_id`. Do not index a column because it exists.
+- A B-Tree is the default. Equality and a range ride it. A sequential scan that was instant on a laptop is the missing index in production.
+- Too many indexes slow every `INSERT`. Cover the endpoints you named. Leave the rest until `EXPLAIN` asks.
+
+<br />
+
+**Failure:** no index on the foreign key the list endpoint filters, then paging with `OFFSET` over a sequential scan. The API was fine. The access path was not.
+
+<br />
+
+---
+
+## 8. Sharding
+
+Shard only after the data no longer fits one node. The key is usually permanent.
+
+<br />
+
+- Shard by the **primary access pattern** so related rows land together. Posts by `post_id`, comments on the same shard as their post — a post and its comments is one database, not a scatter-gather.
+- Hash the key for even spread. Time-range sharding for a write-heavy table puts every insert on **today's** shard. That is a hot shard. Time-range belongs on archival and analytics, not the OLTP write path.
+- Cross-shard joins are the cost. A timeline of followed users, sharded by `user_id`, queries many nodes and merges. Cache the merge, or pick a different key, or accept the fan-out. Do not discover this after the data is split.
+- Partitioning inside one Postgres is not sharding. One primary, one WAL. The difference is [Core SQL Concepts](/notes/core-sql-concepts) and the database Q&A.
+
+<br />
+
+**Failure:** sharding by `created_at` so all writes hit today's shard, or sharding posts and comments on different keys so every detail page is a cross-shard join.
+
+<br />
+
+---
+
+## Recap Q&A
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="model-store">
+    <AccordionTrigger>1. When is Postgres the right default, and when do the other stores win?</AccordionTrigger>
+    <AccordionContent>
+
+      - **Postgres** is the default: tables, foreign keys, ACID, joins. Clear entities and relationships. This stack stays here unless a requirement names another model.
+      - **Document** when the schema actually evolves or nested blobs would explode into joins. A scoped interview has already frozen the fields.
+      - **Key-value** for exact lookup — Redis in front of Postgres, not instead of it. **Wide-column** for append-heavy telemetry. **Graph** almost never; Facebook still uses MySQL.
+      - **Failure:** Mongo or Neo4j to look sophisticated, then needing a join and a unique constraint the store will not enforce.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="model-drivers">
+    <AccordionTrigger>2. What three factors drive the schema?</AccordionTrigger>
+    <AccordionContent>
+
+      - **Volume** — where rows can physically live, and whether user data and post data must split.
+      - **Access patterns** — the important one. They come from the APIs. Each endpoint is a query that needs an index, a denormalized list, or a cache.
+      - **Consistency** — a charge stays in one ACID database; a like on a feed can land a second later.
+      - **Failure:** a schema that ignores how `GET /users/{id}/posts` actually queries.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="model-keys">
+    <AccordionTrigger>3. How do you show relationships without reciting cardinality?</AccordionTrigger>
+    <AccordionContent>
+
+      - A **primary key** uniquely identifies the row. System-generated `id`, not email. A **foreign key** points at another table's PK.
+      - Write the FKs. `posts.user_id → users.id` is one user, many posts. A likes table with both keys is many-to-many. The words are optional.
+      - `UNIQUE`, `NOT NULL`, `CHECK` belong on the table. Application `WHERE` is a habit.
+      - **Failure:** email as PK, or uniqueness only in Hono so two concurrent inserts both succeed.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="model-normalize">
+    <AccordionTrigger>4. When do you index, denormalize, or cache?</AccordionTrigger>
+    <AccordionContent>
+
+      - Start **normalized**. Index the columns the APIs filter and sort — `GET /users/{id}/posts` → `(user_id, created_at)`.
+      - **Denormalize** only for a named read that indexes cannot save. Prefer the copy in **Redis** so Postgres stays the source of truth.
+      - Event logs and audit snapshots capture a point in time on purpose. Username copied onto every post is the other kind.
+      - **Failure:** denormalizing first because "joins are slow," with no query that needed it.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="model-shard">
+    <AccordionTrigger>5. How do you pick a shard key?</AccordionTrigger>
+    <AccordionContent>
+
+      - Shard only after the data no longer fits one node. The key is usually permanent.
+      - Shard by the **primary access pattern**. Collocate related rows — comments with their post — so a common read is not a cross-shard join.
+      - Hash for even spread. Time-range on a write-heavy table is a **hot shard**. Cross-shard work is the cost; name it before the split.
+      - **Failure:** sharding by `created_at` so all writes hit today, or splitting posts and comments onto different keys.
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>

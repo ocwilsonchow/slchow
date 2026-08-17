@@ -72,15 +72,8 @@ Postgres does not run a statement left to right as written. It runs a **logical*
 
 <br />
 
-```mermaid
-flowchart LR
-  fromJoin["FROM / JOIN"] --> whereFilter[WHERE]
-  whereFilter --> groupBy[GROUP_BY]
-  groupBy --> havingFilter[HAVING]
-  havingFilter --> selectList[SELECT]
-  selectList --> windowFn[WINDOW]
-  windowFn --> orderBy[ORDER_BY]
-  orderBy --> limitN[LIMIT]
+```text
+FROM / JOIN → WHERE → GROUP BY → HAVING → SELECT → WINDOW → ORDER BY → LIMIT
 ```
 
 <br />

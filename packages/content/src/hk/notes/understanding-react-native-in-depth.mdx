@@ -41,23 +41,17 @@ React 定義 components、reconciliation、Suspense 與 concurrent rendering。�
 
 <br />
 
-```mermaid
-flowchart TD
-  Source["Expo app source"] --> Prebuild["Prebuild, config plugins, autolinking"]
-  Source --> Metro["Metro + Hermes"]
-  Prebuild --> NativeBin["iOS / Android binary"]
-  Metro --> Hermes["Hermes: React render"]
-  Hermes --> JSI["JSI"]
-  JSI --> Fabric["Fabric shadow tree"]
-  Fabric --> Yoga["Yoga layout"]
-  Yoga --> Mount["Mount on UI thread"]
-  Mount --> Host["UIView / android.view.View"]
-  Host --> Events["Native events and C++ state"]
-  Events --> JSI
-  JSI --> Modules["TurboModules and Expo Modules"]
-  Modules --> Device["Camera, SecureStore, network"]
-  EAS["EAS Build / Updates"] --> NativeBin
-  EAS --> Metro
+```text
+Expo app source
+  ├→ Prebuild, config plugins, autolinking → iOS / Android binary
+  └→ Metro + Hermes
+       → Hermes: React render
+       → JSI ─┬→ Fabric shadow tree → Yoga layout → Mount on UI thread → UIView / android.view.View
+              │                         → Native events and C++ state → JSI
+              └→ TurboModules and Expo Modules → Camera, SecureStore, network
+
+EAS Build / Updates → iOS / Android binary
+EAS Build / Updates → Metro + Hermes
 ```
 
 <br />
@@ -419,7 +413,7 @@ React 永遠不會 rewrite 已經跑過的 handler 裡的 `pressed` binding。�
 
 常見誤解：
 
-- **React Native 不是 WebView。** WebView 是應用裡的 browser origin。Fabric mount platform views。混用兩者是 security boundary，見 [Frontend Security in Next.js and React Native](/notes/frontend-security-nextjs-react-native)。
+- **React Native 不是 WebView。** WebView 是應用裡的 browser origin。Fabric mount platform views。混用兩者是 security boundary，見 [React Native 裡的 Security](/notes/security-in-react-native)。
 - **Expo Go 不是 production 怎麼運作。** Production 是你的 EAS binary，加上可選的、fit 那份 binary 的 OTA JavaScript bundle。
 - **Managed 不代表沒有 native。** Expo generate native project。應用仍是 UIKit 與 Android views。Config plugins 是 native edits。Expo Modules 是 native code。
 - **Bridge 不是 SDK 57 上 JS 與 native 怎麼說話。** JSI 是契約。Interop 可能為舊 modules 存在。
@@ -455,7 +449,7 @@ React Native 不會取代 React 的 rendering model。Expo 不會取代 React Na
 
 保持 rendering pure，因為 Fabric 可能 restart 它。把字串放在 `Text` 裡，因為 host tree 不是 DOM。當 UI thread 已經擁有 scroll 與 gestures 時，把它們移出 React state tree。把 config plugins 放在 binary 裡，不要放在 EAS Update 裡。用 native navigators，這樣 transitions 不會 re-enter JavaScript。
 
-至於 React 自己的 queues、lanes 與 commit phase，繼續看 [深入理解 React](/notes/understanding-react-in-depth)。Web 對照見 [Browser 裡的 Critical Rendering Path](/notes/critical-rendering-path-in-the-browser)。Server/document 側對應的 orchestrator 見 [深入理解 Next.js](/notes/understanding-next-js-in-depth)。Device threat model（extractable bundle、SecureStore、WebView bridges）見 [Frontend Security in Next.js and React Native](/notes/frontend-security-nextjs-react-native)。
+至於 React 自己的 queues、lanes 與 commit phase，繼續看 [深入理解 React](/notes/understanding-react-in-depth)。Web 對照見 [Browser 裡的 Critical Rendering Path](/notes/critical-rendering-path-in-the-browser)。Server/document 側對應的 orchestrator 見 [深入理解 Next.js](/notes/understanding-next-js-in-depth)。Device threat model（extractable bundle、SecureStore、WebView bridges）見 [React Native 裡的 Security](/notes/security-in-react-native)。
 
 主要參考：Expo 的 [SDK 57 changelog](https://expo.dev/changelog/sdk-57)，以及 React Native 的 [architecture overview](https://reactnative.dev/architecture/overview)、[render pipeline](https://reactnative.dev/architecture/render-pipeline)、[threading model](https://reactnative.dev/architecture/threading-model) 與 [New Architecture](https://reactnative.dev/docs/the-new-architecture/landing-page) notes。公開的 Expo 與 React Native 契約是耐用的 API。Shadow-node internals 與 Metro 細節是今天 toolchain 的 debugging 證據，不是要 hard-code 的 API。
 

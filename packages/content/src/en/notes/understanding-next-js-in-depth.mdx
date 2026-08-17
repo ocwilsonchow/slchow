@@ -41,18 +41,17 @@ React defines components, reconciliation, Suspense, Server Components, and hydra
 
 <br />
 
-```mermaid
-flowchart TD
-  Source["Application source"] --> Compiler["Compiler and bundler"]
-  Compiler --> Artifacts["Route manifests and runtime bundles"]
-  Request["HTTP request or navigation"] --> Runtime["Next.js runtime"]
-  Artifacts --> Runtime
-  Runtime --> React["React server renderer"]
-  React --> Outputs["HTML, RSC payload, and client chunks"]
-  Outputs --> Browser["Browser and client router"]
-  Host["Deployment adapter and infrastructure"] --> Runtime
-  Host --> Cache["Shared cache, assets, and functions"]
-  Runtime --> Cache
+```text
+Application source
+  → Compiler and bundler
+  → Route manifests and runtime bundles ─┐
+HTTP request or navigation ──────────────┼→ Next.js runtime
+Deployment adapter and infrastructure ───┘
+  ├→ React server renderer
+  │    → HTML, RSC payload, and client chunks
+  │    → Browser and client router
+  └→ Shared cache, assets, and functions
+Deployment adapter also → Shared cache, assets, and functions
 ```
 
 <br />
@@ -99,12 +98,9 @@ app/
 
 <br />
 
-```mermaid
-flowchart LR
-  Root["Root layout"] --> Locale["Locale layout"]
-  Locale --> Notes["Notes segment"]
-  Notes --> SlugA["slug: a"]
-  Notes -. "next navigation patch" .-> SlugB["slug: b"]
+```text
+Root layout → Locale layout → Notes segment → slug: a
+Notes segment ─(next navigation patch)→ slug: b
 ```
 
 <br />
@@ -119,24 +115,20 @@ A document request matches a route, resolves caches, renders an **RSC payload**,
 
 <br />
 
-```mermaid
-sequenceDiagram
-  participant Browser
-  participant Router as Next client router
-  participant Server as Next server
-  participant React as React server renderer
+```text
+Document request:
+  Browser → Next server: GET document URL
+  Next server → React: Render matched route tree
+  React → Next server: RSC stream
+  Next server → Browser: HTML + embedded RSC data + chunk references
+  Browser: Paint HTML and hydrate client boundaries
 
-  Browser->>Server: GET document URL
-  Server->>React: Render matched route tree
-  React-->>Server: RSC stream
-  Server-->>Browser: HTML + embedded RSC data + chunk references
-  Browser->>Browser: Paint HTML and hydrate client boundaries
-
-  Router->>Server: Request destination RSC payload
-  Server->>React: Render destination tree
-  React-->>Server: RSC tree patch
-  Server-->>Router: text/x-component response
-  Router->>Router: Merge patch and reconcile
+Client navigation:
+  Next client router → Next server: Request destination RSC payload
+  Next server → React: Render destination tree
+  React → Next server: RSC tree patch
+  Next server → Next client router: text/x-component response
+  Next client router: Merge patch and reconcile
 ```
 
 <br />
@@ -170,13 +162,10 @@ export function Quantity() {
 
 <br />
 
-```mermaid
-flowchart LR
-  Page["page.tsx server module"] --> Product["ProductDetails server module"]
-  Page --> ClientRef["Quantity client reference"]
-  ClientRef -. "manifest mapping" .-> ClientModule["Quantity browser module"]
-  ClientModule --> ReactDOM["react-dom client runtime"]
-  Page --> DB["Database-only module"]
+```text
+page.tsx server module → ProductDetails server module
+page.tsx server module → Quantity client reference ─(manifest mapping)→ Quantity browser module → react-dom client runtime
+page.tsx server module → Database-only module
 ```
 
 <br />
@@ -326,16 +315,16 @@ async function getProduct(id: string) {
 
 <br />
 
-```mermaid
-flowchart TD
-  Read["Read getProduct(id)"] --> Memo["Request memoization"]
-  Memo --> FunctionCache["Function cache key"]
-  FunctionCache --> RSC["Rendered RSC result"]
-  RSC --> RouterCache["Browser Router Cache"]
-  Mutation["Server Action mutation"] --> Tag["updateTag or revalidateTag"]
-  Tag --> FunctionCache
-  Mutation --> Refresh["Refresh affected route tree"]
-  Refresh --> RSC
+```text
+Read getProduct(id)
+  → Request memoization
+  → Function cache key
+  → Rendered RSC result
+  → Browser Router Cache
+
+Server Action mutation
+  ├→ updateTag or revalidateTag → Function cache key
+  └→ Refresh affected route tree → Rendered RSC result
 ```
 
 <br />
@@ -352,21 +341,15 @@ Self-hosting turns this into a distributed-systems problem. A process-local cach
 
 <br />
 
-```mermaid
-sequenceDiagram
-  participant Viewport
-  participant Router
-  participant Server
-  participant React
-
-  Viewport->>Router: Link becomes eligible for prefetch
-  Router->>Server: Prefetch route or segment RSC data
-  Server-->>Router: Cacheable RSC patch
-  Router->>Router: Store prefetch entry
-  Viewport->>Router: User activates Link
-  Router->>Router: Reuse entry or request missing data
-  Router->>React: Apply server tree patch in a transition
-  React->>React: Preserve matching layouts and client state
+```text
+Viewport → Router: Link becomes eligible for prefetch
+Router → Server: Prefetch route or segment RSC data
+Server → Router: Cacheable RSC patch
+Router: Store prefetch entry
+Viewport → Router: User activates Link
+Router: Reuse entry or request missing data
+Router → React: Apply server tree patch in a transition
+React: Preserve matching layouts and client state
 ```
 
 <br />
@@ -555,20 +538,12 @@ A Next.js build is not "bundle the app." It classifies modules, emits multiple g
 
 <br />
 
-```mermaid
-flowchart TD
-  Source["app and shared modules"] --> Classify["Classify routes and directives"]
-  Classify --> ServerGraph["Server module graph"]
-  Classify --> ClientGraph["Client module graph"]
-  Classify --> EdgeGraph["Optional edge/proxy graph"]
-  ServerGraph --> ServerChunks["Server route and RSC chunks"]
-  ClientGraph --> BrowserChunks["Browser chunks and CSS"]
-  EdgeGraph --> EdgeChunks["Proxy/edge handlers"]
-  Classify --> Manifests["Route, client-reference, and build manifests"]
-  ServerChunks --> Adapter["Deployment adapter"]
-  BrowserChunks --> Adapter
-  EdgeChunks --> Adapter
-  Manifests --> Adapter
+```text
+app and shared modules → Classify routes and directives
+  ├→ Server module graph → Server route and RSC chunks ─┐
+  ├→ Client module graph → Browser chunks and CSS ──────┼→ Deployment adapter
+  ├→ Optional edge/proxy graph → Proxy/edge handlers ───┤
+  └→ Route, client-reference, and build manifests ──────┘
 ```
 
 <br />
@@ -631,28 +606,21 @@ A product page shows shared catalog fields cached for all users, personalized re
 
 <br />
 
-```mermaid
-sequenceDiagram
-  participant Browser
-  participant CDN
-  participant Server
-  participant Cache
-  participant DB
-
-  Browser->>CDN: GET /products/123
-  CDN->>Server: Document request on miss
-  Server->>Cache: Read cached ProductDetails
-  Cache-->>Server: Shared product fields
-  Server-->>Browser: Static shell HTML + RSC + fallbacks
-  Browser->>Browser: Paint title and hydrate client boundaries
-  Server->>DB: Fetch recommendations with session
-  Server-->>Browser: Stream personalized region
-  Browser->>Server: Prefetch sibling product via Link
-  Server-->>Browser: RSC patch stored in Router Cache
-  Browser->>Server: POST rename Server Action
-  Server->>DB: Authorized update
-  Server->>Cache: updateTag product 123
-  Server-->>Browser: Action result and refreshed route data
+```text
+Browser → CDN: GET /products/123
+CDN → Server: Document request on miss
+Server → Cache: Read cached ProductDetails
+Cache → Server: Shared product fields
+Server → Browser: Static shell HTML + RSC + fallbacks
+Browser: Paint title and hydrate client boundaries
+Server → DB: Fetch recommendations with session
+Server → Browser: Stream personalized region
+Browser → Server: Prefetch sibling product via Link
+Server → Browser: RSC patch stored in Router Cache
+Browser → Server: POST rename Server Action
+Server → DB: Authorized update
+Server → Cache: updateTag product 123
+Server → Browser: Action result and refreshed route data
 ```
 
 <br />
@@ -720,7 +688,7 @@ Next.js does not replace React's rendering model. It decides which React trees e
 
 Compile-time classification, request-time coordination, and client navigation are three different phases. Most production incidents come from collapsing them into one vague idea of "the page rendered."
 
-For React's own render/commit/hydration machinery, continue with [Understanding React in Depth](/notes/understanding-react-in-depth). For browser pixels and main-thread constraints, see [The Critical Rendering Path in the Browser](/notes/critical-rendering-path-in-the-browser). For this repository's AWS/OpenNext delivery path, see [Using SST to Manage AWS Infrastructure and DevOps](/notes/using-sst-for-aws-infra-and-devops). For React 19 APIs that Server Components build on, see [What's New in React 19](/notes/react-19-new-features).
+For React's own render/commit/hydration machinery, continue with [Understanding React in Depth](/notes/understanding-react-in-depth). For browser pixels and main-thread constraints, see [The Critical Rendering Path in the Browser](/notes/critical-rendering-path-in-the-browser). For this repository's AWS/OpenNext delivery path, see [Using SST to Manage AWS Infrastructure and DevOps](/notes/using-sst-for-aws-infra-and-devops). For React 19 APIs that Server Components build on, see [What's New in React 19](/notes/react-19-new-features). For the origin threat model (cookies, Server Actions, cache vs privacy), see [Security in Next.js](/notes/security-in-next-js).
 
 The implementation observations in this article correspond to **Next.js 16.2.11** App Router behavior as installed in this repository. Public conventions — file names, documented directives, cache APIs, and supported runtime functions — are the durable contract. Manifest layouts, internal headers, and exact Flight bytes are debugging evidence for today's toolchain, not an API to hard-code.
 

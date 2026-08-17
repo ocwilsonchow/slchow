@@ -41,11 +41,8 @@ a.inc === Counter.prototype.inc // true
 
 <br />
 
-```mermaid
-flowchart LR
-  newCall["new Counter()"] --> inst[instance]
-  inst -->|"[[Prototype]]"| proto["Counter.prototype"]
-  proto -->|"[[Prototype]]"| objProto["Object.prototype"]
+```text
+new Counter() → instance -([[Prototype]])→ Counter.prototype -([[Prototype]])→ Object.prototype
 ```
 
 <br />

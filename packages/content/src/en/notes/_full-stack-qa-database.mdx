@@ -74,7 +74,7 @@ category: full-stack
       - **1NF:** atomic cells, no repeating groups. Three NDCs do not belong in one text column split in the app. A line-item table is the repeating group done properly.
       - **2NF:** non-key attributes depend on the **whole** composite key. If the key is `(order_id, sku)` and `customer_email` lives on the line, that email belongs on `orders`. **3NF:** no transitive dependence. `department_id` determines `department_name`; the name is not copied onto every order unless there is a reason. (ZIP does **not** uniquely determine city — that example is folklore.)
       - **Deliberate denormalization** is right when the read path is the incident. A pharmacy dashboard that shows fills-per-day per tenant should not join `prescription_fills` to `prescriptions` to `patients` on every page load. A `fill_stats_daily` row keyed by `(organization_id, day)` is kept and updated from the write path or a job.
-      - The update anomaly is accepted and the write is owned: trigger, one transaction that updates both, or a rebuild job that can be rerun. Denormalize when `EXPLAIN` says the join is the product, and keep the normalized tables as the source of truth.
+      - The update anomaly is accepted and the write is owned: trigger, one transaction that updates both, or a rebuild job that can be rerun. Denormalize when `EXPLAIN` says the join is the product, and keep the normalized tables as the source of truth. Full map: [Data Modeling in System Design](/notes/data-modeling-in-system-design).
 
     </AccordionContent>
   </AccordionItem>
@@ -192,7 +192,7 @@ category: full-stack
 
       - **Partitioning** is still one Postgres. A table is split into child partitions — range on `created_at`, list on a status, hash on `organization_id` — and the parent is what the app queries. The win is operational: autovacuum per partition, drop a month of fills with `DROP TABLE`, **partition pruning** so a date-bounded query does not touch old partitions. The failure domain is still one primary, one WAL stream, one backup story.
       - **Sharding** is multiple databases. Routing is by a key — tenant, or hash of patient id — to different primaries. That is how **writes and storage** scale past one machine. Cross-shard joins, unique constraints, and transactions become application problems. Sharding is the move when one primary cannot take the write load or the disk, and a key exists that almost never needs cross-shard work.
-      - **Big enough to partition** is not a row-count slogan. Partition when vacuum, bloat, or bulk delete is the incident, and a **stable partition key** exists that queries actually constrain — usually time. Tens of millions of narrow rows can be fine unpartitioned. A 2M-row patients table is not partitioned "for scale." Indexes and archival come first.
+      - **Big enough to partition** is not a row-count slogan. Partition when vacuum, bloat, or bulk delete is the incident, and a **stable partition key** exists that queries actually constrain — usually time. Tens of millions of narrow rows can be fine unpartitioned. A 2M-row patients table is not partitioned "for scale." Indexes and archival come first. Full map: [Data Modeling in System Design](/notes/data-modeling-in-system-design).
 
     </AccordionContent>
   </AccordionItem>

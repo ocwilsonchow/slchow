@@ -18,35 +18,25 @@ Browser 不會等整頁下載完才一次渲染。它會串流 HTML、發現資�
 
 <br />
 
-```mermaid
-flowchart LR
-  HTML[HTML] --> DOM[DOM]
-  CSS[CSS] --> CSSOM[CSSOM]
-  DOM --> Style[Style]
-  CSSOM --> Style
-  Style --> Layout[Layout]
-  Layout --> Paint[Paint]
-  Paint --> Composite[Compositing]
-  Composite --> Pixels[Pixels]
+```text
+HTML → DOM  ─┐
+             ├→ Style → Layout → Paint → Compositing → Pixels
+CSS  → CSSOM ┘
 ```
 
 <br />
 
-```mermaid
-flowchart TD
-  Nav[Navigation] --> HTMLBytes[HTML bytes arrive]
-  HTMLBytes --> Parse[HTML parser builds DOM]
-  HTMLBytes --> Preload[Preload scanner discovers resources]
-  Preload --> CSSDownload[Download CSS / JS / images]
-  Parse --> CSSOMReady{CSSOM ready?}
-  CSSDownload --> CSSOMReady
-  CSSOMReady -->|No| WaitRender[Cannot paint safely]
-  CSSOMReady -->|Yes| Render[Style → Layout → Paint]
-  Parse --> ScriptBlock{Parser-blocking script?}
-  ScriptBlock -->|Yes| WaitScript[Pause parsing]
-  WaitScript --> ExecJS[Download + execute JS]
-  ExecJS --> Parse
-  ScriptBlock -->|No| Continue[Continue parsing]
+```text
+Navigation → HTML bytes arrive
+  ├─ HTML parser builds DOM
+  │    ├─ CSSOM ready?
+  │    │    No  → Cannot paint safely
+  │    │    Yes → Style → Layout → Paint
+  │    └─ Parser-blocking script?
+  │         Yes → Pause parsing → Download + execute JS → back to parser
+  │         No  → Continue parsing
+  └─ Preload scanner discovers resources → Download CSS / JS / images
+       └─ CSS download also feeds CSSOM ready
 ```
 
 <br />
@@ -92,25 +82,20 @@ CSS 會被解析成 **CSSOM**。Browser 需要適用的 styles，才能決定有
 
 <br />
 
-```mermaid
-sequenceDiagram
-  participant Parser
-  participant Network
-  participant Main as Main thread
+```text
+Classic script:
+  Parser → Network: Discover /legacy.js
+  Parser: Pause HTML parsing
+  Network → Main thread: Script ready
+  Main thread: Execute script
+  Main thread → Parser: Resume parsing
 
-  Note over Parser,Main: Classic script
-  Parser->>Network: Discover /legacy.js
-  Parser--xParser: Pause HTML parsing
-  Network-->>Main: Script ready
-  Main->>Main: Execute script
-  Main->>Parser: Resume parsing
-
-  Note over Parser,Main: defer / module
-  Parser->>Network: Discover /app.js
-  Parser->>Parser: Keep parsing HTML
-  Network-->>Main: Script ready
-  Parser->>Main: DOM complete
-  Main->>Main: Execute deferred scripts
+defer / module:
+  Parser → Network: Discover /app.js
+  Parser: Keep parsing HTML
+  Network → Main thread: Script ready
+  Parser → Main thread: DOM complete
+  Main thread: Execute deferred scripts
 ```
 
 <br />
@@ -137,15 +122,11 @@ for (const card of cards) {
 
 <br />
 
-```mermaid
-flowchart TD
-  Change[Property change] --> Q{Which stage?}
-  Q -->|width / height / top / left| Layout[Layout]
-  Layout --> Paint[Paint]
-  Paint --> Composite[Composite]
-  Q -->|color / background / box-shadow| Paint2[Paint]
-  Paint2 --> Composite
-  Q -->|transform / opacity| CompositeOnly[Composite only]
+```text
+Property change → Which stage?
+  width / height / top / left     → Layout → Paint → Composite
+  color / background / box-shadow → Paint → Composite
+  transform / opacity             → Composite only
 ```
 
 <br />
@@ -163,17 +144,10 @@ JavaScript 與大部分 rendering 工作共用 **main thread**。Browser 不會�
 
 <br />
 
-```mermaid
-flowchart TD
-  Task[Run one task] --> Micro[Drain microtasks]
-  Micro --> Render{Update rendering?}
-  Render -->|Yes| RAF[requestAnimationFrame]
-  RAF --> Style[Style]
-  Style --> Layout[Layout]
-  Layout --> Paint[Paint]
-  Paint --> Composite[Composite]
-  Render -->|No| Next[Next task]
-  Composite --> Next
+```text
+Run one task → Drain microtasks → Update rendering?
+  Yes → requestAnimationFrame → Style → Layout → Paint → Composite → Next task
+  No  → Next task
 ```
 
 <br />
@@ -224,18 +198,14 @@ Client-rendered application 常常要等到 JavaScript、framework startup 與�
 
 <br />
 
-```mermaid
-flowchart LR
-  subgraph CSR["Client render"]
-    C1[HTML shell] --> C2[JS] --> C3[Data] --> C4[Paint]
-  end
+```text
+Client render:
+  HTML shell → JS → Data → Paint
 
-  subgraph SSR["Server render + hydrate"]
-    S1[HTML with content] --> S2[Early paint]
-    S1 --> S3[JS download]
-    S3 --> S4[Hydration]
-    S2 --> S4
-  end
+Server render + hydrate:
+  HTML with content → Early paint
+  HTML with content → JS download → Hydration
+  Early paint → Hydration
 ```
 
 <br />
@@ -253,17 +223,12 @@ flowchart LR
 
 <br />
 
-```mermaid
-flowchart LR
-  Nav[Navigation] --> TTFB[TTFB]
-  TTFB --> Delay[Resource load delay]
-  Delay --> Duration[Resource load duration]
-  Duration --> Render[Element render delay]
-  Render --> LCP[LCP]
+```text
+Navigation → TTFB → Resource load delay → Resource load duration → Element render delay → LCP
 
-  Delay -.->|late discovery / low priority| Fix1[Expose in HTML earlier]
-  Duration -.->|large asset / slow origin| Fix2[Compress / CDN / resize]
-  Render -.->|CSS / fonts / main thread| Fix3[Unblock style and paint]
+Resource load delay:      late discovery / low priority → Expose in HTML earlier
+Resource load duration:   large asset / slow origin     → Compress / CDN / resize
+Element render delay:     CSS / fonts / main thread     → Unblock style and paint
 ```
 
 <br />

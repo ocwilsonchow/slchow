@@ -34,7 +34,7 @@ Name the bottleneck first. A cache without one is complexity with a TTL.
 
 - **Load.** A read-heavy path that is taking Postgres down. Profile fetches, a homepage feed, a join that rebuilds on every request.
 - **Latency.** A non-functional that the disk path cannot meet. Memory sits closer to the CPU; the query does not.
-- **Cost of compute.** A personalized feed that joins posts, follows, likes. Cache the result for sixty seconds. Do not recompute it for every scroll.
+- **Cost of compute.** A personalized feed that joins posts, follows, likes. Cache the result for sixty seconds. Do not recompute it for every scroll. The denormalized feed is the cache; the tables stay normalized. [Data Modeling in System Design](/notes/data-modeling-in-system-design).
 
 <br />
 
@@ -50,12 +50,8 @@ Four places. The production default for application data is **external**.
 
 <br />
 
-```mermaid
-flowchart LR
-  client[Client] --> cdn[CDN]
-  cdn --> hono[Hono]
-  hono --> redis[Redis]
-  redis --> postgres[Postgres]
+```text
+Client → CDN → Hono → Redis → Postgres
 ```
 
 <br />
@@ -166,13 +162,12 @@ Most systems read the cache and write the database. That window is stale data. T
 
 <br />
 
-```mermaid
-flowchart LR
-  write[Write Postgres] --> invalidate["DEL key"]
-  read[Read] --> redis[Redis]
-  redis -->|hit| stale[Maybe stale]
-  redis -->|miss| postgres[Postgres]
-  postgres --> fill[SET key]
+```text
+Write Postgres → DEL key
+
+Read → Redis
+  hit  → Maybe stale
+  miss → Postgres → SET key
 ```
 
 <br />

@@ -12,7 +12,6 @@ Personal site — notes, works, designs, resume, and contact — plus a Hono / M
 - [next-intl](https://next-intl.dev/) for `en` / `hk` / `cn`
 - [Fumadocs](https://www.fumadocs.dev/) MDX for notes, works, and content blocks
 - [Orama](https://orama.com/) (via Fumadocs) for client-side full-text search
-- [Mermaid](https://mermaid.js.org/) for diagrams in MDX
 - [Hono](https://hono.dev/) + [Mastra](https://mastra.ai/) API (agents, workflows, OpenAPI)
 - [Better Auth](https://www.better-auth.com/) + [Drizzle](https://orm.drizzle.team/) / Postgres
 - [TanStack Query](https://tanstack.com/query) + [AI SDK](https://ai-sdk.dev/) on the web client
@@ -50,7 +49,7 @@ sst.config.ts   App entry — currently wires @repo/infra/nextjs
 | Area    | Notes                                                                                                                      |
 | ------- | -------------------------------------------------------------------------------------------------------------------------- |
 | Routes  | Home, resume, notes, works, designs, contact (locale-prefixed)                                                             |
-| Content | Fumadocs MDX from `@repo/content`; Mermaid in notes                                                                        |
+| Content | Fumadocs MDX from `@repo/content`                                                                                          |
 | Search  | ⌘/Ctrl+K; indexes notes, works, and current resume                                                                         |
 | Designs | Album stacks (stills + in-view MP4); synced from `packages/content/design` → `public/design-assets` with 200/320/400/800w variants |
 | Motion  | Lenis smooth scroll + Motion / GSAP-friendly layout                                                                        |

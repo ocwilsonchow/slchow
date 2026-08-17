@@ -23,11 +23,8 @@ A blockchain is a shared ledger that many independent nodes agree on. Once a tra
 
 <br />
 
-```mermaid
-flowchart LR
-  tx[Signed transaction] --> mempool[Mempool]
-  mempool --> block[Included in a block]
-  block --> state[Shared state updated]
+```text
+Signed transaction → Mempool → Included in a block → Shared state updated
 ```
 
 <br />
@@ -44,11 +41,9 @@ A wallet is software (or hardware) that holds cryptographic keys and helps you s
 
 <br />
 
-```mermaid
-flowchart LR
-  privateKey[Private key] --> publicKey[Public key]
-  publicKey --> address[Address]
-  privateKey -->|signs| signature[Transaction signature]
+```text
+Private key → Public key → Address
+Private key -(signs)→ Transaction signature
 ```
 
 <br />
@@ -173,15 +168,12 @@ A **dApp** is an application whose critical logic or ownership lives on-chain.
 
 <br />
 
-```mermaid
-flowchart LR
-  user[User] --> wallet[Wallet]
-  user --> ui[dApp Frontend]
-  ui -->|read state| rpc[RPC Node]
-  ui -->|request signature| wallet
-  wallet -->|signed tx| rpc
-  rpc --> chain[Blockchain]
-  chain --> contracts[Smart Contracts]
+```text
+User → Wallet
+User → dApp Frontend
+dApp Frontend -(read state)→ RPC Node
+dApp Frontend -(request signature)→ Wallet
+Wallet -(signed tx)→ RPC Node → Blockchain → Smart Contracts
 ```
 
 <br />
@@ -199,24 +191,18 @@ A concrete flow many products share:
 
 <br />
 
-```mermaid
-sequenceDiagram
-  participant User
-  participant UI as dApp UI
-  participant Wallet
-  participant Chain as Blockchain
-
-  User->>UI: Open app
-  UI->>Wallet: eth_requestAccounts
-  Wallet-->>UI: address
-  UI->>Chain: balanceOf(address)
-  Chain-->>UI: token balance
-  User->>UI: Deposit
-  UI->>Wallet: approve(protocol, amount)
-  Wallet->>Chain: signed approve tx
-  UI->>Wallet: deposit(amount)
-  Wallet->>Chain: signed deposit tx
-  Chain-->>UI: updated state
+```text
+User → dApp UI: Open app
+dApp UI → Wallet: eth_requestAccounts
+Wallet → dApp UI: address
+dApp UI → Blockchain: balanceOf(address)
+Blockchain → dApp UI: token balance
+User → dApp UI: Deposit
+dApp UI → Wallet: approve(protocol, amount)
+Wallet → Blockchain: signed approve tx
+dApp UI → Wallet: deposit(amount)
+Wallet → Blockchain: signed deposit tx
+Blockchain → dApp UI: updated state
 ```
 
 <br />

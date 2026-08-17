@@ -1,7 +1,4 @@
-import {
-  rehypeCodeDefaultOptions,
-  remarkMdxMermaid,
-} from "fumadocs-core/mdx-plugins"
+import { rehypeCodeDefaultOptions } from "fumadocs-core/mdx-plugins"
 import { pageSchema } from "fumadocs-core/source/schema"
 import { defineCollections, defineConfig } from "fumadocs-mdx/config"
 import { z } from "zod"
@@ -34,7 +31,6 @@ export const docs = defineCollections({
 
 export default defineConfig({
   mdxOptions: {
-    remarkPlugins: [remarkMdxMermaid],
     rehypeCodeOptions: {
       themes: {
         light: "github-light",

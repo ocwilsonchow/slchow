@@ -14,32 +14,18 @@ Production software 不是一叠 libraries。在 React tree、Hono handler 与 P
 
 <br />
 
-```mermaid
-flowchart TB
-  subgraph parallel [Parallel]
-    algo["Algorithms and complexity"]
-  end
+```text
+Parallel:
+  Algorithms and complexity
 
-  subgraph spine [Spine]
-    runtime["Runtime, architecture, memory"]
-    os[Operating systems]
-    conc[Concurrency]
-    net[Networks]
-    db[Databases]
-    dist["Distributed systems"]
-    runtime --> os --> conc
-    conc --> net
-    conc --> db
-    net --> dist
-    db --> dist
-  end
+Spine:
+  Runtime, architecture, memory
+    → Operating systems
+      → Concurrency
+        → Networks → Distributed systems
+        → Databases → Distributed systems
 
-  sec[Security]
-  sec -.-> runtime
-  sec -.-> conc
-  sec -.-> net
-  sec -.-> db
-  sec -.-> dist
+Security cuts across runtime, concurrency, networks, databases, and distributed systems
 ```
 
 <br />
@@ -122,7 +108,7 @@ Database 不是一桶 rows。它是一组 **constraints**、**indexes** 与 **tr
 - Index 是让 lookup 变便宜、write 稍微变贵的 data structure。Isolation 是 concurrent transactions 之间的契约——一笔 transaction 被允许看见别人进行中工作的哪些部分。Schema 就是 API。Application 的 `WHERE` clauses 是习惯，不是保证。
 - 这套 stack 用 Postgres、Drizzle 与 row-level security。只活在 Hono 里的 tenant isolation，离 leak 只差一个被忘掉的 filter。在 laptop 上瞬间完成的 query，在 production 里是 sequential scan。没有 transaction 或 constraint 的 read-modify-write，是在等流量到来的 lost update。
 - **Failure：** 两个 requests 读同一行，都 increment，都 write。每笔 transaction 看起来都正确。Counter 跳过了一个数字。Isolation 并没有神秘地失败。这个 pattern 是 check-then-act，而 database 从未被告知要让它 atomic。
-- Isolation 路径见 [用 Hono、Better Auth、Drizzle 与 Postgres RLS 打造 Multi-Tenant 后端](/notes/multi-tenant-backend-drizzle-hono-better-auth)。Statement 模型见 [SQL 核心概念](/notes/core-sql-concepts)。Postgres 前面的 read path 见 [System Design 里的 Caching](/notes/caching-in-system-design)。
+- Isolation 路径见 [用 Hono、Better Auth、Drizzle 与 Postgres RLS 打造 Multi-Tenant 后端](/notes/multi-tenant-backend-drizzle-hono-better-auth)。Statement 模型见 [SQL 核心概念](/notes/core-sql-concepts)。Schema 本身见 [System Design 里的 Data Modeling](/notes/data-modeling-in-system-design)。Postgres 前面的 read path 见 [System Design 里的 Caching](/notes/caching-in-system-design)。
 
 <br />
 
@@ -167,7 +153,7 @@ Security 是 **trust boundary** 问题：这台机器被允许对那台机器传
 - **Authentication** 回答是谁。**Authorization** 回答他们可以做什么。Client 送来的任何东西都不是 source of truth——不是 JSON 里的 `organizationId`，不是未验证 JWT 里的 role，不是 hidden form field。Browser 是不受信任的 host。React Native bundle 也是。
 - 这适用于上面每一个 node。把其他 tenants 的 data 放进 memory caches、相信 header 的 handlers、没有 `HttpOnly` 的 cookies、某张 table 上缺失的 RLS、能搜到错误 namespace 的 model——都是同一类 bug。Exploit 就是这条边界没检查到的东西。
 - **Failure：** Client 声明它属于哪个 organization，API 相信了。Query 返回另一个 tenant 的 rows。Transit 中的 encryption 帮不上忙。User 被 authenticate 了，然后被允许自己挑 authorization。
-- 这类 failures 见 [Web Security and the OWASP Top 10](/notes/web-security-owasp-top-10)。这套 stack 的两个 hosts 见 [Frontend Security in Next.js and React Native](/notes/frontend-security-nextjs-react-native)。作为 database constraint 的 tenant isolation，见上面的 multi-tenant note。
+- 这类 failures 见 [Web Security and the OWASP Top 10](/notes/web-security-owasp-top-10)。这套 stack 的两个 hosts 见 [Next.js 里的 Security](/notes/security-in-next-js) 与 [React Native 里的 Security](/notes/security-in-react-native)。作为 database constraint 的 tenant isolation，见上面的 multi-tenant note。
 
 <br />
 

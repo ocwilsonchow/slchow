@@ -133,20 +133,12 @@ Observational memory 建模的是人如何記得，以及如何忘記。兩個 a
 
 <br />
 
-```mermaid
-flowchart TD
-  history[Recent messages]
-  observer[Observer]
-  observations[Observation log]
-  reflector[Reflector]
-  model[Agent context]
-
-  history -->|"crosses messageTokens"| observer
-  observer --> observations
-  observations --> model
-  history --> model
-  observations -->|"crosses observationTokens"| reflector
-  reflector --> observations
+```text
+Recent messages → Agent context
+Recent messages
+  -(crosses messageTokens)→ Observer → Observation log → Agent context
+Observation log
+  -(crosses observationTokens)→ Reflector → Observation log
 ```
 
 <br />

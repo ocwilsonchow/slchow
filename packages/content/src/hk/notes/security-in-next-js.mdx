@@ -1,0 +1,298 @@
+---
+title: Next.js 裡的 Security
+description: Next.js App Router 作為 browser origin 如何失敗 —— cookies、RSC、Server Actions、cache vs privacy —— 以及這套 stack 真正 ship 的 defenses
+date: 2026-08-14
+category: security
+---
+
+一份 **Next.js** document 活在 browser **origin** 裡。一塊 React Native screen 活在 **device** 上。兩邊的 UI 都不受信任。兩邊仍然打同一套 Hono / Better Auth API。這篇 note 講 origin。
+
+Category map 見 [Web Security and the OWASP Top 10](/notes/web-security-owasp-top-10)。Device host 見 [React Native 裡的 Security](/notes/security-in-react-native)。這是對 **Next.js 16 App Router** 的防禦性閱讀：failure modes 與 attacker goals，不是 exploits。
+
+<br />
+
+---
+
+## 1. The Host
+
+一次 Next.js request 從 origin 離開，然後遇見 native client 用的同一台 server：
+
+<br />
+
+```text
+Next.js:
+  Document / RSC → HttpOnly cookie → Server Action POST
+Server Action POST → Hono API → Authn then authz
+```
+
+<br />
+
+| | Next.js | React Native |
+| --- | --- | --- |
+| Isolation unit | Browser origin | App ID / keychain access group |
+| Session | `HttpOnly; Secure; SameSite` cookie | SecureStore / Keychain / Keystore |
+| XSS surface | DOM、`dangerouslySetInnerHTML`、`next/script` | WebView 加上你暴露的任何 JS bridge |
+| Secrets | `server-only` modules；`NEXT_PUBLIC_*` 是 public | Binary 裡沒有任何東西是 secret |
+| Deep entry | `searchParams`、open redirects、`router.push` | Custom URL schemes、universal links、push payloads |
+
+<br />
+
+- 兩邊 host 共享同一句謊言：**UI 不是 authorization**。藏一個 button，或在 Client Component 裡檢查 role，並不決定某一行能不能被讀。
+- [深入理解 Next.js](/notes/understanding-next-js-in-depth) 覆蓋 rendering machinery；[Local Storage、Session Storage 與 Cookies](/notes/browser-storage-localstorage-sessionstorage-cookies) 覆蓋為什麼 cookie jar 是不同於 Web Storage 的 primitive。
+
+<br />
+
+---
+
+## 2. The Server/Client Graph
+
+Next.js 把一棵 source tree 編譯成 **數個 module graphs**。`'use client'` 是 bundle boundary，不是 security flag。
+
+- 那個 module import 的一切——以及那些 imports 再 import 的一切——都可以出現在 browser chunk 裡。跨過那條邊界的 secret，是 **build time** 的 leak。
+- `import "server-only"` 把契約寫清楚。Client import 會讓 build 失敗，而不是把 database URL ship 出去。
+- `NEXT_PUBLIC_*` 是 rebuild-time 的 public constant，inline 進 client assets。必須保密的東西在 server 上、在 **runtime** 讀取，來自 SST Secrets 或 function environment。
+- RSC props 穿過同一條邊界 serialize。傳 UI 需要的 **public view**：display name，不是 session、Stripe customer id，或 client 會去「enforce」的 role。
+- React 的 `experimental_taintUniqueValue` 與 `experimental_taintObjectReference` 可以在 tainted secret 即將 serialize 時讓 render 失敗。它們是腰帶。它們不替代拒絕傳這個值。
+
+<br />
+
+```ts
+import "server-only"
+
+export async function getBillingAccount(organizationId: string) {
+  return db.query.billingAccounts.findFirst({
+    where: (table, { eq }) => eq(table.organizationId, organizationId),
+  })
+}
+```
+
+<br />
+
+**Failure：** `'use client'` 放得太高。更肥的 graph 擴大 XSS blast radius：origin 上更多 JavaScript，後面的 Markdown renderer 或 analytics snippet 更有機會在那裡跑。
+
+<br />
+
+---
+
+## 3. Server Actions Are Public POSTs
+
+`'use server'` 不代表「只有這個 form 能呼叫這個」。Build 會建立一個 server reference。Browser POST 那個 reference 加上 serialized arguments。
+
+- 從 security 角度看，action 是一個碰巧會 refresh UI 的 HTTP endpoint。
+- Next.js 加了 transport defenses：same-origin checks、encrypted closed-over values、`serverActions.allowedOrigins`、body-size limits。那些減少 CSRF 與 confused-proxy 情況。它們 **不** 決定這個 session 能不能 rename 這個 product。
+- Bound arguments 與 closed-over IDs 不是 capabilities。Opaque action id 不是 secret。
+- 每次都在 write 旁邊授權，在 parse input 之後。
+
+<br />
+
+```ts
+"use server"
+
+const Input = z.object({
+  id: z.string().uuid(),
+  name: z.string().trim().min(1).max(120),
+})
+
+export async function renameProduct(formData: FormData) {
+  const actor = await requireEditor()
+  const input = Input.parse(Object.fromEntries(formData))
+  await db.product.update({
+    where: { id: input.id, tenantId: actor.tenantId },
+    data: { name: input.name },
+  })
+}
+```
+
+<br />
+
+- `requireEditor()` 在 **server** 上讀 session cookie。渲染 form 的 Client Component 不是 trust decision 的一部分。
+- Form fields 上的 TypeScript 不是 parser。Zod 才是。`where` 上的 tenant scope 是 authorization，不是禮貌 filter。
+- 當 app 坐在 host 不是 public origin 的 reverse proxy 後面時，設 `serverActions.allowedOrigins`。更長的論證在 Next.js note 裡。Security 那句很短：**reachable 就是 callable**。
+
+<br />
+
+---
+
+## 4. `proxy.ts` Is a Cheap Gate
+
+在 Next.js 16，root-level `proxy.ts` 取代 `middleware.ts`。它在 route tree 之前跑。
+
+- 適合 redirects、rewrites、extra headers，以及粗粒度的「到底有沒有 session cookie？」檢查。
+- 不適合當唯一的 authorization。Matchers 會漏 paths。Rewrites 改變 app 以為的 URL。
+- 檢查 cookie 存在並 redirect 到 `/login` 改善 UX。它不證明 user 可以 load `/organizations/[id]/billing`。那份證明屬於 data 旁邊——在 Server Action、Route Handler，或它們後面的 Hono API。
+
+<br />
+
+```ts title="proxy.ts"
+import { NextResponse } from "next/server"
+import type { NextRequest } from "next/server"
+
+export function proxy(request: NextRequest) {
+  const session = request.cookies.get("session")
+  const isApp = request.nextUrl.pathname.startsWith("/app")
+
+  if (isApp && !session) {
+    return NextResponse.redirect(new URL("/login", request.url))
+  }
+
+  return NextResponse.next()
+}
+
+export const proxyConfig = {
+  matcher: ["/app/:path*"],
+}
+```
+
+<br />
+
+**Failure：** 在這裡把 identity 拷進 request header，然後在 Server Component 裡相信那個 header。Session cookie 才是 identity。`proxy.ts` 加上的任何東西仍然只是 header。`/app/export` 上漏掉的 matcher，或 `/api` 下的 Route Handler，不是理論上的缺口。
+
+<br />
+
+---
+
+## 5. Cache vs Privacy
+
+Next.js 很樂意 cache 一棵 personalized tree，如果你讓它這麼做。一份包含另一個 user 的 HTML 或 RSC payload 的 shared CDN entry，是看起來像 performance win 的 privacy incident。
+
+- 讀 `cookies()`、`headers()`，或 user-specific 的 `searchParams`，把工作綁到 **這次 request**。那份 output 不能變成每個 visitor 共用的一個 object。
+- Shared catalog fields 可以 cache。Recommendations、dashboards，以及任何按 session keyed 的東西保持 dynamic——或者用真正 private 的 key 去 cache，加上 CDN 會尊重的 `Vary`。
+- 切開 tree：public catalog 放在 `'use cache'` 或 ISR 下；session-shaped 區域保持 request-time Server Component，讀 cookie，把 **display fields** 傳進 client view，不是 session。
+- Source maps 遵循同一條 audience 規則。Error tracking 可能需要它們。公開的 `/.map` dump 是 source leak。
+
+**Failure：** cache 了錯誤的 audience，不是「忘了 `revalidateTag`」。`/account` 的 full-route cache 是在等一次 hit 的 cross-user leak。如果把 user A 的 page 給 user B 看是錯的，它就不屬於 shared cache。
+
+<br />
+
+---
+
+## 6. XSS in React and Next.js
+
+React escape text children。`<p>` 裡的 `{user.name}` 是 data。剩下的洞是 app 主動 opt out 的地方。
+
+- `dangerouslySetInnerHTML` —— CMS HTML、Markdown pipelines，以及「來自 API 的 rich text」是常見來源。如果產品真的需要 markup，用受維護的 library 在到達 client **之前**、在 **server** 上 sanitize，然後仍然假設會 miss。
+- `next/script` 與 inline snippets —— third-party tags 是你 origin 上的 script。優先用帶明確 strategy 的 `next/script`，並把 hosts 的 allowlist 放進 CSP。
+- User-controlled 的 `href`、`src` 與 `router.push` —— destination 裡的 non-http(s) scheme 是對 page context 的 injection。不要把 `searchParams` concatenate 進那些 APIs。
+- Hydration 不是 sanitizer。在 server 上不安全的 markup，hydrate 之後仍然不安全。
+
+<br />
+
+```ts
+import "server-only"
+import { JSDOM } from "jsdom"
+import createDOMPurify from "dompurify"
+
+const purify = createDOMPurify(new JSDOM("").window)
+
+export function sanitizeArticleHtml(html: string) {
+  return purify.sanitize(html, { USE_PROFILES: { html: true } })
+}
+```
+
+<br />
+
+- CSP 是 **backup**，不是「不渲染 untrusted HTML」的替代。OWASP note 裡的 header set 是起點。Trusted Types 在 browser 支援的地方縮小剩下的 `innerHTML` sinks。
+
+**Failure：** 把 sanitization 當成跳過 CSP 的許可證。`dangerouslySetInnerHTML` 每次都該是一條 review comment。
+
+<br />
+
+---
+
+## 7. Untrusted Navigation
+
+`searchParams`、callback URLs 與 `next/image` sources 是看起來像 routing 的 attacker-controlled input。
+
+- Open redirects：傳給 `redirect()` 或 `router.push` 的 `?next=` 會把 user 送到 link 說的任何地方。
+- Allowlist **這個 origin 上的 paths**，拒絕 protocol-relative URLs，預設到一個已知安全的 location。
+- 當作 query、filter 或 id 用的 `searchParams` 仍然屬於 server 上的 Zod。URL 不是受信任的 database。
+- `next/image` 會 fetch 你允許的 remote URLs。`remotePatterns` 是防止 optimizer 變成 open proxy 的 allowlist——優先特定 host。Local static imports 不需要這個；user-uploaded 或 CMS images 需要。
+
+<br />
+
+```ts
+const ALLOWED_NEXT = new Set(["/app", "/settings", "/billing"])
+
+export function safeNextPath(value: string | undefined) {
+  if (!value || !value.startsWith("/") || value.startsWith("//")) {
+    return "/app"
+  }
+
+  return ALLOWED_NEXT.has(value) ? value : "/app"
+}
+```
+
+<br />
+
+**Failure：** 公開的 `?preview=true` 因為 Server Component 檢查了 query string 就跳過 auth。那是 insecure design，不是 routing trick。`remotePatterns` 裡的 wildcard hostname，和從 Server Action fetch 呼叫方提供的 URL 是同一類。
+
+<br />
+
+---
+
+## 8. Defaults
+
+- Secrets 留在 `server-only` 後面。`NEXT_PUBLIC_*` 給 public identifiers。RSC props 是 public API。
+- Server Actions 與 Route Handlers 在 server 上、Zod 之後 authenticate 與 authorize。`proxy.ts` 是 cheap cookie gate，不是鎖。
+- Personalized HTML 與 RSC 從不進 shared cache。
+- Text 是 data。Markup 是 review。Navigation 與 `remotePatterns` 是 allowlists。CSP backing origin；它不定義 origin。
+
+Origin、session 與 authorization check 才是產品。Renderer 不是。Device 上的同一句話見 [React Native 裡的 Security](/notes/security-in-react-native)。
+
+---
+
+## Recap Q&A
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="next-sec-origin">
+    <AccordionTrigger>1. 為什麼 Next.js document 是不受信任的 origin，而不是受信任的 UI？</AccordionTrigger>
+    <AccordionContent>
+
+      - 一份 **Next.js** document 活在 browser **origin** 裡。UI 不受信任。它仍然打 native client 用的同一套 Hono / Better Auth API。
+      - Authorization 不會因為 renderer 是 React 就搬進 component tree。藏一個 button 不是 permission check。
+      - Next.js 帶著 **HttpOnly cookie** 與 Server Action POSTs。Cookie jar 是 isolation unit；Web Storage 不是。
+      - `'use client'` 是 **bundle boundary**，不是 security flag。`NEXT_PUBLIC_*` 是 rebuild-time 的 public constant。Secrets 在 server 上、在 **runtime** 讀取。
+      - **Failure：** 穿過 RSC props 的 privileged object，已經發布到 browser。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="next-sec-actions">
+    <AccordionTrigger>2. 為什麼 Server Actions 是 public POSTs？</AccordionTrigger>
+    <AccordionContent>
+
+      - `'use server'` 不代表「只有這個 form 能呼叫這個」。Build 建立 server reference。Browser POST 那個 reference 加上 serialized arguments。
+      - 從 security 角度看，action 是一個碰巧會 refresh UI 的 HTTP endpoint。
+      - Same-origin checks 與 encrypted closed-over values 減少 CSRF。它們 **不** 決定這個 session 能不能 rename 這個 product。
+      - Bound arguments 不是 capabilities。Opaque action id 不是 secret。
+      - 每次都在 write 旁邊、Zod 之後授權。`requireEditor()` 在 **server** 上讀 session cookie。`where` 上的 tenant scope 是 authorization，不是禮貌 filter。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="next-sec-cache">
+    <AccordionTrigger>3. Next.js cache 何時變成 privacy incident？</AccordionTrigger>
+    <AccordionContent>
+
+      - Next.js 很樂意 cache 一棵 personalized tree，如果你讓它這麼做。一份包含另一個 user 的 HTML 或 RSC payload 的 shared CDN entry，是看起來像 performance win 的 privacy incident。
+      - 讀 `cookies()`、`headers()`，或 user-specific 的 `searchParams`，把工作綁到 **這次 request**。
+      - 切開 tree：public catalog 被 cache；session-shaped 區域保持 request-time。
+      - Source maps 遵循同一條 audience 規則。
+      - **Failure：** cache 了錯誤的 audience，不是「忘了 `revalidateTag`」。如果把 user A 的 page 給 user B 看是錯的，它就不屬於 shared cache。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="next-sec-xss">
+    <AccordionTrigger>4. React 實際 escape 了什麼，XSS 還活在哪裡？</AccordionTrigger>
+    <AccordionContent>
+
+      - React escape text children。`<p>` 裡的 `{user.name}` 是 data。
+      - 剩下的洞是 app **opt out** 的地方：`dangerouslySetInnerHTML`、CMS/Markdown HTML、user-controlled 的 `href` / `src` / `router.push`、你 origin 上的 `next/script` tags。
+      - 如果產品真的需要 HTML，在 **server** 上 sanitize markup，然後仍然假設會 miss。Hydration 不是 sanitizer。
+      - CSP 是 backup。`'use client'` 放得太高會擴大 XSS blast radius。
+      - Open redirects：allowlist **這個 origin 上的 paths**，拒絕 protocol-relative URLs。
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>

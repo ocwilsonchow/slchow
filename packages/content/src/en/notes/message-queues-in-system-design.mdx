@@ -50,13 +50,8 @@ Three roles. The **producer** writes a message. The **broker** stores it durably
 
 <br />
 
-```mermaid
-flowchart LR
-  client[Client] --> hono[Hono]
-  hono --> db["Postgres + enqueue"]
-  db --> broker[Broker]
-  broker --> worker[Worker]
-  worker --> effect[Side effect]
+```text
+Client → Hono → Postgres + enqueue → Broker → Worker → Side effect
 ```
 
 <br />
@@ -198,13 +193,8 @@ The dual-write is: `COMMIT` the business row, then publish. The process can die 
 
 <br />
 
-```mermaid
-flowchart LR
-  begin[BEGIN] --> row[Business row]
-  row --> outboxRow[Outbox row]
-  outboxRow --> commit[COMMIT]
-  commit --> relay[Relay publishes]
-  relay --> broker[Broker]
+```text
+BEGIN → Business row → Outbox row → COMMIT → Relay publishes → Broker
 ```
 
 <br />

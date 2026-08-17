@@ -14,32 +14,18 @@ Production software is not a stack of libraries. Under the React tree, the Hono 
 
 <br />
 
-```mermaid
-flowchart TB
-  subgraph parallel [Parallel]
-    algo["Algorithms and complexity"]
-  end
+```text
+Parallel:
+  Algorithms and complexity
 
-  subgraph spine [Spine]
-    runtime["Runtime, architecture, memory"]
-    os[Operating systems]
-    conc[Concurrency]
-    net[Networks]
-    db[Databases]
-    dist["Distributed systems"]
-    runtime --> os --> conc
-    conc --> net
-    conc --> db
-    net --> dist
-    db --> dist
-  end
+Spine:
+  Runtime, architecture, memory
+    → Operating systems
+      → Concurrency
+        → Networks → Distributed systems
+        → Databases → Distributed systems
 
-  sec[Security]
-  sec -.-> runtime
-  sec -.-> conc
-  sec -.-> net
-  sec -.-> db
-  sec -.-> dist
+Security cuts across runtime, concurrency, networks, databases, and distributed systems
 ```
 
 <br />
@@ -122,7 +108,7 @@ A database is not a bucket of rows. It is a set of **constraints**, **indexes**,
 - An index is a data structure that makes a lookup cheap and a write a little more expensive. Isolation is the contract between concurrent transactions — what one transaction is allowed to see of someone else’s in-flight work. The schema is the API. Application `WHERE` clauses are a habit, not a guarantee.
 - This stack uses Postgres, Drizzle, and row-level security. Tenant isolation that lives only in Hono is one forgotten filter away from a leak. A query that is instant on a laptop is sequential scan in production. A read-modify-write without a transaction or a constraint is a lost update waiting for traffic.
 - **Failure:** two requests read the same row, both increment, both write. Each transaction looks correct. The counter skipped a number. Isolation did not fail mysteriously. The pattern is check-then-act, and the database was never told to make it atomic.
-- The isolation path is [Building a Multi-Tenant Backend with Hono, Better Auth, Drizzle, and Postgres RLS](/notes/multi-tenant-backend-drizzle-hono-better-auth). The statement model is [Core SQL Concepts](/notes/core-sql-concepts). The read path in front of Postgres is [Caching in System Design](/notes/caching-in-system-design).
+- The isolation path is [Building a Multi-Tenant Backend with Hono, Better Auth, Drizzle, and Postgres RLS](/notes/multi-tenant-backend-drizzle-hono-better-auth). The statement model is [Core SQL Concepts](/notes/core-sql-concepts). The schema itself is [Data Modeling in System Design](/notes/data-modeling-in-system-design). The read path in front of Postgres is [Caching in System Design](/notes/caching-in-system-design).
 
 <br />
 
@@ -167,7 +153,7 @@ Security is a **trust boundary** question: what this machine is allowed to belie
 - **Authentication** answers who. **Authorization** answers what they may do. Nothing the client sends is a source of truth — not an `organizationId` in JSON, not a role in an unverified JWT, not a hidden form field. The browser is an untrusted host. So is a React Native bundle.
 - This applies on every node above. Memory caches that include other tenants’ data, handlers that trust a header, cookies without `HttpOnly`, RLS that is missing on one table, a model that can search the wrong namespace — those are the same class of bug. The exploit is whatever the boundary failed to check.
 - **Failure:** the client declares which organization it belongs to, and the API believes it. The query returns another tenant’s rows. Encryption in transit did not help. A user is authenticated and then allowed to pick their authorization.
-- The class of failures is [Web Security and the OWASP Top 10](/notes/web-security-owasp-top-10). The two hosts in this stack are [Frontend Security in Next.js and React Native](/notes/frontend-security-nextjs-react-native). Tenant isolation as a database constraint is the multi-tenant note above.
+- The class of failures is [Web Security and the OWASP Top 10](/notes/web-security-owasp-top-10). The two hosts in this stack are [Security in Next.js](/notes/security-in-next-js) and [Security in React Native](/notes/security-in-react-native). Tenant isolation as a database constraint is the multi-tenant note above.
 
 <br />
 

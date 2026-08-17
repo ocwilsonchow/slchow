@@ -26,7 +26,7 @@ category: full-stack
       - XSS is injection into the HTML or JavaScript context of the origin. Once hostile script runs there, the browser treats it as the site: it can read the DOM, `localStorage`, and any cookie that is not `HttpOnly`. **Stored** and **reflected** describe how the payload is delivered. **DOM-based** describes a browser-side source-to-sink path and can overlap either.
       - **Stored XSS** persists in a database or CMS field and is served to other users later. **Reflected XSS** comes back in the response to the request that carried it. **DOM-based XSS** never needs the server to echo markup — client script reads the URL, storage, or postMessage data and writes it into an unsafe sink.
       - React escapes **text children** and typical string attributes into text. It does not make every URL safe. A user-controlled `href`, `src`, or `router.push` target can still be a dangerous URL scheme. Hydration is not a sanitizer.
-      - `dangerouslySetInnerHTML` is acceptable only when the product truly must render markup — CMS HTML, a Markdown pipeline — and a maintained library has already sanitized it on the **server**. CSP still sits behind it. Stance: [Frontend Security in Next.js and React Native](/notes/frontend-security-nextjs-react-native).
+      - `dangerouslySetInnerHTML` is acceptable only when the product truly must render markup — CMS HTML, a Markdown pipeline — and a maintained library has already sanitized it on the **server**. CSP still sits behind it. Stance: [Security in Next.js](/notes/security-in-next-js).
 
     </AccordionContent>
   </AccordionItem>

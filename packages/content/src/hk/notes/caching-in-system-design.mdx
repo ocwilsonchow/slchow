@@ -34,7 +34,7 @@ category: system-design
 
 - **Load.** 一條 read-heavy 的路徑正在拖垮 Postgres。Profile fetches、homepage feed、每次 request 都重算的 join。
 - **Latency.** Disk path 達不到的 non-functional。Memory 離 CPU 更近；query 不是。
-- **Cost of compute.** 把 posts、follows、likes join 起來的 personalized feed。把結果 cache 六十秒。不要每次 scroll 都重算。
+- **Cost of compute.** 把 posts、follows、likes join 起來的 personalized feed。把結果 cache 六十秒。不要每次 scroll 都重算。Denormalized feed 是 cache；tables 保持 normalized。[System Design 裡的 Data Modeling](/notes/data-modeling-in-system-design)。
 
 <br />
 
@@ -50,12 +50,8 @@ category: system-design
 
 <br />
 
-```mermaid
-flowchart LR
-  client[Client] --> cdn[CDN]
-  cdn --> hono[Hono]
-  hono --> redis[Redis]
-  redis --> postgres[Postgres]
+```text
+Client → CDN → Hono → Redis → Postgres
 ```
 
 <br />
@@ -166,13 +162,12 @@ Memory 比 dataset 小。必須有東西離開。先給 key 起名，再給 poli
 
 <br />
 
-```mermaid
-flowchart LR
-  write[Write Postgres] --> invalidate["DEL key"]
-  read[Read] --> redis[Redis]
-  redis -->|hit| stale[Maybe stale]
-  redis -->|miss| postgres[Postgres]
-  postgres --> fill[SET key]
+```text
+Write Postgres → DEL key
+
+Read → Redis
+  hit  → Maybe stale
+  miss → Postgres → SET key
 ```
 
 <br />

@@ -133,20 +133,12 @@ When the observation log itself crosses its threshold (default 40,000), the Refl
 
 <br />
 
-```mermaid
-flowchart TD
-  history[Recent messages]
-  observer[Observer]
-  observations[Observation log]
-  reflector[Reflector]
-  model[Agent context]
-
-  history -->|"crosses messageTokens"| observer
-  observer --> observations
-  observations --> model
-  history --> model
-  observations -->|"crosses observationTokens"| reflector
-  reflector --> observations
+```text
+Recent messages → Agent context
+Recent messages
+  -(crosses messageTokens)→ Observer → Observation log → Agent context
+Observation log
+  -(crosses observationTokens)→ Reflector → Observation log
 ```
 
 <br />

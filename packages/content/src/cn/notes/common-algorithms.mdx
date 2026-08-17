@@ -151,12 +151,11 @@ lengthOfLongestSubstring("abcabcbb") // 3 ("abc")
 
 <br />
 
-```mermaid
-flowchart LR
-  lo[lo] --> mid[mid]
-  mid --> hi[hi]
-  mid -->|nums mid less than target| moveLo[lo = mid + 1]
-  mid -->|else| moveHi[hi = mid]
+```text
+lo → mid → hi
+mid:
+  nums[mid] < target → lo = mid + 1
+  else               → hi = mid
 ```
 
 <br />
@@ -326,13 +325,13 @@ function levelOrder(root: TreeNode | null): number[][] {
 
 <br />
 
-```mermaid
-flowchart TD
-  root[Root] --> L1A[Level1]
-  root --> L1B[Level1]
-  L1A --> L2A[Level2]
-  L1A --> L2B[Level2]
-  L1B --> L2C[Level2]
+```text
+Root
+  ├─ Level1
+  │    ├─ Level2
+  │    └─ Level2
+  └─ Level1
+       └─ Level2
 ```
 
 <br />

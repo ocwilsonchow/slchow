@@ -11,6 +11,11 @@ const nextConfig: NextConfig = {
     return [
       { source: "/ja", destination: "/en", permanent: true },
       { source: "/ja/:path*", destination: "/en/:path*", permanent: true },
+      {
+        source: "/:locale/notes/frontend-security-nextjs-react-native",
+        destination: "/:locale/notes/security-in-next-js",
+        permanent: true,
+      },
     ]
   },
   async rewrites() {

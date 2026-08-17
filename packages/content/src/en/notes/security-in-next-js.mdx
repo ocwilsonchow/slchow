@@ -1,38 +1,28 @@
 ---
-title: Frontend Security in Next.js and React Native
-description: How Next.js App Router and React Native / Expo fail as two different hosts — origin vs device, cookies vs Keychain, RSC vs the extractable bundle — and the defenses this stack ships
+title: Security in Next.js
+description: How Next.js App Router fails as a browser origin — cookies, RSC, Server Actions, cache vs privacy — and the defenses this stack ships
 date: 2026-08-14
 category: security
 ---
 
-"Frontend security" is not one threat model. A **Next.js** document lives in a browser **origin**. A **React Native** screen lives in a **device**, behind a JavaScript bundle that anyone with the IPA or APK can read. Both UIs are untrusted. Both still talk to the same Hono / Better Auth API.
+A **Next.js** document lives in a browser **origin**. A React Native screen lives in a **device**. Both UIs are untrusted. Both still talk to the same Hono / Better Auth API. This note is the origin.
 
-The category map is [Web Security and the OWASP Top 10](/notes/web-security-owasp-top-10). This note is how those failures look in **Next.js 16 App Router** and **React Native / Expo**. It is a defensive reading: failure modes and attacker goals, not exploits.
+The category map is [Web Security and the OWASP Top 10](/notes/web-security-owasp-top-10). The device host is [Security in React Native](/notes/security-in-react-native). This is a defensive reading of **Next.js 16 App Router**: failure modes and attacker goals, not exploits.
 
 <br />
 
 ---
 
-## 1. Two Hosts
+## 1. The Host
 
-A Next.js request and a React Native request leave through different isolation units, then meet the same server:
+A Next.js request leaves through the origin, then meets the same server a native client uses:
 
 <br />
 
-```mermaid
-flowchart LR
-  subgraph nextHost [Next.js]
-    Doc[Document / RSC] --> Cookie[HttpOnly cookie]
-    Cookie --> Action[Server Action POST]
-  end
-  subgraph rnHost [React Native]
-    JS[JS thread] --> Native[Native modules]
-    Native --> Keychain[OS keychain]
-    Native --> TLS[TLS]
-  end
-  Action --> API[Hono API]
-  Keychain --> API
-  API --> Authz[Authn then authz]
+```text
+Next.js:
+  Document / RSC → HttpOnly cookie → Server Action POST
+Server Action POST → Hono API → Authn then authz
 ```
 
 <br />
@@ -40,14 +30,14 @@ flowchart LR
 | | Next.js | React Native |
 | --- | --- | --- |
 | Isolation unit | Browser origin | App ID / keychain access group |
-| Session | `HttpOnly; Secure; SameSite` cookie | SecureStore / Keychain / Keystore — never AsyncStorage |
+| Session | `HttpOnly; Secure; SameSite` cookie | SecureStore / Keychain / Keystore |
 | XSS surface | DOM, `dangerouslySetInnerHTML`, `next/script` | WebView plus any JS bridge you expose |
 | Secrets | `server-only` modules; `NEXT_PUBLIC_*` is public | Nothing in the binary is secret |
 | Deep entry | `searchParams`, open redirects, `router.push` | Custom URL schemes, universal links, push payloads |
 
 <br />
 
-- The shared lie is the same on both: **the UI is not authorization**. Hiding a button, checking a role in a Client Component, or storing `isAdmin` in AsyncStorage does not decide whether a row may be read.
+- The shared lie is the same on both hosts: **the UI is not authorization**. Hiding a button or checking a role in a Client Component does not decide whether a row may be read.
 - [Understanding Next.js in Depth](/notes/understanding-next-js-in-depth) covers the rendering machinery; [Local Storage, Session Storage, and Cookies](/notes/browser-storage-localstorage-sessionstorage-cookies) covers why the cookie jar is a different primitive from Web Storage.
 
 <br />
@@ -240,196 +230,34 @@ export function safeNextPath(value: string | undefined) {
 
 ---
 
-## 8. The Bundle Is Not a Secret
-
-React Native's threat model starts where Next.js's server graph ends. There is no `'use client'` fence. Metro's output ships on the device.
-
-- Anyone who can install the app can inspect the JavaScript. API keys, "hidden" feature flags, and hardcoded HMAC secrets in the bundle are public constants with extra steps.
-- The attacker goal is **credentials that were never supposed to leave the build laptop**.
-- Defense is the same sentence as `NEXT_PUBLIC_*`, applied to the whole binary: **the app holds public identifiers and user-bound tokens, not authority**. The Hono API still authenticates every call.
-- Fine in the binary: a Mapbox public token with URL restrictions, a Firebase *client* config, an OAuth client id for a public native client. Not fine: a database URL, an HMAC that mints sessions, a "debug admin" compile-time flag, a Stripe secret key.
-- Expo's `extra` in `app.json` is still in the bundle. EAS secrets baked into the client at build time are `NEXT_PUBLIC_*` again. Hermes bytecode slows casual reading; it is not encryption.
-- Identity on mobile is a **short-lived access token in memory** plus a **refresh token in the OS secret store**, issued by the same Better Auth (or OAuth) server the web app uses.
-
-**Failure:** session material in AsyncStorage, Redux Persist, or unencrypted MMKV. Those are `localStorage` with a native accent. Jailbreak / root detection is not a boundary.
-
-<br />
-
----
-
-## 9. SecureStore, Keychain, and Keystore
-
-iOS Keychain and Android Keystore are the isolation unit that cookies are on the web. `expo-secure-store` is how JS asks the OS to hold a blob the rest of the app should not casually dump to disk.
-
-<br />
-
-```ts
-await SecureStore.setItemAsync("auth.refresh", token, {
-  keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
-})
-```
-
-<br />
-
-- `WHEN_UNLOCKED_THIS_DEVICE_ONLY` keeps the refresh token off iCloud Keychain backups when the product does not need cross-device restore. That is a product trade-off, not a universal rule.
-- Access tokens stay in memory when the session can be refreshed; a process death then costs a refresh, not a stolen long-lived bearer in a world-readable file.
-- Screenshot and recents protection (`FLAG_SECURE`, iOS screen-capture notifications) is policy for banking-shaped screens. It is not cryptography.
-
-**Failure:** treating SecureStore as magic. A compromised device, a malicious keyboard, or a backup you opted into can still expose it. The server still rotates, expires, and revokes.
-
-<br />
-
----
-
-## 10. TLS and Pinning
-
-On the web, the browser and Let's Encrypt did most of this for you. On mobile, the OS still verifies the public PKI: **App Transport Security** on iOS, **Network Security Config** on Android.
-
-- Cleartext HTTP is off unless you explicitly punch a hole. Production API hosts do not get cleartext exceptions.
-- Certificate pinning is defense in depth for high-risk apps: the client additionally requires a known key or SPKI for `api.example.com`. It raises the cost of a rogue CA or a corporate TLS-intercept box.
-- Pinning also means **you need a rotation story** before the pin expires, or you ship a brick. Pin only when the threat model includes hostile networks and the team can rotate pins with an app update or a backup pin.
-
-<br />
-
-```xml title="network_security_config.xml"
-<network-security-config>
-  <base-config cleartextTrafficPermitted="false">
-    <trust-anchors>
-      <certificates src="system" />
-    </trust-anchors>
-  </base-config>
-</network-security-config>
-```
-
-<br />
-
-**Failure:** treating transport security as authorization. ATS / NSC on, no user-installed CAs trusted for the API if the OS lets you say so, pinning only with rotation — and the API still requires a real user session.
-
-<br />
-
----
-
-## 11. Deep Links
-
-A custom URL scheme (`myapp://`) is not an origin. Other apps on the device can often register the same scheme. A verified **universal link** (iOS) or **App Link** (Android) is associated with an HTTPS domain you control.
-
-- The attacker goal is **to open the app on a chosen path with chosen query params**: an OAuth redirect, a password-reset token, a campaign URL that sets `organizationId`.
-- Prefer associated domains over raw schemes for anything that carries a token or chooses an account.
-- Treat every incoming URL as untrusted input. Parse it. Allowlist paths. Do not execute whatever query string arrived.
-- OAuth on mobile goes through the **system browser (or in-app browser tab) plus PKCE**, not an embedded WebView that the app can script. The app never sees the user's password; it sees an authorization code the OS delivered to the claimed redirect.
-- FCM (and other push) payloads are the same class. A campaign deep link that opens a membership offer is marketing. A push that the client interprets as "mark this invoice paid" is an unsigned RPC.
-
-<br />
-
-```ts
-import * as Linking from "expo-linking"
-
-const CAMPAIGN_PATHS = new Set(["/offers", "/card", "/inbox"])
-
-export function pathFromDeepLink(url: string) {
-  const parsed = Linking.parse(url)
-  const path = parsed.path ? `/${parsed.path}` : "/"
-
-  if (!CAMPAIGN_PATHS.has(path)) {
-    return "/home"
-  }
-
-  return path
-}
-```
-
-<br />
-
-Query params from that URL still need the same Zod treatment as Next.js `searchParams`. They do not become `fetch` bodies without a session.
-
-<br />
-
----
-
-## 12. WebView
-
-A WebView is a **browser origin inside the app**. HTML it loads can run script in that origin. If you also expose a JavaScript bridge into native modules — camera, file system, session store — you have given that page a privileged RPC.
-
-- The attacker goal is **to run script in the WebView with the app's privileges**: a loaded help article, a payment iframe you thought was sealed, a `file://` page, a redirect to content you do not control.
-- Prefer an **in-app browser tab** (Safari View Controller / Chrome Custom Tabs, `expo-web-browser`) for pages that are not your UI. They get the real browser's origin isolation and the system cookie jar, not your bridge.
-- If you must WebView your own content, lock navigation to an allowlisted https origin, disable file access you do not need, and do not inject a bridge that can read SecureStore or fire authenticated API calls.
-
-<br />
-
-```tsx
-const ALLOWED_HOST = "help.example.com"
-
-function onShouldStartLoadWithRequest(request: { url: string }) {
-  try {
-    const url = new URL(request.url)
-    return url.protocol === "https:" && url.hostname === ALLOWED_HOST
-  } catch {
-    return false
-  }
-}
-```
-
-<br />
-
-**Failure:** `injectedJavaScript` is `dangerouslySetInnerHTML` for native. User content does not belong there. A membership card rendered in React Native views does not need a WebView.
-
-<br />
-
----
-
-## 13. Native Modules and Push
-
-Third-party native code is supply chain with a second compiler. An npm package that also ships an Android Gradle plugin or a CocoaPod can do anything the OS grants the app.
-
-- The OWASP supply-chain category applies; the extra fact is that **JS review does not see the native half**.
-- Versions are pinned, `autolinking` output is reviewed, and a new native module is a permissions review: what entitlements does this add?
-- A **device push token** identifies a device to APNs or FCM. It does not identify a user. Binding a token to an account happens on the server after a verified session.
-- Register the token on login (`POST /devices`); unregister on logout. `/devices` still authenticates with the session from SecureStore — the token is a destination, not a credential.
-- The JS thread can be paused; native work continues. Logout is a native operation, not only a React state reset: cancel in-flight uploads and wipe SecureStore.
-
-**Failure:** authorizing a mutation because a push arrived, or accepting a token the client posted for someone else.
-
-<br />
-
----
-
-## 14. Defaults
-
-**Next.js**
+## 8. Defaults
 
 - Secrets stay behind `server-only`. `NEXT_PUBLIC_*` is for public identifiers. RSC props are a public API.
 - Server Actions and Route Handlers authenticate and authorize on the server, after Zod. `proxy.ts` is a cheap cookie gate, not the lock.
 - Personalized HTML and RSC never go in a shared cache.
 - Text is data. Markup is a review. Navigation and `remotePatterns` are allowlists. CSP backs the origin; it does not define it.
 
-**React Native**
-
-- The bundle is public. Refresh tokens live in SecureStore / Keychain, not AsyncStorage. Access tokens stay in memory when the product allows.
-- ATS / Network Security Config on; pinning only with a rotation plan.
-- Universal links over raw schemes. OAuth via system browser and PKCE. Deep links and push payloads are untrusted input.
-- No privileged WebView bridge. Logout wipes the secret store and the push binding.
-
-Both still end at the same sentence as the OWASP note: the origin (or the keychain), the session, and the authorization check are the product. The renderer is not.
+The origin, the session, and the authorization check are the product. The renderer is not. The same sentence on device is [Security in React Native](/notes/security-in-react-native).
 
 ---
 
 ## Recap Q&A
 
 <Accordion type="single" collapsible>
-  <AccordionItem value="fe-sec-two-hosts">
-    <AccordionTrigger>1. Why is “frontend security” two threat models, not one?</AccordionTrigger>
+  <AccordionItem value="next-sec-origin">
+    <AccordionTrigger>1. Why is the Next.js document an untrusted origin, not a trusted UI?</AccordionTrigger>
     <AccordionContent>
 
-      - A **Next.js** document lives in a browser **origin**. A **React Native** screen lives in a **device**, behind a JavaScript bundle that anyone with the IPA or APK can read.
-      - Both UIs are untrusted. Both still talk to the same Hono / Better Auth API. Authorization does not move into the component tree because the renderer changed.
-      - Next.js carries an **HttpOnly cookie** and Server Action POSTs. React Native holds secrets in the **OS keychain** and speaks TLS from native modules.
+      - A **Next.js** document lives in a browser **origin**. The UI is untrusted. It still talks to the same Hono / Better Auth API as the native client.
+      - Authorization does not move into the component tree because the renderer is React. Hiding a button is not a permission check.
+      - Next.js carries an **HttpOnly cookie** and Server Action POSTs. The cookie jar is the isolation unit; Web Storage is not.
       - `'use client'` is a **bundle boundary**, not a security flag. `NEXT_PUBLIC_*` is a rebuild-time public constant. Secrets are read at **runtime** on the server.
       - **Failure:** RSC props that pass a privileged object have published it to the browser.
 
     </AccordionContent>
   </AccordionItem>
 
-  <AccordionItem value="fe-sec-actions">
+  <AccordionItem value="next-sec-actions">
     <AccordionTrigger>2. Why are Server Actions public POSTs?</AccordionTrigger>
     <AccordionContent>
 
@@ -442,7 +270,7 @@ Both still end at the same sentence as the OWASP note: the origin (or the keycha
     </AccordionContent>
   </AccordionItem>
 
-  <AccordionItem value="fe-sec-cache">
+  <AccordionItem value="next-sec-cache">
     <AccordionTrigger>3. When does a Next.js cache become a privacy incident?</AccordionTrigger>
     <AccordionContent>
 
@@ -455,7 +283,7 @@ Both still end at the same sentence as the OWASP note: the origin (or the keycha
     </AccordionContent>
   </AccordionItem>
 
-  <AccordionItem value="fe-sec-xss">
+  <AccordionItem value="next-sec-xss">
     <AccordionTrigger>4. What does React actually escape, and where does XSS still live?</AccordionTrigger>
     <AccordionContent>
 
@@ -464,19 +292,6 @@ Both still end at the same sentence as the OWASP note: the origin (or the keycha
       - Sanitize markup on the **server** if the product truly needs HTML, then still assume a miss. Hydration is not a sanitizer.
       - CSP is a backup. `'use client'` too high in the tree widens XSS blast radius.
       - Open redirects: allowlist **paths on this origin**, reject protocol-relative URLs.
-
-    </AccordionContent>
-  </AccordionItem>
-
-  <AccordionItem value="fe-sec-native">
-    <AccordionTrigger>5. Where do tokens and deep links belong on device?</AccordionTrigger>
-    <AccordionContent>
-
-      - iOS Keychain and Android Keystore are the isolation unit that cookies are on the web. `expo-secure-store` holds a refresh token; access tokens stay in memory when the session can be refreshed.
-      - SecureStore is not magic — a compromised device can still expose it. The server still rotates, expires, and revokes. The JS bundle is **not a secret**.
-      - A custom URL scheme is not an origin. Prefer **universal links** / App Links for anything that carries a token.
-      - Treat every incoming URL as untrusted input. OAuth goes through the **system browser plus PKCE**, not a scriptable WebView.
-      - **Failure:** a push payload the client interprets as “mark this invoice paid” is an unsigned RPC. Cleartext HTTP stays off.
 
     </AccordionContent>
   </AccordionItem>

@@ -1,0 +1,278 @@
+---
+title: React Native 裡的 Security
+description: React Native / Expo 作為 device host 如何失敗 —— extractable bundle、Keychain、WebView bridges、deep links —— 以及這套 stack 真正 ship 的 defenses
+date: 2026-08-14
+category: security
+---
+
+一塊 **React Native** screen 活在 **device** 上，背後是任何人拿到 IPA 或 APK 都能讀的 JavaScript bundle。一份 Next.js document 活在 browser **origin** 裡。兩邊的 UI 都不受信任。兩邊仍然打同一套 Hono / Better Auth API。這篇 note 講 device。
+
+Category map 見 [Web Security and the OWASP Top 10](/notes/web-security-owasp-top-10)。Origin host 見 [Next.js 裡的 Security](/notes/security-in-next-js)。這是對 **React Native / Expo** 的防禦性閱讀：failure modes 與 attacker goals，不是 exploits。
+
+<br />
+
+---
+
+## 1. The Host
+
+一次 React Native request 從 native modules 離開，然後遇見 Next.js document 用的同一台 server：
+
+<br />
+
+```text
+React Native:
+  JS thread → Native modules ─┬→ OS keychain
+                              └→ TLS
+OS keychain → Hono API → Authn then authz
+```
+
+<br />
+
+| | Next.js | React Native |
+| --- | --- | --- |
+| Isolation unit | Browser origin | App ID / keychain access group |
+| Session | `HttpOnly; Secure; SameSite` cookie | SecureStore / Keychain / Keystore —— 從不 AsyncStorage |
+| XSS surface | DOM、`dangerouslySetInnerHTML`、`next/script` | WebView 加上你暴露的任何 JS bridge |
+| Secrets | `server-only` modules；`NEXT_PUBLIC_*` 是 public | Binary 裡沒有任何東西是 secret |
+| Deep entry | `searchParams`、open redirects、`router.push` | Custom URL schemes、universal links、push payloads |
+
+<br />
+
+- 兩邊 host 共享同一句謊言：**UI 不是 authorization**。把 `isAdmin` 存進 AsyncStorage，並不決定某一行能不能被讀。
+- [深入理解 React Native](/notes/understanding-react-native-in-depth) 覆蓋 renderer；這篇 note 是 extractable bundle、keychain，以及你 embed 的任何 WebView 周圍的 threat model。
+
+<br />
+
+---
+
+## 2. The Bundle Is Not a Secret
+
+React Native 的 threat model 從 Next.js 的 server graph 結束的地方開始。沒有 `'use client'` fence。Metro 的 output ship 在 device 上。
+
+- 任何人能安裝這個 app，就能 inspect JavaScript。Bundle 裡的 API keys、「隱藏」的 feature flags，以及 hardcoded HMAC secrets，是多了幾步的 public constants。
+- Attacker goal 是 **從來都不該離開 build laptop 的 credentials**。
+- Defense 與 `NEXT_PUBLIC_*` 同一句，應用到整個 binary：**app 持有 public identifiers 與 user-bound tokens，不是 authority**。Hono API 仍然 authenticate 每一次 call。
+- Binary 裡可以有的：帶 URL restrictions 的 Mapbox public token、Firebase *client* config、public native client 的 OAuth client id。不可以有的：database URL、mint sessions 的 HMAC、「debug admin」compile-time flag、Stripe secret key。
+- Expo 在 `app.json` 裡的 `extra` 仍然在 bundle 裡。Build time bake 進 client 的 EAS secrets 又是 `NEXT_PUBLIC_*`。Hermes bytecode 減慢隨便讀；它不是 encryption。
+- Mobile 上的 identity 是 **記憶體裡的 short-lived access token** 加上 **OS secret store 裡的 refresh token**，由 web app 用的同一套 Better Auth（或 OAuth）server 簽發。
+
+**Failure：** session material 放在 AsyncStorage、Redux Persist，或未加密的 MMKV。那些是帶 native 口音的 `localStorage`。Jailbreak / root detection 不是 boundary。
+
+<br />
+
+---
+
+## 3. SecureStore, Keychain, and Keystore
+
+iOS Keychain 與 Android Keystore 是 web 上 cookies 對應的 isolation unit。`expo-secure-store` 是 JS 請 OS 持有一份 blob 的方式，app 其餘部分不該隨手 dump 到 disk。
+
+<br />
+
+```ts
+await SecureStore.setItemAsync("auth.refresh", token, {
+  keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+})
+```
+
+<br />
+
+- 當產品不需要 cross-device restore 時，`WHEN_UNLOCKED_THIS_DEVICE_ONLY` 把 refresh token 留在 iCloud Keychain backups 之外。那是 product trade-off，不是萬能規則。
+- Session 可以 refresh 時，access tokens 留在記憶體；process death 然後只花一次 refresh，而不是一份躺在 world-readable file 裡的 stolen long-lived bearer。
+- Screenshot 與 recents protection（`FLAG_SECURE`、iOS screen-capture notifications）是 banking-shaped screens 的 policy。它不是 cryptography。
+
+**Failure：** 把 SecureStore 當成魔法。被 compromise 的 device、惡意鍵盤，或你 opt into 的 backup，仍然可以暴露它。Server 仍然 rotate、expire 與 revoke。
+
+<br />
+
+---
+
+## 4. TLS and Pinning
+
+在 web 上，browser 與 Let's Encrypt 替你做了大部分。在 mobile 上，OS 仍然驗證 public PKI：iOS 上的 **App Transport Security**，Android 上的 **Network Security Config**。
+
+- Cleartext HTTP 預設關，除非你明確打洞。Production API hosts 不拿 cleartext exceptions。
+- Certificate pinning 是高風險 apps 的 defense in depth：client 額外要求 `api.example.com` 的已知 key 或 SPKI。它提高 rogue CA 或公司 TLS-intercept box 的成本。
+- Pinning 也意味著 **pin 過期之前你需要 rotation story**，否則你 ship 一塊磚。只在 threat model 包含 hostile networks、且團隊能用 app update 或 backup pin 去 rotate 時才 pin。
+
+<br />
+
+```xml title="network_security_config.xml"
+<network-security-config>
+  <base-config cleartextTrafficPermitted="false">
+    <trust-anchors>
+      <certificates src="system" />
+    </trust-anchors>
+  </base-config>
+</network-security-config>
+```
+
+<br />
+
+**Failure：** 把 transport security 當成 authorization。ATS / NSC 開著，若 OS 允許則不信任 user-installed CAs 打 API，pinning 只帶 rotation——然後 API 仍然要求真正的 user session。
+
+<br />
+
+---
+
+## 5. Deep Links
+
+Custom URL scheme（`myapp://`）不是 origin。Device 上的其他 apps 常常能註冊同一個 scheme。Verified **universal link**（iOS）或 **App Link**（Android）與你控制的 HTTPS domain 關聯。
+
+- Attacker goal 是 **用選定的 path 與選定的 query params 打開 app**：OAuth redirect、password-reset token、設置 `organizationId` 的 campaign URL。
+- 任何帶著 token 或選擇 account 的東西，優先 associated domains 而不是 raw schemes。
+- 把每一條 incoming URL 當成 untrusted input。Parse 它。Allowlist paths。不要執行到達的任意 query string。
+- Mobile 上的 OAuth 走 **system browser（或 in-app browser tab）加上 PKCE**，不是 app 能 script 的 embedded WebView。App 從不看見 user 的 password；它看見 OS 交到 claimed redirect 的 authorization code。
+- FCM（以及其他 push）payloads 是同一類。打開 membership offer 的 campaign deep link 是 marketing。Client 解讀成「把這張 invoice 標成 paid」的 push 是 unsigned RPC。
+
+<br />
+
+```ts
+import * as Linking from "expo-linking"
+
+const CAMPAIGN_PATHS = new Set(["/offers", "/card", "/inbox"])
+
+export function pathFromDeepLink(url: string) {
+  const parsed = Linking.parse(url)
+  const path = parsed.path ? `/${parsed.path}` : "/"
+
+  if (!CAMPAIGN_PATHS.has(path)) {
+    return "/home"
+  }
+
+  return path
+}
+```
+
+<br />
+
+那條 URL 上的 query params 仍然需要與 Next.js `searchParams` 同樣的 Zod 處理。沒有 session，它們不成 `fetch` bodies。
+
+<br />
+
+---
+
+## 6. WebView
+
+WebView 是 **app 裡的 browser origin**。它載入的 HTML 可以在那個 origin 跑 script。如果你還暴露一條進 native modules 的 JavaScript bridge——camera、file system、session store——你就給了那頁 privileged RPC。
+
+- Attacker goal 是 **在 WebView 裡用 app 的 privileges 跑 script**：一篇載入的 help article、你以為封死的 payment iframe、`file://` page、redirect 到你不控制的 content。
+- 不是你 UI 的 pages，優先 **in-app browser tab**（Safari View Controller / Chrome Custom Tabs，`expo-web-browser`）。它們拿到真正 browser 的 origin isolation 與 system cookie jar，不是你的 bridge。
+- 如果必須 WebView 自己的 content，把 navigation 鎖到 allowlisted https origin，關掉不需要的 file access，不要注入能讀 SecureStore 或打 authenticated API calls 的 bridge。
+
+<br />
+
+```tsx
+const ALLOWED_HOST = "help.example.com"
+
+function onShouldStartLoadWithRequest(request: { url: string }) {
+  try {
+    const url = new URL(request.url)
+    return url.protocol === "https:" && url.hostname === ALLOWED_HOST
+  } catch {
+    return false
+  }
+}
+```
+
+<br />
+
+**Failure：** `injectedJavaScript` 是 native 上的 `dangerouslySetInnerHTML`。User content 不屬於那裡。用 React Native views 渲染的 membership card 不需要 WebView。
+
+<br />
+
+---
+
+## 7. Native Modules and Push
+
+Third-party native code 是帶第二套 compiler 的 supply chain。一個同時還 ship Android Gradle plugin 或 CocoaPod 的 npm package，能做 OS 授予這個 app 的任何事。
+
+- OWASP supply-chain category 適用；額外事實是 **JS review 看不見 native 那一半**。
+- Versions pin 住，`autolinking` output 被 review，新 native module 是一次 permissions review：這加了哪些 entitlements？
+- **Device push token** 向 APNs 或 FCM 標識一台 device。它不標識一個 user。把 token bind 到 account 發生在 server 上、verified session 之後。
+- Login 時 register token（`POST /devices`）；logout 時 unregister。`/devices` 仍然用 SecureStore 裡的 session authenticate——token 是 destination，不是 credential。
+- JS thread 可以被 pause；native work 繼續。Logout 是 native operation，不只是 React state reset：取消 in-flight uploads，wipe SecureStore。
+
+**Failure：** 因為一條 push 到達就授權 mutation，或接受 client 替別人 posted 的 token。
+
+<br />
+
+---
+
+## 8. Defaults
+
+- Bundle 是 public。Refresh tokens 活在 SecureStore / Keychain，不是 AsyncStorage。產品允許時，access tokens 留在記憶體。
+- ATS / Network Security Config 開著；pinning 只帶 rotation plan。
+- Universal links 優於 raw schemes。OAuth 走 system browser 與 PKCE。Deep links 與 push payloads 是 untrusted input。
+- 沒有 privileged WebView bridge。Logout wipe secret store 與 push binding。
+
+Keychain、session 與 authorization check 才是產品。Renderer 不是。Origin 上的同一句話見 [Next.js 裡的 Security](/notes/security-in-next-js)。
+
+---
+
+## Recap Q&A
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="rn-sec-bundle">
+    <AccordionTrigger>1. 為什麼 JavaScript bundle 不是 secret？</AccordionTrigger>
+    <AccordionContent>
+
+      - 沒有 `'use client'` fence。Metro 的 output ship 在 device 上。任何人能安裝這個 app，就能 inspect JavaScript。
+      - Bundle 裡的 API keys、「隱藏」的 feature flags，以及 hardcoded HMAC secrets，是多了幾步的 public constants。
+      - Defense 與 `NEXT_PUBLIC_*` 同一句：**app 持有 public identifiers 與 user-bound tokens，不是 authority**。Hono API 仍然 authenticate 每一次 call。
+      - Expo 在 `app.json` 裡的 `extra` 仍然在 bundle 裡。Hermes bytecode 減慢隨便讀；它不是 encryption。
+      - **Failure：** session material 放在 AsyncStorage、Redux Persist，或未加密的 MMKV。Jailbreak / root detection 不是 boundary。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="rn-sec-store">
+    <AccordionTrigger>2. Tokens 在 device 上屬於哪裡？</AccordionTrigger>
+    <AccordionContent>
+
+      - iOS Keychain 與 Android Keystore 是 web 上 cookies 對應的 isolation unit。`expo-secure-store` 持有 refresh token；session 可以 refresh 時，access tokens 留在記憶體。
+      - 當產品不需要 cross-device restore 時，`WHEN_UNLOCKED_THIS_DEVICE_ONLY` 把 refresh token 留在 iCloud Keychain backups 之外。
+      - SecureStore 不是魔法——被 compromise 的 device 仍然可以暴露它。
+      - Server 仍然 rotate、expire 與 revoke。
+      - **Failure：** 把 SecureStore 當成對 bundle 的 encryption。Bundle 仍然是 public。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="rn-sec-tls">
+    <AccordionTrigger>3. ATS / Network Security Config 實際買到什麼？</AccordionTrigger>
+    <AccordionContent>
+
+      - OS 驗證 public PKI：iOS 上的 **App Transport Security**，Android 上的 **Network Security Config**。Cleartext HTTP 預設關，除非你打洞。
+      - Certificate pinning 是高風險 apps 的 defense in depth。它也需要 pin 過期之前的 **rotation story**，否則你 ship 一塊磚。
+      - 只在 threat model 包含 hostile networks、且團隊能用 app update 或 backup pin 去 rotate 時才 pin。
+      - **Failure：** 把 transport security 當成 authorization。ATS / NSC 開著，pinning 只帶 rotation——然後 API 仍然要求真正的 user session。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="rn-sec-deeplink">
+    <AccordionTrigger>4. 為什麼 custom URL scheme 不是 origin？</AccordionTrigger>
+    <AccordionContent>
+
+      - Device 上的其他 apps 常常能註冊同一個 scheme。Verified **universal link** / App Link 與你控制的 HTTPS domain 關聯。
+      - Attacker goal 是用選定的 path 與選定的 query params 打開 app：OAuth redirect、password-reset token、設置 `organizationId` 的 campaign URL。
+      - 把每一條 incoming URL 當成 untrusted input。Parse 它。Allowlist paths。Query params 仍然需要 Zod。沒有 session，它們不成 `fetch` bodies。
+      - OAuth 走 **system browser 加上 PKCE**，不是可 script 的 WebView。
+      - **Failure：** Client 解讀成「把這張 invoice 標成 paid」的 push payload 是 unsigned RPC。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="rn-sec-webview">
+    <AccordionTrigger>5. 為什麼加了 bridge 的 WebView 是 privileged RPC？</AccordionTrigger>
+    <AccordionContent>
+
+      - WebView 是 **app 裡的 browser origin**。它載入的 HTML 可以在那個 origin 跑 script。進 camera、file system 或 session store 的 JS bridge，把 app 的 privileges 給了那頁。
+      - 不是你 UI 的 pages，優先 **in-app browser tab**（`expo-web-browser`）。
+      - 如果必須 WebView 自己的 content，把 navigation 鎖到 allowlisted https origin，不要注入能讀 SecureStore 的 bridge。
+      - Third-party native modules 是帶第二套 compiler 的 supply chain。JS review 看不見 native 那一半。
+      - **Failure：** `injectedJavaScript` 是 native 上的 `dangerouslySetInnerHTML`。Logout 必須 wipe SecureStore 與 push binding，不只是 React state。
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>

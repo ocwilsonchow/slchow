@@ -50,12 +50,9 @@ Clients 會 retry。Caches 與 API Gateway 相信 method semantics。Timeout 不
 
 <br />
 
-```mermaid
-flowchart LR
-  client[Client] --> rest["REST / Hono"]
-  rest --> postgres[Postgres]
-  rest -.-> grpc["gRPC optional"]
-  grpc --> inventory[Inventory service]
+```text
+Client → REST / Hono → Postgres
+REST / Hono → (optional) gRPC → Inventory service
 ```
 
 <br />
@@ -91,6 +88,7 @@ GET    /bookings/{id}
 
 - 父級是必須的就 **nest**：`/events/{id}/tickets` 沒有 event 就沒有意義。Filter 是可選的就用 **query**：`/tickets?eventId=123&section=VIP`。
 - **Path** 標識 resource。**Query** 修改 retrieval —— filter、sort、page。**Body** 是你 create 或 replace 的 payload。敏感和大體量的 data 不屬於 URL。
+- 這些名字會變成 tables。[System Design 裡的 Data Modeling](/notes/data-modeling-in-system-design)。
 
 <br />
 

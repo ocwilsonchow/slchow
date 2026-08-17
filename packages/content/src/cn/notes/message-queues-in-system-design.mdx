@@ -50,13 +50,8 @@ Queue **decouple** producer 与 consumer。Producer 不等 side effect。Consume
 
 <br />
 
-```mermaid
-flowchart LR
-  client[Client] --> hono[Hono]
-  hono --> db["Postgres + enqueue"]
-  db --> broker[Broker]
-  broker --> worker[Worker]
-  worker --> effect[Side effect]
+```text
+Client → Hono → Postgres + enqueue → Broker → Worker → Side effect
 ```
 
 <br />
@@ -198,13 +193,8 @@ Dual-write 是：`COMMIT` business row，然后再 publish。Process 可以死�
 
 <br />
 
-```mermaid
-flowchart LR
-  begin[BEGIN] --> row[Business row]
-  row --> outboxRow[Outbox row]
-  outboxRow --> commit[COMMIT]
-  commit --> relay[Relay publishes]
-  relay --> broker[Broker]
+```text
+BEGIN → Business row → Outbox row → COMMIT → Relay publishes → Broker
 ```
 
 <br />

@@ -25,12 +25,8 @@ A typical authenticated request must agree in four places:
 
 <br />
 
-```mermaid
-flowchart LR
-  Origin[Browser origin] --> Cookie[Cookie / session]
-  Cookie --> API[Hono API]
-  API --> Authz[Authn then authz]
-  Authz --> Store[Postgres]
+```text
+Browser origin → Cookie / session → Hono API → Authn then authz → Postgres
 ```
 
 <br />
