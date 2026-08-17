@@ -52,7 +52,7 @@ const Page = async ({ params }: Props) => {
           data-lenis-prevent
         >
           <div className="mt-8 lg:mt-0 space-y-3 max-w-prose">
-            <h1 className="text-lg lg:text-sm font-semibold tracking-tight text-content-ink leading-tight">
+            <h1 className="text-lg font-semibold tracking-tight text-content-ink leading-tight">
               {page?.data.title}
             </h1>
 
