@@ -1,13 +1,15 @@
 ---
 title: 如何搭建一套 RAG 系统
-description: 一份教程：用 Mastra workflows、Pinecone namespaces 与 tool-called retrieval，做 organization-scoped 的 document RAG
-date: 2026-08-13
+description: 一份教程：用 Reducto parsing、Mastra workflows、Pinecone hybrid namespaces 与 tool-called retrieval，做 organization-scoped 的 document RAG
+date: 2026-08-18
 category: ai
 ---
 
 一套能跑的 RAG stack 是两条共享 embedding space 的 pipelines：一条**deterministic ingest workflow** 负责写 vectors，一条**tool-called retriever** 负责读。难的是 tenant boundary。若 model 能选择搜*谁的* index，你就没有 RAG。你有的是泄漏。
 
-这套设计用 Mastra workflows、`MDocument` chunking、OpenAI `text-embedding-3-small`（1536-d），以及按 **namespace = `organizationId`** 分区的 Pinecone serverless index。Identity 留在它本来就在的地方：Better Auth organizations 与 Hono request context，见 [用 Hono、Better Auth、Drizzle 与 Postgres RLS 打造 Multi-Tenant 后端](/notes/multi-tenant-backend-drizzle-hono-better-auth)。`userId` 是 actor。`organizationId` 是图书馆。
+这套设计用 Mastra workflows、用 **Reducto Parse** 做 layout-aware chunking、OpenAI `text-embedding-3-small`（dense）加 `pinecone-sparse-english-v0`（sparse），以及一个按 **namespace = `organizationId`** 分区的 Pinecone serverless **hybrid** index。Identity 留在它本来就在的地方：Better Auth organizations 与 Hono request context，见 [用 Hono、Better Auth、Drizzle 与 Postgres RLS 打造 Multi-Tenant 后端](/notes/multi-tenant-backend-drizzle-hono-better-auth)。`userId` 是 actor。`organizationId` 是图书馆。
+
+Write path 到 upsert 为止。Hybrid search 与 rerank 活在 read path——绝不在 upload 这条线上。
 
 <br />
 
@@ -24,18 +26,15 @@ Write
   POST /documents
   → S3 orgs/organizationId/docs/filename
   → workflow pinecone-document-ingestion
-  → extract text
-  → MDocument.chunk (token)
-  → embedMany text-embedding-3-small
-  → deleteVectors namespace + path
-  → upsert namespace=organizationId
-  → Pinecone index document-chunks
+       loadFile → parseReducto → mapChunks → indexChunks
+  → Pinecone index document-chunks, metric=dotproduct
 
 Read (later turn)
   chat → agent
   → tool search-pinecone-documents
-  → embed query (same model)
-  → pinecone.query namespace=organizationId
+  → embed query (same dense + sparse models)
+  → hybrid query (alpha-weighted) namespace=organizationId
+  → rerank top results (cross-encoder)
   → relevantContext + sources
   → agent
 ```
@@ -46,6 +45,7 @@ Read (later turn)
 - 一张能跟 S3 与 Pinecone 漂移的 `documents` row，是你日后必须 reconcile 的第三份 source of truth。
 - Mastra Workspace search（`Workspace` + `PineconeVector` + embedder）索引的是一个 agent sandbox。留给 agent 的 working set。这套 workflow 留给产品 corpus。
 - Upload 那一轮仍把 file parts 内联带上。Indexing 是 async。Retrieval 是后续 turns，这样后面的 turns 搜 index，而不是再寄一遍 file。
+- 把 Reducto 的 parse JSON（或它的 job id）留在 file 旁边。换 embedding models 时可以 re-embed 而不必 re-parse。
 
 **失败：** 把 Workspace search 当成 HTTP upload API。它没有做过 membership check 的 `requestContext`，也没有 org-scoped library。
 
@@ -55,13 +55,13 @@ Read (later turn)
 
 ## 2. Why a workflow for ingest, a tool for retrieve
 
-Mastra 的经验法则对上这个拆分：workflows 做已定义的多步 processes，agents 做会用 tools 的决策。
+Mastra 的经验法则对上这个拆分：workflows 做已定义的多步 processes，agents 做会用 tools 的决策。Reducto 作为 ingest workflow 里的 **parse step** 很合适——它是 deterministic transform，不是决策，也不是第二条 workflow。
 
 <br />
 
 | 关注点 | Primitive | 原因 |
 | --- | --- | --- |
-| Load → extract → chunk → embed → upsert | `createWorkflow` | 固定 DAG、retries、run snapshots、skip vs fail |
+| Load → Parse → map → embed → upsert | 一条 `createWorkflow` | 一次逻辑操作、一个 `runId` 当 status、从 snapshots retry |
 | 「User asked about the handbook」 | `createTool` on an agent | Open-ended；「hi」时跳过 retrieval |
 | Tenant key | `requestContext`, never tool args | LLM 绝不能自己挑 namespace |
 
@@ -79,37 +79,52 @@ Mastra 的经验法则对上这个拆分：workflows 做已定义的多步 proce
 
 ## 3. Embedding contract
 
-Ingest 与 query 必须用**同一个 model 与 dimension**。跨两个 embedding spaces 做 cosine similarity 是噪声。
+Ingest 与 query 必须用**同一个 dense model 与 dimension**。跨两个 embedding spaces 做 cosine similarity 是噪声。Hybrid 加了第二份契约：write 与 query 用同一个 **sparse** model。
 
 <br />
 
 ```ts
 import { ModelRouterEmbeddingModel } from "@mastra/core/llm"
 import { embedMany } from "ai"
+import { Pinecone } from "@pinecone-database/pinecone"
 
-export const EMBEDDING_MODEL_ID = "openai/text-embedding-3-small"
-export const EMBEDDING_DIMENSION = 1536
+export const DENSE_MODEL_ID = "openai/text-embedding-3-small"
+export const DENSE_DIMENSION = 1536
+export const SPARSE_MODEL_ID = "pinecone-sparse-english-v0"
 
-const embeddingModel = new ModelRouterEmbeddingModel(EMBEDDING_MODEL_ID)
+const denseModel = new ModelRouterEmbeddingModel(DENSE_MODEL_ID)
+const pc = new Pinecone({ apiKey: process.env.PINECONE_API_KEY! })
 
-export async function embedTexts(values: string[]): Promise<number[][]> {
+export async function embedDense(values: string[]): Promise<number[][]> {
   if (values.length === 0) return []
-  const { embeddings } = await embedMany({
-    model: embeddingModel,
-    values,
-  })
+  const { embeddings } = await embedMany({ model: denseModel, values })
   return embeddings
+}
+
+export async function embedSparse(values: string[], inputType: "passage" | "query") {
+  if (values.length === 0) return []
+  const { data } = await pc.inference.embed({
+    model: SPARSE_MODEL_ID,
+    inputs: values,
+    parameters: { inputType, truncate: "END" },
+  })
+  return data.map((d) => ({
+    indices: d.sparseIndices,
+    values: d.sparseValues,
+  }))
 }
 ```
 
 <br />
 
-- Mastra 文档里的路径是带 `provider/model` id 的 `ModelRouterEmbeddingModel`。
-- Pinecone index 的 metric 是 `cosine`。Dimension 在 `createIndex` 时冻结。以后换 model 意味着新 index 加一次完整 re-ingest。
+- Mastra 文档里的路径是带 `provider/model` id 的 `ModelRouterEmbeddingModel`，用于 dense。Sparse model 由 Pinecone 托管；通过 Pinecone SDK 调用。
+- Hybrid index 把两种 vectors 存在同一条 record 上，要求 **`metric: "dotproduct"`**。本 repo 里 dense-only 的 indexes 用的是 `cosine`；切换意味着新 index 加一次完整 re-ingest。
+- Dimension 在 `createIndex` 时冻结。以后换 dense model 意味着新 index 加一次完整 re-ingest。
 - `text-embedding-3-small` 把 input 上限卡在 8191 tokens。先 chunk，再 embed。
+- Sparse scores 无界；dense cosine scores 是 `[-1, 1]`。在 query 时用 **alpha** 权重（`α·dense + (1-α)·sparse`）把它们组合起来。自然语言问题从 `α = 0.75` 开始。不加权，sparse 部分会压过一切。
 - Batch embeddings 与 upserts。Pinecone 实务上限大约是 1000 vectors 或 2 MB；1536-d 且 metadata 带 `text` 时，靠近 100 更稳。
 
-**失败：** 一次 `embedMany` 一份无界 PDF。
+**失败：** 一次 `embedMany` 一份无界 PDF，或者做 hybrid query 却不加 alpha，让 exact-match tokens 淹没语义。
 
 <br />
 
@@ -146,27 +161,25 @@ Shared index + namespace (yes)
 <br />
 
 ```ts
-import { PineconeVector } from "@mastra/pinecone"
+import { Pinecone } from "@pinecone-database/pinecone"
 
 export const PINECONE_INDEX_NAME = "document-chunks"
 
-export const pinecone = new PineconeVector({
-  id: "pinecone",
-  apiKey: process.env.PINECONE_API_KEY!,
-  cloud: "aws",
-  region: "us-east-1",
-})
+export const pc = new Pinecone({ apiKey: process.env.PINECONE_API_KEY! })
 
 let indexReady: Promise<void> | undefined
 
 export async function ensurePineconeIndex() {
   if (!indexReady) {
-    indexReady = pinecone
+    indexReady = pc
       .createIndex({
-        indexName: PINECONE_INDEX_NAME,
-        dimension: EMBEDDING_DIMENSION,
-        metric: "cosine",
+        name: PINECONE_INDEX_NAME,
+        vectorType: "dense",
+        dimension: DENSE_DIMENSION,
+        metric: "dotproduct",
+        spec: { serverless: { cloud: "aws", region: "us-east-1" } },
       })
+      .then(() => undefined)
       .catch((error: unknown) => {
         indexReady = undefined
         throw error
@@ -178,11 +191,13 @@ export async function ensurePineconeIndex() {
 
 <br />
 
-- `@mastra/pinecone` 上的 `createIndex` 把 409 当成「已经存在」，然后检查 dimension。Latch 这个 promise，避免重复那次 round trip。
-- 每个 vector 的 metadata 必须是 **flat** 的。Pinecone 不会 flatten nested objects。把 `text` 留在 metadata 里，否则 retrieval 只返回没有散文的 scores。`maxSize: 512` 的 token chunks 会待在 40 KB cap 之下。
+- Pinecone 上的 hybrid 是**一个 dense index，在同一条 record 上带 `sparse_values`**。Linkage 是隐式的：一次 upsert、一次 query、不需要 client-side merge。Separate dense/sparse indexes 只用于 sparse-only queries 或 Pinecone-integrated sparse embedding——这里用不上。
+- Mastra 的 `PineconeVector` 是 dense 的 upsert/query wrapper。Hybrid 意味着用 Pinecone SDK（或包一层）才能设 `sparse_values`。把 workflow、agent 与 `requestContext` 留给 Mastra；别指望 `@mastra/pinecone` 来管 hybrid。
+- 每个 vector 的 metadata 必须是 **flat** 的。Pinecone 不会 flatten nested objects。把 `text` 留在 metadata 里，否则 retrieval 只返回没有散文的 scores。
+- Reducto 的 chunks 带 citation metadata。把 `page`、`bbox` 与 `blockType` 跟 `path`、`chunkIndex` 放在一起，答案才能指到某个区域，而不只是某个 file。
 - `organizationId` 不属于 metadata 里的 isolation key。Namespace *就是* tenant。Metadata filters 是该 tenant *内部* 的相关性（`path`，以及以后）。
 - Document identity 是 org prefix 下的 `path`，通常是 `docs/filename`。同一 path 再 upload 会覆盖。Rename 是一份新 document。`docs/` 下两个撞上同一 filename 的 files 是同一份 document。
-- Flat metadata 是 `{ path, filename, chunkIndex, text, mediaType }`。没有 nested objects。
+- Flat metadata 是 `{ path, filename, chunkIndex, page, bbox, blockType, text, embedText, mediaType }`。没有 nested objects。
 
 **失败：** 省略 `namespace` 看起来像「搜所有东西」。它搜的是 default namespace。
 
@@ -191,6 +206,8 @@ export async function ensurePineconeIndex() {
 ---
 
 ## 5. Ingest workflow
+
+File upload 与 ingest 属于 **一条** workflow：`pinecone-document-ingestion`。「一条 workflow」不是「一步」。DAG 是四步。HTTP route 只写 object 并 start 这次 run。
 
 Input 对齐 upload route，这样 Studio 与 HTTP 共享一份契约：`{ path, filename, mediaType }`。`startAsync` 是 fire-and-forget：它立刻返回 `{ runId }`。Route 不等 `status` 或 `chunkCount`。
 
@@ -203,40 +220,61 @@ POST /documents
   → startAsync → runId
   → list runs by resourceId, match input path
 
-Background run
-  → exists(path) → readFile(path)
-  → extractText → MDocument.chunk
-  → deleteVectors namespace + filter path
-  → upsert ids + vectors + metadata (if chunks)
+pinecone-document-ingestion  (one run)
+  loadFile       exists(path) → readFile → upload to Reducto
+  parseReducto   variable chunks, embedding_optimized → parse JSON
+  mapChunks      chunks → { text, embedText, page, bbox, blockType, chunkIndex }
+  indexChunks    deleteMany(path) → embed dense+sparse → upsert
 ```
 
 <br />
 
-- Skip images。PDFs 走 text extractor。其余是 UTF-8。Empty extract 是 `skipped`，不是 throw。
-- Skip 仍然 **删除** 该 path 已有的 vectors：用同名 image 替换一份 PDF，绝不能让旧 handbook 还能搜到。
-- 不要把 file bytes 传过 step output。Workflow snapshots 会把那份 data JSON-serialize。每一步按 `path` 从已经 org-rooted 的 filesystem 读。
+留在一条 workflow，因为它是 **一次逻辑操作**。每个 file 两条 workflows 意味着要 join 两次 runs——`documents` table 问题变成 runs-join。Retries 与 snapshots 是 per-run 的：若 upsert 在 parse 成功之后 flake，同一条 run 从 snapshot retry `indexChunks`。它不会再开一条 pipeline，去重新推导第一条已经知道的东西。
+
+真正要紧的边界是 **step**，不是 workflow：
+
+- `parseReducto` 要 retry-safe，不该每次 retry 都再 parse。Reducto 按 parse 收费。把 parse JSON（或 job id）留在 step output——以及 file 旁边——这样 retry `indexChunks` 时，若该 `path` + content hash 已经有 parse，就直接跳到 `mapChunks`。
+- 不要把 file bytes 传过 step output。Workflow snapshots 会把那份 data JSON-serialize。每一步按 `path` 从已经 org-rooted 的 filesystem 读。步骤之间只流 parse JSON（小、有结构）或它的引用。
+- Delete-then-upsert 留在 `indexChunks` 里。把 delete 拆成自己的 workflow，会让它在没有 matching upsert 的情况下跑起来。
+
+**不属于** 这条 workflow 的东西：
+
+- Retrieval。Hybrid query 与 rerank 是后续 turns 上的 tool。Upload 这条线到 upsert 为止。
+- Reducto Extract。Schema fill（`invoice.total`）有不同的 inputs、outputs 与 callers。那是以后的产品、以后的 workflow。
+- 换 model 时的 re-embed。一条读缓存 parse JSON 的 maintenance workflow。共享 `mapChunks` / `indexChunks` **steps**——export 它们再 reuse——不要 fork 由 upload 触发的那次 run。
+
+若某一步以后独立有用或运维上变重，抽出 *step*（Mastra steps 可组合），而不是第二条 ingest workflow。又慢又被 rate-limit 的 parse 变成 durable/suspendable step，让同一条 run 等着，不必占着 worker。Per-chunk enrichment 变成同一 DAG 里的第五步。
+
+<br />
+
+- 用 Reducto 的 **Parse**，不是 Extract。Parse 是 RAG ingest 这一步：pages、blocks、tables、figures、bounding boxes、citation-ready chunks。Extract 是 schema fill（`invoice.total`、`contract.effectiveDate`）——那是第二个产品，不是 corpus builder。
+- 让 Reducto 来 chunk。`retrieval.chunking.chunk_mode: "variable"` 以 1000 字符左右的 semantic boundaries 为目标。加上 `embedding_optimized: true`，tables 会得到一条给 vectors 用的 `embed` 字符串和一条给 display 用的 `content` 字符串。过滤 `Header`、`Footer` 与 `Page Number` blocks。
+- **不要**对 Reducto 的输出再跑 `MDocument.chunk()`。那是先花钱买 structure-aware chunks，再用 token splitter 砸烂。`MDocument` 在这里是 **adapter**：用 `fromMarkdown`（或 `fromJSON`）装 `text` + metadata，而不是 re-chunk。
+- Images 走同一条 Parse 路径（OCR / vision pass）。除非以后要靠像素搜「找到这张截图」，否则不需要单独的 vision index。
+- 把 Reducto parse JSON（或它的 job id）留在 file 旁边 **以及** `parseReducto` 的 step output 里。换 models 时 re-embed 而不 re-parse。Retry `indexChunks` 时不必再为 Parse 付钱。
 - 若 server 忘了设 org，`getWorkspaceOrganizationId` 会 throw——就是 upload route 放进 `requestContext` 的那份做过 membership check 的值。
-- `MDocument.chunk` 的 `maxSize` 是 character count，除非 `strategy: "token"`。用 tokens，让 size 对齐 embedding model。Media type 匹配时用 `fromMarkdown` / `fromHTML` / `fromJSON`，让 separators 跟随结构。
-- `chunkIndex` 是 array index。`MDocument` chunks 是 `{ text, metadata }`——它们不会替你带上 `chunkIndex`。
+- `chunkIndex` 是 array index。Reducto 的 chunks 带 `blocks[]`，里面有 bbox/page；自己把它们 map 成 flat metadata。
 
 <br />
 
 ```ts
-const doc =
-  inputData.mediaType === "text/markdown"
-    ? MDocument.fromMarkdown(inputData.text)
-    : inputData.mediaType === "text/html"
-      ? MDocument.fromHTML(inputData.text)
-      : inputData.mediaType === "application/json"
-        ? MDocument.fromJSON(inputData.text)
-        : MDocument.fromText(inputData.text)
-
-const nodes = await doc.chunk({
-  strategy: "token",
-  maxSize: 512,
-  overlap: 50,
-  encodingName: "cl100k_base",
+const result = await reducto.parse.run({
+  input: upload.fileId,
+  retrieval: {
+    chunking: { chunk_mode: "variable", chunk_size: 1000 },
+    embedding_optimized: true,
+    filter_blocks: ["Header", "Footer", "Page Number"],
+  },
 })
+
+const chunks = result.result.chunks.map((chunk, chunkIndex) => ({
+  chunkIndex,
+  text: chunk.content,           // display
+  embedText: chunk.embed,        // vectors
+  page: chunk.blocks[0]?.bbox.page,
+  bbox: chunk.blocks[0]?.bbox,
+  blockType: chunk.blocks[0]?.type,
+}))
 ```
 
 <br />
@@ -247,31 +285,29 @@ Pinecone 的 upsert 没有 `deleteFilter`。pgvector 可以一次 call 替换一
 
 ```ts
 const organizationId = getWorkspaceOrganizationId(requestContext)
+const index = pc.Index(PINECONE_INDEX_NAME)
 
-await pinecone.deleteVectors({
-  indexName: PINECONE_INDEX_NAME,
-  namespace: organizationId,
-  filter: { path: inputData.path },
-})
+await index.namespace(organizationId).deleteMany({ path: inputData.path })
 
-if (inputData.skipped || inputData.chunks.length === 0) return
+if (inputData.chunks.length === 0) return { status: "skipped", chunkCount: 0 }
 
-const embeddings = await embedTexts(
-  inputData.chunks.map((chunk) => chunk.text),
-)
-await pinecone.upsert({
-  indexName: PINECONE_INDEX_NAME,
-  namespace: organizationId,
-  ids: inputData.chunks.map(
-    (chunk) => `${inputData.path}:${chunk.chunkIndex}`,
-  ),
-  vectors: embeddings,
-  metadata: inputData.chunks.map((chunk) => ({
-    path: inputData.path,
-    filename: inputData.filename,
-    chunkIndex: chunk.chunkIndex,
-    text: chunk.text,
-    mediaType: inputData.mediaType,
+const dense = await embedDense(inputData.chunks.map((c) => c.embedText))
+const sparse = await embedSparse(inputData.chunks.map((c) => c.embedText), "passage")
+
+await index.namespace(organizationId).upsert({
+  records: inputData.chunks.map((chunk, i) => ({
+    id: `${inputData.path}:${chunk.chunkIndex}`,
+    values: dense[i],
+    sparseValues: sparse[i],
+    metadata: {
+      path: inputData.path,
+      filename: inputData.filename,
+      chunkIndex: chunk.chunkIndex,
+      page: chunk.page,
+      blockType: chunk.blockType,
+      text: chunk.text,
+      mediaType: inputData.mediaType,
+    },
   })),
 })
 ```
@@ -280,8 +316,9 @@ await pinecone.upsert({
 
 - 在 namespace 里 **先** 按 path delete，包括 skip 时，然后若有东西可写再 upsert。返回 `{ status: "skipped", chunkCount: 0 }` 或 `{ status: "indexed", chunkCount }`。
 - Deterministic ids（`${path}:${chunkIndex}`）会原地覆盖。它们仍不会移除已经不存在的 `chunkIndex` 值。Delete-first 才是正确的 overwrite。
+- Embed 用 `embedText` 字段，存 `text` 字段。当 Reducto 给 tables 做 summary 时，两者会不同。
 - Batch embed 与 upsert（1536-d 且 metadata 带 `text` 时约 100）。
-- 把 DAG 接成 `loadFile` → `extractTextStep` → `chunkDocument` → `indexChunks`，然后 `commit()`。在 Mastra instance 上注册 store、workflow，以及带 search tool 的 agent。
+- 把 DAG 接成 `loadFile` → `parseReducto` → `mapChunks` → `indexChunks`，然后 `commit()`。在 Mastra instance 上注册 store、workflow，以及带 search tool 的 agent。一条 workflow。四步。
 - Delete 然后 upsert 不是 atomic。若 concurrent re-uploads 重要，在 upload handler 里按 `{ organizationId, path }` serialize ingest。
 - Serverless search 是 eventually consistent：与 `startAsync` 同一 turn 的 query 可能错过新 chunks。这也是 retrieval 留给后续 turns 的另一个原因。
 
@@ -307,7 +344,7 @@ const { runId } = await run.startAsync({
 
 ## 6. Retrieval
 
-Retrieval 是 agent 调用的 **tool**，不是「embed 每条 user message 再 prepend hits」。Isolation 套在 `execute` 里，不在 tool schema 里。
+Retrieval 是 agent 调用的 **tool**，不是「embed 每条 user message 再 prepend hits」。Isolation 套在 `execute` 里，不在 tool schema 里。Hybrid search 与 rerank 活在这里——绝不在 upload 这条线上。
 
 <br />
 
@@ -316,8 +353,9 @@ User question
   → agent (query, optional topK)
   → tool execute
       namespace = organizationId   (server)
-      embedTexts(query)
-      pinecone.query cosine ANN
+      embedDense(query) + embedSparse(query)
+      hybrid query (alpha-weighted) dotproduct ANN
+      rerank top ~40 → keep ~8
       keep text and score ≥ 0.2
   → relevantContext + sources
   → agent
@@ -329,6 +367,16 @@ User question
 import { createTool } from "@mastra/core/tools"
 import { z } from "zod"
 
+function hybridScoreNorm(dense: number[], sparse: SparseVector, alpha: number) {
+  return {
+    dense: dense.map((v) => v * alpha),
+    sparse: {
+      indices: sparse.indices,
+      values: sparse.values.map((v) => v * (1 - alpha)),
+    },
+  }
+}
+
 export const searchPineconeDocuments = createTool({
   id: "search-pinecone-documents",
   description:
@@ -339,27 +387,46 @@ export const searchPineconeDocuments = createTool({
   }),
   execute: async (inputData, { requestContext }) => {
     const organizationId = getWorkspaceOrganizationId(requestContext)
-    const [queryVector] = await embedTexts([inputData.query])
-    const results = await pinecone.query({
-      indexName: PINECONE_INDEX_NAME,
-      queryVector,
-      namespace: organizationId,
-      topK: inputData.topK ?? 8,
-      includeVector: false,
+    const [denseQ] = await embedDense([inputData.query])
+    const [sparseQ] = await embedSparse([inputData.query], "query")
+    const { dense, sparse } = hybridScoreNorm(denseQ, sparseQ, 0.75)
+
+    const index = pc.Index(PINECONE_INDEX_NAME)
+    const results = await index.namespace(organizationId).query({
+      vector: dense,
+      sparseVector: sparse,
+      topK: 40,
+      includeMetadata: true,
     })
-    const sources = results.flatMap((result) => {
-      const text =
-        typeof result.metadata?.text === "string" ? result.metadata.text : ""
-      if (!text || result.score < 0.2) return []
-      return [
-        {
-          path: String(result.metadata?.path ?? ""),
-          filename: String(result.metadata?.filename ?? ""),
-          score: result.score,
-          text,
-        },
-      ]
+
+    const hits = results.matches
+      .map((m) => ({
+        id: m.id,
+        score: m.score,
+        text: String(m.metadata?.text ?? ""),
+        path: String(m.metadata?.path ?? ""),
+        filename: String(m.metadata?.filename ?? ""),
+        page: Number(m.metadata?.page ?? 0),
+      }))
+      .filter((h) => h.text)
+
+    const reranked = await pc.inference.rerank({
+      model: "bge-reranker-v2-m3",
+      query: inputData.query,
+      documents: hits.map((h) => ({ id: h.id, text: h.text })),
+      rankFields: ["text"],
+      topN: inputData.topK ?? 8,
+      returnDocuments: true,
+      parameters: { truncate: "END" },
     })
+
+    const sources = reranked.data
+      .map((r) => {
+        const hit = hits.find((h) => h.id === r.document.id)
+        return hit ? { ...hit, score: r.score } : undefined
+      })
+      .filter((s): s is NonNullable<typeof s> => Boolean(s && s.score >= 0.2))
+
     return {
       relevantContext: sources.map((s) => s.text).join("\n\n"),
       sources,
@@ -378,18 +445,22 @@ Isolation 与 relevance 是不同的 APIs：
 | --- | --- | --- |
 | Tenant | `namespace: organizationId` | Server, always |
 | Which file | `filter: { path }` | Optional; omit in v1 |
-| Neighbor count | `topK` | Agent, capped 1–20 |
-| Weak matches | `minScore` 0.2 | Server constant |
+| Signal mix | `hybridScoreNorm` 里的 `alpha` | Server constant (start 0.75) |
+| Candidate count | 给 hybrid 的 `topK` (40) | Server constant |
+| Final count | rerank 出来的 `topN` (8) | Agent, capped 1–20 |
+| Weak matches | rerank 后的 `minScore` 0.2 | Server constant |
 
 <br />
 
 - v1 搜的是 **该 organization 的全部 docs**。Path filters 是以后的 mention feature。不要把 tenancy 做成 metadata filter，「只为了跟 Postgres 保持一致」。
-- `0.2` 是 noise floor，不是校准过的 confidence。这个 model 上不相关的 pairs 常常坐在那附近。
-- `topK: 8` 是一份 context budget：8 × 约 512-token 的 overlapping chunks。Pinecone search 是 ANN；你可能错过在 exact kNN 里会排第 9 的 chunk。
-- 保持 `{ relevantContext, sources }`，这样以后从 pgvector cutover 是换 tool，不是改写 agent。若 `embedTexts` 什么都不返回，就返回 empty sources。
-- 一次成功的 vector lookup 不能证明答案是 grounded 的。Citations 仍必须被检查。Document RAG 是「handbook 里有什么」。Message-history semantic recall 是不同的 index、不同的 tenancy、不同的 tool。
+- Alpha `0.75` 偏语义。当 query 带 SKUs、error codes，或必须 exact match 的 named entities 时，往 `0.25` 降。用你自己 corpus 里带标注的集合来 evaluate。
+- 先取约 40 个 candidates，再 rerank 到 8。Rerank 是 query 时的 cross-encoder（`bge-reranker-v2-m3`），不是 ingest step。
+- sources 上 Reducto 的 `page` 与 `bbox` 让 UI 能把 citations 渲染到某个区域，而不只是某个 filename。
+- `0.2` 是 rerank 之后的 noise floor，不是校准过的 confidence。一次成功的 lookup 不能证明答案是 grounded 的；citations 仍必须被检查。
+- 保持 `{ relevantContext, sources }`，这样以后从 Pinecone cutover 是换 tool，不是改写 agent。若 embed 什么都不返回，就返回 empty sources。
+- Document RAG 是「handbook 里有什么」。Message-history semantic recall 是不同的 index、不同的 tenancy、不同的 tool。
 
-`createVectorQueryTool` 只有在 server 于 agent 跑起来 **之前**，从已认证的 org 设置 `databaseConfig.pinecone.namespace`（或一个 `VectorStoreResolver`），并且 tool input schema 从不包含 namespace 时才可用。
+`createVectorQueryTool` 只有在 server 于 agent 跑起来 **之前**，从已认证的 org 设置 `databaseConfig.pinecone.namespace`（或一个 `VectorStoreResolver`），并且 tool input schema 从不包含 namespace 时才可用。它也假设 store 是 dense-only。对 hybrid，custom tool 是唯一路径。
 
 - 默认 examples 用 static namespace 或 `requestContext.set("databaseConfig", …)`，很容易接错，也很容易通过 `PINECONE_PROMPT` filter syntax 暴露给 model。
 - 对 org-scoped user data，在 `execute` 里从已认证的 principal 派生 namespace。Custom tool 让那成为唯一路径。
@@ -408,11 +479,9 @@ Document identity 是 `path`。再 upload 替换 object，并替换 `{ namespace
 <br />
 
 ```ts
-await pinecone.deleteVectors({
-  indexName: PINECONE_INDEX_NAME,
-  namespace: organizationId,
-  filter: { path },
-})
+await pc.Index(PINECONE_INDEX_NAME)
+  .namespace(organizationId)
+  .deleteMany({ path })
 await filesystem.deleteFile(path, { force: true })
 ```
 
@@ -420,7 +489,7 @@ await filesystem.deleteFile(path, { force: true })
 
 - 若你只删 object，retrieval 会继续端出 ghosts。
 - 若你只删 vectors，file 仍在，以后的 ingest 可以重建。Prefer 一份 orphaned file，而不是泄漏或过期的 excerpt。
-- Skip-with-delete（empty extract、images、missing file）是同一条规则：当前 object 是 source of truth，所以 index 不得保留该 path 的上一版。
+- Skip-with-delete（empty parse、unsupported file、missing file）是同一条规则：当前 object 是 source of truth，所以 index 不得保留该 path 的上一版。
 
 **失败：** 只删 object，会在 Pinecone 里留下可搜的 ghosts。
 
@@ -430,10 +499,12 @@ await filesystem.deleteFile(path, { force: true })
 
 ## 8. What to leave out until it hurts
 
-在扁平 `docs/` prefix 上的 dense cosine 真正痛之前，先把这些留在外面。
+在扁平 `docs/` prefix 上的 hybrid 真正痛之前，先把这些留在外面。
 
-- **Hybrid sparse + dense。** 需要 `metric: "dotproduct"`，以及 upsert *和* query 上的 sparse vectors。对 exact tokens（SKUs、error codes）有帮助。以后的 hybrid index 是新 index，不是你在 `document-chunks` 上翻转的一个 setting。
-- **Re-rank。** Fetch `topK=30`，再用 `rerankWithScorer` 收到 8。当 ANN 返回「同一话题，错的段落」时有帮助。多一跳 cross-encoder（或 agent scorer）。
+- **Separate dense 与 sparse indexes。** 两次 upserts、两次 queries、client-side merge。只有在需要 sparse-only queries 或 Pinecone-integrated sparse embedding 时才值得。一个 hybrid index 更简单，在这里也是对的。
+- **第二条 ingest workflow。** Parse 是一步，不是一条 pipeline。把 `parseReducto` 拆成自己的 workflow，会丢掉这套设计依赖的 single-run status 与 snapshot-retry。Parse 变慢就抽出可组合的 *step*；不要 fork 这次 run。
+- **Reducto Extract。** Parse 建 corpus。Extract 填 schemas（`invoice.total`），是另一个产品。不要把它们混进 ingest DAG。
+- **Multimodal image index。** Reducto 已经把 images OCR 成 text chunks。只有当用户搜「找到这张截图」时，才加 pixel embeddings。
 - **GraphRAG。** 跟随 chunks 之间的 edges。对 wiki，也许。对扁平 `docs/` prefix，不必。
 - **Always-on injection。** Embed 每条 user message。你会在问候上 retrieval，并烧掉 tokens。
 
@@ -443,13 +514,15 @@ await filesystem.deleteFile(path, { force: true })
 
 ## 9. Invariants
 
-1. Write 与 read 用同一个 embedding model 与 dimension。
+1. Write 与 read 用同一个 dense 与 sparse models。Dense 用同一个 dimension。
 2. Namespace 是 organization。`userId` 是 actor。Metadata filters 是该 tenant 内部的相关性。
 3. Overwrite 与 skip 都以 `deleteVectors(path)` 开始。Pinecone 不会替你做这件事。
-4. Agent 选择*何时*搜。Server 选择*哪个 org* 可见。
-5. Files 仍是 source of truth。Vectors 是派生的。Workflow runs 是 ingest status。`resourceId` 是 org；path 在 run input 上匹配。
+4. Agent 选择*何时*搜。Server 选择*哪个 org* 可见，以及 signals *如何*混合（`alpha`）。
+5. Files 仍是 source of truth。Vectors 是派生的。Reducto parse JSON 是缓存的中间产物——留着它，re-embed 与 ingest retries 就不必 re-parse。Workflow runs 是 ingest status。`resourceId` 是 org；path 在 run input 上匹配。
+6. Rerank 是 query-time。Upload path 到 upsert 为止。
+7. Upload 与 ingest 是一条 workflow、四步（`loadFile` → `parseReducto` → `mapChunks` → `indexChunks`）。一个 `runId` 就是 status。不要把 parse 拆成第二条 workflow。
 
-这就是这套系统：一个四步 ingest DAG、一份按 organization 分区的 cosine index，以及一份 tool schema 不能点名另一个 tenant 的 retriever。
+这就是这套系统：一条 workflow 里的四步 ingest DAG、一份按 organization 分区的 hybrid dotproduct index，以及一份 tool schema 不能点名另一个 tenant 的 retriever。
 
 ---
 
@@ -461,7 +534,8 @@ await filesystem.deleteFile(path, { force: true })
     <AccordionContent>
 
       - 一套能跑的 RAG stack 是两条共享 embedding space 的 pipelines：一条写 vectors 的 **deterministic ingest workflow**，一条读它们的 **tool-called retriever**。
-      - Load → extract → chunk → embed → upsert 是带 retries 与 run snapshots 的固定 DAG。「User asked about the handbook」是 open-ended 的；「hi」时跳过 retrieval。
+      - Upload 与 ingest 是 **一条** workflow，四步：`loadFile` → `parseReducto` → `mapChunks` → `indexChunks`。一个 `runId` 就是 ingest status。Parse 是一步，不是第二条 workflow。「User asked about the handbook」是 open-ended 的；「hi」时跳过 retrieval。
+      - Hybrid search 与 rerank 属于 read path，绝不在 upload 这条线上。Write path 到 upsert 为止。Extract 与 re-embed 是以后的 workflows，可以 reuse steps，不是额外的 ingest pipelines。
       - Always-on injection 会 embed 每一句问候并烧掉 tokens。
       - Tenant key 活在 **`requestContext`** 里，绝不在 tool args 里。Upload 与 chat 用同一套方式填 context：session → 验证 membership → 设置 `organizationId` 与 `userId`。
       - **失败：** 若 model 能选择搜*谁的* index，你就有泄漏。绝不要从 client header 或 model 能影响的 `databaseConfig` 复制 org。
@@ -473,11 +547,11 @@ await filesystem.deleteFile(path, { force: true })
     <AccordionTrigger>2. Embedding contract 是什么？</AccordionTrigger>
     <AccordionContent>
 
-      - Ingest 与 query 必须用**同一个 model 与 dimension**。跨两个 embedding spaces 做 cosine similarity 是噪声。
-      - Dimension 在 `createIndex` 时冻结。以后换 model 意味着新 index 加一次完整 re-ingest。
+      - Ingest 与 query 必须用**同一个 dense model 与 dimension**，以及同一个 **sparse model**。跨空间的 cosine similarity 是噪声。
+      - Hybrid 用一个 dense index，在同一条 record 上带 `sparse_values`，metric 是 **`dotproduct`**。Dense-only 的 `cosine` index 要切换就得完整重建。
+      - Sparse scores 无界；dense scores 是 `[-1, 1]`。Query 时用 `α·dense + (1-α)·sparse` 加权。从 `α = 0.75` 开始。不加权，exact-match tokens 会淹没语义。
       - 先 chunk，再 embed。不要对一份无界 PDF 做 `embedMany`。Batch upserts；1536-d 且 metadata 带 `text` 时，每次 request 靠近 100 vectors。
-      - Files 是 source of truth。Vectors 是派生 index。Ingest status 是该 org 与 path 的最新 workflow run，不是一张能跟 S3 与 Pinecone 漂移的 documents table。
-      - Mastra Workspace search 是给 agent sandbox 的，不是带 membership-checked context 的 HTTP upload API。
+      - Files 是 source of truth。Vectors 是派生 index。Reducto parse JSON 是缓存的中间产物——留着它，re-embed 就不必 re-parse。Ingest status 是该 org 与 path 的最新 workflow run。
 
     </AccordionContent>
   </AccordionItem>
@@ -500,9 +574,9 @@ await filesystem.deleteFile(path, { force: true })
     <AccordionContent>
 
       - Retrieval **不是**「embed 每条 user message 再 prepend hits」。Isolation 套在 `execute` 里，不在 tool schema 里。
-      - Schema 暴露 `query` 与可选的 `topK`。Server 设置 `namespace = organizationId`，embed query，跑 cosine ANN，留下 `text` 且 score ≥ 0.2，并返回 `relevantContext` 加上 sources。
+      - Schema 暴露 `query` 与可选的 `topK`。Server 设置 `namespace = organizationId`，embed dense + sparse，跑一次 alpha-weighted hybrid query 取约 40 个 candidates，rerank 到 8，留下 `text` 且 score ≥ 0.2，并返回带 `page`/`bbox` citations 的 `relevantContext` 与 sources。
+      - `createVectorQueryTool` 假设 store 是 dense-only。对 hybrid，custom tool 是唯一路径。
       - 一次成功的 vector lookup 不能证明答案是 grounded 的。Citations 仍必须被检查。
-      - Document RAG 是「handbook 里有什么」。Message-history semantic recall 是不同的 index、不同的 tenancy、不同的 tool。
       - **失败：** 带 static namespace 或 model 可见的 `databaseConfig` / `PINECONE_PROMPT` filters 的 `createVectorQueryTool`。
 
     </AccordionContent>
@@ -515,8 +589,8 @@ await filesystem.deleteFile(path, { force: true })
       - Document identity 是 **`path`**。再 upload 替换 object，并替换 `{ namespace, path }` 的 vectors。
       - Delete 必须打到两个 stores，**先 vectors**。若你只删 object，retrieval 会继续端出 ghosts。若你只删 vectors，file 仍在，以后的 ingest 可以重建。
       - Prefer 一份 orphaned file，而不是泄漏或过期的 excerpt。
-      - Skip-with-delete（empty extract、images、missing file）是同一条规则：当前 object 是 source of truth，所以 index 不得保留该 path 的上一版。
-      - Hybrid sparse+dense、re-rank 与 GraphRAG 等到扁平 `docs/` prefix 上的 dense cosine 真正痛再上。
+      - Skip-with-delete（empty parse、unsupported file、missing file）是同一条规则：当前 object 是 source of truth，所以 index 不得保留该 path 的上一版。
+      - Separate dense/sparse indexes、Reducto Extract、multimodal image index 与 GraphRAG 等到扁平 `docs/` prefix 上的 hybrid 真正痛再上。
 
     </AccordionContent>
   </AccordionItem>
