@@ -15,3 +15,10 @@ sst-env.d.ts
 bun.lock
 package-lock.json
 apps/web/public/search-index/
+# Biome owns web JS/TS/JSON/CSS (same split as lint-staged).
+apps/web/**/*.ts
+apps/web/**/*.tsx
+apps/web/**/*.js
+apps/web/**/*.jsx
+apps/web/**/*.json
+apps/web/**/*.css
