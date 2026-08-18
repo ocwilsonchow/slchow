@@ -46,14 +46,14 @@ sst.config.ts   App entry — currently wires @repo/infra/nextjs
 
 ### Web app features (`apps/web`)
 
-| Area    | Notes                                                                                                                      |
-| ------- | -------------------------------------------------------------------------------------------------------------------------- |
-| Routes  | Home, resume, notes, works, designs, contact (locale-prefixed)                                                             |
-| Content | Fumadocs MDX from `@repo/content`                                                                                          |
-| Search  | ⌘/Ctrl+K; indexes notes, works, and current resume                                                                         |
+| Area    | Notes                                                                                                                              |
+| ------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Routes  | Home, resume, notes, works, designs, contact (locale-prefixed)                                                                     |
+| Content | Fumadocs MDX from `@repo/content`                                                                                                  |
+| Search  | ⌘/Ctrl+K; indexes notes, works, and current resume                                                                                 |
 | Designs | Album stacks (stills + in-view MP4); synced from `packages/content/design` → `public/design-assets` with 200/320/400/800w variants |
-| Motion  | Lenis smooth scroll + Motion / GSAP-friendly layout                                                                        |
-| i18n    | `en`, `hk`, `cn` via next-intl + Fumadocs                                                                            |
+| Motion  | Lenis smooth scroll + Motion / GSAP-friendly layout                                                                                |
+| i18n    | `en`, `hk`, `cn` via next-intl + Fumadocs                                                                                          |
 
 ## Requirements
 
