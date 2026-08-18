@@ -36,9 +36,9 @@ Durable agent that empowers internal tools and workflows.
 
 - Built agent runs durable streams so clients could disconnect, reconnect, and resume without losing progress.
 - Built **Mastra workflows**, memory, schedules, tools, pause/resume, retries, sandboxing, and skills.
-- Shipped org-scoped **RAG** (ingestion, chunking, **Pinecone** query/reranking) and eval-gated releases.
+- **RAG** (ingestion, chunking, **Pinecone** query/reranking); **SQL agent** to query database in natural language.
 - Ran Hono + Better Auth on **ECS Fargate**, with Postgres, S3, and Mastra Platform for observability.
-- Shipped chat, tool-invocation UIs, a custom TipTap @mentions input component for attaching workspace files.
+- Built a custom **@mentions-style** input component for attaching workspace files to messages.
 
 ---
 
@@ -63,17 +63,18 @@ Strapi, Meilisearch, and **Next.js** editorial platform in the WordPress-to-head
 - Used hybrid ISR: main pages/latest 100 articles at build, rest on demand; Strapi **GraphQL**, **Next.js** cache tags, and webhooks revalidated publishes without full rebuilds.
 - Made keyboard navigation, accessible form errors, semantics, and Lighthouse/axe checks release requirements.
 - Split interactive state from page data: **XState** + **TanStack Form** / **Zod**, route-owned locale, and hybrid-ISR content.
-- Built a Strapi plugin for AI-assisted content generation with AI SDK.
+- Built a Strapi plugin for AI content generation with AI SDK.
 
 ---
 
-### React Native Membership Platform, shipped Apr 2024
+### Restaurant Membership Platform, shipped Apr 2024
 
-- Owned digital card, points, and offers from Figma through Apple App Store / Google Play release; maintained the Express API and **Next.js** admin.
-- Stored refresh tokens in **SecureStore** / Keychain and generated typed **OpenAPI** REST clients.
+React Native membership app, paired with a **Express** backend and **Next.js** admin portal.
+
+- Owned application delivery from Figma, **React Native** development, through Apple App Store / Google Play release; maintained backend API and admin portal.
 - Maintained **99%** crash-free sessions by diagnosing crashes, device issues, and API bottlenecks with **Sentry**.
-- Fixed JS-thread feed stalls with **FlashList**, memoized rows, smaller cached images, and native-thread **Reanimated** / **Moti**; froze/deferred inactive tabs, trading later first paint for **60 FPS** (RN Perf Monitor, lab).
-- Routed FCM promo/milestone deep links to the matching screen.
+- Fixed JS-thread feed stalls with **FlashList**, memoized rows, smaller cached images, and native-thread **Reanimated** / **Moti**; froze/deferred inactive tabs, ensured consistent **60 FPS** performance.
+- Routed Firebase Cloud Messaging promo/milestone deep links to the matching screen.
 
 <br />
 
@@ -90,15 +91,16 @@ Also shipped React Native student and restaurant loyalty apps, a Flutter elderly
 ## Skills
 
 - **Languages**: TypeScript, Node.js, SQL, Python
-- **Frontend**: React, Next.js, React Native, Expo, HTML/CSS, Tailwind CSS, shadcn/ui, Figma, TipTap
+- **Design**: Figma
+- **Frontend**: React, Next.js, React Native, Expo, HTML/CSS, Tailwind CSS, shadcn/ui, TipTap
 - **UI behavior**: TanStack Query, TanStack Form, React Hook Form, XState, TanStack Table, next-intl
 - **Architecture**: state modeling (URL/server/local), component APIs, routing, SSR/ISR, GraphQL, tRPC, OpenAPI clients, Storybook, Fumadocs
 - **Backend**: Hono, Drizzle, Prisma, Postgres, DynamoDB, Better Auth
 - **Auth & security**: OAuth 2.0/OIDC, JWT, HttpOnly cookies, CORS, RBAC
-- **AI**: Mastra, Vercel AI SDK, LangChain, Pinecone, Strands, AWS Bedrock, evals, ClickHouse tracing
-- **Quality**: Vitest, Playwright, Cypress, React Testing Library, Lighthouse, axe, Sentry
-- **Mobile**: FlashList, Reanimated, Moti, Skia, Unistyles, SecureStore, FCM
-- **AWS & DevOps**: SST, Docker, ECS Fargate, Lambda/API Gateway, CloudFront/CDN, GitHub Actions, AWS, Turborepo
+- **AI**: Mastra, Vercel AI SDK, LangChain, Pinecone, Strands, AWS Bedrock
+- **QA**: Vitest, Playwright, Cypress, Lighthouse, axe, Sentry
+- **Mobile**: FlashList, Reanimated, Moti, Skia, Unistyles
+- **AWS & DevOps**: SST, Terraform, Docker, GitHub Actions, AWS, Turborepo
 
 <br />
 
