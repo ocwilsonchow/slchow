@@ -1,0 +1,283 @@
+---
+title: OAuth 2.0 与 OIDC 解释
+description: Delegated authorization 对上 login —— roles、grants、tokens、authorization code + PKCE，以及这套 stack 实际上如何用 Better Auth
+date: 2026-08-18
+category: security
+---
+
+**OAuth 2.0** 是 delegated authorization。它不是「用 popup 登录。」**OpenID Connect (OIDC)** 是叠在 OAuth 上的 identity：ID token、UserInfo endpoint，以及 `openid` scope。「Sign in with Google」是 OIDC。用带 scope 的 access token 打 Google API 才是 OAuth。
+
+这篇 note 依 [Code and Stuff 的 walkthrough](https://www.youtube.com/watch?v=tpIXmmV4ib4)。Video 讲的是 OAuth 的四方与五种 grants。OIDC 以及这套 stack 实际上如何用 Better Auth，是多出来的一层。Category map 见 [Web Security and the OWASP Top 10](/notes/web-security-owasp-top-10)。Cookie lifetime 见 [Local Storage、Session Storage 与 Cookies](/notes/browser-storage-localstorage-sessionstorage-cookies)。
+
+<br />
+
+---
+
+## 1. The Distinction
+
+OAuth 回答 **这个 client 可以代表 owner 做什么**。OIDC 回答 **刚 authenticate 的是谁**。把两者混在一起，login screen 就会变成 API credential，或 access token 就会变成假 identity。
+
+- **Resource owner** 是已经有 access 的人（或 service account）。不是 app。
+- **Client** 是来要那一小片 access 的 app。Next.js server 是 **confidential** client：它可以持有 secret。SPA 或 React Native binary 是 **public** client：它不能。
+- **Authorization server** authenticate owner 并签发 tokens。**Resource server** 是接受 access token、仍然要 authorize 那一行的 API。
+
+这套 stack 的「login」通常是 Better Auth mint 一个 **session**，不是 browser 握着 OAuth access token。Social login 是这支 app 当 Google 或 GitHub 的 OIDC **client**，再把那份 identity 换成自己的 session。
+
+<br />
+
+---
+
+## 2. Roles
+
+四方。Browser 是信差，不是第五方。
+
+<br />
+
+```text
+Resource owner
+  → Client (this app)
+    → Authorization server (Google, GitHub, or this Better Auth)
+      → Authorization code
+    → Token endpoint (code + secret or verifier → tokens)
+  → Resource server (Hono API, or Google's API)
+```
+
+<br />
+
+| Role | Job | In this stack |
+| --- | --- | --- |
+| Resource owner | Consents | 已登录的人 |
+| Client | Requests a scoped grant | Next.js / Expo app |
+| Authorization server | Authenticates and issues | Google / GitHub，或 Better Auth |
+| Resource server | Enforces the token | Hono，或 provider 的 API |
+
+<br />
+
+Setup 是 **client registration**。Pin 一个精确的 `redirect_uri`，拿到 `client_id`，以及 —— 只有 confidential —— `client_secret`。Resource server 与 authorization server 可以是同一个 process。它们仍是两个 roles。
+
+- **Confidential client** — 能保住 `client_secret` 的 server。Token exchange 发生在 browser 之外。
+- **Public client** — SPA 或 native app。没有 secret 能一直保密。PKCE 是替代证明。
+- **Scopes** 是 authorization server 与 resource server 约定的字符串（`profile`、`photos.read`）。没有普世意义。分享 calendar，不分享 diary。可以组合。Owner 已经同意过那一小片时，consent 可以跳过。
+
+**Failure:** 把 client 当成 user。Access token 说的是 *client* 可以做什么。Membership 与 row checks 仍在 Hono。那条路见 [用 Hono、Better Auth、Drizzle 与 Postgres RLS 打造 Multi-Tenant 后端](/notes/multi-tenant-backend-drizzle-hono-better-auth)。
+
+<br />
+
+---
+
+## 3. Tokens
+
+每个 token 只有一份工作。拿来做另一份，就是常见的 bug。
+
+| Token | Travels | Job |
+| --- | --- | --- |
+| Authorization code | Front channel，一次 | Owner 已同意的证明。Short-lived。拿去换，不拿来存。 |
+| Access token | Back channel，再到 API | Client 可以做什么。Resource server 上的 bearer。 |
+| Refresh token | Back channel，再由 client 持有 | 不用 owner 再出场，mint 新的 access token。 |
+| ID token | Back channel，到 client | 谁 authenticate 了。**不是** API credential。 |
+
+<br />
+
+- **Authorization code** 是一次性票。没有 PKCE verifier（public client）或 client secret（confidential client）就没用。
+- **Access token** 可以是 API 本地验证的 JWT，或 API introspect 的 opaque value。Format 与 grant 无关。Lifetime 从几分钟到一两个小时。每小时再叫 owner 登录一次，看起来像诈骗。
+- **Refresh** 本身就是一种 grant：`grant_type=refresh_token`。Authorization server 确认 access 没有被撤销，再签发新的 access token。实现各不相同，而且没有完全规格化：同一个 refresh token 或每次换新的 —— 回来什么就存什么；前一个 access token 是否立刻作废；短暂的 concurrent-refresh grace。认清这台 authorization server。
+- **ID token** 是给 *client* 的 JWT：`iss`、`aud`、`exp`、`sub`，以及请求过的 profile claims。Client 检查 signature 与 audience。它不会把那颗 JWT 当 `Authorization: Bearer` 送给 Hono。
+
+**Failure:** 因为「它是 JWT 而且有 `sub`」就把 ID token 送给 API。Audience 是 client，不是 API。API 要的是 access token —— 或在这套 stack 里，它自己签发的 session cookie。
+
+<br />
+
+---
+
+## 4. Grant Map
+
+**Grant** 是 client 如何证明自己该拿到 tokens。它不是 token format。
+
+| Grant | Who it is for | Production stance |
+| --- | --- | --- |
+| Authorization code + PKCE | Browser 与 native public clients；confidential clients 也适用 | Default interactive login |
+| Device code | TV 与其他输入受限的 devices | RFC 8628。Poll，不要在 toaster 上打字。 |
+| Refresh token | 已经握有 refresh token 的 client | Silent renew。回来什么就存什么。 |
+| Client credentials | Server 打另一台 server | 不绑定 resource owner 的数据 |
+| Implicit | Legacy SPAs | Deprecated。RFC 9700。OAuth 2.1 已拿掉。 |
+| Resource owner password (ROPC) | Client 自己收 password | Discouraged。Client 变成 IdP。 |
+
+<br />
+
+- **Authorization code** 让 tokens 离开 front channel。Redirect 带的是 code。Token endpoint 是直接、已认证的呼叫。
+- **PKCE**（S256）在 OAuth 2.1 draft 里对 public clients 是必须。对 confidential clients 也是便宜的保险。
+- **Device code** 给打不了字的屏幕。Owner 在手机上授权。
+- **Client credentials** 没有人。`client_id` + `client_secret` 进，access token 出。Scopes 仍然绑住 token。不是 user grant。
+- **Implicit** 把 access token 放进 redirect URL。History、logs，以及靠近 Referer 的意外。没有一次性 code，也没有 client authentication。
+- **ROPC** 训练用户把 password 打进错误的 app。那个 grant 里没有 MFA，也没有 consent screens。
+
+Video 走五种 flavors，把 implicit 与 ROPC 当成 insecure 省略。这里同一立场。
+
+<br />
+
+---
+
+## 5. Authorization Code + PKCE
+
+这是 production 真正 ship 的 interactive flow。两拍：能保密的 backend，然后无法保住 secret 的 public client。
+
+<br />
+
+```text
+Client                Authorization server              Resource server
+  |                          |                                |
+  |  1. generate verifier    |                                |
+  |     S256 → challenge     |                                |
+  |  2. redirect (challenge, |                                |
+  |     client_id, scope,    |                                |
+  |     redirect_uri, state) |                                |
+  | ------------------------>|  3. owner authenticates        |
+  |                          |     and consents               |
+  |  4. redirect + code      |                                |
+  | <------------------------|                                |
+  |  5. POST token endpoint  |                                |
+  |     code + secret        |                                |
+  |     or code + verifier   |                                |
+  |     + original redirect  |                                |
+  | ------------------------>|                                |
+  |  6. access_token         |                                |
+  |     (+ id_token, refresh)|                                |
+  | <------------------------|                                |
+  |  7. Authorization: Bearer ... ---------------------------->|
+  |                                                           |
+```
+
+<br />
+
+**Confidential.** Token POST 带 `client_id`、`client_secret`，以及原来的 `redirect_uri`。Access token 是 secret。Backend 把它放在 database 或加密的 session cookie。不交给 frontend。
+
+**Public / mobile.** 没有 secret。PKCE 存在，是因为 **device 上任何 app 都能宣称同一个 custom URI scheme** 并偷走 code。Redirect 之前，client 产生 **code verifier** 与 **code challenge** `BASE64URL(SHA256(verifier))`。Authorization server 存下 challenge —— 或把它塞进 code。Exchange 证明 verifier hash 成那个 challenge。只拦到 code 的 interceptor 无法完成。
+
+- **`state`** 把 callback 绑到这次 browser session。**`nonce`**（OIDC）把 ID token 绑到这次 request。两者不能互换。
+- Owner 在 authorization server 上 authenticate。Mobile 上那是 **system browser 或 in-app browser tab**，不是 app 能 script 的 WebView。Stance：[React Native 里的 Security](/notes/security-in-react-native)。
+
+**Failure:** 只用 custom URL scheme 当 redirect、可 script 的 WebView，或「因为 Expo app 里有 client secret」而跳过 PKCE。Secret 就在 IPA 里。
+
+<br />
+
+---
+
+## 6. Device Grant
+
+一台 TV、一台 console、一台没有键盘的 toaster。Authorization code flow 打不了字。
+
+<br />
+
+```text
+Device                  Authorization server              Phone
+  |  1. POST device      |                                 |
+  |     authorization    |                                 |
+  |     (client_id,      |                                 |
+  |      scope)          |                                 |
+  | -------------------->|                                 |
+  |  2. device_code,     |                                 |
+  |     user_code,       |                                 |
+  |     verification_uri |                                 |
+  | <--------------------|                                 |
+  |  3. show URI + code  |                                 |
+  |     (or QR)          |                                 |
+  |                      |  4. owner types user_code       |
+  |                      | <-------------------------------|
+  |  5. poll token       |                                 |
+  |     (authorization_  |                                 |
+  |      pending …)      |                                 |
+  | -------------------->|                                 |
+  |  6. access_token     |                                 |
+  | <--------------------|                                 |
+```
+
+<br />
+
+- Device 打 **device authorization endpoint**，带 `client_id` 与 scopes。回来的是 `device_code`、一短串 `user_code`，以及 verification URI。有时 URI 是已经把 code 放进 query 的 QR。
+- Owner 在手机或笔记本上授权。Device 用 `device_code` **poll** token endpoint。一开始是 `authorization_pending`。Consent 之后才是 tokens。
+
+**Failure:** 叫 owner 把 password 打进 TV。那是输入更糟的 ROPC。
+
+<br />
+
+---
+
+## 7. OIDC Extras
+
+OIDC 是 OAuth 2.0 加上一份 **authentication** 契约。Video 停在 OAuth。这是多出来的一层。
+
+- 请求 **`openid`** scope。Client 需要那些 claims 时再加 `profile` 与 `email`。Scopes 仍然描述 *access token* 在 provider APIs 上可以做什么。
+- **ID token** 是 JWT。Client 验证 signature（JWKS）、`iss`、`aud`（这个 `client_id`）、`exp`，以及 `nonce`。`sub` 是那个 issuer 上稳定的 subject —— 在 app map 之前，不是 Hono user id。
+- **UserInfo** 是 claims 没有全部塞进 ID token 时，带 access token 多打的一次 GET。它仍是 provider 的 identity，不是这支 API 的 session。
+- Authentication 是 **谁**。OAuth scopes 是 **API 可以做什么**。一颗验证通过的 ID token，不代表这个 identity 可以读另一个 organization 的 row。
+
+Better Auth 的 social login 是这支 app 当 OIDC client：redirect、code、ID token，然后 **mint 一个 Better Auth session**。Session 才是产品其余部分看见的 credential。
+
+<br />
+
+---
+
+## 8. What This Stack Ships
+
+Better Auth 已经拥有 password hashing、session records 与 cookie issuance。这里的 OAuth/OIDC 通常是 **inbound social login**，不是这支 API 假装自己是 Google。
+
+<br />
+
+```http
+Set-Cookie: session=opaque-value; Path=/; HttpOnly; Secure; SameSite=Lax
+```
+
+<br />
+
+- **Web.** Browser 握着一颗 opaque session cookie。`HttpOnly` 让 XSS 无法轻易 export。`Secure` 让它离开 HTTP。`SameSite=Lax` 是默认起点。Next.js document 是不受信任的 origin；cookie 才是 credential。Stance：[Next.js 里的 Security](/notes/security-in-next-js)。
+- **Social.** Better Auth 是跟 Google 或 GitHub 说话的 confidential client。User 从不把 Google password 交给这支 app。Callback 之后，Better Auth 写下 **它自己的** session，不是把 Google access token 丢进 `localStorage`。这跟 video 一致：confidential client 让 access token 离开 frontend。
+- **Mobile.** 内存里的 short-lived access token。SecureStore / Keychain / Keystore 里的 refresh token。跟 web app 同一台 authorization server。Binary 不是 `client_secret` 的 secret store。PKCE，不是 IPA 里的 client secret。
+- UI 不是 authorization。藏一个按钮、从 ID token 读 role，或信任 `X-Organization-Id`，都不决定某一行能不能被读。
+
+**Failure:** 在 Better Auth 的 cookie 旁边，再发明一套 JWT-in-`localStorage`「因为 SPA」。Browser 已经有 credential container。两套 session 机制就是两套 revocation 故事。
+
+<br />
+
+---
+
+## 9. Client Credentials
+
+Client 以自己的身份登录。Confidential，backend-to-backend。循环里没有 resource owner。
+
+- Grant 是 **client credentials**：在 token endpoint 交 `client_id` 与 `client_secret`，换回 short-lived access token。常常是 JWT。Resource server 仍然检查 `aud`、`iss`、expiry，以及 **scopes**。
+- 用在 **不绑定 resource owner** 的数据：webhook setup、client registration、client 自己的 admin。没有人同意过某人的 calendar。
+- Grant 不是 token format。Client credentials 可以 mint JWT 或 opaque token。Config file 里一颗静态 JWT 两者都不是；那是带额外 claims 的 long-lived password。
+- **API keys** 是每次调用都带的 shared secret。适合简单的 webhook receiver。Hash 它们、绑到 tenant、支持两把同时有效的 keys。没有标准 scopes，rotate 很痛。
+
+**Failure:** 因为「server 有 secret」就用 client credentials 读 user 的数据。那不是 user grant。Query string 里的静态 API key，或一把 service account 泄漏后没有 revoke 路径的 24-hour JWT，是同一类。
+
+<br />
+
+---
+
+## 10. Pitfalls
+
+Protocol 没问题。常见伤害是把错的 token 放进错的地方。
+
+- **`localStorage` 里的 access tokens。** Origin 上的 XSS 读得到。Web 上的 production default 是 cookie jar，不是 Web Storage。[Local Storage、Session Storage 与 Cookies](/notes/browser-storage-localstorage-sessionstorage-cookies)。
+- **Implicit.** Access token 走 front channel。Deprecated。用 authorization code + PKCE。
+- **ID token 当 bearer。** Audience 是 client。API 没签发它，也不该接受它。
+- **宽松的 `redirect_uri`。** App 上的 open redirect，或只 match prefix 的 allowlist，会把 callback 变成别人的 code drop。Register 精确的 redirect URIs。
+- **Cookie session 混上 JavaScript 也握着的 JWT。** Cookie 把 CSRF 带回来；XSS 偷走 JWT。选一个 credential container。
+- **把 CORS 当 access control。** CORS 是 browser 的 reading rule。Native app、`curl`，以及被偷走的 token 都不会遵守。API 仍然要 authenticate。
+
+**Failure:** 用「我们有用 OAuth」代替 authorization。OAuth 拿到了 token。Hono 仍然要问这个 identity 能不能碰这一 row。
+
+<br />
+
+---
+
+## 11. Where It Sits
+
+OAuth 与 OIDC 是 **这个 client** 如何拿到一份证明。它们不是 **这支 API** 如何决定 access。
+
+- Trust boundaries 与 attacker goals：[Web Security and the OWASP Top 10](/notes/web-security-owasp-top-10)
+- Cookie vs Web Storage：[Local Storage、Session Storage 与 Cookies](/notes/browser-storage-localstorage-sessionstorage-cookies)
+- Browser origin：[Next.js 里的 Security](/notes/security-in-next-js)
+- Device host：[React Native 里的 Security](/notes/security-in-react-native)
+- Identity、membership，以及那一行：[用 Hono、Better Auth、Drizzle 与 Postgres RLS 打造 Multi-Tenant 后端](/notes/multi-tenant-backend-drizzle-hono-better-auth)

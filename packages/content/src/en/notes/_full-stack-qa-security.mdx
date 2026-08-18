@@ -71,7 +71,7 @@ category: full-stack
     <AccordionTrigger>6. Walk through the OAuth 2.0 authorization code flow with PKCE. Why is the implicit flow deprecated?</AccordionTrigger>
     <AccordionContent>
 
-      - OAuth is delegated authorization, not "login with a popup." The **authorization code flow with PKCE** is what production ships for a public client — a SPA or a native app — where a client secret cannot be hidden.
+      - OAuth is delegated authorization, not "login with a popup." The **authorization code flow with PKCE** is what production ships for a public client — a SPA or a native app — where a client secret cannot be hidden. The longer reading is [OAuth 2.0 and OIDC Explained](/notes/oauth-2-and-oidc-explained).
       - The client generates a high-entropy **code verifier** and derives a **code challenge** (usually SHA-256). It sends the user to the authorization server with the challenge; the verifier never goes on that first request. The user authenticates (system browser on mobile, not a scriptable WebView). The server redirects back with a short-lived **authorization code**. The client exchanges the code **and the verifier** at the token endpoint.
       - PKCE's job is to stop an attacker who intercepted the code from exchanging it. They do not have the verifier.
       - **Implicit flow** is deprecated because it delivered access tokens in the front channel with no client authentication and no one-time code. Tokens land in browser history and in any client that logs the full redirect URL. Fragments are **not** sent in `Referer` to other sites — that claim is a common mix-up. RFC 9700 discourages implicit; the **OAuth 2.1 draft** omits it and requires authorization code plus PKCE (S256) for public clients.
