@@ -23,7 +23,6 @@ import {
   useNavbarContext,
 } from "./context"
 import { useMediaQuery, useNavbarFocusLock, useNavbarScrollHide } from "./hooks"
-import { useNavbarVisibility } from "./visibility"
 import {
   backdropVariants,
   contentVariants,
@@ -36,6 +35,7 @@ import {
   reducedTriggerIconVariants,
   triggerIconVariants,
 } from "./variants"
+import { useNavbarVisibility } from "./visibility"
 
 function useNavbarVariants<T>(normal: T, reduced: T) {
   const { shouldReduceMotion } = useNavbarContext()

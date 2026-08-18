@@ -180,8 +180,11 @@ export async function loadMdxCompiled(page: NotesPage) {
 }
 
 export async function loadFullStackQa(locale: string) {
-  const sections: { slug: string; body: DocData["body"]; toc: DocData["toc"] }[] =
-    []
+  const sections: {
+    slug: string
+    body: DocData["body"]
+    toc: DocData["toc"]
+  }[] = []
 
   for (const slug of FULL_STACK_QA_SECTION_SLUGS) {
     const page = content.getPage([NOTES_CATEGORY, slug], locale)

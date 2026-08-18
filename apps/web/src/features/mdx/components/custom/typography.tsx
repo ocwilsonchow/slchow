@@ -28,10 +28,7 @@ export function h2({ className, ...props }: ComponentProps<"h2">) {
 export function h3({ className, ...props }: ComponentProps<"h3">) {
   return (
     <h3
-      className={cn(
-        "font-semibold tracking-tight text-content-ink",
-        className
-      )}
+      className={cn("font-semibold tracking-tight text-content-ink", className)}
       {...props}
     />
   )

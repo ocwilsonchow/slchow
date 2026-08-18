@@ -10,8 +10,6 @@ import { ContactIntentField } from "./contact-intent-field"
 import { ContactProgress } from "./contact-progress"
 import { ContactReviewFields } from "./contact-review-fields"
 import { ContactTextField } from "./contact-text-field"
-import { Link } from "@/i18n/navigation"
-import { MoveRightIcon } from "lucide-react"
 
 const HEADING_ID = "contact-step-heading"
 const ERROR_ID = "contact-step-error"
