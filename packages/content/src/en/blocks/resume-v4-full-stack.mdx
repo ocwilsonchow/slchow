@@ -32,23 +32,24 @@ Primary engineer for concurrent client products, owning delivery from UX scoping
 
 ### Multi-Channel Agentic Platform, Apr 2026 – Present
 
-Durable agent platform across web and Discord.
+Durable agent that empowers internal tools and workflows.
 
-- Made agent runs durable streams so clients could disconnect, reconnect, and resume without losing progress.
-- Built Mastra / AI SDK workflows, memory, schedules, tools, pause/resume, retries, sandboxing, and skills.
-- Shipped org-scoped RAG (ingestion, chunking, Pinecone query/reranking) and eval-gated releases.
-- Ran Hono + Better Auth on **ECS Fargate**, with Postgres, S3, and non-blocking ClickHouse traces for cost/latency.
-- Shipped chat, tool-invocation, multi-step flows, and TipTap @mentions for attaching workspace files.
+- Built agent runs durable streams so clients could disconnect, reconnect, and resume without losing progress.
+- Built **Mastra workflows**, memory, schedules, tools, pause/resume, retries, sandboxing, and skills.
+- Shipped org-scoped RAG (ingestion, chunking, **Pinecone** query/reranking) and eval-gated releases.
+- Ran Hono + Better Auth on **ECS Fargate**, with Postgres, S3, and Mastra Platform for observability.
+- Shipped chat, tool-invocation UIs, a custom TipTap @mentions input component for attaching workspace files.
 
 ---
 
 ### Healthcare AI Agent, July 2025 – Apr 2026
 
-Healthcare and shopping assistant grounded in uploaded documents and product data.
+Healthcare and shopping assistant grounded in uploaded documents and Shopify store product data.
 
-- Owned document upload, questionnaires, product/cart actions, and admin flows; Better Auth, HttpOnly cookies, and RBAC separated client/admin roles.
-- Split admin list state: URL-owned filters/pagination, **TanStack Query** server cache, and **TanStack Table** presentation.
-- Built document ingestion and scoped RAG so recommendations stayed grounded in the uploaded report.
+- Questionnaires/health report -> structured insights -> personalized product recommendations -> add to product cart.
+- Owned document upload, questionnaires, product/cart actions, and admin flows.
+- Built backend with **Hono**, **LangChain**, **Qdrant**, **Better Auth**; Frontend with **Next.js**, **AI SDK**.
+- Deployed on AWS with IaC for scalable, production-ready infrastructure.
 
 ---
 
