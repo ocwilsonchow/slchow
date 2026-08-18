@@ -1,0 +1,399 @@
+---
+title: Learning Java as a TypeScript Developer
+description: How Java types, the JVM, and Spring Boot map onto TypeScript, Node, and Hono — and where the analogy breaks
+date: 2026-08-18
+category: backend
+---
+
+TypeScript erases types. **Java keeps them.** A duck-typed object that "has `id` and `email`" is a TypeScript habit. In Java it is not a type. The compiler and the runtime both want a named class, a record, or an interface. A **Spring Boot** controller with Bean Validation on a record body is the same instinct as a Zod-validated Hono route — the check lives in a type the JVM still knows, not in a schema you parse by hand.
+
+This note is the mapping used when reading a **Spring Boot 3** API as a **Hono** developer. Samples target **Java 21**: records, sealed types, pattern matching, virtual threads mentioned once. **JPA/Hibernate** and **Bean Validation** appear once, as the Drizzle and Zod cousins. It is not a rewrite of this site in Java. The typed Hono stack is [Backend APIs with Hono, Drizzle, Zod OpenAPI, and SST](/notes/backend-apis-hono-sst). The Python sibling, where the types are annotations until the HTTP boundary, is [Learning Python as a TypeScript Developer](/notes/learning-python-as-a-typescript-developer). The object model you already have is [TypeScript Classes and Runtime Identity](/notes/typescript-classes-and-runtime-identity).
+
+<br />
+
+```text
+TS / Node:  .ts → tsc/bun erase types → V8, one event loop
+Java / JVM: .java → javac keep types → bytecode → JVM, threads and a heap
+```
+
+<br />
+
+Four kinds of statements:
+
+- A **TypeScript contract**, such as an interface that vanishes at runtime, or `throw` with no type.
+- A **Java language rule**, such as `List<String>` erasing to `List`, or `throws IOException` on the signature.
+- A **JVM observation**, such as a heap, GC pauses, or virtual threads. Application code must not depend on pause length.
+- A **Spring Boot convention**, such as `@RestController` and a bean you did not `new`.
+
+<br />
+
+---
+
+## 1. What This Note Is
+
+A TypeScript engineer already has the right abstractions: a request in, JSON out, a validated body, a query against Postgres, a session. Java remaps each of those onto a different runtime.
+
+- **Types survive compilation.** `instanceof`, reflection, and overload resolution see them. A TypeScript `interface` does not.
+- **The unit of code is a class** (or a record, or an interface). Functions exist as methods. There is no file-level `export function`.
+- **The host is a JVM**, not V8. Many threads share a heap. There is no event loop draining microtasks.
+- **Spring Boot is the application framework.** Hono is a router you assemble. Spring is a container that constructs the router for you.
+
+The throughline is a small **users** resource: fetch by id, list, create. Enough to read a controller, an entity, and a repository.
+
+<br />
+
+---
+
+## 2. Types Exist at Runtime
+
+Java has two families: **primitives** (`int`, `long`, `boolean`) and **reference types** (everything else, including `Integer`, arrays, and classes). Boxing is real. `int` is not an object. `Integer` is.
+
+<br />
+
+```ts
+type User = { id: string; email: string }
+
+function greet(u: User): string {
+  return u.email
+}
+
+greet({ id: "1", email: "a@b.c" }) // structural — no class required
+```
+
+<br />
+
+```java
+record User(String id, String email) {}
+
+String greet(User u) {
+  return u.email();
+}
+
+greet(new User("1", "a@b.c")); // nominal — that record, not a lookalike
+```
+
+<br />
+
+- TypeScript is **structural**. If the shape matches, it type-checks. Java is **nominal**. The name is the type.
+- `instanceof` in Java is a runtime fact. In TypeScript it only works on classes, and those classes are JavaScript constructors. Stance: [TypeScript Classes and Runtime Identity](/notes/typescript-classes-and-runtime-identity).
+- `null` is a value of every reference type. It is not `undefined`. There is one empty, not two.
+
+**Failure:** passing an anonymous `{ id, email }` into a Java method because "it has the fields." There is no structural slot. Construct the type.
+
+<br />
+
+---
+
+## 3. Null, Optional, NPE
+
+TypeScript writes `email?: string` or `string | undefined`. Java writes `String email` and means "this might be null." The type system does not track that hole unless you add a tool (NullAway, JSpecify) or wrap it.
+
+<br />
+
+```ts
+function emailOf(user: User | null): string | undefined {
+  return user?.email
+}
+```
+
+<br />
+
+```java
+Optional<String> emailOf(User user) {
+  return Optional.ofNullable(user).map(User::email);
+}
+```
+
+<br />
+
+- **`Optional`** is a box you return. It is not a field type for an entity column, and it is not TypeScript `?`. Unwrapping with `.get()` without a check is a slower `NullPointerException`.
+- **NPE** is the classic crash: a reference was null, a method was called. The compiler did not stop you.
+- Prefer returning `Optional` from methods that may miss. Prefer `null` only at the persistence edge, then map it.
+
+**Failure:** pretending `Optional<User>` is `User | undefined`. It is a heap object with a method API. It does not make the rest of the codebase null-safe.
+
+<br />
+
+---
+
+## 4. Classes, Records, Interfaces, Sealed
+
+In TypeScript, a class is a constructor you usually avoid. In Java, a **class** is how code is organized. A **record** is the data carrier you actually wanted. An **interface** is a contract with a runtime type.
+
+<br />
+
+```java
+public interface UserRepository {
+  Optional<User> findById(String id);
+}
+
+public record User(String id, String email) {}
+
+public final class UserService {
+  private final UserRepository users;
+
+  public UserService(UserRepository users) {
+    this.users = users;
+  }
+
+  public User require(String id) {
+    return users.findById(id).orElseThrow();
+  }
+}
+```
+
+<br />
+
+- **`record`** is `id`, `email`, `equals`, `hashCode`, `toString`, and accessors. Use it for DTOs and values. Do not put JPA identity on a record unless the team already does.
+- **`interface`** can have `default` methods. It still exists at runtime. A TypeScript `interface` does not.
+- **`sealed`** restricts who may implement. That is the Java counterpart of a TS union: `sealed interface Result permits Ok, Err`. Pattern matching then switches on the subtypes.
+- Visibility is `public`, `protected`, package-private (no modifier), `private`. Package-private is the default. `export` is not a keyword.
+
+**Failure:** a public class with public mutable fields because "it's just a DTO." That is an API. Use a record or getters.
+
+<br />
+
+---
+
+## 5. Generics and Erasure
+
+TypeScript erases all types. Java erases **generic arguments** and keeps the raw class.
+
+<br />
+
+```text
+List<String> names  →  bytecode sees List
+Map<String, User>   →  bytecode sees Map
+```
+
+<br />
+
+- `List<String>` and `List<User>` are the same class at runtime. You cannot overload two methods that differ only by that argument. You cannot `new T()`.
+- Bounds (`List<? extends User>`) are a compile-time contract. Reflection will not hand you `User` for free.
+- Arrays are reified (`String[]` is actually `String[]`). Mixing arrays and generics is where Java still hurts. Prefer `List`.
+
+**Failure:** `if (list instanceof List<String>)`. Illegal. Check the class, then the elements.
+
+<br />
+
+---
+
+## 6. Collections
+
+Java does not use objects as maps. `List`, `Set`, and `Map` are interfaces. `ArrayList`, `HashSet`, and `HashMap` are the usual implementations.
+
+<br />
+
+```ts
+const ids = users.map((u) => u.id).filter(Boolean)
+```
+
+<br />
+
+```java
+List<String> ids = users.stream()
+    .map(User::id)
+    .filter(id -> !id.isBlank())
+    .toList();
+```
+
+<br />
+
+- Mutation is the default. `list.add` changes the list. `toList()` on a stream is unmodifiable. `Collections.unmodifiableList` wraps; it does not copy.
+- Iteration order: `ArrayList` keeps insertion. `HashSet` does not. `LinkedHashSet` does.
+- A JSON object in TypeScript is `Record<string, unknown>` or a typed object. In Java it is a `Map<String, Object>` or, better, a record the JSON library binds.
+
+**Failure:** using `HashMap` as the API type because JSON arrived. Parse into a record. Same instinct as Zod.
+
+<br />
+
+---
+
+## 7. Exceptions
+
+TypeScript `throw` is untyped. Java splits **checked** and **unchecked**.
+
+- **Unchecked** (`RuntimeException`, `NullPointerException`, `IllegalArgumentException`): do not declare. Programming errors and domain misses.
+- **Checked** (`IOException`, `SQLException`): part of the signature. The caller must `catch` or declare `throws`. The compiler enforces it.
+- Do not wrap every repository call in `try/catch` to "handle" a checked exception into an empty `catch`. Translate at the boundary, or let a Spring advice map it to an HTTP status.
+
+<br />
+
+```java
+public User require(String id) {
+  return users.findById(id)
+      .orElseThrow(() -> new NotFoundException(id));
+}
+```
+
+<br />
+
+**Failure:** `throws Exception` on every method "to be safe." That is the Java equivalent of `any`. Narrow it or make it unchecked.
+
+<br />
+
+---
+
+## 8. Packages, Modules, Visibility
+
+A TypeScript file is a module. A Java file is **one public type** whose name matches the file, inside a package that matches the folder.
+
+<br />
+
+```text
+src/main/java/com/example/users/UserController.java
+  package com.example.users;
+  public class UserController { ... }
+```
+
+<br />
+
+- `import` is a name in the same compilation. It is not a runtime graph of ESM chunks. The **classpath** is the set of JARs and directories the JVM will search.
+- Package-private types are visible to the rest of the package, not to the world. That is how you hide a repository implementation without `export`.
+- JPMS (`module-info.java`) exists. Most Spring apps still live on the classpath. Do not start there.
+
+**Failure:** a 400-line `Utils.java` in the default package. Packages are the module boundary.
+
+<br />
+
+---
+
+## 9. JVM vs Node
+
+Node is one thread for JavaScript, plus a thread pool for I/O. The model is [Core JavaScript Concepts](/notes/core-javascript-concepts). The JVM is **many threads, one heap**.
+
+<br />
+
+```text
+Node:  stack (JS) → microtasks → one macrotask → poll I/O
+JVM:   N platform threads (or virtual threads) share a heap
+       blocking I/O blocks that thread, not the process
+```
+
+<br />
+
+- A servlet or Spring MVC handler can block. That is normal. Throughput comes from a thread pool, and in Java 21 from **virtual threads** (`spring.threads.virtual.enabled`). Virtual threads are not `async`/`await`. They are cheap threads the JVM mounts onto carriers. You still write blocking JDBC.
+- **GC** reclaims the heap. Pauses happen. They are not microtask checkpoints. Size the heap; do not `delete` objects.
+- Shared mutable state across threads needs `synchronized`, concurrent collections, or confinement. There is no single-thread lie.
+
+**Failure:** `synchronized` around a whole request, or a static `HashMap` as a cache. That is a global in a concurrent runtime.
+
+<br />
+
+---
+
+## 10. Build
+
+`package.json` plus a lockfile is the TypeScript habit. Java splits **coordinates** (`groupId:artifactId:version`) from a **build tool**.
+
+| | TypeScript / bun | Java |
+| --- | --- | --- |
+| Manifest | `package.json` | `pom.xml` or `build.gradle.kts` |
+| Lock | `bun.lock` | Maven/Gradle lock or reproducible versions plugin |
+| Install | `node_modules` | local `~/.m2` cache plus a project classpath |
+| Ship | a server process, or a bundle | a **JAR** (often fat, with Spring inside) |
+| Entry | `src/index.ts` | `public static void main`, or Spring's `SpringApplication.run` |
+
+<br />
+
+- **Maven** is XML and a lifecycle (`compile`, `test`, `package`). **Gradle** is code. Spring Initializr will pick one. Read the file; do not fight it on day one.
+- The compiler emits `.class` files. The JAR is a zip of those classes plus a manifest. The JVM loads them. There is no `node_modules` next to the process in production — the fat JAR *is* the dependencies.
+- `src/main/java` is application code. `src/test/java` is tests. `src/main/resources` is `application.yml`, not `NEXT_PUBLIC_*`.
+
+**Failure:** committing compiled `.class` files, or treating `mvn install` as `bun run dev`. One writes to the local Maven cache. The other starts a watcher.
+
+<br />
+
+---
+
+## 11. Spring Boot as Hono
+
+Hono is a function you call with a request. Spring Boot is a **process that constructs beans**, then maps HTTP onto methods.
+
+<br />
+
+```ts
+app.get("/users/:id", async (c) => {
+  const id = c.req.param("id")
+  const user = await users.require(id)
+  return c.json(user)
+})
+```
+
+<br />
+
+```java
+@RestController
+@RequestMapping("/users")
+public class UserController {
+  private final UserService users;
+
+  public UserController(UserService users) {
+    this.users = users;
+  }
+
+  @GetMapping("/{id}")
+  public User get(@PathVariable String id) {
+    return users.require(id);
+  }
+}
+```
+
+<br />
+
+- **`@RestController`** is a route table plus JSON. `@GetMapping` is `app.get`. Path variables are method arguments, not `c.req.param`.
+- **A bean** is an object Spring constructed and stored. Constructor injection is the `import` plus `new` you no longer write. The default scope is singleton — one `UserService` for the process.
+- **Filters and interceptors** are Hono middleware. A `Filter` wraps the request before the controller. `@ControllerAdvice` maps exceptions to status codes.
+- `@SpringBootApplication` starts the container, scans the package, and binds `application.yml`. There is no `index.ts` you wire by hand.
+
+**Failure:** `new UserService()` inside a controller. You just left the container. Tests, proxies, and transactions will not see that instance.
+
+<br />
+
+---
+
+## 12. Persistence and Validation
+
+Drizzle is SQL in TypeScript. JPA/Hibernate is an **object graph** that sometimes emits SQL. Bean Validation is annotations on the type. Zod is a schema you parse.
+
+<br />
+
+```ts
+const UserCreate = z.object({
+  email: z.string().email(),
+})
+
+await db.insert(users).values({ email }).returning()
+```
+
+<br />
+
+```java
+public record UserCreate(@Email @NotBlank String email) {}
+
+public interface UserRepository extends JpaRepository<UserEntity, String> {}
+```
+
+<br />
+
+- **`@Entity`** is a table mapping. The class is not the HTTP type. Map entity → record at the controller boundary, the same way a Hono route does not return a Drizzle row blindly.
+- **`JpaRepository`** gives `findById`, `save`, and derived query names (`findByEmail`). Lazy relations are a second query waiting to explode if the session is closed. Fetch explicitly.
+- **`@Valid`** on a controller argument runs Bean Validation. It is not Zod: the rules live on the type, and the parse is implicit. Failures become 400 via Spring's advice.
+- Postgres still evaluates a statement. Schema, indexes, and RLS do not move into Hibernate. [Core SQL Concepts](/notes/core-sql-concepts). Tenant filters still belong in the query and in RLS: [Building a Multi-Tenant Backend with Hono, Better Auth, Drizzle, and Postgres RLS](/notes/multi-tenant-backend-drizzle-hono-better-auth).
+
+**Failure:** returning an entity with a lazy `orders` collection as JSON. That is an N+1, or a `LazyInitializationException`, dressed as an API.
+
+<br />
+
+---
+
+## 13. Where It Sits
+
+Java is how **this JVM** types a value. Spring is how **this process** receives a request. Neither replaces authorization, SQL, or the session.
+
+- The interpreter sibling: [Learning Python as a TypeScript Developer](/notes/learning-python-as-a-typescript-developer)
+- Runtime identity in TypeScript: [TypeScript Classes and Runtime Identity](/notes/typescript-classes-and-runtime-identity)
+- When JS runs: [Core JavaScript Concepts](/notes/core-javascript-concepts)
+- The Hono analog: [Backend APIs with Hono, Drizzle, Zod OpenAPI, and SST](/notes/backend-apis-hono-sst)
+- The statement: [Core SQL Concepts](/notes/core-sql-concepts)
+- Identity, membership, and the row: [Building a Multi-Tenant Backend with Hono, Better Auth, Drizzle, and Postgres RLS](/notes/multi-tenant-backend-drizzle-hono-better-auth)

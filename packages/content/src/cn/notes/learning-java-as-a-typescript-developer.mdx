@@ -1,0 +1,398 @@
+---
+title: 以 TypeScript Developer 身份学 Java
+description: Java types、JVM 与 Spring Boot 如何对应 TypeScript、Node 与 Hono —— 以及 analogy 在哪里破裂
+date: 2026-08-18
+category: backend
+---
+
+TypeScript 会 erase types。Java 把它们留在 **JVM** 上。一个 duck-typed、「有 `id` 与 `email`」的 object 是 TypeScript 习惯。在 Java 里那不是一个 type。Compiler 与 runtime 都要一个 named class、record，或 interface。
+
+这篇 note 是以 **Hono** developer 身份读 **Spring Boot 3** API 时用的 mapping。Samples 对准 **Java 21**：records、sealed types、pattern matching，virtual threads 提一次。不是把这个 site 重写成 Java。Typed Hono stack 见 [用 Hono、Drizzle、Zod OpenAPI 与 SST 打造 Backend APIs](/notes/backend-apis-hono-sst)。你已有的 object model 见 [TypeScript Class 与 Runtime Identity](/notes/typescript-classes-and-runtime-identity)。
+
+<br />
+
+```text
+TS / Node:  .ts → tsc/bun erase types → V8, one event loop
+Java / JVM: .java → javac keep types → bytecode → JVM, threads and a heap
+```
+
+<br />
+
+四种 statements：
+
+- 一份 **TypeScript contract**，例如 runtime 会消失的 interface，或没有 type 的 `throw`。
+- 一条 **Java language rule**，例如 `List<String>` erase 成 `List`，或 signature 上的 `throws IOException`。
+- 一个 **JVM observation**，例如 heap、GC pauses，或 virtual threads。Application code 不该依赖 pause 长度。
+- 一个 **Spring Boot convention**，例如 `@RestController`，以及你没有 `new` 的 bean。
+
+<br />
+
+---
+
+## 1. What This Note Is
+
+TypeScript engineer 已经有对的 abstractions：request 进、JSON 出、validated body、打 Postgres 的 query、一份 session。Java 把每一项 remap 到不同的 runtime。
+
+- **Types 活过 compilation。** `instanceof`、reflection、overload resolution 都看得到。TypeScript `interface` 看不到。
+- **Code 的单位是 class**（或 record，或 interface）。Functions 以 methods 存在。没有 file-level 的 `export function`。
+- **Host 是 JVM**，不是 V8。许多 threads 共享一个 heap。没有 draining microtasks 的 event loop。
+- **Spring Boot 是 application framework。** Hono 是你组起来的 router。Spring 是帮你建构 router 的 container。
+
+Throughline 是一个小的 **users** resource：依 id fetch、list、create。够用来读 controller、entity，与 repository。
+
+<br />
+
+---
+
+## 2. Types Exist at Runtime
+
+Java 有两族：**primitives**（`int`、`long`、`boolean`）与 **reference types**（其余一切，包括 `Integer`、arrays、classes）。Boxing 是真的。`int` 不是 object。`Integer` 是。
+
+<br />
+
+```ts
+type User = { id: string; email: string }
+
+function greet(u: User): string {
+  return u.email
+}
+
+greet({ id: "1", email: "a@b.c" }) // structural — no class required
+```
+
+<br />
+
+```java
+record User(String id, String email) {}
+
+String greet(User u) {
+  return u.email();
+}
+
+greet(new User("1", "a@b.c")); // nominal — that record, not a lookalike
+```
+
+<br />
+
+- TypeScript 是 **structural**。Shape 对了就 type-check。Java 是 **nominal**。Name 就是 type。
+- Java 的 `instanceof` 是 runtime 事实。TypeScript 只对 classes 有效，而且那些 classes 是 JavaScript constructors。Stance：[TypeScript Class 与 Runtime Identity](/notes/typescript-classes-and-runtime-identity)。
+- `null` 是每个 reference type 的一个 value。它不是 `undefined`。只有一种 empty，不是两种。
+
+**Failure:** 因为「它有那些 fields」就把匿名 `{ id, email }` 传进 Java method。没有 structural slot。Construct 那个 type。
+
+<br />
+
+---
+
+## 3. Null, Optional, NPE
+
+TypeScript 写 `email?: string` 或 `string | undefined`。Java 写 `String email`，意思是「这可能是 null。」Type system 不会追那个洞，除非你加工具（NullAway、JSpecify）或把它包起来。
+
+<br />
+
+```ts
+function emailOf(user: User | null): string | undefined {
+  return user?.email
+}
+```
+
+<br />
+
+```java
+Optional<String> emailOf(User user) {
+  return Optional.ofNullable(user).map(User::email);
+}
+```
+
+<br />
+
+- **`Optional`** 是你返回的 box。它不是 entity column 的 field type，也不是 TypeScript `?`。不 check 就 `.get()`，只是比较慢的 `NullPointerException`。
+- **NPE** 是经典 crash：reference 是 null，却调用了 method。Compiler 没挡住你。
+- 可能 miss 的 methods 优先返回 `Optional`。只在 persistence edge 用 `null`，然后 map 掉。
+
+**Failure:** 把 `Optional<User>` 当成 `User | undefined`。它是带 method API 的 heap object。不会让其余 codebase 变成 null-safe。
+
+<br />
+
+---
+
+## 4. Classes, Records, Interfaces, Sealed
+
+在 TypeScript 里，class 是你通常避免的 constructor。在 Java 里，**class** 是组织 code 的方式。**Record** 才是你真正想要的 data carrier。**Interface** 是带 runtime type 的 contract。
+
+<br />
+
+```java
+public interface UserRepository {
+  Optional<User> findById(String id);
+}
+
+public record User(String id, String email) {}
+
+public final class UserService {
+  private final UserRepository users;
+
+  public UserService(UserRepository users) {
+    this.users = users;
+  }
+
+  public User require(String id) {
+    return users.findById(id).orElseThrow();
+  }
+}
+```
+
+<br />
+
+- **`record`** 是 `id`、`email`、`equals`、`hashCode`、`toString`，以及 accessors。用在 DTOs 与 values。除非团队已经这样做，否则不要把 JPA identity 放在 record 上。
+- **`interface`** 可以有 `default` methods。它在 runtime 仍然存在。TypeScript `interface` 不存在。
+- **`sealed`** 限制谁可以 implement。那是 TS union 的 Java 对应：`sealed interface Result permits Ok, Err`。Pattern matching 再对 subtypes switch。
+- Visibility 是 `public`、`protected`、package-private（没有 modifier）、`private`。Default 是 package-private。`export` 不是 keyword。
+
+**Failure:** 因为「只是 DTO」就写一个带 public mutable fields 的 public class。那是 API。用 record 或 getters。
+
+<br />
+
+---
+
+## 5. Generics and Erasure
+
+TypeScript erase 所有 types。Java erase **generic arguments**，留下 raw class。
+
+<br />
+
+```text
+List<String> names  →  bytecode sees List
+Map<String, User>   →  bytecode sees Map
+```
+
+<br />
+
+- `List<String>` 与 `List<User>` 在 runtime 是同一个 class。不能只靠那个 argument 来 overload 两个 methods。不能 `new T()`。
+- Bounds（`List<? extends User>`）是 compile-time contract。Reflection 不会免费交给你 `User`。
+- Arrays 是 reified（`String[]` 真的是 `String[]`）。Arrays 混 generics 仍是 Java 的痛点。优先用 `List`。
+
+**Failure:** `if (list instanceof List<String>)`。不合法。Check class，再 check elements。
+
+<br />
+
+---
+
+## 6. Collections
+
+Java 不用 objects 当 maps。`List`、`Set`、`Map` 是 interfaces。`ArrayList`、`HashSet`、`HashMap` 是常见 implementations。
+
+<br />
+
+```ts
+const ids = users.map((u) => u.id).filter(Boolean)
+```
+
+<br />
+
+```java
+List<String> ids = users.stream()
+    .map(User::id)
+    .filter(id -> !id.isBlank())
+    .toList();
+```
+
+<br />
+
+- Mutation 是 default。`list.add` 改 list。Stream 上的 `toList()` 是 unmodifiable。`Collections.unmodifiableList` 是 wrap，不是 copy。
+- Iteration order：`ArrayList` 保留 insertion。`HashSet` 不保留。`LinkedHashSet` 保留。
+- TypeScript 里的 JSON object 是 `Record<string, unknown>` 或 typed object。Java 里是 `Map<String, Object>`，或更好，让 JSON library bind 成 record。
+
+**Failure:** 因为 JSON 来了就用 `HashMap` 当 API type。Parse 成 record。跟 Zod 同一直觉。
+
+<br />
+
+---
+
+## 7. Exceptions
+
+TypeScript 的 `throw` 没有 type。Java 分成 **checked** 与 **unchecked**。
+
+- **Unchecked**（`RuntimeException`、`NullPointerException`、`IllegalArgumentException`）：不必宣告。Programming errors 与 domain misses。
+- **Checked**（`IOException`、`SQLException`）：是 signature 的一部分。Caller 必须 `catch` 或宣告 `throws`。Compiler 强制。
+- 不要为了「处理」checked exception，就把每个 repository call wrap 进空的 `catch`。在 boundary 翻译，或让 Spring advice map 成 HTTP status。
+
+<br />
+
+```java
+public User require(String id) {
+  return users.findById(id)
+      .orElseThrow(() -> new NotFoundException(id));
+}
+```
+
+<br />
+
+**Failure:** 每个 method 都 `throws Exception`「以求安全。」那是 Java 版的 `any`。收窄它，或改成 unchecked。
+
+<br />
+
+---
+
+## 8. Packages, Modules, Visibility
+
+TypeScript file 是 module。Java file 是 **一个 public type**，name 对齐 file，package 对齐 folder。
+
+<br />
+
+```text
+src/main/java/com/example/users/UserController.java
+  package com.example.users;
+  public class UserController { ... }
+```
+
+<br />
+
+- `import` 是同一次 compilation 里的 name。它不是 ESM chunks 的 runtime graph。**Classpath** 是 JVM 会搜索的 JARs 与 directories。
+- Package-private types 对同一个 package 可见，对世界不可见。那是没有 `export` 也能藏 repository implementation 的方式。
+- JPMS（`module-info.java`）存在。多数 Spring apps 仍活在 classpath 上。不要从那里开始。
+
+**Failure:** 在 default package 放一个 400 行的 `Utils.java`。Packages 才是 module boundary。
+
+<br />
+
+---
+
+## 9. JVM vs Node
+
+Node 是一条跑 JavaScript 的 thread，加上 I/O 的 thread pool。模型见 [JavaScript 核心概念](/notes/core-javascript-concepts)。JVM 是 **许多 threads，一个 heap**。
+
+<br />
+
+```text
+Node:  stack (JS) → microtasks → one macrotask → poll I/O
+JVM:   N platform threads (or virtual threads) share a heap
+       blocking I/O blocks that thread, not the process
+```
+
+<br />
+
+- Servlet 或 Spring MVC handler 可以 block。那是正常的。Throughput 来自 thread pool，在 Java 21 则来自 **virtual threads**（`spring.threads.virtual.enabled`）。Virtual threads 不是 `async`/`await`。它们是 JVM 挂到 carriers 上的便宜 threads。你仍然写 blocking JDBC。
+- **GC** 回收 heap。Pauses 会发生。它们不是 microtask checkpoints。Size heap；不要 `delete` objects。
+- Threads 之间的 shared mutable state 需要 `synchronized`、concurrent collections，或 confinement。没有 single-thread 谎言。
+
+**Failure:** 把整个 request `synchronized`，或用 static `HashMap` 当 cache。那是 concurrent runtime 里的 global。
+
+<br />
+
+---
+
+## 10. Build
+
+`package.json` 加上 lockfile 是 TypeScript 习惯。Java 把 **coordinates**（`groupId:artifactId:version`）与 **build tool** 分开。
+
+| | TypeScript / bun | Java |
+| --- | --- | --- |
+| Manifest | `package.json` | `pom.xml` 或 `build.gradle.kts` |
+| Lock | `bun.lock` | Maven/Gradle lock 或 reproducible versions plugin |
+| Install | `node_modules` | 本机 `~/.m2` cache 加上 project classpath |
+| Ship | 一个 server process，或一份 bundle | 一个 **JAR**（常常是 fat，里面有 Spring） |
+| Entry | `src/index.ts` | `public static void main`，或 Spring 的 `SpringApplication.run` |
+
+<br />
+
+- **Maven** 是 XML 与 lifecycle（`compile`、`test`、`package`）。**Gradle** 是 code。Spring Initializr 会选一个。读那个 file；第一天不要跟它打。
+- Compiler 产出 `.class` files。JAR 是那些 classes 加上 manifest 的 zip。JVM 载入它们。Production 里 process 旁边没有 `node_modules` —— fat JAR *就是* dependencies。
+- `src/main/java` 是 application code。`src/test/java` 是 tests。`src/main/resources` 是 `application.yml`，不是 `NEXT_PUBLIC_*`。
+
+**Failure:** commit 编译好的 `.class` files，或把 `mvn install` 当成 `bun run dev`。一个写进本机 Maven cache。另一个启动 watcher。
+
+<br />
+
+---
+
+## 11. Spring Boot as Hono
+
+Hono 是你用 request 调用的 function。Spring Boot 是一个 **建构 beans 的 process**，再把 HTTP map 到 methods。
+
+<br />
+
+```ts
+app.get("/users/:id", async (c) => {
+  const id = c.req.param("id")
+  const user = await users.require(id)
+  return c.json(user)
+})
+```
+
+<br />
+
+```java
+@RestController
+@RequestMapping("/users")
+public class UserController {
+  private final UserService users;
+
+  public UserController(UserService users) {
+    this.users = users;
+  }
+
+  @GetMapping("/{id}")
+  public User get(@PathVariable String id) {
+    return users.require(id);
+  }
+}
+```
+
+<br />
+
+- **`@RestController`** 是 route table 加上 JSON。`@GetMapping` 是 `app.get`。Path variables 是 method arguments，不是 `c.req.param`。
+- **Bean** 是 Spring 建构并存起来的 object。Constructor injection 是你不再写的 `import` 加 `new`。Default scope 是 singleton —— process 里一个 `UserService`。
+- **Filters 与 interceptors** 是 Hono middleware。`Filter` 在 controller 之前 wrap request。`@ControllerAdvice` 把 exceptions map 成 status codes。
+- `@SpringBootApplication` 启动 container、scan package、bind `application.yml`。没有你亲手接线的 `index.ts`。
+
+**Failure:** 在 controller 里 `new UserService()`。你刚离开 container。Tests、proxies、transactions 都看不见那个 instance。
+
+<br />
+
+---
+
+## 12. Persistence and Validation
+
+Drizzle 是 TypeScript 里的 SQL。JPA/Hibernate 是有时会发出 SQL 的 **object graph**。Bean Validation 是 type 上的 annotations。Zod 是你 parse 的 schema。
+
+<br />
+
+```ts
+const UserCreate = z.object({
+  email: z.string().email(),
+})
+
+await db.insert(users).values({ email }).returning()
+```
+
+<br />
+
+```java
+public record UserCreate(@Email @NotBlank String email) {}
+
+public interface UserRepository extends JpaRepository<UserEntity, String> {}
+```
+
+<br />
+
+- **`@Entity`** 是 table mapping。Class 不是 HTTP type。在 controller boundary 把 entity → record，就像 Hono route 不会盲目返回 Drizzle row。
+- **`JpaRepository`** 提供 `findById`、`save`，以及 derived query names（`findByEmail`）。Lazy relations 是 session 关了之后才爆炸的第二次 query。明确 fetch。
+- Controller argument 上的 **`@Valid`** 会跑 Bean Validation。它不是 Zod：规则活在 type 上，parse 是 implicit。Failures 经 Spring advice 变成 400。
+- Postgres 仍然求值一条 statement。Schema、indexes、RLS 不会搬进 Hibernate。[SQL 核心概念](/notes/core-sql-concepts)。Tenant filters 仍属于 query 与 RLS：[用 Hono、Better Auth、Drizzle 与 Postgres RLS 打造 Multi-Tenant 后端](/notes/multi-tenant-backend-drizzle-hono-better-auth)。
+
+**Failure:** 把带 lazy `orders` collection 的 entity 当 JSON 返回。那是 N+1，或穿着 API 的 `LazyInitializationException`。
+
+<br />
+
+---
+
+## 13. Where It Sits
+
+Java 是 **这个 JVM** 如何 type 一个 value。Spring 是 **这个 process** 如何接收 request。两者都不取代 authorization、SQL，或 session。
+
+- TypeScript 的 runtime identity：[TypeScript Class 与 Runtime Identity](/notes/typescript-classes-and-runtime-identity)
+- JS 何时执行：[JavaScript 核心概念](/notes/core-javascript-concepts)
+- Hono analog：[用 Hono、Drizzle、Zod OpenAPI 与 SST 打造 Backend APIs](/notes/backend-apis-hono-sst)
+- Statement：[SQL 核心概念](/notes/core-sql-concepts)
+- Identity、membership，以及那一行：[用 Hono、Better Auth、Drizzle 与 Postgres RLS 打造 Multi-Tenant 后端](/notes/multi-tenant-backend-drizzle-hono-better-auth)
