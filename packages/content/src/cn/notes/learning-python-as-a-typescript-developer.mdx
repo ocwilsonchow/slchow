@@ -1,0 +1,411 @@
+---
+title: 以 TypeScript Developer 身份学 Python
+description: Python types、CPython 与 FastAPI 如何对应 TypeScript、Node 与 Hono —— 以及 analogy 在哪里破裂
+date: 2026-08-18
+category: backend
+---
+
+TypeScript 会 erase types。**Python 从未要求过 types。** Duck typing 是 default：只要它有 `id` 与 `email`，它就走得通。Compiler 不在门口等。一支带 Pydantic body 的 **FastAPI** route，跟 Zod-validated Hono route 是同一直觉 —— check 搬到 HTTP boundary，而不是 language。
+
+这篇 note 是以 **Hono** developer 身份读 **FastAPI** API 时用的 mapping。Samples 对准 **Python 3.12+**：type parameter syntax、`match`、dataclasses。**Pydantic v2** 与 **SQLAlchemy 2** 各出现一次，作为 Zod 与 Drizzle 的表亲。不是把这个 site 重写成 Python。Typed Hono stack 见 [用 Hono、Drizzle、Zod OpenAPI 与 SST 打造 Backend APIs](/notes/backend-apis-hono-sst)。Types 真的活过 compilation 的 Java 兄弟篇是 [以 TypeScript Developer 身份学 Java](/notes/learning-java-as-a-typescript-developer)。你已有的 object model 见 [TypeScript Class 与 Runtime Identity](/notes/typescript-classes-and-runtime-identity)。
+
+<br />
+
+```text
+TS / Node:   .ts → tsc/bun erase types → V8, one event loop
+Py / CPython: .py → CPython bytecode → CPython, GIL + optional asyncio loop
+```
+
+<br />
+
+四种 statements：
+
+- 一份 **TypeScript contract**，例如 runtime 会消失的 interface，或没有 type 的 `throw`。
+- 一条 **Python language rule**，例如 duck typing，或 `x: str | None`。
+- 一个 **CPython observation**，例如 GIL，或 `asyncio` loop。Application code 不该依赖超出那个范围的 interpreter internals。
+- 一个 **FastAPI convention**，例如 decorated route 与 `BaseModel` body。
+
+<br />
+
+---
+
+## 1. What This Note Is
+
+TypeScript engineer 已经有对的 abstractions：request 进、JSON 出、validated body、打 Postgres 的 query、一份 session。Python 把每一项 remap 到不同的 runtime。
+
+- **Types 是 annotations，不是一道墙。** `def f(x: int)` 不会拒绝 string。`mypy` / `pyright` 可以。Pydantic 可以在 edge 做到。
+- **Code 的单位是 module。** 一个 `.py` file 已经是 namespace。没有 one-class-per-file 规则，也没有 `export` keyword。
+- **Host 是 CPython**，不是 V8，也不是 JVM。GIL 意味着一次只有一条 thread 跑 bytecode。`asyncio` 是你已经认识的 event loop。
+- **FastAPI 是 router 加上 validation。** Hono 是你用 Zod 组起来的 router。FastAPI decorate functions，并请 Pydantic parse body。
+
+Throughline 是一个小的 **users** resource：依 id fetch、list、create。够用来读 router、model，与 session。
+
+<br />
+
+---
+
+## 2. Duck Typing vs Structural Types
+
+TypeScript 在 compile time 是 structural。Python 在 runtime 是 duck。两边都让一个 plain object 通过。只有 Python 会在凌晨两点仍然调用它。
+
+<br />
+
+```ts
+interface UserLike {
+  id: string
+  email: string
+}
+
+function greet(u: UserLike): string {
+  return u.email
+}
+```
+
+<br />
+
+```python
+def greet(u) -> str:
+    return u.email  # anything with .email works
+```
+
+<br />
+
+- **`typing.Protocol`** 是 TypeScript `interface`。它是 shape，不是 base class。`mypy` 会强制；CPython 不会。
+- **`isinstance`** 检查的是 class。它不证明 shape。一个 keys 正确的 `dict` 仍然会失败。
+- 没有 `instanceof` 习惯，因为 objects 通常不是靠 `new` 来证明 identity。它们因为会 quack 而被传递。
+
+**Failure:** ship 一个调用 `u.email` 的 `greet(u)`，然后指望 type hint 救了你。它没有。Parse input，或 annotate `Protocol` 并跑 checker。
+
+<br />
+
+---
+
+## 3. None, Not Undefined
+
+TypeScript 有 `null` 与 `undefined`。Python 只有一种 empty：**`None`**。
+
+<br />
+
+```ts
+function emailOf(user: User | null): string | undefined {
+  return user?.email
+}
+```
+
+<br />
+
+```python
+def email_of(user: User | None) -> str | None:
+    return user.email if user is not None else None
+```
+
+<br />
+
+- `x: str | None` 是 annotation。它是 documentation 加一条 mypy 规则。CPython 仍然接受任何东西。
+- **Pydantic** 把那个 annotation 变成真正的 check。`BaseModel` 上的 `email: str | None` 意味着缺 key 是 error，而 JSON `null` 变成 `None`。
+- 没有 truthiness 捷径。`if not user` 会吞掉 `""`、`0`、`[]`，以及 `None`。Check `is None` 或 `is not None`。
+
+**Failure:** 当空字符串是合法、已验证的 email 时写 `if not user.email`。空字符串不是 `None`。
+
+<br />
+
+---
+
+## 4. Modules, Functions, Dataclasses, Classes
+
+在 Java 里 class 是单位。在 Python 里 **module** 是。一个 file 是 namespace。Functions 是可以传递的 values。
+
+<br />
+
+```python
+# users/models.py
+from dataclasses import dataclass
+
+@dataclass
+class User:
+    id: str
+    email: str
+```
+
+<br />
+
+```python
+# users/service.py
+from users.models import User
+
+def require(users, id: str) -> User:
+    user = users.find_by_id(id)
+    if user is None:
+        raise LookupError(id)
+    return user
+```
+
+<br />
+
+- **`@dataclass`** 是 Java `record`。它给你 `__init__`、`__eq__`、`__repr__`。用在 values。它不是 Pydantic model；它不 validate。
+- **Classes** 存在。`__init__` 是 constructor，`self` 是 explicit。你比在 Java 里更少需要它们。一个 module 的 functions 就是正常的 service。
+- **一切默认都是 `public` by convention。** 开头底线（`_private`）是标志，不是锁。Compiler 不会阻止 import `_private`。
+
+**Failure:** 写一个只有一个 method、收 `self`、再加上一整个 module imports 的 `class UserService:`。那是多几道手续的 module。
+
+<br />
+
+---
+
+## 5. Type Hints Are Not the Compiler
+
+TypeScript 的 types 会被 erase，但你写的时候有强制。Python 的 annotations 在 runtime 是 **data**。Interpreter 把它们读进 `__annotations__`，然后继续走。
+
+<br />
+
+```python
+def add(a: int, b: int) -> int:
+    return a + b
+
+add("1", "2")  # returns "12"; no error
+```
+
+<br />
+
+- 跑 **`mypy`** 或 **`pyright`**，hints 才有意义。它们是独立工具。CI 跑它们；CPython 不跑。
+- **Pydantic** 是 runtime 对应。`BaseModel` parse 并 coerce。`model_validate` 在错的 type 上 raise。那是 Zod。
+- `Protocol`、`dataclass`、`BaseModel` 是三种不同的答案。按 boundary 选：internal code 用 shape，value 用 dataclass，HTTP edge 用 Pydantic。
+
+**Failure:** 因为 annotation 存在，就以为 `def create_user(body: UserCreate)` 会拒绝坏 body。没有 Pydantic，那只是 comment。
+
+<br />
+
+---
+
+## 6. Collections
+
+Python 内置 `list`、`dict`、`set`、`tuple`。JSON object 到达时是 `dict`，不是 typed record，直到你 parse 它。
+
+<br />
+
+```ts
+const ids = users.map((u) => u.id).filter(Boolean)
+```
+
+<br />
+
+```python
+ids = [u.id for u in users if u.id]
+```
+
+<br />
+
+- **Comprehensions** 是 `map` / `filter` 习惯。List comprehension 建出 list。Generator expression `(u.id for u in users)` 保持 lazy。
+- Mutation 是 default。`list.append` 会改它。`tuple` 是 frozen array。`frozenset` 是 frozen set。
+- Iteration order：`dict` 自 3.7 起保留 insertion。`set` 不保留。从 `json.loads` 来的一串 `dict` rows 不是 typed API。
+
+**Failure:** 因为「已经是 JSON 形状」就把 `[dict(row) for row in rows]` 当 response 返回。那是 Java note 里的 `HashMap` 错误。Parse 成 model。
+
+<br />
+
+---
+
+## 7. Exceptions
+
+TypeScript 的 `throw` 没有 type。Python 的 `raise` 也没有 type。没有 checked exceptions。风格是 **EAFP** —— easier to ask forgiveness than permission —— 对上 **LBYL** —— look before you leap。
+
+<br />
+
+```python
+def require(users, id: str) -> User:
+    user = users.find_by_id(id)
+    if user is None:
+        raise LookupError(id)
+    return user
+```
+
+<br />
+
+```python
+try:
+    user = require(users, id)
+except LookupError:
+    raise HTTPException(status_code=404, detail="user not found")
+```
+
+<br />
+
+- Catch **specific** exception。`except Exception:` 是 Java 的 `throws Exception`。它藏起你真正造成的 bug。
+- Miss 的 function 会 raise。想要 404 的 route 在 boundary catch。不要同一个 miss 又回 `None` 又 raise。
+- `HTTPException` 是 FastAPI 的 typed exit。它不是 language feature。它是 framework 把 exception map 成 status。
+
+**Failure:** 在 database call 外面包裸 `except:`，然后回 500。Connection error 与 missing user 是不同的 exceptions。让 driver raise；翻译你打算处理的那一个。
+
+<br />
+
+---
+
+## 8. Packages, venv, Visibility
+
+TypeScript project 在 code 旁边有 `node_modules`。Python project 有一个 interpreter 指向的 **virtual environment**。
+
+<br />
+
+```text
+.venv/
+  lib/python3.12/site-packages/...
+pyproject.toml
+src/
+  users/
+    __init__.py
+    models.py
+```
+
+<br />
+
+- **`venv`**（或 `uv` 管理的 env）是 dependencies 落地的地方。它不是你 ship 的 path 上的 `node_modules`；它是 interpreter 的 search path。
+- **`pyproject.toml`** 是 `package.json`。`pip` 是 installer。`uv` 是连 lock 一起做的快的那个。`requirements.txt` 是旧 lockfile。
+- **`__init__.py`** 把 directory 变成 package。它也是 barrel file：你 `from users import` 到的，是 `users/__init__.py` expose 的东西。`_private` 是 convention，不是 compiler。
+
+**Failure:** 因为 `pip install fastapi` 曾经成功，就装进 system Python。下一个 project 会继承它。用 venv。
+
+<br />
+
+---
+
+## 9. CPython vs Node
+
+Node 是一条跑 JavaScript 的 thread，加上 I/O 的 pool。CPython 有 **GIL**：一次只有一条 thread 跑 bytecode。模型仍是 [JavaScript 核心概念](/notes/core-javascript-concepts) —— 一个 loop、queues、callbacks —— 但 loop 是 `asyncio`，而且 process 里有真的 threads，大多在等。
+
+<br />
+
+```text
+Node:    stack (JS) → microtasks → one macrotask → poll I/O
+CPython: GIL (one bytecode thread)
+         asyncio loop: tasks yield at await
+         blocking I/O blocks the loop, not a "thread you forgot"
+```
+
+<br />
+
+- **`async def`** 是 coroutine。它在 `await` yield。它不是 Java virtual thread，也不是 background worker。里面一个 `requests.get` 会停住整个 loop。
+- **GIL** 意味着 CPython 上 `threading` 不给你 parallel CPU。`multiprocessing` 或 worker pool 才会。I/O 的话，`asyncio` 就够。
+- Async handler 里的 **CPU-bound** 工作，跟 Node 里一段长的 sync loop 是同一个错。搬到 thread（`run_in_executor`）或 process。
+
+**Failure:** `async def get_user(...)` 里调用 blocking 的 SQLAlchemy session。Loop 现在是只有一人的 queue。用 `asyncpg` / SQLAlchemy async，或把 route 改成 sync。
+
+<br />
+
+---
+
+## 10. Build
+
+`package.json` 加 lockfile 是 TypeScript 习惯。Python 把 **project metadata** 与 **resolver** 分开。
+
+| | TypeScript / bun | Python |
+| --- | --- | --- |
+| Manifest | `package.json` | `pyproject.toml` |
+| Lock | `bun.lock` | `uv.lock`，或 compiled 的 `requirements.txt` |
+| Install | `node_modules` | venv 的 `site-packages` |
+| Ship | 一个 server process，或一份 bundle | source 加上 interpreter（或带 venv 的 Docker image） |
+| Entry | `src/index.ts` | 以 `python -m` 跑的 module，或 `uvicorn app:app` |
+
+<br />
+
+- 没有 fat JAR。Production ship 的是 **source 与 interpreter**，通常在已经装好 venv 的 container 里。Serverless ZIP 跟 Lambda bundle 是同一个想法。
+- **`uv`** resolve 与 install 都快。它读 `pyproject.toml` 并写 lock。只用 `pip` 就得自己 pin。
+- `src/` layout 让 imports 诚实。Tests 旁边放平的 package，在糟糕的一天会 import 到错的那份。
+
+**Failure:** 实验了一个周末之后 `pip freeze > requirements.txt`。Lock 现在是垃圾场。从 `pyproject.toml` 开始。
+
+<br />
+
+---
+
+## 11. FastAPI as Hono
+
+Hono 是你用 request 调用的 function。FastAPI 是一个由 **decorated functions** 组成的 router，并由 Pydantic parse body。
+
+<br />
+
+```ts
+app.get("/users/:id", async (c) => {
+  const id = c.req.param("id")
+  const user = await users.require(id)
+  return c.json(user)
+})
+```
+
+<br />
+
+```python
+from fastapi import FastAPI, HTTPException
+
+app = FastAPI()
+
+@app.get("/users/{id}")
+async def get_user(id: str) -> UserRead:
+    user = await users.require(id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="user not found")
+    return user
+```
+
+<br />
+
+- **`@app.get("/users/{id}")`** 是 `app.get`。Path parameter 是 function argument，不是 `c.req.param`。Return annotation 是 response model。
+- **`Depends`** 是 middleware 加 injection。它不是 Spring bean container。它按 request resolve。Dependency 可以读 request、开 DB session，然后 yield 它。
+- **`HTTPException`** 是 typed exit。底下是 Starlette。FastAPI 在上面加 OpenAPI 与 Pydantic。
+- `uvicorn` 是 process。`FastAPI` 是 app object。除了定义 `app` 的 module 之外，没有 `index.ts`。
+
+**Failure:** 把 dependency 当成可以 stash request 的 singleton。`Depends` 按 request 跑。Request-scoped state 放在 yield 出来的 object 上，不是 app 上。
+
+<br />
+
+---
+
+## 12. Pydantic and SQLAlchemy
+
+Zod 是你 parse 的 schema。Pydantic **`BaseModel`** 是同一个想法放在 class 上。SQLAlchemy 2 是 Drizzle 较重的表亲：一个 explicit **session**，不是你忘记关的 request-scoped implicit。
+
+<br />
+
+```ts
+const UserCreate = z.object({
+  email: z.string().email(),
+})
+
+await db.insert(users).values({ email }).returning()
+```
+
+<br />
+
+```python
+from pydantic import BaseModel, EmailStr
+
+class UserCreate(BaseModel):
+    email: EmailStr
+
+# SQLAlchemy 2
+from sqlalchemy import select
+stmt = select(User).where(User.id == id)
+user = session.scalars(stmt).first()
+```
+
+<br />
+
+- **`BaseModel`** 把 JSON parse 成 typed object。`EmailStr` 是 validator。`model_dump()` 是回 JSON 的路。它不是 ORM。
+- **SQLAlchemy** 有 `Session` / `AsyncSession`。它是 unit of work。不要跨 requests 共享。一个 yield session 然后关掉的 `Depends` 是 FastAPI 习惯。
+- **`select()`** 是 SQL 形状。Session 跟踪 identity。Lazy loads 是第二次 query。Postgres 仍然求值一条 statement：[SQL 核心概念](/notes/core-sql-concepts)。Tenant filters 仍属于 query 与 RLS：[用 Hono、Better Auth、Drizzle 与 Postgres RLS 打造 Multi-Tenant 后端](/notes/multi-tenant-backend-drizzle-hono-better-auth)。
+
+**Failure:** 因为「FastAPI 会 serialize」就把 ORM object 当 JSON 返回。那是 detached instance、lazy load，或 500。在 boundary 把 ORM → Pydantic，跟 Java note 里 entity → record 同一直觉。
+
+<br />
+
+---
+
+## 13. Where It Sits
+
+Python 是 **这个 interpreter** 如何把 value 传来传去。FastAPI 是 **这个 process** 如何接收 request。两者都不取代 authorization、SQL，或 session。
+
+- JVM 兄弟篇：[以 TypeScript Developer 身份学 Java](/notes/learning-java-as-a-typescript-developer)
+- TypeScript 的 runtime identity：[TypeScript Class 与 Runtime Identity](/notes/typescript-classes-and-runtime-identity)
+- JS 何时执行：[JavaScript 核心概念](/notes/core-javascript-concepts)
+- Hono analog：[用 Hono、Drizzle、Zod OpenAPI 与 SST 打造 Backend APIs](/notes/backend-apis-hono-sst)
+- Statement：[SQL 核心概念](/notes/core-sql-concepts)
+- Identity、membership，以及那一行：[用 Hono、Better Auth、Drizzle 与 Postgres RLS 打造 Multi-Tenant 后端](/notes/multi-tenant-backend-drizzle-hono-better-auth)

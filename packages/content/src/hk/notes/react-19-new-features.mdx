@@ -4,9 +4,9 @@ description: 改變 forms、async work 與 component structure 的 React 19 功�
 category: frontend
 ---
 
-React 19 感覺比較不像一堆互不相干的 API，而更像 React 補上了以往應用程式碼要自己處理的幾個缺口。Forms 現在可以跑非同步 Actions，optimistic updates 有專用的 Hook，components 可以用 `use` 讀取 promises，而 refs、context 與 document metadata 等常見 pattern 也少了很多繁瑣寫法。
+React 19 補上了以往應用程式碼要自己處理的缺口：非同步 form **Actions**、optimistic updates、用 `use` 讀取 promises，以及 refs、context 與 document metadata 周圍更少的繁瑣寫法。
 
-React 19.2 在這個基礎上加入了 `Activity`、`useEffectEvent`，以及更好的效能工具。以下是最實用的功能，以及決定何時使用時值得記住的注意事項。
+React 19.2 加入 `Activity`、`useEffectEvent`，以及更好的效能工具。把升級與功能採用當成分開的步驟。
 
 <br />
 
@@ -16,35 +16,28 @@ React 19.2 在這個基礎上加入了 `Activity`、`useEffectEvent`，以及更
 
 **Action** 是在 **Transition** 裡執行的函式。它可以做非同步工作，同時由 React 管理周圍的 **pending state**、errors，以及最終的 state update。
 
-Actions 最顯眼的用途是 `<form>` 上新的 `action` prop。不用再攔截 `onSubmit`、讀取表單、追蹤 loading flag，再手動重置表單——可以直接把函式傳給它。
-
 <br />
 
 ```tsx
 function UpdateName() {
   async function updateName(formData: FormData) {
-    const name = String(formData.get("name") ?? "")
-
-    await saveName(name)
+    await saveName(String(formData.get("name") ?? ""))
   }
 
   return (
     <form action={updateName}>
-      <label>
-        Name
-        <input name="name" />
-      </label>
+      <input name="name" />
       <SubmitButton />
     </form>
   )
 }
 ```
 
-當 Action 成功時，React 會自動重置表單裡的 uncontrolled fields。同一個函式也可以指定給 button 的 `formAction` prop，讓不同 submit buttons 有不同行為。
-
-Actions 不只限於 forms，但表單整合是它們砍掉最多例行 state management 的地方。
-
 <br />
+
+- 最顯眼的用途是 `<form>` 上的 `action` prop。把函式傳進去，而不是攔截 `onSubmit`、讀取表單、追蹤 loading flag，再手動重置。
+- 當 Action 成功時，React 會自動重置 uncontrolled fields。同一個函式也可以指定給 button 的 `formAction`，讓不同 submit buttons 有不同行為。
+- Actions 不只限於 forms，但表單整合是它們砍掉最多例行 state management 的地方。
 
 ---
 
@@ -52,51 +45,28 @@ Actions 不只限於 forms，但表單整合是它們砍掉最多例行 state ma
 
 `useActionState` 把 Action 接到由其前一次結果產生的 state。它回傳 **current state**、一個包裝過的 Action，以及 `isPending` 值。
 
-Action 會在平常的參數之前先收到 previous state。對 form Action 來說，第二個參數就是提交的 `FormData`。
-
 <br />
 
 ```tsx
-import { useActionState } from "react"
-import { useFormStatus } from "react-dom"
-
-type FormState = {
-  message: string
-  ok: boolean
-}
-
-const initialState: FormState = {
-  message: "",
-  ok: false,
-}
+type FormState = { message: string; ok: boolean }
 
 async function saveEmail(
   previousState: FormState,
   formData: FormData
 ): Promise<FormState> {
   const email = String(formData.get("email") ?? "")
-
-  if (!email.includes("@")) {
-    return { message: "Enter a valid email address.", ok: false }
-  }
-
+  if (!email.includes("@")) return { message: "Enter a valid email.", ok: false }
   await subscribe(email)
   return { message: "You are subscribed.", ok: true }
 }
 
 function SubmitButton() {
   const { pending } = useFormStatus()
-
-  return (
-    <button type="submit" disabled={pending}>
-      {pending ? "Subscribing..." : "Subscribe"}
-    </button>
-  )
+  return <button type="submit" disabled={pending}>{pending ? "Subscribing..." : "Subscribe"}</button>
 }
 
 function NewsletterForm() {
-  const [state, formAction] = useActionState(saveEmail, initialState)
-
+  const [state, formAction] = useActionState(saveEmail, { message: "", ok: false })
   return (
     <form action={formAction}>
       <input name="email" type="email" />
@@ -107,100 +77,66 @@ function NewsletterForm() {
 }
 ```
 
-`useFormStatus` 讀取其 parent form 的 status，所以必須從渲染在該 form **裡面** 的 component 呼叫。若在建立 form 的同一個 component 裡呼叫，就觀察不到該 form 的 submission。
-
-當 server 結果應該變成 UI state 時，適合用 `useActionState`；若 controls 只需要知道周圍 form 是否 pending，則用 `useFormStatus`。
-
 <br />
+
+- Action 會在平常的參數之前先收到 previous state。對 form Action 來說，第二個參數就是提交的 `FormData`。
+- `useActionState` 適合 **server result 應該變成 UI state** 的時候。`useFormStatus` 適合只需要知道周圍 form 是否 pending 的 controls。
+- **Failure：** 在建立 form 的同一個 component 裡呼叫 `useFormStatus`。它讀的是 **parent** form，所以必須從渲染在該 form **裡面** 的 child 呼叫。
 
 ---
 
 ## 3. `useOptimistic`
 
-等 network round trip 完成才更新介面，會讓本來很快的應用顯得緩慢。`useOptimistic` 讓 UI 在 Action 執行期間立刻顯示 **預期結果**，完成後再與真實 state 對齊。
+`useOptimistic` 讓 UI 在 Action 跑的時候立刻顯示 **預期結果**，完成後再與真實 state 對帳。
 
 <br />
 
 ```tsx
-import { useOptimistic, useState } from "react"
-
-type Message = {
-  id: string
-  text: string
-  sending?: boolean
-}
+type Message = { id: string; text: string; sending?: boolean }
 
 function MessageThread({ initialMessages }: { initialMessages: Message[] }) {
   const [messages, setMessages] = useState(initialMessages)
   const [optimisticMessages, addOptimisticMessage] = useOptimistic(
     messages,
-    (current, text: string) => [
-      ...current,
-      { id: crypto.randomUUID(), text, sending: true },
-    ]
+    (current, text: string) => [...current, { id: crypto.randomUUID(), text, sending: true }]
   )
 
   async function sendMessage(formData: FormData) {
     const text = String(formData.get("message") ?? "")
     addOptimisticMessage(text)
-
-    const savedMessage = await saveMessage(text)
-    setMessages((current) => [...current, savedMessage])
+    const saved = await saveMessage(text)
+    setMessages((current) => [...current, saved])
   }
 
   return (
-    <>
-      <ul>
-        {optimisticMessages.map((message) => (
-          <li key={message.id}>
-            {message.text}
-            {message.sending ? " (sending...)" : ""}
-          </li>
-        ))}
-      </ul>
-
-      <form action={sendMessage}>
-        <input name="message" />
-        <button type="submit">Send</button>
-      </form>
-    </>
+    <form action={sendMessage}>
+      {optimisticMessages.map((m) => (
+        <p key={m.id}>{m.text}{m.sending ? " (sending...)" : ""}</p>
+      ))}
+      <input name="message" />
+    </form>
   )
 }
 ```
 
-Optimistic value 是暫時的。Action 結束後，React 會回到 component 真實 state 或 props 提供的值。也就是說，**source of truth** 仍需要在 optimistic reducer 之外更新。
-
-Optimistic updates 最適合預期結果很明顯、失敗可以解釋或還原的情況。destructive operations 值得更謹慎，假裝成功會誤導用戶的情況也一樣。
-
 <br />
+
+- Optimistic value 是 **暫時的**。Action 結束後，React 會回到真實 state 或 props 提供的值。
+- **Source of truth** 仍然要在 optimistic reducer 外面更新。
+- **Failure：** 把 optimistic UI 當成已提交的成功。Destructive operations，以及假裝成功可能誤導用戶的任何事，都該更謹慎。
 
 ---
 
 ## 4. 用 `use` 讀取 Resources
 
-新的 `use` API 在 **render 期間讀取 resource**。目前這類 resource 通常是 **Promise** 或 **Context**。
-
-當 `use` 收到 pending Promise 時，component 會 suspend，React 顯示最近的 `<Suspense>` fallback。若 Promise reject，則由最近的 **Error Boundary** 處理 error。
+`use` 在 **rendering 期間讀取 resource**——今天是 **Promise** 或 **Context**。Pending Promise 會 suspend 到最近的 `<Suspense>` fallback。Rejection 會走到最近的 **Error Boundary**。
 
 <br />
 
 ```tsx
-import { Suspense, use } from "react"
-
-type Profile = {
-  name: string
-  role: string
-}
-
 function ProfileCard({ profilePromise }: { profilePromise: Promise<Profile> }) {
   const profile = use(profilePromise)
-
-  return (
-    <article>
-      <h2>{profile.name}</h2>
-      <p>{profile.role}</p>
-    </article>
-  )
+  return <h2>{profile.name}</h2>
 }
 
 function ProfilePage({ profilePromise }: { profilePromise: Promise<Profile> }) {
@@ -212,99 +148,48 @@ function ProfilePage({ profilePromise }: { profilePromise: Promise<Profile> }) {
 }
 ```
 
-與 Hooks 不同，`use` 可以在 conditions 與 loops 裡呼叫。它仍必須在 React 正在 render component 或 custom Hook 時呼叫。
-
-重要的 Promise 注意點是 identity。在每次 Client Component render 時都建立新的 Promise，會導致反覆 suspension。Promise 應來自 framework、cache，或 Server Component，才能重用同一個 resource。
-
-`use` 也可以有條件地讀取 Context：
-
 <br />
 
-```tsx
-function Heading({ muted }: { muted: boolean }) {
-  if (muted) {
-    return <h2 className="muted">Archived</h2>
-  }
-
-  const theme = use(ThemeContext)
-  return <h2 className={theme}>Active</h2>
-}
-```
-
-`use` 是 render 與可能尚未就緒的 resource 之間的橋樑，而不是取代每個 data-fetching library。
-
-<br />
+- 與 Hooks 不同，`use` 可以放在 conditions 與 loops 裡。它仍然必須在 React 正在 render 一個 component 或 custom Hook 時跑。
+- `use` 也可以有條件地讀取 Context——在 muted heading 上跳過 `use(ThemeContext)`，在 active 的那個上呼叫。
+- `use` 是通往可能尚未就緒的 resource 的橋，不是每一個 data-fetching library 的替代品。
+- **Failure：** 在每次 Client Component render 時建立新的 Promise。那會反覆 suspend。Promise 應該來自 framework、cache，或 Server Component，好讓同一個 resource 能被複用。
 
 ---
 
 ## 5. Refs 與 Context 少了繁瑣寫法
 
-Function components 在 React 19 可以把 **`ref` 當一般 prop** 接收。新 components 不再需要只為了 expose element 而使用 `forwardRef`。
+Function components 在 React 19 裡可以把 **`ref` 當成普通 prop** 接收。新 components 不再需要只為了暴露一個 element 而寫 `forwardRef`。
 
 <br />
 
 ```tsx
-import type { ComponentPropsWithRef } from "react"
-
 function SearchInput(props: ComponentPropsWithRef<"input">) {
   return <input type="search" {...props} />
 }
 
-function Search() {
-  const inputRef = useRef<HTMLInputElement>(null)
-
-  return <SearchInput ref={inputRef} placeholder="Search" />
-}
+<canvas
+  ref={(node) => {
+    if (!node) return
+    const observer = new ResizeObserver(() => draw(node))
+    observer.observe(node)
+    return () => observer.disconnect()
+  }}
+/>
 ```
-
-既有的 `forwardRef` components 仍然可用，所以不必立刻改寫。React 計劃在遷移有足夠時間後，於未來版本 deprecate `forwardRef`。
-
-Ref callbacks 現在也可以回傳 cleanup functions：
 
 <br />
 
-```tsx
-function Canvas() {
-  return (
-    <canvas
-      ref={(node) => {
-        if (!node) return
-
-        const observer = new ResizeObserver(() => draw(node))
-        observer.observe(node)
-
-        return () => observer.disconnect()
-      }}
-    />
-  )
-}
-```
-
-**Context providers** 也更短了。可以直接 render Context object，不必再用 `.Provider`。
-
-<br />
-
-```tsx
-// Before
-<ThemeContext.Provider value="dark">
-  <App />
-</ThemeContext.Provider>
-
-// React 19
-<ThemeContext value="dark">
-  <App />
-</ThemeContext>
-```
-
-這些改動不大，但拿掉了幾乎每個 React codebase 都常見的 wrappers。
-
-<br />
+- 既有的 `forwardRef` components 仍然能用。React 計劃在遷移有時間發生之後再 deprecate `forwardRef`。
+- Ref callbacks 可以回傳 cleanup functions——上面的 `ResizeObserver` disconnect。
+- Context object 可以直接渲染：`<ThemeContext value="dark">`，而不是 `<ThemeContext.Provider value="dark">`。
+- **Failure：** 把更嚴格的 ref-callback TypeScript 當成意外。Callbacks 現在可以回傳 cleanup，所以型別會拒絕以前被忽略的意外 returns。
 
 ---
 
 ## 6. Document Metadata 與 Resources
 
-React 19 能理解 components 裡 render 的 `<title>`、`<meta>` 與 `<link>` tags。React 會把它們移到 document 的 `<head>`，也就是說 **metadata 可以放在擁有它的 route 或 content 附近**。
+React 19 理解渲染在 components 裡的 `<title>`、`<meta>` 與 `<link>` tags。React 會把它們移到 document 的 `<head>`，所以 **metadata 可以住在擁有它的 route 或內容旁邊**。
 
 <br />
 
@@ -314,44 +199,24 @@ function ProductPage({ product }: { product: Product }) {
     <>
       <title>{product.name} – Acme Store</title>
       <meta name="description" content={product.summary} />
-      <link
-        rel="canonical"
-        href={`https://example.com/products/${product.slug}`}
-      />
-
       <h1>{product.name}</h1>
-      <p>{product.summary}</p>
     </>
   )
 }
 ```
 
-React 19 也會協調 stylesheets 與 scripts。Stylesheets 可以宣告 `precedence`，React 會等相關 CSS 就緒後才顯示 Suspense content。即使多個 components render 同一個 script，async scripts 也會被 deduplicate。
-
-React DOM 暴露了 `preconnect`、`preload`、`preinit`、`preloadModule`、`preinitModule` 等 resource hints，適用於應用在 React render 需要該 resource 的 element 之前就已知曉的情況。
-
 <br />
 
-```tsx
-import { preconnect, preload } from "react-dom"
-
-function ProductImage({ src, alt }: { src: string; alt: string }) {
-  preconnect("https://images.example.com")
-  preload(src, { as: "image" })
-
-  return <img src={src} alt={alt} />
-}
-```
-
-Frameworks 已經處理了其中不少工作，所以在直接呼叫這些 API 之前，先查看 framework 的慣例。
-
-<br />
+- `<title>`、`<meta>` 與 `<link rel="canonical">` 可以住在擁有它們的 route 旁邊。React 會把它們 hoist 進 `<head>`。
+- Stylesheets 可以宣告 `precedence`。React 會等相關 CSS，再揭示 Suspense 內容。即使多個 components 渲染同一份 script，async scripts 也會被 deduplicated。
+- React DOM 暴露 `preconnect`、`preload`、`preinit`、`preloadModule` 與 `preinitModule`，給在需要它們的 element 之前就已知的 resources。
+- Frameworks 已經處理了其中大部分。在直接呼叫這些 APIs 之前，先看 framework 的 conventions。
 
 ---
 
 ## 7. 更好的 Custom Elements 與 Hydration Errors
 
-React 19 完整支援 **custom elements**。在 server rendering 期間，字串與數字等 primitive props 會變成 attributes。在瀏覽器裡，當 custom element 暴露對應 properties 時，React 會把值 assign 為 properties。
+React 19 對 **custom elements** 有完整支援。Server rendering 時，strings 與 numbers 這類 primitive props 會變成 attributes。在 browser 裡，當 custom element 暴露匹配的 properties 時，React 會把值賦成 properties。
 
 <br />
 
@@ -366,32 +231,27 @@ function Checkout() {
 }
 ```
 
-這讓 web components 更容易使用，不必為每個非字串值寫 React-specific wrappers。
-
-Hydration diagnostics 也更實用。不再是好幾條重疊的 warnings，React 19 會回報一條整合過的 error，並用 diff 顯示 server-rendered HTML 與 client output 的差異。
-
-改進後的訊息並不會讓 hydration mismatches 變得無害。它只是讓真正原因——例如不同的日期、僅在瀏覽器執行的分支、變化中的外部資料，或無效的 HTML nesting——更快被找到。
-
 <br />
+
+- Web components 更容易消費，不必為每個非 string 值寫 React-specific wrappers。
+- Hydration diagnostics 被收攏：一個 error，附帶 diff，顯示 server-rendered HTML 與 client output 差在哪裡。
+- **Failure：** 把更好的 message 當成修復。Mismatches 仍然來自 clocks、random values、browser-only branches、變化中的外部資料，或無效的 HTML nesting。
 
 ---
 
 ## 8. React 19.2 的 `Activity`
 
-`Activity` 讓 React 保持介面某一區塊 mounted，同時控制它是否可見，以及其 updates 應以多高的緊急程度處理。
+`Activity` 讓 React 保持一段 interface mounted，同時控制它是否可見，以及它的 updates 該以多緊急的程度被處理。
 
 <br />
 
 ```tsx
-import { Activity } from "react"
-
 function Workspace({ activeTab }: { activeTab: "editor" | "preview" }) {
   return (
     <>
       <Activity mode={activeTab === "editor" ? "visible" : "hidden"}>
         <Editor />
       </Activity>
-
       <Activity mode={activeTab === "preview" ? "visible" : "hidden"}>
         <Preview />
       </Activity>
@@ -400,84 +260,60 @@ function Workspace({ activeTab }: { activeTab: "editor" | "preview" }) {
 }
 ```
 
-React 19.2 支援兩種 modes：
+<br />
 
 - `visible` 顯示 children、mount 它們的 effects，並正常處理 updates。
-- `hidden` 隱藏 children、unmount 它們的 effects，並把 updates 延後到 React 沒有可見工作為止。
-
-與 conditional rendering 有用的差異是 **preserved state**。隱藏的 editor 可以保留 draft、selection 與 component state，同時 React 也能在背景準備很可能會用到的下一個畫面。
-
-這與用 CSS 把 component 留在可見狀態不同。Hidden Activities 會清理 effects，所以 subscriptions 與其他外部 synchronization 必須能正確停止與重新啟動。
-
-<br />
+- `hidden` 隱藏 children、**unmount 它們的 effects**，並把它們的 updates 延後到 React 沒有可見工作剩下。
+- 與 conditional rendering 真正有用的差別是 **preserved state**。Hidden editor 可以保住 draft、selection 與 component state，同時 React 可以在背景準備很可能出現的下一個畫面。
+- **Failure：** 把這當成 CSS `display: none`。Hidden Activities 會清理 effects，所以 subscriptions 必須能正確停止與重啟。
 
 ---
 
 ## 9. React 19.2 的 `useEffectEvent`
 
-Effects 常常混進兩種不同想法：應對 dependency 作出反應的 synchronization，以及應讀取最新 props、卻不應重啟該 synchronization 的 event-like logic。
-
-`useEffectEvent` 把 event-like 的部分分開。
+Effects 常常混進兩個想法：該對 dependency 做出反應的 synchronization，以及該讀到最新 props、卻不該重啟那段 synchronization 的 event-like logic。`useEffectEvent` 把 event-like 那部分拆出來。
 
 <br />
 
 ```tsx
-import { useEffect, useEffectEvent } from "react"
-
-function ChatRoom({
-  roomId,
-  theme,
-}: {
-  roomId: string
-  theme: "light" | "dark"
-}) {
+function ChatRoom({ roomId, theme }: { roomId: string; theme: "light" | "dark" }) {
   const onConnected = useEffectEvent(() => {
     showNotification("Connected", theme)
   })
 
   useEffect(() => {
     const connection = createConnection(roomId)
-
     connection.on("connected", () => onConnected())
     connection.connect()
-
     return () => connection.disconnect()
   }, [roomId])
-
-  return <p>Room: {roomId}</p>
 }
 ```
 
-改變 `theme` 不再會重連 chat room，但當 connection event 觸發時，`onConnected` 仍會讀到最新的 theme。
-
-**Effect Events 不是用來隱藏缺失 dependencies 的方法。** 它們應代表概念上由 Effect 觸發的邏輯，而且只能從同一個 component 或 custom Hook 裡的 Effects 呼叫。它們不應被放進 dependency arrays。
-
-使用這個 API 也需要較新的 `eslint-plugin-react-hooks`，因為 linter 理解並會強制這些限制。
-
 <br />
+
+- 改 `theme` 不再會重連 chat room，但 connection event 觸發時，`onConnected` 仍會讀到最新的 theme。
+- Effect Events 只能從同一個 component 或 custom Hook 裡的 Effects 呼叫。它們不應出現在 dependency arrays 裡。
+- 使用這個 API 需要較新的 `eslint-plugin-react-hooks`；linter 理解並強制這些限制。
+- **Failure：** 用 Effect Events 掩蓋缺失的 dependencies。它們應代表概念上由 Effect 觸發的 logic。
 
 ---
 
 ## 10. React 19.2 的效能與 Server 改進
 
-React 19.2 在 Chrome DevTools performance profiles 加入了 **React Performance Tracks**。Scheduler tracks 顯示 update priorities，以及 work 何時被 scheduled、blocked、rendered 或 painted。Components tracks 顯示 components 何時 render，以及它們的 effects 何時 mount。
+React 19.2 把 **React Performance Tracks** 加進 Chrome DevTools performance profiles。Scheduler tracks 顯示 update priorities，以及 work 何時被 scheduled、blocked、rendered 或 painted。Components tracks 顯示 components 何時 render，以及它們的 effects 何時 mount。
 
-這提供比 React DevTools Profiler 更底層的視角。當緩慢的互動牽涉 scheduling、瀏覽器工作與 React rendering，而不是某個明顯昂貴的 component 時，它很合適。
-
-還有兩項多數應用開發者會透過 framework 接觸到的新增：
-
-- `cacheSignal` 為 React Server Component 工作提供與 `cache()` entry 生命週期綁定的 `AbortSignal`，讓未使用的 requests 或其他工作可以被取消。
-- Partial pre-rendering APIs 讓 framework 可以預先 render 靜態 shell、儲存 postponed work，稍後再 resume 剩餘的 server render。
-
-React 19.2 也透過批次附近的 Suspense boundary reveals 改善了 streaming SSR，並為 Node.js 加入 Web Streams 支援。React 團隊在 Node 環境仍建議使用 Node Streams APIs，因為它們更快，也更自然地配合 compression。
-
-<br />
+- 這是比 React DevTools Profiler 更低階的視圖。適合緩慢互動牽涉 scheduling、browser 工作與 React rendering，而不是某一個明顯昂貴的 component 的時候。
+- `cacheSignal` 給 React Server Component 工作一個綁在 `cache()` entry 生命週期上的 `AbortSignal`，好取消不再使用的 requests。
+- Partial pre-rendering APIs 讓 framework 預先 render 一份 static shell、存下 postponed work，稍後再 resume 剩下的 server render。
+- Streaming SSR 會把鄰近的 Suspense boundary reveals batch 起來。Node.js 得到 Web Streams 支援；React team 仍建議在 Node 裡用 Node Streams APIs，因為它們更快，也更自然地配合 compression。
+- 大多數應用開發者會透過 framework 碰到 `cacheSignal` 與 partial pre-rendering。
 
 ---
 
 ## 11. 升級到 React 19
 
-React、React DOM，以及它們的 TypeScript definitions 應一起升級，使用 framework 支援的最新 patched React 19 release。
+一起升級 React、React DOM，以及它們的 TypeScript definitions，使用 framework 支援的最新 patched React 19 release。
 
 <br />
 
@@ -486,24 +322,89 @@ npm install react@^19 react-dom@^19
 npm install --save-dev @types/react@^19 @types/react-dom@^19
 ```
 
-官方 upgrade guide 包含常見遷移的 codemods。值得先檢查的 breaking changes 是已移除的 legacy APIs：
-
-- `ReactDOM.render` 與 `ReactDOM.hydrate` 由 `createRoot` 與 `hydrateRoot` 取代。
-- `unmountComponentAtNode` 由 `root.unmount()` 取代。
-- `findDOMNode`、string refs 與 `this.refs` 已移除。
-- Legacy Context APIs 與 function component `propTypes` 已移除。
-- Ref callback 的 TypeScript 規則更嚴格，因為 callbacks 現在可以回傳 cleanup functions。
-
-**升級與功能採用應分成兩個步驟**。先讓既有應用在 React 19 上運作，再在 Actions、`use` 或 `Activity` 真正簡化某個 pattern 的地方引入它們。Major upgrade 若沒有與大規模 rewrite 混在一起，會更容易 debug。
-
 <br />
+
+- 官方 upgrade guide 包含常見 migrations 的 codemods。
+- `ReactDOM.render` / `ReactDOM.hydrate` → `createRoot` / `hydrateRoot`。`unmountComponentAtNode` → `root.unmount()`。
+- `findDOMNode`、string refs 與 `this.refs` 被移除。Legacy Context APIs 與 function component `propTypes` 被移除。
+- Ref callback TypeScript 規則更嚴格，因為 callbacks 現在可以回傳 cleanup functions。
+- **Failure：** 把升級跟一次大型 rewrite 混在一起。先讓既有應用在 React 19 上能跑，再在 Actions、`use` 或 `Activity` 真正簡化某個 pattern 的地方引入它們。
 
 ---
 
 ## 重點
 
-React 19 的主題是 coordination。Actions 協調 async mutations 與 pending 及 optimistic UI。`use` 協調 rendering 與 resources。Document APIs 協調 metadata、styles 與 scripts。`Activity` 協調可見與背景工作，而 `useEffectEvent` 把 synchronization 與 event-like behavior 分開。
+Actions 協調 async mutations 與 pending 及 optimistic UI。`use` 協調 rendering 與 resources。Document APIs 協調 metadata、styles 與 scripts。`Activity` 協調可見與背景工作。`useEffectEvent` 把 synchronization 與 event-like behavior 分開。
 
-最常保留的功能是 form Actions、`useActionState`、`useOptimistic`、ref as a prop，以及 `useEffectEvent`。`use`、`Activity` 與 server rendering APIs 更依賴 framework 支援與應用架構，但它們指向一種 loading、mutations 與 rendering 被設計成一起運作的 React model。
+最常保留的功能是 form Actions、`useActionState`、`useOptimistic`、ref as a prop，以及 `useEffectEvent`。`use`、`Activity` 與 server rendering APIs 更依賴 framework 支援與架構。
 
 官方說明見 [React 19 release notes](https://react.dev/blog/2024/12/05/react-19)、[React 19.2 release notes](https://react.dev/blog/2025/10/01/react-19-2)，以及 [React 19 upgrade guide](https://react.dev/blog/2024/04/25/react-19-upgrade-guide)。
+
+---
+
+## Recap Q&A
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="r19-actions">
+    <AccordionTrigger>1. 什麼是 Action，form 的 `action` prop 取代了什麼？</AccordionTrigger>
+    <AccordionContent>
+
+      - **Action** 是在 **Transition** 裡執行的函式。它可以做非同步工作，同時由 React 管理 **pending state**、errors，以及周圍的最終 update。
+      - 最顯眼的用途是 `<form>` 上的 `action` prop：不用再攔截 `onSubmit`、讀取表單、追蹤 loading flag，再手動重置——把函式傳進去。
+      - 當 Action 成功時，React 會自動重置 uncontrolled fields。同一個函式也可以指定給 button 的 `formAction`。
+      - 真正幹活的仍是 Action。React 擁有以前住在每個 form component 裡的 pending 與 error bookkeeping。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="r19-action-state">
+    <AccordionTrigger>2. 什麼時候用 `useActionState`，什麼時候用 `useFormStatus`？</AccordionTrigger>
+    <AccordionContent>
+
+      - `useActionState` 把 Action 接到由其前一次結果產生的 state：current state、包裝過的 Action，以及 `isPending`。
+      - Action 會在平常的參數之前先收到 previous state；對 form Action 來說，第二個參數是 `FormData`。適合 **server result 應該變成 UI state** 的時候。
+      - `useFormStatus` 讀的是 **parent** form 的 status，所以必須從渲染在該 form **裡面** 的 component 呼叫。
+      - 用在只需要知道周圍 form 是否 pending 的 controls。
+      - **Failure：** 在建立 form 的同一個 component 裡呼叫 `useFormStatus`。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="r19-optimistic">
+    <AccordionTrigger>3. `useOptimistic` 不允許被當成什麼？</AccordionTrigger>
+    <AccordionContent>
+
+      - `useOptimistic` 讓 UI 在 Action 跑的時候立刻顯示 **預期結果**，完成後再與真實 state 對帳。
+      - Optimistic value 是 **暫時的**。Action 結束後，React 會回到真實 state 或 props 提供的值。
+      - **Source of truth** 仍然要在 optimistic reducer 外面更新。
+      - Optimistic updates 在預期結果很明顯、失敗可以被解釋或撤銷時最好用。
+      - **Failure：** 把 optimistic UI 當成已提交的成功。Destructive operations，以及假裝成功可能誤導用戶的任何事，都該更謹慎。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="r19-use">
+    <AccordionTrigger>4. `use()` 讀什麼，為什麼 Promise identity 很重要？</AccordionTrigger>
+    <AccordionContent>
+
+      - `use` 在 **rendering 期間讀取 resource**——今天是 **Promise** 或 **Context**。Pending Promise 會 suspend 到最近的 `<Suspense>` fallback；rejection 會走到最近的 Error Boundary。
+      - 與 Hooks 不同，`use` 可以放在 conditions 與 loops 裡，但它仍然必須在 React 正在 render 一個 component 或 custom Hook 時跑。
+      - 在每次 Client Component render 時建立新的 Promise 會造成 **repeated suspension**。Promise 應該來自 framework、cache，或 Server Component，好讓同一個 resource 能被複用。
+      - `use` 是通往可能尚未就緒的 resource 的橋，不是每一個 data-fetching library 的替代品。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="r19-activity-effect-event">
+    <AccordionTrigger>5. `Activity` 與 `useEffectEvent` 拆開了以前混在一起的什麼？</AccordionTrigger>
+    <AccordionContent>
+
+      - **`Activity`** 保持一段 mounted，同時控制可見性與緊急程度。`visible` 顯示 children、mount effects，並正常處理 updates。`hidden` 隱藏 children、**unmount effects**，並把 updates 延後到沒有可見工作。
+      - 與 conditional rendering 真正有用的差別是 **preserved state**。它不是 CSS `display: none`：subscriptions 必須能正確停止與重啟。
+      - **`useEffectEvent`** 把該對 dependency 做出反應的 synchronization，與該讀到最新 props、卻不該重啟那段 Effect 的 event-like logic 拆開。
+      - Effect Events 只能從同一個 component 裡的 Effects 呼叫，且不應出現在 dependency arrays 裡。
+      - **Failure：** 用 Effect Events 掩蓋缺失的 dependencies。
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>

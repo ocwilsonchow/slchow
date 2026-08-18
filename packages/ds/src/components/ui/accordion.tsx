@@ -42,12 +42,12 @@ function AccordionTrigger({
       <AccordionPrimitive.Trigger
         data-slot="accordion-trigger"
         className={cn(
-          "flex flex-1 items-center justify-between gap-3 py-3 text-left font-semibold tracking-tight text-content-ink transition-colors outline-none focus-visible:ring-[3px] focus-visible:ring-content-ink [&[data-state=open]>svg]:rotate-180",
+          "flex flex-1 items-center justify-between gap-3 py-3 text-left font-semibold tracking-tight text-content-ink transition-colors outline-none focus-visible:ring-[3px] focus-visible:ring-content-ink [&[data-state=open]>svg]:rotate-180 [&_code]:whitespace-nowrap",
           className
         )}
         {...props}
       >
-        {children}
+        <span className="min-w-0 flex-1">{children}</span>
         <ChevronDown
           aria-hidden
           className="size-4 shrink-0 text-content-subdued transition-transform duration-200"
@@ -71,7 +71,7 @@ function AccordionContent({
       )}
       {...props}
     >
-      <div className="space-y-2 pb-3">{children}</div>
+      <div className="space-y-2 pb-12">{children}</div>
     </AccordionPrimitive.Content>
   )
 }

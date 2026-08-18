@@ -1,0 +1,411 @@
+---
+title: Learning Python as a TypeScript Developer
+description: How Python types, CPython, and FastAPI map onto TypeScript, Node, and Hono — and where the analogy breaks
+date: 2026-08-18
+category: backend
+---
+
+TypeScript erases types. **Python never required them.** Duck typing is the default: if it has `id` and `email`, it walks. The compiler is not waiting at the door. A **FastAPI** route with a Pydantic body is the same instinct as a Zod-validated Hono route — the check moves to the HTTP boundary, not the language.
+
+This note is the mapping used when reading a **FastAPI** API as a **Hono** developer. Samples target **Python 3.12+**: type parameter syntax, `match`, dataclasses. **Pydantic v2** and **SQLAlchemy 2** appear once, as the Zod and Drizzle cousins. It is not a rewrite of this site in Python. The typed Hono stack is [Backend APIs with Hono, Drizzle, Zod OpenAPI, and SST](/notes/backend-apis-hono-sst). The Java sibling, where the types do survive compilation, is [Learning Java as a TypeScript Developer](/notes/learning-java-as-a-typescript-developer). The object model you already have is [TypeScript Classes and Runtime Identity](/notes/typescript-classes-and-runtime-identity).
+
+<br />
+
+```text
+TS / Node:   .ts → tsc/bun erase types → V8, one event loop
+Py / CPython: .py → CPython bytecode → CPython, GIL + optional asyncio loop
+```
+
+<br />
+
+Four kinds of statements:
+
+- A **TypeScript contract**, such as an interface that vanishes at runtime, or `throw` with no type.
+- A **Python language rule**, such as duck typing, or `x: str | None`.
+- A **CPython observation**, such as the GIL, or an `asyncio` loop. Application code must not depend on interpreter internals beyond that.
+- A **FastAPI convention**, such as a decorated route and a `BaseModel` body.
+
+<br />
+
+---
+
+## 1. What This Note Is
+
+A TypeScript engineer already has the right abstractions: a request in, JSON out, a validated body, a query against Postgres, a session. Python remaps each of those onto a different runtime.
+
+- **Types are annotations, not a wall.** `def f(x: int)` does not reject a string. `mypy` / `pyright` can. Pydantic can at the edge.
+- **The unit of code is a module.** A `.py` file is already a namespace. There is no one-class-per-file rule and no `export` keyword.
+- **The host is CPython**, not V8 and not a JVM. A GIL means one thread runs bytecode at a time. `asyncio` is the event loop you already know.
+- **FastAPI is a router plus validation.** Hono is a router you assemble with Zod. FastAPI decorates functions and asks Pydantic to parse the body.
+
+The throughline is a small **users** resource: fetch by id, list, create. Enough to read a router, a model, and a session.
+
+<br />
+
+---
+
+## 2. Duck Typing vs Structural Types
+
+TypeScript is structural at compile time. Python is duck at runtime. Both let a plain object through. Only Python will still call it at 2 a.m.
+
+<br />
+
+```ts
+interface UserLike {
+  id: string
+  email: string
+}
+
+function greet(u: UserLike): string {
+  return u.email
+}
+```
+
+<br />
+
+```python
+def greet(u) -> str:
+    return u.email  # anything with .email works
+```
+
+<br />
+
+- **`typing.Protocol`** is the TypeScript `interface`. It is a shape, not a base class. `mypy` enforces it; CPython does not.
+- **`isinstance`** checks a class. It does not prove the shape. A `dict` with the right keys still fails.
+- There is no `instanceof` habit because objects are not usually `new`ed to prove identity. They are passed because they quack.
+
+**Failure:** shipping a `greet(u)` that calls `u.email` and hoping a type hint saved you. It did not. Parse the input, or annotate a `Protocol` and run a checker.
+
+<br />
+
+---
+
+## 3. None, Not Undefined
+
+TypeScript has `null` and `undefined`. Python has one empty: **`None`**.
+
+<br />
+
+```ts
+function emailOf(user: User | null): string | undefined {
+  return user?.email
+}
+```
+
+<br />
+
+```python
+def email_of(user: User | None) -> str | None:
+    return user.email if user is not None else None
+```
+
+<br />
+
+- `x: str | None` is the annotation. It is documentation plus a mypy rule. CPython still accepts anything.
+- **Pydantic** turns that annotation into a real check. `email: str | None` on a `BaseModel` means a missing key is an error, and a JSON `null` becomes `None`.
+- There is no truthiness shortcut. `if not user` swallows `""`, `0`, `[]`, and `None`. Check `is None` or `is not None`.
+
+**Failure:** `if not user.email` when an empty string is a valid, already-validated email. The empty string is not `None`.
+
+<br />
+
+---
+
+## 4. Modules, Functions, Dataclasses, Classes
+
+In Java a class is the unit. In Python a **module** is. A file is a namespace. Functions are values you pass.
+
+<br />
+
+```python
+# users/models.py
+from dataclasses import dataclass
+
+@dataclass
+class User:
+    id: str
+    email: str
+```
+
+<br />
+
+```python
+# users/service.py
+from users.models import User
+
+def require(users, id: str) -> User:
+    user = users.find_by_id(id)
+    if user is None:
+        raise LookupError(id)
+    return user
+```
+
+<br />
+
+- **`@dataclass`** is the Java `record`. It gives `__init__`, `__eq__`, `__repr__`. Use it for values. It is not a Pydantic model; it does not validate.
+- **Classes** exist. `__init__` is a constructor, `self` is explicit. You need them less than in Java. A module of functions is a normal service.
+- **Everything is `public` by convention.** A leading underscore (`_private`) is a sign, not a lock. The compiler will not stop an import of `_private`.
+
+**Failure:** writing `class UserService:` with one method that takes `self` and a module of imports anyway. That is a module with extra steps.
+
+<br />
+
+---
+
+## 5. Type Hints Are Not the Compiler
+
+TypeScript's types are erased but enforced while you write them. Python's annotations are **data** at runtime. The interpreter reads them into `__annotations__` and keeps going.
+
+<br />
+
+```python
+def add(a: int, b: int) -> int:
+    return a + b
+
+add("1", "2")  # returns "12"; no error
+```
+
+<br />
+
+- Run **`mypy`** or **`pyright`** to make the hints mean something. They are separate tools. CI runs them; CPython does not.
+- **Pydantic** is the runtime counterpart. `BaseModel` parses and coerces. `model_validate` raises on a wrong type. That is Zod.
+- A `Protocol`, a `dataclass`, and a `BaseModel` are three different answers. Pick per boundary: shape for internal code, dataclass for a value, Pydantic at the HTTP edge.
+
+**Failure:** believing `def create_user(body: UserCreate)` rejects a bad body because the annotation exists. Without Pydantic, it is a comment.
+
+<br />
+
+---
+
+## 6. Collections
+
+Python ships `list`, `dict`, `set`, `tuple`. A JSON object arrives as a `dict`, not a typed record, until you parse it.
+
+<br />
+
+```ts
+const ids = users.map((u) => u.id).filter(Boolean)
+```
+
+<br />
+
+```python
+ids = [u.id for u in users if u.id]
+```
+
+<br />
+
+- **Comprehensions** are the `map` / `filter` habit. A list comprehension builds a list. A generator expression `(u.id for u in users)` stays lazy.
+- Mutation is the default. `list.append` changes it. `tuple` is the frozen array. `frozenset` is the frozen set.
+- Iteration order: `dict` keeps insertion since 3.7. `set` does not. A `list` of `dict` rows from `json.loads` is not a typed API.
+
+**Failure:** returning `[dict(row) for row in rows]` as the response because "it's already JSON-shaped." That is the `HashMap` mistake from the Java note. Parse into a model.
+
+<br />
+
+---
+
+## 7. Exceptions
+
+TypeScript `throw` is untyped. Python `raise` is also untyped. There are no checked exceptions. The style is **EAFP** — easier to ask forgiveness than permission — against **LBYL** — look before you leap.
+
+<br />
+
+```python
+def require(users, id: str) -> User:
+    user = users.find_by_id(id)
+    if user is None:
+        raise LookupError(id)
+    return user
+```
+
+<br />
+
+```python
+try:
+    user = require(users, id)
+except LookupError:
+    raise HTTPException(status_code=404, detail="user not found")
+```
+
+<br />
+
+- Catch a **specific** exception. `except Exception:` is the Java `throws Exception`. It hides the bug you actually caused.
+- A function that misses raises. A route that wants 404 catches at the boundary. Do not return `None` and also raise for the same miss.
+- `HTTPException` is FastAPI's typed exit. It is not a language feature. It is the framework mapping an exception to a status.
+
+**Failure:** a bare `except:` around a database call, then a 500. The connection error and the missing user are different exceptions. Let the driver raise; translate the one you mean.
+
+<br />
+
+---
+
+## 8. Packages, venv, Visibility
+
+A TypeScript project has `node_modules` next to the code. A Python project has a **virtual environment** the interpreter points at.
+
+<br />
+
+```text
+.venv/
+  lib/python3.12/site-packages/...
+pyproject.toml
+src/
+  users/
+    __init__.py
+    models.py
+```
+
+<br />
+
+- **`venv`** (or `uv`'s managed env) is where dependencies land. It is not `node_modules` on the path you ship; it is the interpreter's search path.
+- **`pyproject.toml`** is `package.json`. `pip` is the installer. `uv` is the fast one that also locks. `requirements.txt` is the old lockfile.
+- **`__init__.py`** turns a directory into a package. It is also a barrel file: what you `from users import` is what `users/__init__.py` exposes. `_private` is the convention, not the compiler.
+
+**Failure:** installing into the system Python because `pip install fastapi` worked once. The next project inherits it. Use a venv.
+
+<br />
+
+---
+
+## 9. CPython vs Node
+
+Node is one thread for JavaScript, plus a pool for I/O. CPython has a **GIL**: one thread runs bytecode at a time. The model is still [Core JavaScript Concepts](/notes/core-javascript-concepts) — a loop, queues, and callbacks — but the loop is `asyncio` and the process has real threads that mostly wait.
+
+<br />
+
+```text
+Node:    stack (JS) → microtasks → one macrotask → poll I/O
+CPython: GIL (one bytecode thread)
+         asyncio loop: tasks yield at await
+         blocking I/O blocks the loop, not a "thread you forgot"
+```
+
+<br />
+
+- **`async def`** is a coroutine. It yields at `await`. It is not a Java virtual thread and it is not a background worker. A `requests.get` inside it stalls the whole loop.
+- The **GIL** means `threading` does not give you parallel CPU on CPython. `multiprocessing` or a worker pool does. For I/O, `asyncio` is enough.
+- **CPU-bound** work in an async handler is the same mistake as a long sync loop in Node. Move it to a thread (`run_in_executor`) or a process.
+
+**Failure:** `async def get_user(...)` that calls a blocking SQLAlchemy session. The loop is now a queue of one. Use `asyncpg` / `SQLAlchemy` async, or make the route sync.
+
+<br />
+
+---
+
+## 10. Build
+
+`package.json` plus a lockfile is the TypeScript habit. Python splits **project metadata** from a **resolver**.
+
+| | TypeScript / bun | Python |
+| --- | --- | --- |
+| Manifest | `package.json` | `pyproject.toml` |
+| Lock | `bun.lock` | `uv.lock`, or a compiled `requirements.txt` |
+| Install | `node_modules` | a venv's `site-packages` |
+| Ship | a server process, or a bundle | source plus an interpreter (or a Docker image with a venv) |
+| Entry | `src/index.ts` | a module run as `python -m`, or `uvicorn app:app` |
+
+<br />
+
+- There is no fat JAR. Production ships **source and an interpreter**, usually inside a container that already installed the venv. A serverless ZIP is the same idea as a Lambda bundle.
+- **`uv`** resolves and installs fast. It reads `pyproject.toml` and writes a lock. `pip` alone leaves you pinning by hand.
+- `src/` layout keeps imports honest. A flat package next to tests imports the wrong copy on a bad day.
+
+**Failure:** `pip freeze > requirements.txt` after a weekend of experiments. The lock is now a landfill. Start from `pyproject.toml`.
+
+<br />
+
+---
+
+## 11. FastAPI as Hono
+
+Hono is a function you call with a request. FastAPI is a router of **decorated functions**, with Pydantic parsing the body.
+
+<br />
+
+```ts
+app.get("/users/:id", async (c) => {
+  const id = c.req.param("id")
+  const user = await users.require(id)
+  return c.json(user)
+})
+```
+
+<br />
+
+```python
+from fastapi import FastAPI, HTTPException
+
+app = FastAPI()
+
+@app.get("/users/{id}")
+async def get_user(id: str) -> UserRead:
+    user = await users.require(id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="user not found")
+    return user
+```
+
+<br />
+
+- **`@app.get("/users/{id}")`** is `app.get`. The path parameter is a function argument, not `c.req.param`. The return annotation is the response model.
+- **`Depends`** is middleware plus injection. It is not a Spring bean container. It resolves per request. A dependency can read the request, open a DB session, and yield it.
+- **`HTTPException`** is the typed exit. Starlette is underneath. FastAPI adds OpenAPI and Pydantic on top.
+- `uvicorn` is the process. `FastAPI` is the app object. There is no `index.ts` beyond the module that defines `app`.
+
+**Failure:** treating a dependency as a singleton you can stash a request in. `Depends` runs per request. Store request-scoped state on the yielded object, not on the app.
+
+<br />
+
+---
+
+## 12. Pydantic and SQLAlchemy
+
+Zod is a schema you parse. Pydantic **`BaseModel`** is the same idea on a class. SQLAlchemy 2 is Drizzle's heavier cousin: an explicit **session**, not a request-scoped implicit you forget to close.
+
+<br />
+
+```ts
+const UserCreate = z.object({
+  email: z.string().email(),
+})
+
+await db.insert(users).values({ email }).returning()
+```
+
+<br />
+
+```python
+from pydantic import BaseModel, EmailStr
+
+class UserCreate(BaseModel):
+    email: EmailStr
+
+# SQLAlchemy 2
+from sqlalchemy import select
+stmt = select(User).where(User.id == id)
+user = session.scalars(stmt).first()
+```
+
+<br />
+
+- **`BaseModel`** parses JSON into a typed object. `EmailStr` is a validator. `model_dump()` is the way back to JSON. It is not the ORM.
+- **SQLAlchemy** has a `Session` / `AsyncSession`. It is a unit of work. Do not share it across requests. A `Depends` that yields a session and closes it is the FastAPI habit.
+- **`select()`** is SQL-shaped. The session tracks identity. Lazy loads are a second query. Postgres still evaluates a statement: [Core SQL Concepts](/notes/core-sql-concepts). Tenant filters still belong in the query and in RLS: [Building a Multi-Tenant Backend with Hono, Better Auth, Drizzle, and Postgres RLS](/notes/multi-tenant-backend-drizzle-hono-better-auth).
+
+**Failure:** returning an ORM object as JSON because "FastAPI will serialize it." That is a detached instance, a lazy load, or a 500. Map ORM → Pydantic at the boundary, same instinct as entity → record in the Java note.
+
+<br />
+
+---
+
+## 13. Where It Sits
+
+Python is how **this interpreter** passes a value around. FastAPI is how **this process** receives a request. Neither replaces authorization, SQL, or the session.
+
+- The JVM sibling: [Learning Java as a TypeScript Developer](/notes/learning-java-as-a-typescript-developer)
+- Runtime identity in TypeScript: [TypeScript Classes and Runtime Identity](/notes/typescript-classes-and-runtime-identity)
+- When JS runs: [Core JavaScript Concepts](/notes/core-javascript-concepts)
+- The Hono analog: [Backend APIs with Hono, Drizzle, Zod OpenAPI, and SST](/notes/backend-apis-hono-sst)
+- The statement: [Core SQL Concepts](/notes/core-sql-concepts)
+- Identity, membership, and the row: [Building a Multi-Tenant Backend with Hono, Better Auth, Drizzle, and Postgres RLS](/notes/multi-tenant-backend-drizzle-hono-better-auth)

@@ -1,0 +1,283 @@
+---
+title: OAuth 2.0 and OIDC Explained
+description: Delegated authorization vs login — roles, grants, tokens, authorization code + PKCE, and how this stack actually uses Better Auth
+date: 2026-08-18
+category: security
+---
+
+**OAuth 2.0** is delegated authorization. It is not "login with a popup." **OpenID Connect (OIDC)** is identity on top of OAuth: an ID token, a UserInfo endpoint, and the `openid` scope. "Sign in with Google" is OIDC. Calling a Google API with a scoped access token is OAuth.
+
+This note follows [Code and Stuff's walkthrough](https://www.youtube.com/watch?v=tpIXmmV4ib4). The video is the OAuth cast and the five grants. OIDC and how this stack actually uses Better Auth are the extra layer. The category map is [Web Security and the OWASP Top 10](/notes/web-security-owasp-top-10). Cookie lifetime belongs with [Local Storage, Session Storage, and Cookies](/notes/browser-storage-localstorage-sessionstorage-cookies).
+
+<br />
+
+---
+
+## 1. The Distinction
+
+OAuth answers **what this client may do on the owner's behalf**. OIDC answers **who just authenticated**. Mixing the two is how a login screen becomes an API credential, or an access token becomes a fake identity.
+
+- The **resource owner** is the human (or service account) who already has access. They are not the app.
+- The **client** is the app asking for a slice of that access. A Next.js server is a **confidential** client: it can hold a secret. A SPA or a React Native binary is a **public** client: it cannot.
+- The **authorization server** authenticates the owner and issues tokens. The **resource server** is the API that accepts an access token and still has to authorize the row.
+
+"Login" in this stack is usually Better Auth minting a **session**, not the browser holding an OAuth access token. Social login is this app acting as an OIDC **client** of Google or GitHub, then exchanging that identity for its own session.
+
+<br />
+
+---
+
+## 2. Roles
+
+Four parties. The browser is a messenger, not a fifth one.
+
+<br />
+
+```text
+Resource owner
+  → Client (this app)
+    → Authorization server (Google, GitHub, or this Better Auth)
+      → Authorization code
+    → Token endpoint (code + secret or verifier → tokens)
+  → Resource server (Hono API, or Google's API)
+```
+
+<br />
+
+| Role | Job | In this stack |
+| --- | --- | --- |
+| Resource owner | Consents | The signed-in human |
+| Client | Requests a scoped grant | Next.js / Expo app |
+| Authorization server | Authenticates and issues | Google / GitHub, or Better Auth |
+| Resource server | Enforces the token | Hono, or the provider's API |
+
+<br />
+
+Setup is **client registration**. You pin an exact `redirect_uri`, get a `client_id`, and — confidential only — a `client_secret`. The resource server and the authorization server may be one process. They remain two roles.
+
+- **Confidential client** — a server that can keep `client_secret`. Token exchange happens off the browser.
+- **Public client** — a SPA or native app. No secret stays secret. PKCE is the substitute proof.
+- **Scopes** are strings the authorization server and the resource server agree on (`profile`, `photos.read`). They have no universal meaning. Share the calendar, not the diary. Combine them. Consent may be skipped if the owner already granted that slice.
+
+**Failure:** treating the client as the user. The access token says what the *client* may do. Membership and row checks still live on Hono. That path is [Building a Multi-Tenant Backend with Hono, Better Auth, Drizzle, and Postgres RLS](/notes/multi-tenant-backend-drizzle-hono-better-auth).
+
+<br />
+
+---
+
+## 3. Tokens
+
+Each token has one job. Reusing one for another is the usual bug.
+
+| Token | Travels | Job |
+| --- | --- | --- |
+| Authorization code | Front channel, once | Proof the owner consented. Short-lived. Exchanged, not stored. |
+| Access token | Back channel, then to the API | What the client may do. Bearer at the resource server. |
+| Refresh token | Back channel, then held by the client | Mint a new access token without the owner. |
+| ID token | Back channel, to the client | Who authenticated. **Not** an API credential. |
+
+<br />
+
+- An **authorization code** is a one-time ticket. It is useless without the PKCE verifier (public client) or the client secret (confidential client).
+- An **access token** may be a JWT the API verifies locally, or an opaque value the API introspects. Format is independent of the grant. Lifetime is minutes to a couple of hours. Asking the owner to sign in again every hour looks like a scam.
+- **Refresh** is its own grant: `grant_type=refresh_token`. The authorization server checks that access has not been revoked, then issues a new access token. Implementations differ and are not fully specified: the same refresh token or a new one each time — store whatever came back; whether the previous access token dies immediately; a short concurrent-refresh grace. Know this authorization server.
+- An **ID token** is a JWT for the *client*: `iss`, `aud`, `exp`, `sub`, and whatever profile claims were requested. The client checks the signature and the audience. It does not send that JWT as `Authorization: Bearer` to Hono.
+
+**Failure:** sending the ID token to the API because "it is a JWT and it has `sub`." The audience is the client, not the API. The API wants an access token — or, in this stack, a session cookie it issued itself.
+
+<br />
+
+---
+
+## 4. Grant Map
+
+A **grant** is how the client proves it should get tokens. It is not a token format.
+
+| Grant | Who it is for | Production stance |
+| --- | --- | --- |
+| Authorization code + PKCE | Browser and native public clients; also fine for confidential clients | Default interactive login |
+| Device code | TVs and other input-constrained devices | RFC 8628. Poll, do not type on the toaster. |
+| Refresh token | A client that already has a refresh token | Silent renew. Store whatever came back. |
+| Client credentials | A server talking to another server | Data not bound to a resource owner |
+| Implicit | Legacy SPAs | Deprecated. RFC 9700. Omitted from OAuth 2.1. |
+| Resource owner password (ROPC) | The client collects the password | Discouraged. The client becomes the IdP. |
+
+<br />
+
+- **Authorization code** keeps tokens off the front channel. The redirect carries a code. The token endpoint is a direct, authenticated call.
+- **PKCE** (S256) is required for public clients in the OAuth 2.1 draft. It is cheap insurance for confidential clients too.
+- **Device code** is for a screen that cannot type. The owner authorizes on a phone.
+- **Client credentials** has no human. `client_id` + `client_secret` in, access token out. Scopes still bound the token. Not a user grant.
+- **Implicit** put the access token in the redirect URL. History, logs, and Referer-adjacent accidents. There is no one-time code and no client authentication.
+- **ROPC** trains users to type a password into the wrong app. MFA and consent screens do not exist in that grant.
+
+The video walks five flavors and omits implicit and ROPC as insecure. Same stance here.
+
+<br />
+
+---
+
+## 5. Authorization Code + PKCE
+
+This is the interactive flow production ships. Two beats: a confidential backend, then a public client that cannot keep a secret.
+
+<br />
+
+```text
+Client                Authorization server              Resource server
+  |                          |                                |
+  |  1. generate verifier    |                                |
+  |     S256 → challenge     |                                |
+  |  2. redirect (challenge, |                                |
+  |     client_id, scope,    |                                |
+  |     redirect_uri, state) |                                |
+  | ------------------------>|  3. owner authenticates        |
+  |                          |     and consents               |
+  |  4. redirect + code      |                                |
+  | <------------------------|                                |
+  |  5. POST token endpoint  |                                |
+  |     code + secret        |                                |
+  |     or code + verifier   |                                |
+  |     + original redirect  |                                |
+  | ------------------------>|                                |
+  |  6. access_token         |                                |
+  |     (+ id_token, refresh)|                                |
+  | <------------------------|                                |
+  |  7. Authorization: Bearer ... ---------------------------->|
+  |                                                           |
+```
+
+<br />
+
+**Confidential.** The token POST includes `client_id`, `client_secret`, and the original `redirect_uri`. The access token is secret. A backend keeps it in a database or an encrypted session cookie. It does not hand it to the frontend.
+
+**Public / mobile.** There is no secret. PKCE exists because **any app on the device can claim a custom URI scheme** and steal the code. Before the redirect, the client generates a **code verifier** and a **code challenge** `BASE64URL(SHA256(verifier))`. The authorization server stores the challenge — or stuffs it into the code. The exchange proves the verifier hashes to that challenge. An interceptor who only has the code cannot finish.
+
+- **`state`** binds the callback to this browser session. **`nonce`** (OIDC) binds the ID token to this request. They are not interchangeable.
+- The owner authenticates at the authorization server. On mobile that is the **system browser or in-app browser tab**, not a WebView the app can script. Stance: [Security in React Native](/notes/security-in-react-native).
+
+**Failure:** a custom URL scheme as the only redirect, a scriptable WebView, or skipping PKCE "because we have a client secret in the Expo app." The secret is in the IPA.
+
+<br />
+
+---
+
+## 6. Device Grant
+
+A TV, a console, a toaster with no keyboard. The authorization code flow will not type.
+
+<br />
+
+```text
+Device                  Authorization server              Phone
+  |  1. POST device      |                                 |
+  |     authorization    |                                 |
+  |     (client_id,      |                                 |
+  |      scope)          |                                 |
+  | -------------------->|                                 |
+  |  2. device_code,     |                                 |
+  |     user_code,       |                                 |
+  |     verification_uri |                                 |
+  | <--------------------|                                 |
+  |  3. show URI + code  |                                 |
+  |     (or QR)          |                                 |
+  |                      |  4. owner types user_code       |
+  |                      | <-------------------------------|
+  |  5. poll token       |                                 |
+  |     (authorization_  |                                 |
+  |      pending …)      |                                 |
+  | -------------------->|                                 |
+  |  6. access_token     |                                 |
+  | <--------------------|                                 |
+```
+
+<br />
+
+- The device hits a **device authorization endpoint** with `client_id` and scopes. Back come a `device_code`, a short `user_code`, and a verification URI. Sometimes the URI is a QR with the code already in a query parameter.
+- The owner authorizes on a phone or a laptop. The device **polls** the token endpoint with the `device_code`. Early responses are `authorization_pending`. After consent, tokens.
+
+**Failure:** asking the owner to type a password into the TV. That is ROPC with worse input.
+
+<br />
+
+---
+
+## 7. OIDC Extras
+
+OIDC is OAuth 2.0 plus a contract for **authentication**. The video stays on OAuth. This is the extra layer.
+
+- Request the **`openid`** scope. Add `profile` and `email` when the client needs those claims. Scopes still describe what the *access token* may do at the provider's APIs.
+- The **ID token** is a JWT. The client verifies signature (JWKS), `iss`, `aud` (this `client_id`), `exp`, and `nonce`. `sub` is the stable subject at that issuer — not a Hono user id until the app maps it.
+- **UserInfo** is an extra GET with the access token when claims were not all packed into the ID token. It is still the provider's identity, not this API's session.
+- Authentication is **who**. OAuth scopes are **what the API may do**. An ID token that verifies does not mean this identity may read another organization's row.
+
+Social login in Better Auth is this app as the OIDC client: redirect, code, ID token, then **mint a Better Auth session**. The session is the credential the rest of the product sees.
+
+<br />
+
+---
+
+## 8. What This Stack Ships
+
+Better Auth already owns password hashing, session records, and cookie issuance. OAuth/OIDC here is usually **inbound social login**, not this API pretending to be Google.
+
+<br />
+
+```http
+Set-Cookie: session=opaque-value; Path=/; HttpOnly; Secure; SameSite=Lax
+```
+
+<br />
+
+- **Web.** The browser holds an opaque session cookie. `HttpOnly` keeps XSS from trivially exporting it. `Secure` keeps it off HTTP. `SameSite=Lax` is the default starting point. The Next.js document is an untrusted origin; the cookie is the credential. Stance: [Security in Next.js](/notes/security-in-next-js).
+- **Social.** Better Auth is the confidential client talking to Google or GitHub. The user never hands this app a Google password. After the callback, Better Auth writes **its** session, not a Google access token into `localStorage`. That matches the video: a confidential client keeps the access token off the frontend.
+- **Mobile.** Short-lived access token in memory. Refresh token in SecureStore / Keychain / Keystore. Same authorization server as the web app. The binary is not a secret store for `client_secret`. PKCE, not a client secret in the IPA.
+- The UI is not authorization. Hiding a button, reading a role from the ID token, or trusting `X-Organization-Id` does not decide whether a row may be read.
+
+**Failure:** inventing a parallel JWT-in-`localStorage` scheme "because SPA" next to Better Auth's cookie. The browser already has a credential container. Two session mechanisms is two revocation stories.
+
+<br />
+
+---
+
+## 9. Client Credentials
+
+The client signs in as itself. Confidential, backend-to-backend. No resource owner in the loop.
+
+- The grant is **client credentials**: `client_id` and `client_secret` at the token endpoint, a short-lived access token back. Often a JWT. The resource server still checks `aud`, `iss`, expiry, and **scopes**.
+- Use it for data **not bound to a resource owner**: webhook setup, client registration, admin of the client itself. Nobody consented to a person's calendar.
+- A grant is not a token format. Client credentials can mint a JWT or an opaque token. A static JWT in a config file is neither; it is a long-lived password with extra claims.
+- **API keys** are a shared secret on every call. Fine for a simple webhook receiver. Hash them, bind them to a tenant, support two active keys. They have no standard scopes and a painful rotate.
+
+**Failure:** using client credentials to read a user's data because "the server has a secret." That is not a user grant. A static API key in a query string, or a 24-hour JWT with no revoke path after a service account leaks, is the same class.
+
+<br />
+
+---
+
+## 10. Pitfalls
+
+The protocol is fine. The usual damage is putting the wrong token in the wrong place.
+
+- **Access tokens in `localStorage`.** XSS on the origin reads them. The production default on web is the cookie jar, not Web Storage. [Local Storage, Session Storage, and Cookies](/notes/browser-storage-localstorage-sessionstorage-cookies).
+- **Implicit.** Access token on the front channel. Deprecated. Use authorization code + PKCE.
+- **ID token as a bearer.** The audience is the client. The API did not issue it and should not accept it.
+- **Loose `redirect_uri`.** An open redirect on the app, or an allowlist that matches a prefix, turns the callback into a code drop for someone else. Register exact redirect URIs.
+- **Mixing a cookie session with a JWT the JavaScript also holds.** CSRF comes back for the cookie; XSS steals the JWT. Pick one credential container.
+- **CORS as access control.** CORS is a browser reading rule. A native app, `curl`, and a stolen token do not obey it. The API still authenticates.
+
+**Failure:** "we use OAuth" as a substitute for authorization. OAuth got a token. Hono still has to ask whether this identity may touch this row.
+
+<br />
+
+---
+
+## 11. Where It Sits
+
+OAuth and OIDC are how **this client** obtains a proof. They are not how **this API** decides access.
+
+- Trust boundaries and attacker goals: [Web Security and the OWASP Top 10](/notes/web-security-owasp-top-10)
+- Cookie vs Web Storage: [Local Storage, Session Storage, and Cookies](/notes/browser-storage-localstorage-sessionstorage-cookies)
+- The browser origin: [Security in Next.js](/notes/security-in-next-js)
+- The device host: [Security in React Native](/notes/security-in-react-native)
+- Identity, membership, and the row: [Building a Multi-Tenant Backend with Hono, Better Auth, Drizzle, and Postgres RLS](/notes/multi-tenant-backend-drizzle-hono-better-auth)

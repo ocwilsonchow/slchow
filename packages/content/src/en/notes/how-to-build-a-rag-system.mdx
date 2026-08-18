@@ -1,13 +1,15 @@
 ---
 title: How to build a RAG system
-description: A tutorial for organization-scoped document RAG with Mastra workflows, Pinecone namespaces, and tool-called retrieval
-date: 2026-08-13
+description: A tutorial for organization-scoped document RAG with Reducto parsing, Mastra workflows, Pinecone hybrid namespaces, and tool-called retrieval
+date: 2026-08-18
 category: ai
 ---
 
-A working RAG stack is not “embed text and hope.” It is two pipelines that share an embedding space: a **deterministic ingest workflow** that writes vectors, and a **tool-called retriever** that reads them. The hard part is the tenant boundary. If the model can choose *whose* index to search, you do not have RAG. You have a leak.
+A working RAG stack is two pipelines that share an embedding space: a **deterministic ingest workflow** that writes vectors, and a **tool-called retriever** that reads them. The hard part is the tenant boundary. If the model can choose *whose* index to search, you do not have RAG. You have a leak.
 
-This design uses Mastra workflows, `MDocument` chunking, OpenAI `text-embedding-3-small` (1536-d), and a Pinecone serverless index partitioned by **namespace = `organizationId`**. Identity and membership stay where they already live: Better Auth organizations and Hono request context, as in [Building a Multi-Tenant Backend with Hono, Better Auth, Drizzle, and Postgres RLS](/notes/multi-tenant-backend-drizzle-hono-better-auth). `userId` is the actor. `organizationId` is the library. Members of the same org share one corpus.
+This design uses Mastra workflows, **Reducto Parse** for layout-aware chunking, OpenAI `text-embedding-3-small` (dense) plus `pinecone-sparse-english-v0` (sparse), and a single Pinecone serverless **hybrid** index partitioned by **namespace = `organizationId`**. Identity stays where it already lives: Better Auth organizations and Hono request context, as in [Building a Multi-Tenant Backend with Hono, Better Auth, Drizzle, and Postgres RLS](/notes/multi-tenant-backend-drizzle-hono-better-auth). `userId` is the actor. `organizationId` is the library.
+
+The write path ends at upsert. Hybrid search and rerank live on the read path — never in the upload line.
 
 <br />
 
@@ -17,10 +19,6 @@ This design uses Mastra workflows, `MDocument` chunking, OpenAI `text-embedding-
 
 Files are the source of truth. Vectors are a derived index. Ingest status is the latest workflow run for that org and path, not a documents table.
 
-List files from the filesystem prefix. Ask “is this file searchable yet?” by listing workflow runs with `resourceId = organizationId` and matching the run’s input `path`. A failed snapshot is a failed ingest. You do not need a `documents` row to know either of those things, and a row that can drift from S3 and Pinecone is a third source of truth you will have to reconcile.
-
-Mastra Workspace search (`Workspace` + `PineconeVector` + an embedder) indexes one agent sandbox. That is the right primitive for a coding agent’s local files. It is the wrong primitive for an HTTP upload API, an org-scoped library, and a membership-checked `requestContext`. Keep Workspace for the agent’s working set. Keep this workflow for the product corpus.
-
 <br />
 
 ```text
@@ -28,25 +26,28 @@ Write
   POST /documents
   → S3 orgs/organizationId/docs/filename
   → workflow pinecone-document-ingestion
-  → extract text
-  → MDocument.chunk (token)
-  → embedMany text-embedding-3-small
-  → deleteVectors namespace + path
-  → upsert namespace=organizationId
-  → Pinecone index document-chunks
+       loadFile → parseReducto → mapChunks → indexChunks
+  → Pinecone index document-chunks, metric=dotproduct
 
 Read (later turn)
   chat → agent
   → tool search-pinecone-documents
-  → embed query (same model)
-  → pinecone.query namespace=organizationId
+  → embed query (same dense + sparse models)
+  → hybrid query (alpha-weighted) namespace=organizationId
+  → rerank top results (cross-encoder)
   → relevantContext + sources
   → agent
 ```
 
 <br />
 
-The upload turn still carries file parts inline on the chat message. Indexing is async. Retrieval is for subsequent turns against the org corpus. That split is deliberate: the user can ask about the PDF they just attached *this turn*, before Pinecone has the chunks. Later turns should not re-send the whole file. They search the index.
+- List files from the filesystem prefix. Ask “is this file searchable yet?” by listing workflow runs with `resourceId = organizationId` and matching the run’s input `path`.
+- A `documents` row that can drift from S3 and Pinecone is a third source of truth you will have to reconcile.
+- Mastra Workspace search (`Workspace` + `PineconeVector` + an embedder) indexes one agent sandbox. Keep it for the agent’s working set. Keep this workflow for the product corpus.
+- The upload turn still carries file parts inline. Indexing is async. Retrieval is for subsequent turns, so later turns search the index instead of re-sending the file.
+- Persist Reducto’s parse JSON (or its job id) next to the file. You can re-embed without re-parsing when you change embedding models.
+
+**Failure:** treating Workspace search as the HTTP upload API. It has no membership-checked `requestContext` and no org-scoped library.
 
 <br />
 
@@ -54,19 +55,23 @@ The upload turn still carries file parts inline on the chat message. Indexing is
 
 ## 2. Why a workflow for ingest, a tool for retrieve
 
+Mastra’s rule of thumb matches this split: workflows for defined multi-step processes, agents for decisions that use tools. Reducto fits as the **parse step** inside the ingest workflow — it is a deterministic transform, not a decision, and not a second workflow.
+
 <br />
 
 | Concern | Primitive | Reason |
 | --- | --- | --- |
-| Load → extract → chunk → embed → upsert | `createWorkflow` | Fixed DAG, retries, run snapshots, skip vs fail |
+| Load → Parse → map → embed → upsert | one `createWorkflow` | One logical operation, one `runId` as status, retries from snapshots |
 | “User asked about the handbook” | `createTool` on an agent | Open-ended; skip retrieval on “hi” |
 | Tenant key | `requestContext`, never tool args | The LLM must not pick a namespace |
 
 <br />
 
-Mastra’s rule of thumb matches this split: workflows for defined multi-step processes, agents for decisions that use tools.
+- Populate `requestContext` the same way on upload and on chat: session → verify membership in the route’s `organizationId` → `requestContext.set("organizationId", organizationId)` and `requestContext.set("userId", userId)`.
+- Never copy org from a client header, a tool argument, or `databaseConfig` the model can influence.
+- Always-on injection embeds every greeting and burns tokens. Tool-calling keeps retrieval off the default path.
 
-Populate `requestContext` the same way on upload and on chat: session → verify membership in the route’s `organizationId` → `requestContext.set("organizationId", organizationId)` and `requestContext.set("userId", userId)`. Never copy org from a client header, a tool argument, or `databaseConfig` the model can influence.
+**Failure:** if the model can choose *whose* index to search, you have a leak.
 
 <br />
 
@@ -74,34 +79,52 @@ Populate `requestContext` the same way on upload and on chat: session → verify
 
 ## 3. Embedding contract
 
-Ingest and query must use the **same model and dimension**. Cosine similarity across two embedding spaces is noise. Mastra’s documented path is `ModelRouterEmbeddingModel` with a `provider/model` id.
+Ingest and query must use the **same dense model and dimension**. Cosine similarity across two embedding spaces is noise. Hybrid adds a second contract: the same **sparse** model at write and query.
 
 <br />
 
 ```ts
 import { ModelRouterEmbeddingModel } from "@mastra/core/llm"
 import { embedMany } from "ai"
+import { Pinecone } from "@pinecone-database/pinecone"
 
-export const EMBEDDING_MODEL_ID = "openai/text-embedding-3-small"
-export const EMBEDDING_DIMENSION = 1536
+export const DENSE_MODEL_ID = "openai/text-embedding-3-small"
+export const DENSE_DIMENSION = 1536
+export const SPARSE_MODEL_ID = "pinecone-sparse-english-v0"
 
-const embeddingModel = new ModelRouterEmbeddingModel(EMBEDDING_MODEL_ID)
+const denseModel = new ModelRouterEmbeddingModel(DENSE_MODEL_ID)
+const pc = new Pinecone({ apiKey: process.env.PINECONE_API_KEY! })
 
-export async function embedTexts(values: string[]): Promise<number[][]> {
+export async function embedDense(values: string[]): Promise<number[][]> {
   if (values.length === 0) return []
-  const { embeddings } = await embedMany({
-    model: embeddingModel,
-    values,
-  })
+  const { embeddings } = await embedMany({ model: denseModel, values })
   return embeddings
+}
+
+export async function embedSparse(values: string[], inputType: "passage" | "query") {
+  if (values.length === 0) return []
+  const { data } = await pc.inference.embed({
+    model: SPARSE_MODEL_ID,
+    inputs: values,
+    parameters: { inputType, truncate: "END" },
+  })
+  return data.map((d) => ({
+    indices: d.sparseIndices,
+    values: d.sparseValues,
+  }))
 }
 ```
 
 <br />
 
-Pinecone index metric is `cosine`. Dimension is frozen at `createIndex`. Changing the model later means a new index and a full re-ingest.
+- Mastra’s documented path is `ModelRouterEmbeddingModel` with a `provider/model` id for dense. Pinecone hosts the sparse model; call it through the Pinecone SDK.
+- A hybrid index stores both vectors on one record and requires **`metric: "dotproduct"`**. Dense-only indexes in this repo used `cosine`; switching is a new index and a full re-ingest.
+- Dimension is frozen at `createIndex`. Changing the dense model later means a new index and a full re-ingest.
+- `text-embedding-3-small` caps input at 8191 tokens. Chunk first, then embed.
+- Sparse scores are unbounded; dense cosine scores are `[-1, 1]`. Combine them at query time with an **alpha** weight (`α·dense + (1-α)·sparse`). Start at `α = 0.75` for natural-language questions. Without weighting, the sparse component dominates.
+- Batch embeddings and upserts. Pinecone’s practical ceiling is about 1000 vectors or 2 MB; at 1536-d with `text` in metadata, stay closer to 100.
 
-`text-embedding-3-small` caps input at 8191 tokens. Chunk first, then embed. Do not `embedMany` an unbounded PDF in one call. Batch embeddings and upserts (Pinecone’s practical ceiling is about 1000 vectors or 2 MB per request; at 1536-d with `text` in metadata, stay closer to 100).
+**Failure:** `embedMany` on an unbounded PDF in one call, or querying hybrid without alpha so exact-match tokens drown semantics.
 
 <br />
 
@@ -109,7 +132,7 @@ Pinecone index metric is `cosine`. Dimension is frozen at `createIndex`. Changin
 
 ## 4. Vector layout: one index, many namespaces
 
-Pinecone offers three tenant strategies. Only one is acceptable for an org-scoped library.
+Pinecone offers three tenant strategies. Only **namespace = `organizationId`** is acceptable for an org-scoped library.
 
 <br />
 
@@ -130,37 +153,33 @@ Shared index + namespace (yes)
 <br />
 
 - **Index per org:** isolation is real; `createIndex` is slow; index-count limits kill you.
-- **Metadata `filter: { organizationId }`:** one forgotten filter leaks the corpus. Query cost also scales with the *whole* index. This is the pgvector pattern. Do not port it to Pinecone if namespaces exist.
-- **Namespace = `organizationId`:** query, upsert, and delete always take `namespace`. Namespaces are created on first upsert. Pinecone stores them separately, so a missing metadata filter cannot see another tenant. Query cost is 1 RU per GB of the targeted namespace, not the whole index.
-
-Omitting `namespace` does **not** search every tenant. It queries the default namespace. Isolation holds only if you never write that default namespace. Always pass `namespace: organizationId`.
-
-Index names: 1–45 characters, lowercase alphanumeric and hyphens, start and end alphanumeric. No underscores, no dots. Use `document-chunks`, not `mastra_document_chunks`.
+- **Metadata `filter: { organizationId }`:** one forgotten filter leaks the corpus. Query cost scales with the *whole* index — the pgvector pattern. Do not port it to Pinecone if namespaces exist.
+- **Namespace = `organizationId`:** query, upsert, and delete always take `namespace`. Namespaces are created on first upsert. Pinecone stores them separately, so a missing metadata filter cannot see another tenant. Query cost is 1 RU per GB of the targeted namespace.
+- Omitting `namespace` queries the **default** namespace, not every tenant. Isolation holds only if you never write that default. Always pass `namespace: organizationId`.
+- Index names: 1–45 characters, lowercase alphanumeric and hyphens, start and end alphanumeric. Use `document-chunks`, not `mastra_document_chunks`.
 
 <br />
 
 ```ts
-import { PineconeVector } from "@mastra/pinecone"
+import { Pinecone } from "@pinecone-database/pinecone"
 
 export const PINECONE_INDEX_NAME = "document-chunks"
 
-export const pinecone = new PineconeVector({
-  id: "pinecone",
-  apiKey: process.env.PINECONE_API_KEY!,
-  cloud: "aws",
-  region: "us-east-1",
-})
+export const pc = new Pinecone({ apiKey: process.env.PINECONE_API_KEY! })
 
 let indexReady: Promise<void> | undefined
 
 export async function ensurePineconeIndex() {
   if (!indexReady) {
-    indexReady = pinecone
+    indexReady = pc
       .createIndex({
-        indexName: PINECONE_INDEX_NAME,
-        dimension: EMBEDDING_DIMENSION,
-        metric: "cosine",
+        name: PINECONE_INDEX_NAME,
+        vectorType: "dense",
+        dimension: DENSE_DIMENSION,
+        metric: "dotproduct",
+        spec: { serverless: { cloud: "aws", region: "us-east-1" } },
       })
+      .then(() => undefined)
       .catch((error: unknown) => {
         indexReady = undefined
         throw error
@@ -172,27 +191,15 @@ export async function ensurePineconeIndex() {
 
 <br />
 
-`createIndex` on `@mastra/pinecone` treats 409 as “already exists” and then checks dimension. The latch above avoids repeating that round trip.
+- Hybrid on Pinecone is **one dense index with `sparse_values` on the same record**. The linkage is implicit: one upsert, one query, no client-side merge. Separate dense/sparse indexes are only for sparse-only queries or Pinecone-integrated sparse embedding — you do not need them.
+- Mastra’s `PineconeVector` is a dense upsert/query wrapper. Hybrid means using the Pinecone SDK (or wrapping it) so you can set `sparse_values`. Keep Mastra for the workflow, agent, and `requestContext`; do not expect `@mastra/pinecone` to own hybrid.
+- Per-vector metadata must be **flat**. Pinecone does not flatten nested objects. Keep `text` in metadata or retrieval returns scores with no prose.
+- Reducto chunks carry citation metadata. Keep `page`, `bbox`, and `blockType` alongside `path` and `chunkIndex` so answers can point at a region, not just a file.
+- `organizationId` does not belong in metadata as the isolation key. The namespace *is* the tenant. Metadata filters are for relevance *inside* that tenant (`path`, later).
+- Document identity is `path` under the org prefix, typically `docs/filename`. Re-upload of the same path overwrites. Rename is a new document. Two files that collide on filename under `docs/` are the same document.
+- Flat metadata is `{ path, filename, chunkIndex, page, bbox, blockType, text, embedText, mediaType }`. No nested objects.
 
-Per-vector metadata must be **flat**. Pinecone does not support nested objects (it does not flatten them for you). Keep `text` in metadata or retrieval returns scores with no prose. Token chunks at `maxSize: 512` stay under the 40 KB metadata cap.
-
-<br />
-
-```ts
-type ChunkMetadata = {
-  path: string
-  filename: string
-  chunkIndex: number
-  text: string
-  mediaType: string
-}
-```
-
-<br />
-
-`organizationId` does not belong in metadata as the isolation key. The namespace *is* the tenant. Metadata filters are for relevance *inside* that tenant (`path`, later).
-
-Document identity is `path` under the org prefix, typically `docs/filename`. Re-upload of the same path overwrites. Rename is a new document. Two files that collide on filename under `docs/` are the same document.
+**Failure:** omitting `namespace` looks like “search everything.” It searches the default namespace.
 
 <br />
 
@@ -200,19 +207,9 @@ Document identity is `path` under the org prefix, typically `docs/filename`. Re-
 
 ## 5. Ingest workflow
 
-Input matches the upload route so Studio and HTTP share a contract:
+File upload and ingest belong in **one** workflow: `pinecone-document-ingestion`. “One workflow” is not “one step.” The DAG is four steps. The HTTP route only writes the object and starts the run.
 
-<br />
-
-```ts
-import { z } from "zod"
-
-const ingestionInputSchema = z.object({
-  path: z.string(), // "docs/handbook.pdf"
-  filename: z.string(),
-  mediaType: z.string(),
-})
-```
+Input matches the upload route so Studio and HTTP share a contract: `{ path, filename, mediaType }`. `startAsync` is fire-and-forget: it returns `{ runId }` immediately. The route does not wait for `status` or `chunkCount`.
 
 <br />
 
@@ -223,333 +220,109 @@ POST /documents
   → startAsync → runId
   → list runs by resourceId, match input path
 
-Background run
-  → exists(path) → readFile(path)
-  → extractText → MDocument.chunk
-  → deleteVectors namespace + filter path
-  → upsert ids + vectors + metadata (if chunks)
+pinecone-document-ingestion  (one run)
+  loadFile       exists(path) → readFile → upload to Reducto
+  parseReducto   variable chunks, embedding_optimized → parse JSON
+  mapChunks      chunks → { text, embedText, page, bbox, blockType, chunkIndex }
+  indexChunks    deleteMany(path) → embed dense+sparse → upsert
 ```
 
 <br />
 
-`startAsync` is fire-and-forget. It returns `{ runId }` immediately. The route does not wait for `status` or `chunkCount`. Poll or list later.
+Stay in one workflow because it is **one logical operation**. Two workflows per file means two runs to join — the `documents`-table problem as a runs-join. Retries and snapshots are per-run: if upsert flakes after a successful parse, the same run retries `indexChunks` from the snapshot. It does not start a second pipeline that has to re-derive what the first already knew.
+
+The boundary that matters is the **step**, not the workflow:
+
+- `parseReducto` is retry-safe and should not re-parse on every retry. Reducto costs money per parse. Persist the parse JSON (or job id) in the step output — and next to the file — so a retry of `indexChunks` skips straight to `mapChunks` when a parse already exists for that `path` + content hash.
+- Do not pass file bytes through step output. Workflow snapshots JSON-serialize that data. Each step reads by `path` from an already org-rooted filesystem. Only the parse JSON (small, structured) or its reference flows between steps.
+- Delete-then-upsert stays inside `indexChunks`. Splitting delete into its own workflow lets it run without the matching upsert.
+
+What does **not** belong in this workflow:
+
+- Retrieval. Hybrid query and rerank are a tool on later turns. The upload line ends at upsert.
+- Reducto Extract. Schema fill (`invoice.total`) has different inputs, outputs, and callers. It is a later product, a later workflow.
+- Re-embed on model change. A maintenance workflow that reads the cached parse JSON. Share the `mapChunks` / `indexChunks` **steps** — export them and reuse — do not fork the upload-triggered run.
+
+If a step later becomes independently useful or operationally heavy, extract the *step* (Mastra steps are composable), not a second ingest workflow. Parse that is slow and rate-limited becomes a durable/suspendable step so the same run waits without holding a worker. Per-chunk enrichment becomes a fifth step in the same DAG.
 
 <br />
 
-### Load, extract, and chunk
-
-Skip images. PDFs go through a text extractor. Everything else is UTF-8. Empty extract is `skipped`, not thrown. Skip still **deletes** existing vectors for that path: replacing a PDF with an image of the same name must not leave the old handbook searchable.
-
-`MDocument.chunk` `maxSize` is character count unless you use `strategy: "token"`. Use tokens so the size matches the embedding model.
-
-<br />
-
-Do not pass file bytes through step output. Workflow snapshots JSON-serialize that data. Each step reads by `path` from an already org-rooted filesystem.
-
-`getWorkspaceOrganizationId` throws if the server forgot to set the org. That is the same membership-checked value the upload route put on `requestContext`.
+- Use Reducto **Parse**, not Extract. Parse is the RAG ingest step: pages, blocks, tables, figures, bounding boxes, citation-ready chunks. Extract is schema fill (`invoice.total`, `contract.effectiveDate`) — a second product, not the corpus builder.
+- Let Reducto chunk. `retrieval.chunking.chunk_mode: "variable"` targets semantic boundaries around 1000 characters. Add `embedding_optimized: true` so tables get an `embed` string for vectors and a `content` string for display. Filter `Header`, `Footer`, and `Page Number` blocks.
+- Do **not** run `MDocument.chunk()` on Reducto output. That pays for structure-aware chunks and then smashes them with a token splitter. `MDocument` is an **adapter** here: `fromMarkdown` (or `fromJSON`) to hold `text` + metadata, not to re-chunk.
+- Images go through the same Parse path (OCR / vision pass). You do not need a separate vision index unless you later search “find this screenshot” by pixels.
+- Persist the Reducto parse JSON (or its job id) next to the file **and** in the `parseReducto` step output. Re-embed without re-parsing when you change models. Retry `indexChunks` without re-paying for Parse.
+- `getWorkspaceOrganizationId` throws if the server forgot to set the org — the same membership-checked value the upload route put on `requestContext`.
+- `chunkIndex` is the array index. Reducto chunks carry `blocks[]` with bbox/page; map them yourself into flat metadata.
 
 <br />
 
 ```ts
-import { RequestContext } from "@mastra/core/request-context"
-import { createStep } from "@mastra/core/workflows"
-import { MDocument } from "@mastra/rag"
-import { z } from "zod"
-
-function getWorkspaceOrganizationId(requestContext: RequestContext): string {
-  const organizationId = requestContext.get("organizationId")
-  if (typeof organizationId !== "string" || !organizationId) {
-    throw new Error("organizationId missing from requestContext")
-  }
-  return organizationId
-}
-
-const loadOutputSchema = ingestionInputSchema.extend({
-  skipped: z.boolean().optional(),
-  skipReason: z.string().optional(),
-})
-
-const loadFile = createStep({
-  id: "load-file",
-  inputSchema: ingestionInputSchema,
-  outputSchema: loadOutputSchema,
-  execute: async ({ inputData }) => {
-    const exists = await filesystem.exists(inputData.path)
-    if (!exists) {
-      return {
-        ...inputData,
-        skipped: true,
-        skipReason: "File not found",
-      }
-    }
-    return inputData
+const result = await reducto.parse.run({
+  input: upload.fileId,
+  retrieval: {
+    chunking: { chunk_mode: "variable", chunk_size: 1000 },
+    embedding_optimized: true,
+    filter_blocks: ["Header", "Footer", "Page Number"],
   },
 })
+
+const chunks = result.result.chunks.map((chunk, chunkIndex) => ({
+  chunkIndex,
+  text: chunk.content,           // display
+  embedText: chunk.embed,        // vectors
+  page: chunk.blocks[0]?.bbox.page,
+  bbox: chunk.blocks[0]?.bbox,
+  blockType: chunk.blocks[0]?.type,
+}))
 ```
 
 <br />
 
-Extract next. Images, empty text, and missing files all become `skipped`. The index step still deletes for that path.
+Pinecone has no `deleteFilter` on upsert. pgvector can replace a document in one call; Pinecone cannot. If a re-upload produces fewer chunks, leftover neighbors survive.
 
 <br />
 
 ```ts
-const extractOutputSchema = loadOutputSchema.extend({
-  text: z.string().optional(),
-})
+const organizationId = getWorkspaceOrganizationId(requestContext)
+const index = pc.Index(PINECONE_INDEX_NAME)
 
-const extractTextStep = createStep({
-  id: "extract-text",
-  inputSchema: loadOutputSchema,
-  outputSchema: extractOutputSchema,
-  execute: async ({ inputData }) => {
-    if (inputData.skipped) {
-      return inputData
-    }
+await index.namespace(organizationId).deleteMany({ path: inputData.path })
 
-    if (inputData.mediaType.startsWith("image/")) {
-      return {
-        ...inputData,
-        skipped: true,
-        skipReason: "Images are not indexed",
-      }
-    }
+if (inputData.chunks.length === 0) return { status: "skipped", chunkCount: 0 }
 
-    const bytes = await filesystem.readFile(inputData.path)
-    const text =
-      inputData.mediaType === "application/pdf"
-        ? await extractPdfText(bytes)
-        : new TextDecoder("utf-8").decode(bytes)
+const dense = await embedDense(inputData.chunks.map((c) => c.embedText))
+const sparse = await embedSparse(inputData.chunks.map((c) => c.embedText), "passage")
 
-    if (!text.trim()) {
-      return {
-        ...inputData,
-        skipped: true,
-        skipReason: "Empty extract",
-      }
-    }
-
-    return { ...inputData, text }
-  },
-})
-```
-
-<br />
-
-Chunk last. `chunkIndex` is the array index. `MDocument` chunks are `{ text, metadata }` — they do not carry `chunkIndex` for you.
-
-<br />
-
-```ts
-const chunkOutputSchema = ingestionInputSchema.extend({
-  chunks: z.array(
-    z.object({
-      text: z.string(),
-      chunkIndex: z.number(),
-    }),
-  ),
-  skipped: z.boolean().optional(),
-  skipReason: z.string().optional(),
-})
-```
-
-<br />
-
-```ts
-const chunkDocument = createStep({
-  id: "chunk-document",
-  inputSchema: extractOutputSchema,
-  outputSchema: chunkOutputSchema,
-  execute: async ({ inputData }) => {
-    if (inputData.skipped || !inputData.text) {
-      return {
-        path: inputData.path,
-        filename: inputData.filename,
-        mediaType: inputData.mediaType,
-        chunks: [],
-        skipped: true,
-        skipReason: inputData.skipReason ?? "No text to chunk",
-      }
-    }
-
-    const doc =
-      inputData.mediaType === "text/markdown"
-        ? MDocument.fromMarkdown(inputData.text)
-        : inputData.mediaType === "text/html"
-          ? MDocument.fromHTML(inputData.text)
-          : inputData.mediaType === "application/json"
-            ? MDocument.fromJSON(inputData.text)
-            : MDocument.fromText(inputData.text)
-
-    const nodes = await doc.chunk({
-      strategy: "token",
-      maxSize: 512,
-      overlap: 50,
-      encodingName: "cl100k_base",
-    })
-
-    return {
+await index.namespace(organizationId).upsert({
+  records: inputData.chunks.map((chunk, i) => ({
+    id: `${inputData.path}:${chunk.chunkIndex}`,
+    values: dense[i],
+    sparseValues: sparse[i],
+    metadata: {
       path: inputData.path,
       filename: inputData.filename,
+      chunkIndex: chunk.chunkIndex,
+      page: chunk.page,
+      blockType: chunk.blockType,
+      text: chunk.text,
       mediaType: inputData.mediaType,
-      chunks: nodes.map((node, chunkIndex) => ({
-        text: node.text,
-        chunkIndex,
-      })),
-    }
-  },
+    },
+  })),
 })
 ```
 
 <br />
 
-Use `fromMarkdown` / `fromHTML` / `fromJSON` when the media type matches so separators follow structure instead of raw characters.
+- Delete by path in the namespace **first**, including on skip, then upsert if there is anything to write. Return `{ status: "skipped", chunkCount: 0 }` or `{ status: "indexed", chunkCount }`.
+- Deterministic ids (`${path}:${chunkIndex}`) overwrite in place. They still do not remove `chunkIndex` values that no longer exist. Delete-first is the correct overwrite.
+- Embed the `embedText` field, store the `text` field. They differ when Reducto summarizes tables.
+- Batch embed and upsert (~100 at 1536-d with `text` in metadata).
+- Wire the DAG as `loadFile` → `parseReducto` → `mapChunks` → `indexChunks`, then `commit()`. Register the store, the workflow, and the agent (with the search tool) on the Mastra instance. One workflow. Four steps.
+- Delete then upsert is not atomic. Serialize ingest per `{ organizationId, path }` in the upload handler if concurrent re-uploads matter.
+- Serverless search is eventually consistent: a query on the same turn as `startAsync` can miss the new chunks. That is another reason retrieval is for later turns.
 
-<br />
-
-### Index step: Pinecone has no `deleteFilter` on upsert
-
-pgvector can replace a document in one call:
-
-<br />
-
-```ts
-await pgVector.upsert({
-  indexName,
-  vectors: embeddings,
-  deleteFilter: { organizationId, path },
-  metadata,
-})
-```
-
-<br />
-
-Pinecone cannot. If a re-upload produces fewer chunks, leftover neighbors survive. Delete by path in the namespace **first**, including on skip, then upsert if there is anything to write.
-
-Deterministic ids (`${path}:${chunkIndex}`) overwrite in place. They still do not remove `chunkIndex` values that no longer exist. Delete-first is the correct overwrite. Pass `ids` so the snippet matches the prose.
-
-<br />
-
-```ts
-const UPSERT_BATCH_SIZE = 100
-
-const indexOutputSchema = z.object({
-  status: z.enum(["indexed", "skipped"]),
-  path: z.string(),
-  chunkCount: z.number(),
-  reason: z.string().optional(),
-})
-
-const indexChunks = createStep({
-  id: "index-chunks",
-  inputSchema: chunkOutputSchema,
-  outputSchema: indexOutputSchema,
-  execute: async ({ inputData, requestContext }) => {
-    const organizationId = getWorkspaceOrganizationId(requestContext)
-
-    await ensurePineconeIndex()
-
-    await pinecone.deleteVectors({
-      indexName: PINECONE_INDEX_NAME,
-      namespace: organizationId,
-      filter: { path: inputData.path },
-    })
-
-    if (inputData.skipped || inputData.chunks.length === 0) {
-      return {
-        status: "skipped" as const,
-        path: inputData.path,
-        chunkCount: 0,
-        reason: inputData.skipReason ?? "No chunks to index",
-      }
-    }
-
-    await upsertChunkBatches(organizationId, inputData)
-
-    return {
-      status: "indexed" as const,
-      path: inputData.path,
-      chunkCount: inputData.chunks.length,
-    }
-  },
-})
-```
-
-<br />
-
-Batch embed and upsert. Pinecone’s practical ceiling is about 1000 vectors or 2 MB; at 1536-d with `text` in metadata, 100 is safer.
-
-<br />
-
-```ts
-async function upsertChunkBatches(
-  organizationId: string,
-  inputData: z.infer<typeof chunkOutputSchema>,
-) {
-  for (let i = 0; i < inputData.chunks.length; i += UPSERT_BATCH_SIZE) {
-    const batch = inputData.chunks.slice(i, i + UPSERT_BATCH_SIZE)
-    const embeddings = await embedTexts(batch.map((chunk) => chunk.text))
-
-    await pinecone.upsert({
-      indexName: PINECONE_INDEX_NAME,
-      namespace: organizationId,
-      ids: batch.map((chunk) => `${inputData.path}:${chunk.chunkIndex}`),
-      vectors: embeddings,
-      metadata: batch.map((chunk) => ({
-        path: inputData.path,
-        filename: inputData.filename,
-        chunkIndex: chunk.chunkIndex,
-        text: chunk.text,
-        mediaType: inputData.mediaType,
-      })),
-    })
-  }
-}
-```
-
-<br />
-
-Delete then upsert is not atomic. Two concurrent re-uploads of the same `path` can interleave (delete A, delete B, upsert A, upsert B — or worse, upsert A after B’s delete). Serialize ingest per `{ organizationId, path }` in the upload handler if that matters. Serverless search is also eventually consistent: a query on the same turn as `startAsync` can miss the new chunks. That is another reason retrieval is for later turns, and the current turn uses inline file parts.
-
-<br />
-
-### Wiring the DAG
-
-<br />
-
-```ts title="src/mastra/workflows/pinecone-document-ingestion.ts"
-import { createWorkflow } from "@mastra/core/workflows"
-
-export const pineconeDocumentIngestion = createWorkflow({
-  id: "pinecone-document-ingestion",
-  inputSchema: ingestionInputSchema,
-  outputSchema: indexOutputSchema,
-})
-  .then(loadFile)
-  .then(extractTextStep)
-  .then(chunkDocument)
-  .then(indexChunks)
-
-pineconeDocumentIngestion.commit()
-```
-
-<br />
-
-Register the store, the workflow, and the agent (with the search tool) on the Mastra instance:
-
-<br />
-
-```ts title="src/mastra/index.ts"
-import { Mastra } from "@mastra/core/mastra"
-
-export const mastra = new Mastra({
-  vectors: { pinecone },
-  workflows: { pineconeDocumentIngestion },
-  agents: { workspaceAgent },
-})
-```
-
-<br />
+**Failure:** two concurrent re-uploads of the same `path` can interleave — delete A, delete B, upsert A, upsert B.
 
 Fire-and-forget from the upload handler with `resourceId` set to the **organization**, not the user. `resourceId` scopes the run to the tenant. It does not join by path. To find the latest ingest for a file, list runs for that `resourceId` and match `input.path`.
 
@@ -571,7 +344,7 @@ const { runId } = await run.startAsync({
 
 ## 6. Retrieval
 
-Retrieval is **not** “embed every user message and prepend hits.” It is a tool the agent calls. Isolation is applied in `execute`, not in the tool schema.
+Retrieval is a **tool** the agent calls, not “embed every user message and prepend hits.” Isolation is applied in `execute`, not in the tool schema. Hybrid search and rerank live here — never on the upload line.
 
 <br />
 
@@ -580,8 +353,9 @@ User question
   → agent (query, optional topK)
   → tool execute
       namespace = organizationId   (server)
-      embedTexts(query)
-      pinecone.query cosine ANN
+      embedDense(query) + embedSparse(query)
+      hybrid query (alpha-weighted) dotproduct ANN
+      rerank top ~40 → keep ~8
       keep text and score ≥ 0.2
   → relevantContext + sources
   → agent
@@ -593,6 +367,16 @@ User question
 import { createTool } from "@mastra/core/tools"
 import { z } from "zod"
 
+function hybridScoreNorm(dense: number[], sparse: SparseVector, alpha: number) {
+  return {
+    dense: dense.map((v) => v * alpha),
+    sparse: {
+      indices: sparse.indices,
+      values: sparse.values.map((v) => v * (1 - alpha)),
+    },
+  }
+}
+
 export const searchPineconeDocuments = createTool({
   id: "search-pinecone-documents",
   description:
@@ -601,77 +385,59 @@ export const searchPineconeDocuments = createTool({
     query: z.string().describe("The search query"),
     topK: z.number().int().min(1).max(20).optional(),
   }),
-  outputSchema: z.object({
-    relevantContext: z.string(),
-    sources: z.array(
-      z.object({
-        path: z.string(),
-        filename: z.string(),
-        score: z.number(),
-        text: z.string(),
-      }),
-    ),
-  }),
   execute: async (inputData, { requestContext }) => {
-    return searchOrgDocuments(inputData, requestContext)
+    const organizationId = getWorkspaceOrganizationId(requestContext)
+    const [denseQ] = await embedDense([inputData.query])
+    const [sparseQ] = await embedSparse([inputData.query], "query")
+    const { dense, sparse } = hybridScoreNorm(denseQ, sparseQ, 0.75)
+
+    const index = pc.Index(PINECONE_INDEX_NAME)
+    const results = await index.namespace(organizationId).query({
+      vector: dense,
+      sparseVector: sparse,
+      topK: 40,
+      includeMetadata: true,
+    })
+
+    const hits = results.matches
+      .map((m) => ({
+        id: m.id,
+        score: m.score,
+        text: String(m.metadata?.text ?? ""),
+        path: String(m.metadata?.path ?? ""),
+        filename: String(m.metadata?.filename ?? ""),
+        page: Number(m.metadata?.page ?? 0),
+      }))
+      .filter((h) => h.text)
+
+    const reranked = await pc.inference.rerank({
+      model: "bge-reranker-v2-m3",
+      query: inputData.query,
+      documents: hits.map((h) => ({ id: h.id, text: h.text })),
+      rankFields: ["text"],
+      topN: inputData.topK ?? 8,
+      returnDocuments: true,
+      parameters: { truncate: "END" },
+    })
+
+    const sources = reranked.data
+      .map((r) => {
+        const hit = hits.find((h) => h.id === r.document.id)
+        return hit ? { ...hit, score: r.score } : undefined
+      })
+      .filter((s): s is NonNullable<typeof s> => Boolean(s && s.score >= 0.2))
+
+    return {
+      relevantContext: sources.map((s) => s.text).join("\n\n"),
+      sources,
+    }
   },
 })
 ```
 
 <br />
 
-`execute` takes `organizationId` from `requestContext`. The tool schema cannot name another tenant.
-
-<br />
-
-```ts
-async function searchOrgDocuments(
-  inputData: { query: string; topK?: number },
-  requestContext: RequestContext,
-) {
-  const organizationId = getWorkspaceOrganizationId(requestContext)
-  const topK = inputData.topK ?? 8
-
-  await ensurePineconeIndex()
-
-  const [queryVector] = await embedTexts([inputData.query])
-  if (!queryVector) {
-    return { relevantContext: "", sources: [] }
-  }
-
-  const results = await pinecone.query({
-    indexName: PINECONE_INDEX_NAME,
-    queryVector,
-    namespace: organizationId,
-    topK,
-    includeVector: false,
-  })
-
-  const minScore = 0.2
-  const sources = results.flatMap((result) => {
-    const text =
-      typeof result.metadata?.text === "string" ? result.metadata.text : ""
-    if (!text || result.score < minScore) return []
-    return [
-      {
-        path: String(result.metadata?.path ?? ""),
-        filename: String(result.metadata?.filename ?? ""),
-        score: result.score,
-        text,
-      },
-    ]
-  })
-
-  return {
-    relevantContext: sources.map((s) => s.text).join("\n\n"),
-    sources,
-  }
-}
-```
-
-<br />
-
-### Isolation vs relevance are different APIs
+Isolation and relevance are different APIs:
 
 <br />
 
@@ -679,44 +445,28 @@ async function searchOrgDocuments(
 | --- | --- | --- |
 | Tenant | `namespace: organizationId` | Server, always |
 | Which file | `filter: { path }` | Optional; omit in v1 |
-| Neighbor count | `topK` | Agent, capped 1–20 |
-| Weak matches | `minScore` 0.2 | Server constant |
+| Signal mix | `alpha` in `hybridScoreNorm` | Server constant (start 0.75) |
+| Candidate count | `topK` to hybrid (40) | Server constant |
+| Final count | `topN` from rerank (8) | Agent, capped 1–20 |
+| Weak matches | `minScore` 0.2 after rerank | Server constant |
 
 <br />
 
-v1 searches **all of that organization’s docs**. Path filters are a later mention feature. Do not implement tenancy as a metadata filter “just to be consistent with Postgres.”
+- v1 searches **all of that organization’s docs**. Path filters are a later mention feature. Do not implement tenancy as a metadata filter “just to be consistent with Postgres.”
+- Alpha `0.75` leans semantic. Drop toward `0.25` when queries carry SKUs, error codes, or named entities that must match exactly. Evaluate on a labeled set from your own corpus.
+- Fetch ~40 candidates, rerank down to 8. Rerank is a query-time cross-encoder (`bge-reranker-v2-m3`), not an ingest step.
+- Reducto’s `page` and `bbox` on sources let the UI render citations that point at a region, not just a filename.
+- `0.2` is a noise floor after rerank, not calibrated confidence. A successful lookup does not prove the answer is grounded; citations still have to be checked.
+- Keep `{ relevantContext, sources }` so a later cutover from Pinecone is a tool swap, not an agent rewrite. If embed returns nothing, return empty sources.
+- Document RAG is “what is in the handbook.” Message-history semantic recall is a different index, different tenancy, different tool.
 
-`0.2` is a noise floor, not calibrated confidence. Unrelated pairs for this model often sit near there; do not treat it as “typical range.” `topK: 8` is a context budget: 8 × ~512-token overlapping chunks. Pinecone search is ANN; you can miss a chunk that would rank 9th in exact kNN. That is acceptable for an org library.
+`createVectorQueryTool` is usable only if the server sets `databaseConfig.pinecone.namespace` (or a `VectorStoreResolver`) from the authenticated org **before** the agent runs, and the tool input schema never includes namespace. It also assumes a dense-only store. For hybrid, a custom tool is the only path.
 
-<br />
+- Default examples use a static namespace or `requestContext.set("databaseConfig", …)`, which is easy to wire wrong and easy to expose to the model via `PINECONE_PROMPT` filter syntax.
+- For org-scoped user data, derive namespace inside `execute` from the authenticated principal. A custom tool makes that the only path.
+- Do not dump `PINECONE_PROMPT` into instructions and let the model invent `$and` / `$in` filters for tenancy.
 
-### Why not `createVectorQueryTool`
-
-Mastra can bind Pinecone like this:
-
-<br />
-
-```ts
-import { createVectorQueryTool } from "@mastra/rag"
-import { ModelRouterEmbeddingModel } from "@mastra/core/llm"
-
-const pineconeQueryTool = createVectorQueryTool({
-  vectorStoreName: "pinecone",
-  indexName: "document-chunks",
-  model: new ModelRouterEmbeddingModel("openai/text-embedding-3-small"),
-  databaseConfig: {
-    pinecone: { namespace: "production" },
-  },
-})
-```
-
-<br />
-
-That helper is usable if the server sets `databaseConfig.pinecone.namespace` (or a `VectorStoreResolver`) from the authenticated org **before** the agent runs, and the tool input schema never includes namespace. The default examples use a static namespace or `requestContext.set("databaseConfig", …)`, which is easy to wire wrong and easy to expose to the model via `PINECONE_PROMPT` filter syntax.
-
-For org-scoped user data, derive namespace inside `execute` from the authenticated principal and **do not put it on the tool input schema**. A custom tool makes that the only path.
-
-Keep the output shape `{ relevantContext, sources }` so a later cutover from pgvector is a tool swap, not an agent rewrite. Do not dump `PINECONE_PROMPT` into instructions and let the model invent `$and` / `$in` filters for tenancy.
+**Failure:** putting namespace on the tool input schema, or letting the model set `databaseConfig`.
 
 <br />
 
@@ -724,24 +474,24 @@ Keep the output shape `{ relevantContext, sources }` so a later cutover from pgv
 
 ## 7. Delete, overwrite, and failure modes
 
-Document identity is `path`. Re-upload replaces the object and replaces vectors for `{ namespace, path }`. Delete must hit both stores, **vectors first**:
+Document identity is `path`. Re-upload replaces the object and replaces vectors for `{ namespace, path }`. Delete must hit both stores, **vectors first**.
 
 <br />
 
 ```ts
-await pinecone.deleteVectors({
-  indexName: PINECONE_INDEX_NAME,
-  namespace: organizationId,
-  filter: { path },
-})
+await pc.Index(PINECONE_INDEX_NAME)
+  .namespace(organizationId)
+  .deleteMany({ path })
 await filesystem.deleteFile(path, { force: true })
 ```
 
 <br />
 
-If you only delete the object, retrieval keeps serving ghosts. If you only delete vectors, the file remains and a later ingest can rebuild. Prefer an orphaned file over a leaked or stale excerpt.
+- If you only delete the object, retrieval keeps serving ghosts.
+- If you only delete vectors, the file remains and a later ingest can rebuild. Prefer an orphaned file over a leaked or stale excerpt.
+- Skip-with-delete (empty parse, unsupported file, missing file) is the same rule: the current object is the source of truth, so the index must not keep a previous version of that path.
 
-Skip-with-delete (empty extract, images, missing file) is the same rule: the current object is the source of truth, so the index must not keep a previous version of that path.
+**Failure:** deleting only the object leaves searchable ghosts in Pinecone.
 
 <br />
 
@@ -749,13 +499,14 @@ Skip-with-delete (empty extract, images, missing file) is the same rule: the cur
 
 ## 8. What to leave out until it hurts
 
-**Hybrid sparse + dense.** Requires `metric: "dotproduct"` and sparse vectors on upsert *and* query. Helps exact tokens (SKUs, error codes). Dense cosine is enough for prose. A later hybrid index is a new index, not a setting you flip on `document-chunks`.
+Leave these out until hybrid on a flat `docs/` prefix actually hurts.
 
-**Re-rank.** Fetch `topK=30`, then `rerankWithScorer` down to 8. Helps when ANN returns “same topic, wrong paragraph.” Adds a cross-encoder (or agent scorer) hop.
-
-**GraphRAG.** Follows edges between chunks. For a wiki, maybe. For a flat `docs/` prefix, no.
-
-**Always-on injection.** Embed every user message. You retrieve on greetings and burn tokens. Tool-calling keeps retrieval off the default path.
+- **Separate dense and sparse indexes.** Two upserts, two queries, client-side merge. Only worth it for sparse-only queries or Pinecone-integrated sparse embedding. One hybrid index is simpler and correct here.
+- **A second ingest workflow.** Parse is a step, not a pipeline. Splitting `parseReducto` into its own workflow loses the single-run status and snapshot-retry semantics this design relies on. Extract a composable *step* if parse gets slow; do not fork the run.
+- **Reducto Extract.** Parse builds the corpus. Extract fills schemas (`invoice.total`) as a separate product. Do not mix them into the ingest DAG.
+- **Multimodal image index.** Reducto already OCRs images into text chunks. Add pixel embeddings only when users search “find this screenshot.”
+- **GraphRAG.** Follows edges between chunks. For a wiki, maybe. For a flat `docs/` prefix, no.
+- **Always-on injection.** Embed every user message. You retrieve on greetings and burn tokens.
 
 <br />
 
@@ -763,10 +514,84 @@ Skip-with-delete (empty extract, images, missing file) is the same rule: the cur
 
 ## 9. Invariants
 
-1. Same embedding model and dimension on write and read.
+1. Same dense and sparse models on write and read. Same dimension for dense.
 2. Namespace is the organization. `userId` is the actor. Metadata filters are for relevance inside that tenant.
 3. Overwrite and skip both start with `deleteVectors(path)`. Pinecone will not do this for you.
-4. The agent chooses *when* to search. The server chooses *which org* is visible.
-5. Files remain source of truth. Vectors are derived. Workflow runs are ingest status. `resourceId` is the org; path is matched on the run input.
+4. The agent chooses *when* to search. The server chooses *which org* is visible and *how* signals mix (`alpha`).
+5. Files remain source of truth. Vectors are derived. Reducto parse JSON is a cached intermediate — keep it so re-embed and ingest retries do not re-parse. Workflow runs are ingest status. `resourceId` is the org; path is matched on the run input.
+6. Rerank is query-time. The upload path ends at upsert.
+7. Upload and ingest are one workflow, four steps (`loadFile` → `parseReducto` → `mapChunks` → `indexChunks`). One `runId` is the status. Do not split parse into a second workflow.
 
-That is the system: a four-step ingest DAG, a cosine index partitioned by organization, and a retriever whose tool schema cannot name another tenant.
+That is the system: a four-step ingest DAG in a single workflow, a hybrid dotproduct index partitioned by organization, and a retriever whose tool schema cannot name another tenant.
+
+---
+
+## Recap Q&A
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="rag-two-pipelines">
+    <AccordionTrigger>1. Why is ingest a workflow and retrieval a tool?</AccordionTrigger>
+    <AccordionContent>
+
+      - A working RAG stack is two pipelines that share an embedding space: a **deterministic ingest workflow** that writes vectors, and a **tool-called retriever** that reads them.
+      - Upload and ingest are **one** workflow, four steps: `loadFile` → `parseReducto` → `mapChunks` → `indexChunks`. One `runId` is ingest status. Parse is a step, not a second workflow. “User asked about the handbook” is open-ended; skip retrieval on “hi.”
+      - Hybrid search and rerank belong on the read path, never on the upload line. The write path ends at upsert. Extract and re-embed are later workflows that may reuse steps, not extra ingest pipelines.
+      - Always-on injection embeds every greeting and burns tokens.
+      - The tenant key lives in **`requestContext`**, never in tool args. Populate context the same way on upload and on chat: session → verify membership → set `organizationId` and `userId`.
+      - **Failure:** if the model can choose *whose* index to search, you have a leak. Never copy org from a client header or `databaseConfig` the model can influence.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="rag-embedding">
+    <AccordionTrigger>2. What is the embedding contract?</AccordionTrigger>
+    <AccordionContent>
+
+      - Ingest and query must use the **same dense model and dimension**, and the same **sparse model**. Cross-space cosine similarity is noise.
+      - Hybrid uses one dense index with `sparse_values` on the same record, metric **`dotproduct`**. Dense-only `cosine` indexes need a full rebuild to switch.
+      - Sparse scores are unbounded; dense scores are `[-1, 1]`. Weight them at query time with `α·dense + (1-α)·sparse`. Start at `α = 0.75`. Without it, exact-match tokens drown semantics.
+      - Chunk first, then embed. Do not `embedMany` an unbounded PDF. Batch upserts; at 1536-d with `text` in metadata, stay closer to 100 vectors per request.
+      - Files are the source of truth. Vectors are a derived index. Reducto parse JSON is a cached intermediate — keep it so re-embed does not re-parse. Ingest status is the latest workflow run for that org and path.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="rag-namespaces">
+    <AccordionTrigger>3. Why is namespace = organizationId the only acceptable Pinecone layout?</AccordionTrigger>
+    <AccordionContent>
+
+      - Per-org indexes isolate, but `createIndex` is slow and index-count limits kill you.
+      - A shared index plus **metadata filter** is one forgotten filter from a leak, and query cost scales with the whole index — the pgvector pattern. Do not port it to Pinecone if namespaces exist.
+      - **Namespace = `organizationId`**: query, upsert, and delete always take `namespace`. Pinecone stores them separately, so a missing metadata filter cannot see another tenant.
+      - Omitting `namespace` does **not** search every tenant. It queries the **default** namespace. Isolation holds only if you never write that default.
+      - `userId` is the actor. `organizationId` is the library.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="rag-retrieve">
+    <AccordionTrigger>4. Where is isolation applied on retrieval?</AccordionTrigger>
+    <AccordionContent>
+
+      - Retrieval is **not** “embed every user message and prepend hits.” Isolation is applied in `execute`, not in the tool schema.
+      - The schema exposes `query` and optional `topK`. The server sets `namespace = organizationId`, embeds dense + sparse, runs an alpha-weighted hybrid query for ~40 candidates, reranks to 8, keeps `text` and score ≥ 0.2, and returns `relevantContext` plus sources with `page`/`bbox` citations.
+      - `createVectorQueryTool` assumes a dense-only store. For hybrid, a custom tool is the only path.
+      - A successful vector lookup does not prove the answer is grounded. Citations still have to be checked.
+      - **Failure:** `createVectorQueryTool` with a static namespace or model-visible `databaseConfig` / `PINECONE_PROMPT` filters.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="rag-delete">
+    <AccordionTrigger>5. How do overwrite and delete stay consistent?</AccordionTrigger>
+    <AccordionContent>
+
+      - Document identity is **`path`**. Re-upload replaces the object and replaces vectors for `{ namespace, path }`.
+      - Delete must hit both stores, **vectors first**. If you only delete the object, retrieval keeps serving ghosts. If you only delete vectors, the file remains and a later ingest can rebuild.
+      - Prefer an orphaned file over a leaked or stale excerpt.
+      - Skip-with-delete (empty parse, unsupported file, missing file) is the same rule: the current object is the source of truth, so the index must not keep a previous version of that path.
+      - Separate dense/sparse indexes, Reducto Extract, a multimodal image index, and GraphRAG wait until hybrid on a flat `docs/` prefix actually hurts.
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>

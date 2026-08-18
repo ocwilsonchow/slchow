@@ -5,9 +5,9 @@ date: 2026-08-12
 category: frontend
 ---
 
-Next.js 常被介绍成「带有 file-system routing 与 server-side rendering 的 React」。这个描述并没有错，但压缩得太厉害，解释不了为什么加上 `'use client'` 会改变 bundle、为什么一个 request 返回 HTML 而另一个返回 `text/x-component`、为什么读取 cookie 会改变工作何时发生，或为什么 invalidate server data 不一定会取代浏览器里已有的内容。
+Next.js 常被介绍成「带有 file-system routing 与 SSR 的 React」。那个描述跳过了为什么 `'use client'` 会改变 bundle、为什么一个 request 返回 HTML 而另一个返回 `text/x-component`、为什么 cookie 会改变工作何时发生，以及为什么 invalidate server data 不一定会取代浏览器里已有的内容。
 
-更有用的模型是：Next.js 是围绕 React 的 **orchestrator**。在 build time，它把一棵 source tree 转成数个 module graphs 与 routing manifests。在 runtime，它选出一棵 route tree、协调 data 与 caches、请 React 产生 Server Component stream、可选择把该 stream 转成 HTML，并提供足够信息让 client router 在不 reload document 的情况下 merge 稍后的 server results。
+有用的模型：Next.js 是围绕 React 的 **orchestrator**。在 build time，它把一棵 source tree 转成数个 module graphs。在 runtime，它选出一棵 **route tree**、协调 caches、请 React 产生 Server Component stream、可选择把该 stream 转成 HTML，并让 client router 在不 reload document 的情况下 merge 稍后的 patches。
 
 <br />
 
@@ -25,57 +25,54 @@ source modules
 
 <br />
 
-这篇文章针对 **Next.js 16.2.11 App Router**（这个 repository 里是 React 19.2.4），并假设你已熟悉 React、HTTP、JavaScript runtimes、Suspense 与 cache invalidation。它区分三种陈述：
+这篇笔记针对 **Next.js 16.2.11 App Router**（这里是 React 19.2.4）。三种陈述：
 
 - 一条 **React 规则**，例如 render purity，或 client-bound values 必须 serializable。
-- 一份 **Next.js 契约**，例如 `page.tsx` 惯例或 `cacheTag`。
-- 一项 **实现观察**，例如产生出来的 manifest field 或内部 request header。观察有助于调试，但应用代码不得依赖未文档化的格式。
+- 一份 **Next.js 契约**，例如 `page.tsx` 或 `cacheTag`。
+- 一项 **实现观察**，例如 manifest field 或内部 header。有助于调试。应用代码不得依赖未文档化的格式。
 
-Pages Router 只在旧词汇会造成歧义时出现。App Router 不会执行 `getStaticProps` 或 `getServerSideProps`；rendering 与 caching 决策现在在 route、component 与 function boundaries 组合。
-
-<br />
+App Router 不会执行 `getStaticProps` 或 `getServerSideProps`。Rendering 与 caching 在 route、component 与 function boundaries 组合。
 
 ---
 
 ## 1. Next.js 在 React 周围加上 Policy 与基础设施
 
-React 定义 components、reconciliation、Suspense、Server Components 与 hydration。它不决定 URLs 如何对应到 component trees、component 在哪里执行、route 如何被 cache、images 如何被转换，或 server function 如何通过 HTTP 寻址。Next.js 做那些决策并把它们接起来。
-
-一个 production Next.js 应用跨越四层：
-
-```mermaid
-flowchart TD
-  Source["应用源码"] --> Compiler["Compiler 与 bundler"]
-  Compiler --> Artifacts["Route manifests 与 runtime bundles"]
-  Request["HTTP request 或 navigation"] --> Runtime["Next.js runtime"]
-  Artifacts --> Runtime
-  Runtime --> React["React server renderer"]
-  React --> Outputs["HTML、RSC payload 与 client chunks"]
-  Outputs --> Browser["Browser 与 client router"]
-  Host["Deployment adapter 与基础设施"] --> Runtime
-  Host --> Cache["Shared cache、assets 与 functions"]
-  Runtime --> Cache
-```
-
-这些 boundaries 很重要，因为同一个应用可以在 React 没变的情况下表现不同：
-
-- **Compilation** 决定哪些 modules 可以出现在 browser chunk，并在 server 与 client graphs 之间建立 references。
-- **Routing** 把 pathname 转成 layouts、pages、slots 与 boundaries 的有序 tree。
-- **Rendering policy** 决定哪些工作可以在 request 之前发生、哪些必须在 request 期间发生，以及 Suspense fallback 在哪里切开两者。
-- **Caching policy** 决定哪些 results 可以重用、给谁、多重久。
-- **Deployment adapter** 把 Next.js output 对应到 processes、functions、CDN objects 与 shared caches。Vercel、长时间运行的 Node server，以及 AWS 上的 OpenNext，基础设施并不相同。
-
-这个 repository 示范了这个区别。`next.config.ts` 启用 React Compiler、组合 Fumadocs 与 `next-intl`、定义 PostHog rewrites，并配置 image policy。`packages/infra/nextjs.ts` 再把 build 交给 SST 与 OpenNext。Next.js 拥有应用语义；OpenNext 把它们对应到 AWS resources。
-
-把 Next.js 叫做「backend-for-frontend」有时有用，但仍低估了 compiler。叫做「meta-framework」是准确的，但仍低估了它的 runtime。比较耐用的心智模型是 **compiler 加上 request-time coordinator 加上 client router**，再通过 host-specific adapter 部署。
+React 定义 components、reconciliation、Suspense、Server Components 与 hydration。它不决定 URLs 如何对应到 trees、component 在哪里执行、route 如何被 cache，或 server function 如何通过 HTTP 寻址。
 
 <br />
+
+```text
+Application source
+  → Compiler and bundler
+  → Route manifests and runtime bundles ─┐
+HTTP request or navigation ──────────────┼→ Next.js runtime
+Deployment adapter and infrastructure ───┘
+  ├→ React server renderer
+  │    → HTML, RSC payload, and client chunks
+  │    → Browser and client router
+  └→ Shared cache, assets, and functions
+Deployment adapter also → Shared cache, assets, and functions
+```
+
+<br />
+
+- **Compilation** 决定哪些 modules 可以出现在 browser chunk，并在 server 与 client graphs 之间建立 references。
+- **Routing** 把 pathname 转成 layouts、pages、slots 与 boundaries。
+- **Rendering policy** 决定哪些工作可以在 request 之前发生、哪些必须在 request 期间发生，以及 Suspense 在哪里切开两者。
+- **Caching policy** 决定哪些 results 可以重用、给谁、多重久。
+- **Deployment adapter** 把 output 对应到 processes、functions、CDN objects 与 shared caches。Vercel、长时间运行的 Node server，以及 AWS 上的 OpenNext，并不相同。
+
+这个 repository 的 `next.config.ts` 启用 React Compiler、组合 Fumadocs 与 `next-intl`、定义 PostHog rewrites，并配置 image policy。`packages/infra/nextjs.ts` 再把 build 交给 SST 与 OpenNext。
+
+耐用的模型是 **compiler 加上 request-time coordinator 加上 client router**，再通过 host-specific adapter 部署。
 
 ---
 
 ## 2. Route Tree 不只是 URL Matcher
 
-`app` 底下的 folders 定义 **segments**。Special files 把行为挂到那些 segments：
+`app` 底下的 folders 定义 **segments**。Special files 把行为挂到那些 segments。
+
+<br />
 
 ```text
 app/
@@ -90,87 +87,67 @@ app/
         page.tsx              /:locale/notes/:slug
 ```
 
-`page.tsx` 让一个 segment 可被寻址。`layout.tsx` 包住它的 descendants，并在该 segment 仍被匹配的 navigations 中保持 identity。`template.tsx` 占类似位置，但每次 navigation 会拿到新的 identity，所以它的 client state 与 Effects 会重启。`loading.tsx`、`error.tsx` 与 `not-found.tsx` 不是全局 event listeners；它们在 route tree 的既定位置成为 boundaries。
+<br />
 
-Route groups 例如 `(marketing)` 用来组织或变化 layout composition，而不加 URL segment。Dynamic segments（`[id]`）、catch-all segments（`[...rest]`）与 optional catch-all segments（`[[...rest]]`）贡献 parameters。Parallel-route folders 例如 `@modal` 在 layout 里建立 named slots。Intercepting segments 例如 `(.)photo` 改变 client navigation 渲染哪棵 route tree，同时保留 canonical 的 direct-load route。
-
-在 build time，Next.js 把这个 filesystem 编译成可执行的 route entries 与 manifests。这个网站的一次 production build 产出了 `app-paths-manifest.json` entry，对应：
-
-```json
-{
-  "/[locale]/notes/[slug]/page": "app/[locale]/notes/[slug]/page.js",
-  "/resume/route": "app/resume/route.js"
-}
-```
-
-它也为 `[locale]`、`[slug]` 与 `[...rest]` 产出 route regular expressions。这些文件解释 runtime 行为，但它们的 schema 是内部的。受支持的界面仍是 source-level 的 file conventions。
-
-Route tree 也定义 **state identity**。从 `/en/notes/a` navigation 到 `/en/notes/b` 时，root layout、locale layout 与 notes layout 可以保持 mounted，只改 leaf segment。Client router 套用 server 提供的 tree patch，而不是把页面当无关的 React root 重建。
-
-这就是为什么 layouts 有一条让习惯 request templates 的人意外的限制：shared layout 不会只为了观察每次 URL 变化而 rerender。若互动 UI 需要目前的 pathname 或 search parameters，把那个观察放进带 `usePathname` 或 `useSearchParams` 的 Client Component。Server layout 的持久性是功能，不是 stale rendering。
+- `page.tsx` 让一个 segment 可被寻址。`layout.tsx` 包住 descendants，并在该 segment 仍匹配时跨 navigations **保持 identity**。
+- `template.tsx` 占类似位置，但在 navigation 时拿到 **新的 identity**，所以 client state 与 Effects 会重启。
+- `loading.tsx`、`error.tsx` 与 `not-found.tsx` 在定义好的位置成为 boundaries。它们不是全局 event listeners。
+- Route groups 如 `(marketing)` 只做组织，不增加 URL segment。`[id]`、`[...rest]` 与 `[[...rest]]` 贡献 parameters。`@modal` 是 parallel slot。`(.)photo` 拦截 client navigation，同时保留一条 canonical 的 direct-load route。
+- Build manifests（`app-paths-manifest.json`、route regexes）解释 runtime 行为。它们的 schema 是 **internal**。受支持的界面仍是 file conventions。
+- 在 `/en/notes/a` → `/en/notes/b` 期间，共享 layouts 可以保持 mounted。Client router 套用的是一份 server **tree patch**，不是一个新的 React root。
 
 <br />
 
-```mermaid
-flowchart LR
-  Root["Root layout"] --> Locale["Locale layout"]
-  Locale --> Notes["Notes segment"]
-  Notes --> SlugA["slug: a"]
-  Notes -. "下次 navigation patch" .-> SlugB["slug: b"]
+```text
+Root layout → Locale layout → Notes segment → slug: a
+Notes segment ─(next navigation patch)→ slug: b
 ```
 
 <br />
+
+**Failure：** 把 URL observation 放进 server layout，并指望它看见每一次 navigation。Pathname 与 search params 属于带有 `usePathname` 或 `useSearchParams` 的 Client Component。Layout persistence 是功能，不是 bug。
 
 ---
 
 ## 3. Document Request 与 Navigation 是不同的 Pipelines
 
-对 browser document request，runtime 大致做这些事：
-
-1. 套用已配置的 headers、redirects、rewrites，以及 `proxy.ts` interception。
-2. 把结果 URL 匹配到 App Router entry，并导出 route parameters。
-3. 选择 runtime，并加载已编译、对应那棵 route tree 的 server modules。
-4. 解析 prerendered、cached 与 request-time 工作。
-5. 请 React 把 Server Component tree render 成 **RSC payload**。
-6. 用 RSC result 加上 Client Component references，为初始画面产生 HTML。
-7. 当 Suspense boundaries 就绪时，stream response bytes。
-8. 让浏览器显示 HTML、加载 client chunks、消费 RSC data，并 hydrate Client Components。
-
-之后的 client navigation，Next.js 通常不再请求另一份完整 HTML document。Client router 送出目前的 router-tree state，向 server 要到达目的地所需的 RSC data，再把返回的 patch merge 进既有 tree。
-
-```mermaid
-sequenceDiagram
-  participant Browser
-  participant Router as Next client router
-  participant Server as Next server
-  participant React as React server renderer
-
-  Browser->>Server: GET document URL
-  Server->>React: Render 已匹配的 route tree
-  React-->>Server: RSC stream
-  Server-->>Browser: HTML + 内嵌 RSC data + chunk references
-  Browser->>Browser: Paint HTML 并 hydrate client boundaries
-
-  Router->>Server: 请求目的地 RSC payload
-  Server->>React: Render 目的地 tree
-  React-->>Server: RSC tree patch
-  Server-->>Router: text/x-component response
-  Router->>Router: Merge patch 并 reconcile
-```
-
-一份本地 Next.js 16.2.11 production 的 `routes-manifest.json` 让这个区别可见。它把 `rsc` 记成 request discriminator、把 `text/x-component` 记成 RSC content type，并把 `rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch` 放进 response 的 `Vary` policy。那些名称是运作证据，不是要人手重现的 API。用 reverse proxy 或 CDN 把它们剥掉或忽略 `Vary`，可能把 document、navigation 与 prefetch variants 塌成错误的 cached object。
-
-`proxy.ts` 在 route render 之前参与，而且重要的是，在 response cache 能回答之前。它适合便宜的 request normalization、redirects、rewrites，以及粗粒度 access gates。它不是在读取或 mutate data 的代码里做 authorization 的替代品。Next.js 16 把惯例从 `middleware.ts` 改名，就是为了让这条 boundary 更清楚。这个 repository 的 `src/proxy.ts` 只跑 `next-intl` locale routing，并设 `localeDetection: false`，让 `/` redirects 对 CDN caching 保持确定性。
+一次 document request 匹配一条 route、解析 caches、render 一份 **RSC payload**、把它转成 HTML、在 Suspense boundaries 就绪时 stream bytes，然后 hydrate Client Components。之后的 client navigation 通常 **不会** 再请求另一份 HTML document。
 
 <br />
+
+```text
+Document request:
+  Browser → Next server: GET document URL
+  Next server → React: Render matched route tree
+  React → Next server: RSC stream
+  Next server → Browser: HTML + embedded RSC data + chunk references
+  Browser: Paint HTML and hydrate client boundaries
+
+Client navigation:
+  Next client router → Next server: Request destination RSC payload
+  Next server → React: Render destination tree
+  React → Next server: RSC tree patch
+  Next server → Next client router: text/x-component response
+  Next client router: Merge patch and reconcile
+```
+
+<br />
+
+- Client router 送出目前的 tree state，请求到达 destination 所需的 RSC data，然后 **merge 这份 patch**。
+- 本地 `routes-manifest.json` 记录 `rsc` 作为 request discriminator、`text/x-component` 作为 RSC content type，以及 `Vary` 于 `rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch`。
+- 那些名字是操作证据，不是 API。Proxy 或 CDN 若剥掉它们，可能 cache 错误的 variant。
+- `proxy.ts` 在 route render **之前**、response cache 能回答 **之前** 跑。便宜的 redirects、rewrites、粗粒度 gates。不是读取或突变 data 的那段代码的 authorization。
+- Next.js 16 把 `middleware.ts` 改名为 `proxy.ts`。这个 repository 的 `src/proxy.ts` 只跑 `next-intl` locale routing，并设 `localeDetection: false`，让 `/` redirects 对 CDN caching 保持可确定。
 
 ---
 
 ## 4. `'use client'` 切开 Module Graph
 
-Server Components 是 App Router 的默认。短语「Server Component」并不代表「每次 HTTP request 都跑一次的 component」。它代表 component 实现留在 server graph，而其 rendered result 穿过 React Server Component boundary。
+Server Components 是默认。这个短语不代表「每次 HTTP request 跑一次」。它代表实现留在 **server graph**，而 rendered result 穿过 RSC boundary。
 
-`'use client'` 是 **module-graph entry directive**：
+`'use client'` 是 **module-graph entry directive**。
+
+<br />
 
 ```tsx
 'use client'
@@ -183,53 +160,32 @@ export function Quantity() {
 }
 ```
 
-这个 directive 在从 server graph import 时，把这个 module 的 exports 标成 client references。除非 graph 被另一条 boundary 切开，它的 transitive imports 也必须对 client bundler 可用。它不代表：
+<br />
 
-- 这个 component 在初始 load 没有 server-rendered HTML；
-- 每个 descendant element 都必须在 client module 实现；
-- 因为 parent 是 Server Component，这个 component 就可以 import server secrets；
-- 浏览器可以调用任意 server functions。
-
-Compiler 建立相关但不同的 graphs：
-
-```mermaid
-flowchart LR
-  Page["page.tsx server module"] --> Product["ProductDetails server module"]
-  Page --> ClientRef["Quantity client reference"]
-  ClientRef -. "manifest mapping" .-> ClientModule["Quantity browser module"]
-  ClientModule --> ReactDOM["react-dom client runtime"]
-  Page --> DB["Database-only module"]
+```text
+page.tsx server module → ProductDetails server module
+page.tsx server module → Quantity client reference ─(manifest mapping)→ Quantity browser module → react-dom client runtime
+page.tsx server module → Database-only module
 ```
-
-Server 可以 render `<Quantity />`，因为 RSC stream 编码了对其 client implementation 的 reference 以及 serializable props。浏览器稍后把那个 reference resolve 成 JavaScript chunk。Database module 只从 server graph 可达。
-
-这就是为什么 boundary 放哪里是架构决策。把 `'use client'` 放在高层 application shell，可能把 providers、utility libraries 与 descendants 拉进 browser-reachable chunks。常见做法是把 data access 与 static composition 留在 server，把 directive 放在窄的 interactive leaves。
-
-反向 composition 也很重要。Client Component 可以通过 `children` 这类 slot 接受 Server Component result：
-
-```tsx
-// Server Component
-export default async function Page() {
-  const details = await getProduct()
-  return <InteractivePanel details={<ProductDetails product={details} />} />
-}
-```
-
-`InteractivePanel` 收到的是已经描述好的 server-rendered subtree。它并不是在浏览器里 import 并执行 `ProductDetails`。
-
-穿过 boundary 的 values 必须能被 React 的 serialization protocol 表示。普通 functions、带 private behavior 的 class instances、open database handles，以及任意 closures，都不是 props。Server Functions 是刻意的例外：React serialize 一个 Next.js 知道如何在 server 上 invoke 的 reference。
-
-对必须在泄进 client graph 时让 compilation 失败的 modules 用 `server-only`，对依赖 browser semantics 的 modules 用 `client-only`。这些 markers 把架构假设变成 build-time check。
 
 <br />
+
+- 这个 directive 在从 server graph import 时，把这个 module 的 exports 标成 client references。除非另一条 boundary 切开 graph，transitive imports 必须对 client 可达。
+- 它 **不** 代表：没有 server HTML、每个 descendant 都是 client module、component 可以 import server secrets，或浏览器可以调用任意 server functions。
+- Server 可以 render `<Quantity />`，因为 RSC stream 编码了一个 **reference** 加上 serializable props。Database module 留在 server graph。
+- Client Component 可以通过 `children` 接收 Server Component result。它并不是在浏览器里 import 并执行那个 server module。
+- 穿过 boundary 的 values 必须 serializable。**Server Functions** 是刻意的例外：一个 Next.js 知道如何 invoke 的 reference。
+- 用 `server-only` 与 `client-only`，让泄漏在 compile time 失败。
+
+**Failure：** 把 `'use client'` 放在高层 shell。Providers、utilities 与 descendants 会被拉进 browser-reachable chunks。把 directive 放在 **窄的 interactive leaves**。
 
 ---
 
 ## 5. Flight 携带一棵 Tree，HTML 携带初始画面
 
-RSC payload（常依 React 的 protocol 称为 **Flight payload**）不是 HTML，也不是 DOM 的 JSON 表示。它是一条 stream，可以编码已 render 的 Server Component output、pending Suspense 工作、Client Components 的 references、module metadata，以及 React serialization model 支持的 values。
+RSC payload——常称为 **Flight payload**——不是 HTML，也不是 DOM 的 JSON 画面。它是一条 stream：已 render 的 Server Component output、pending Suspense 工作、Client Component references，以及 serializable values。
 
-对初始 request，有三份相关 outputs：
+<br />
 
 ```text
 RSC render
@@ -238,39 +194,22 @@ RSC render
   └─ client chunks: executable code for Client Component references
 ```
 
-HTML 让浏览器在所有 application JavaScript 执行完之前就能 paint。RSC data 让 React 在 client 重建并 reconcile 同一棵逻辑 tree。Client chunks 为 interactive boundaries 提供行为。
-
-**Hydration 作用在 Client Components**，不是 Server Components 的实现。Server Component 可以贡献大量 HTML，但它的 function body 不会只为了让浏览器重跑而被下载。浏览器在 RSC payload 里收到它的 rendered result。
-
-这让「zero JavaScript」成为 per-subtree 的可能，而不是每个 RSC 应用的属性。一条 route 可以大部分是 server-rendered，但靠近 root 的一个 client provider 会造成宽的 interactive subtree 与可观的 JavaScript。
-
-之后的 navigations，HTML 会是多余的，因为浏览器已经拥有 document 与 React root。Client 要 RSC data、resolve 任何新的 client references，并把 patch 对已保留的 layouts reconcile。这也是为什么把 RSC endpoint 当公开 JSON API 是错的：它是耦合到该 build 的 module references 与 router state 的 framework protocol。
-
-Wire format 与产生出来的 client-reference mappings 刻意不是稳定的应用界面。检查它们来诊断 proxy、cache 或 bundle 问题；不要在产品代码里 parse 它们。
-
 <br />
+
+- HTML 让浏览器在 application JavaScript 执行之前就能 paint。RSC 重建同一棵逻辑 tree。Client chunks 为 interactive boundaries 提供行为。
+- **Hydration 作用在 Client Components**，不是 Server Component 的实现。浏览器收到的是 Server Component 的 **rendered result**，不是它的 function body。
+- 「Zero JavaScript」是 per-subtree 的可能。靠近 root 的一个 client provider 仍可能加宽 interactive 表面。
+- 之后的 navigations 跳过 HTML，因为浏览器已经拥有 document。把 RSC endpoint 当公开 JSON API 是错的：它耦合到该 build 的 module references 与 router state。
+
+**Failure：** 在产品代码里 parse Flight bytes 或产生出来的 client-reference maps。检查它们来诊断 proxy、cache 或 bundle 问题。它们不是稳定的应用界面。
 
 ---
 
 ## 6. Rendering 是光谱，不是三种 Page Types
 
-Pages Router 鼓励 route-level 词汇：CSR、SSR、SSG 与 ISR。那些词仍描述结果，但 App Router 的工作组合得更细。
+Pages Router 词汇——CSR、SSR、SSG、ISR——仍描述结果。App Router 的工作组合得更细，落在三个时间：**build 或 revalidation**、**request**，以及 **client**。
 
-有三个重要时间：
-
-- **Build 或 revalidation time**：Next.js 可以 prerender 确定性工作，并持久化可重用的 output。
-- **Request time**：runtime APIs 与 uncached 工作带著具体 request 执行。
-- **Client time**：Client Components hydrate、处理 interactions，并可能做额外 fetching。
-
-没有 Cache Components 时，Next.js 仍可分类并 prerender routes，而 `dynamic = 'force-static'` 这类 route-segment options 可以让意图明确。自 Next.js 15 起，`fetch` 默认不会放进 persistent cache。
-
-设了 `cacheComponents: true` 后，Next.js 16 启用较新的 **Cache Components** 模型。一条 route 可以包含：
-
-- 可以安全 prerender 的 static 工作；
-- 用 `'use cache'` 标记的 cached 工作；
-- 读取 `cookies()`、`headers()`、`searchParams` 或其他 dynamic source 的 request-time 工作。
-
-Request-time 工作必须坐在 Suspense 底下，让 build 能产出 static shell 与 fallback，同时延后 dynamic region。Next.js 把这种 composition 称为 Partial Prerendering。
+<br />
 
 ```tsx
 import { Suspense } from 'react'
@@ -287,47 +226,23 @@ export default function ProductPage() {
 }
 ```
 
-这条 boundary 是 scheduling 与 streaming boundary，不是 cache directive。Suspense 说明什么可以独立揭示。`'use cache'` 说明一个 result 可以在某个 key 与 lifetime 下重用。把它们混在一起会造成两种常见错误：期望 Suspense 去 cache 一个 query，以及期望 cached data 自动 stream。
-
-这个 repository 目前使用明确的 static route exports，例如：
-
-```ts
-export const dynamic = 'force-static'
-export const dynamicParams = false
-```
-
-而且 **没有** 在 `next.config.ts` 启用 `cacheComponents`。每个 locale page 目前都 opt into `force-static`，用 `generateStaticParams` 处理 locales 与 MDX slugs，未知 slugs 则用 `dynamicParams = false`。这是有效的 Next.js 16 配置：caching 是 build-time SSG 加上 CDN，不是 Cache Components。文章里使用 `'use cache'` 或 Server Actions 的例子描述的是更广的 framework 模型，不是这个网站目前 ship 的 APIs。
-
 <br />
+
+- 没有 Cache Components 时，Next.js 仍可以分类并 prerender routes。自 Next.js 15 起，`fetch` 默认 **不会** 放进 persistent cache。
+- 打开 `cacheComponents: true` 后，一条 route 可以混合 prerendered 工作、`'use cache'`，以及读取 `cookies()`、`headers()` 或 `searchParams` 的 request-time 工作。
+- Request-time 工作必须坐在 **Suspense** 下面，build 才能发出 static shell——Partial Prerendering。
+- Suspense 是 **streaming** boundary。`'use cache'` 是在某个 key 与 lifetime 下的 **reuse**。
+- 这个 repository 使用 `dynamic = 'force-static'`、`dynamicParams = false` 与 `generateStaticParams`。它 **没有** 启用 `cacheComponents`。这里的 caching 是 build-time SSG 加上 CDN。
+
+**Failure：** 指望 Suspense 去 cache 一次 query，或指望 cached data 自动 stream。
 
 ---
 
 ## 7. Data Dependencies 决定 Streaming 质量
 
-Async Server Component 可以直接 query database 或 service：
+一个 async Server Component 可以直接 query database。把这次调用绕过这个应用的 Route Handler，会加上 HTTP serialization、另一次 router pass，以及一次取决于部署的 hop。改成共享一个 **server-only function**。
 
-```tsx
-export default async function ProductPage({
-  params,
-}: {
-  params: Promise<{ id: string }>
-}) {
-  const { id } = await params
-  const product = await getProduct(id)
-  return <ProductDetails product={product} />
-}
-```
-
-把这个 call 绕过同一个应用的 Route Handler 没有好处。那样会加上 HTTP serialization、多一次 router pass，以及依赖部署的 network hop。当 component 与 Route Handler 都需要同一能力时，从两边使用 shared server-only function。
-
-Component tree 可能意外把独立工作序列化：
-
-```tsx
-const product = await getProduct(id)
-const inventory = await getInventory(id)
-```
-
-在 await 之前先启动独立 operations：
+<br />
 
 ```tsx
 const productPromise = getProduct(id)
@@ -339,36 +254,22 @@ const [product, inventory] = await Promise.all([
 ])
 ```
 
-Component boundaries 也可以提早开始工作，并独立揭示：
-
-```tsx
-export default function Page({ params }: PageProps) {
-  return (
-    <>
-      <Suspense fallback={<ProductSkeleton />}>
-        <Product params={params} />
-      </Suspense>
-      <Suspense fallback={<InventorySkeleton />}>
-        <Inventory params={params} />
-      </Suspense>
-    </>
-  )
-}
-```
-
-Streaming 修不好每一条 waterfall。若 `Inventory` 真的需要 product 的 database result，那个 dependency 是真的。若 dependency 只是因为 parent 在构建下一个 child 之前 await 了前一个，那条 waterfall 就是架构造成的。
-
-React 的 request-scoped memoization 与 Next.js persistent caching 解决不同问题。Memoization 在一次 render/request lifecycle 内去除等价工作。Persistent caching 在 freshness policy 下跨 requests 重用 result。Memoized 但 uncached 的 query 仍可能在下一个 request 再跑；persistent cache 若 invalidation 错了，仍可能返回 stale data。
-
-对浏览器拥有的 data（即时协作、高频 polling、offline state，或必须用 browser credentials 的 third-party API），client fetching 仍然合适。「Server first」是减少 waterfalls 与 credentials 暴露的默认，不是禁止 client data systems。
-
 <br />
+
+- 独立的 `await getProduct` 再 `await getInventory` 会把本可重叠的工作 **序列化**。先启动两者，再 `Promise.all`，或把它们放在 sibling Suspense boundaries 下揭示。
+- Streaming 修不好真正的 data dependency。它可以修好一个 parent 在构造下一个 child 之前就 await 了前一个。
+- Request **memoization** 在一次 render 里去重等价工作。**Persistent cache** 跨 requests 重用 result。一次 memoized 但未 cache 的 query 下次仍会再跑；persistent cache 仍可能返回 stale data。
+- 浏览器拥有的 data——live collaboration、高频 polling、offline state、需要 browser credentials 的第三方 APIs——仍属于 client。
+
+**Failure：** 对独立 reads 做 sequential `await`。那条 waterfall 是架构引入的，不是固有的。
 
 ---
 
 ## 8. Caching 是一组 Lifetimes 与 Identities
 
-「这页有没有被 cache？」通常是错的问题。Next.js 应用可以在几个 scopes 重用工作：
+「这个 page 被 cache 了吗？」是错误的问题。一个 Next.js 应用可以在多个 scopes 重用工作。
+
+<br />
 
 ```text
 one render/request
@@ -387,23 +288,12 @@ network edge or host
   a CDN may reuse HTTP responses according to host policy
 ```
 
-每一层都有自己的 identity 与 invalidation 路径。一笔新鲜的 database row 不保证已经填满的 client Router Cache 里有新鲜的 RSC response。反过来说，`router.refresh()` 可以请求新的 server result，而不删除 persistent data-cache entry。
+<br />
 
-### Cache Components
+- 每一层有自己的 identity 与 invalidation。一行新鲜的 database row 不保证已经坐在 **Router Cache** 里的 RSC response 也是新鲜的。`router.refresh()` 可以请求新的 server result，而不删除 persistent data-cache entry。
+- 用 `cacheComponents: true` 启用 Cache Components。然后 `'use cache'` 加上 `cacheLife` 与 `cacheTag`，让一个 function 选择进入 persistent reuse。
 
-在 Next.js 16，明确启用这个模型：
-
-```ts title="next.config.ts"
-import type { NextConfig } from 'next'
-
-const nextConfig: NextConfig = {
-  cacheComponents: true,
-}
-
-export default nextConfig
-```
-
-然后 function 或 component 可以 opt into persistent reuse：
+<br />
 
 ```tsx
 import { cacheLife, cacheTag } from 'next/cache'
@@ -412,140 +302,72 @@ async function getProduct(id: string) {
   'use cache'
   cacheLife('hours')
   cacheTag(`product:${id}`)
-
   return db.product.findUniqueOrThrow({ where: { id } })
 }
 ```
 
-Cache key 不只是那个 string tag。Next.js 文档把 key 写成包含 build identifier、secure function identifier、serialized arguments，以及从 outer scope 提取的 serialized values。Tags 提供 entries 上的 invalidation index；它们不是主要 identity。
+<br />
 
-这个区别会抓住一个细微 bug：
-
-```tsx
-async function getProductForTenant(tenantId: string, productId: string) {
-  'use cache'
-  cacheTag(`product:${productId}`)
-  return db.product.findFirstOrThrow({
-    where: { tenantId, id: productId },
-  })
-}
-```
-
-`tenantId` 是 function arguments 的一部分，因此是 cache key 的一部分。不过 tag 会把每个 tenant 里带那个 ID 的 product 别名在一起。Invalidate 它可能 evict 比预期更多的 entries。若 tag 省略 tenant identity，而 invalidation 预期是 tenant-local，即使 reads 仍隔离，政策也没有效率。更危险的是，在 shared cached 工作里从 ambient mutable state 读取 tenant，会让 isolation 无法审计。
-
-Runtime request APIs 不能在普通 `'use cache'` scope 里调用。在外面读它们，只传入刻意参与 identity 的 value：
-
-```tsx
-import { cookies } from 'next/headers'
-
-async function Recommendations() {
-  const sessionId = (await cookies()).get('session')?.value
-  return <CachedRecommendations sessionId={sessionId} />
-}
-
-async function CachedRecommendations({
-  sessionId,
-}: {
-  sessionId: string | undefined
-}) {
-  'use cache'
-  return getRecommendations(sessionId)
-}
-```
-
-这在机制上有效，但可能是坏政策：session ID 会在 shared cache 里建立 per-session entries。只在 hit rate 与 data classification 说得通时才 cache。
-
-### Freshness 与 invalidation
-
-`cacheLife` 用 named 或 custom profiles 定义 freshness。概念上，重要的视窗是：
-
-- **stale**：clients 可以不检查就重用多久；
-- **revalidate**：stale content 可以在 refresh 工作进行时被 serve 的时间点；
-- **expire**：硬限制，超过后 request 必须等新鲜工作。
-
-对 on-demand invalidation，语义不同：
-
-```ts
-import { revalidateTag, updateTag } from 'next/cache'
-
-revalidateTag('products', 'max') // mark stale; next visit may serve stale while refreshing
-updateTag('products')            // expire now for read-your-own-writes
-```
-
-`updateTag` 限于 Server Actions，用意是 mutation flows 里发起的用户应立刻看到 write。`revalidateTag(tag, 'max')` 用 stale-while-revalidate 语义，适合不必挡住下一个 reader 的情况。`revalidatePath` 依 path 针对 route output，但不能取代范围良好的 data tags。
+- Cache **key** 包含 build identifier、secure function identifier、serialized arguments，以及从 outer scope 捕捉到的 serialized values。Tags 是 **invalidation index**，不是主要 identity。
+- Runtime request APIs 不能在 `'use cache'` 里面调用。在外面读 `cookies()`，只传入应参与 identity 的那个值。按 session ID cache 在机制上有效，但常常是坏政策。
+- `cacheLife` 窗口：**stale**（重用不检查）、**revalidate**（先 serve stale 同时刷新）、**expire**（必须等新鲜工作）。
+- `revalidateTag(tag, 'max')` 标成 stale。`updateTag` 立刻 expire，用于 read-your-own-writes，并限制在 **Server Actions**。`revalidatePath` 针对 route output；它不取代 scoped data tags。
 
 <br />
 
-```mermaid
-flowchart TD
-  Read["Read getProduct(id)"] --> Memo["Request memoization"]
-  Memo --> FunctionCache["Function cache key"]
-  FunctionCache --> RSC["Rendered RSC result"]
-  RSC --> RouterCache["Browser Router Cache"]
-  Mutation["Server Action mutation"] --> Tag["updateTag or revalidateTag"]
-  Tag --> FunctionCache
-  Mutation --> Refresh["Refresh 受影响的 route tree"]
-  Refresh --> RSC
+```text
+Read getProduct(id)
+  → Request memoization
+  → Function cache key
+  → Rendered RSC result
+  → Browser Router Cache
+
+Server Action mutation
+  ├→ updateTag or revalidateTag → Function cache key
+  └→ Refresh affected route tree → Rendered RSC result
 ```
 
 <br />
 
-Self-hosting 把 cache 语义变成 distributed-systems 问题。Process-local cache 在 replicas 之间不连贯，替换时也会消失。Next.js 支持 shared storage 的 custom cache handlers；host 或 adapter 也必须协调 invalidation 与 deployment build IDs。Framework 无法单靠声明，就让任意 Redis、filesystem、CDN 与 rolling-deployment topology 变得一致。
+Self-hosting 会把它变成分布式系统问题。Process-local cache 在 replicas 之间并不 coherent。Next.js 支持 custom cache handlers；host 仍必须协调 invalidation 与 build IDs。
 
-<br />
+**Failure：** tag 写成 `product:${productId}`，而 function 还吃 `tenantId`。Reads 仍按 arguments 隔离；invalidation 宽度错了。在共享 cached 工作里从 ambient mutable state 读 tenant，会让 isolation 无法审计。
 
 ---
 
 ## 9. Navigation 套用 Server 产生的 Tree Patches
 
-`<Link>` 不只是带 `preventDefault()` 的 anchor。它给 router 一个可以 prefetch、cache，并在保留 shared segments 的同时 transition 过去的目的地。Production prefetch 行为取决于 route 能否被 prerender，以及 loading boundaries 是否允许有用的 partial result。
-
-在 navigation 时，router 概念上持有：
-
-- 目前的 route tree；
-- 已访问或 prefetched segments 的 cached RSC results；
-- 属于被保留 Client Components 的 browser state；
-- 一个目的地，以及到达它所需要的 server patch。
-
-```mermaid
-sequenceDiagram
-  participant Viewport
-  participant Router
-  participant Server
-  participant React
-
-  Viewport->>Router: Link 变得符合 prefetch 条件
-  Router->>Server: Prefetch route 或 segment RSC data
-  Server-->>Router: 可 cache 的 RSC patch
-  Router->>Router: 存储 prefetch entry
-  Viewport->>Router: 用户启动 Link
-  Router->>Router: 重用 entry 或请求缺少的 data
-  Router->>React: 在 transition 里套用 server tree patch
-  React->>React: 保留匹配的 layouts 与 client state
-```
-
-Prefetching 是推测。若 Server Component 在 render 期间做了本应是 mutation 的工作，它可能浪费 bandwidth 或触发不想要的 side effects。Render 必须可以安全地开始、重复、cache 与丢弃。
-
-主要 navigation APIs 表达不同操作：
-
-- `router.push` 与 `router.replace` 请求另一个 route-tree state。
-- `router.back` 与 `router.forward` 与 browser history 整合。
-- `router.refresh` 向 server 再要目前 route，并在保留相容的 client 与 browser state 下 merge result。
-- `usePathname` 与 `useSearchParams` 观察 client router state。
-
-`router.refresh` 不是万能 invalidation API。若 server 工作被 persistent cache，refresh 可以忠实返回同一个 cached value。在 write boundary invalidate 或 update data cache，然后 refresh，或让 Server Action response 更新 route。
-
-Race handling 很重要。用户可以开始 navigation A，再在 A resolve 之前开始 navigation B。React transitions 与 router 可以丢弃过时的 render results，但作为 render side effect 触发的外部 mutation 无法撤回。这是另一个理由：reads 属于 render，writes 属于明确的 actions 或 handlers。
-
-不要把不可信的 strings concatenate 进 `router.push` 或 `router.replace`。把 destinations 当 injection boundary；`javascript:` URL 可以在 page context 执行。
+`<Link>` 不只是带 `preventDefault()` 的 anchor。它给 router 一个可以 prefetch、cache，并在保留共享 segments 的同时 transition 过去的 destination。
 
 <br />
+
+```text
+Viewport → Router: Link becomes eligible for prefetch
+Router → Server: Prefetch route or segment RSC data
+Server → Router: Cacheable RSC patch
+Router: Store prefetch entry
+Viewport → Router: User activates Link
+Router: Reuse entry or request missing data
+Router → React: Apply server tree patch in a transition
+React: Preserve matching layouts and client state
+```
+
+<br />
+
+- Prefetching 是 speculation。Render 必须能安全地开始、重复、cache 与丢弃。不要把 mutate 当 render 的 side effect。
+- `router.push` 与 `router.replace` 请求另一种 route-tree state。`back` 与 `forward` 接入 browser history。`refresh` 重新请求当前 route 并 merge，保留兼容的 client state。
+- `usePathname` 与 `useSearchParams` 观察 client router state。
+- `router.refresh` 不是通用 invalidation API。若 server 工作被 persistent cache，refresh 可以忠实地返回同一个值。在 write boundary invalidate，然后再 refresh。
+
+**Failure：** 把不受信任的 strings 拼进 `router.push` 或 `router.replace`。把 destinations 当 injection boundary；`javascript:` URL 可以在 page context 执行。
 
 ---
 
 ## 10. Server Actions 是有地址的 Mutations，不是受信任的 Functions
 
-Server Action 是当作 mutation entry point 使用的 Server Function。`'use server'` 让 build 建立可以穿过 RSC boundary 的 server reference：
+Server Action 是作为 mutation entry point 使用的 Server Function。`'use server'` 建立一个可以穿过 RSC boundary 的 server reference。
+
+<br />
 
 ```ts
 'use server'
@@ -573,67 +395,27 @@ export async function renameProduct(formData: FormData) {
 }
 ```
 
-在 build time，被使用的 actions 拿到 opaque identifiers，并出现在 server-reference metadata；未使用的 actions 可以被消除。Invoke 时，client 送出带 action reference 与 serialized arguments 的 HTTP `POST`。Server 对目前 build resolve 该 reference、deserialize 支持的 values、执行 function，并可以同时返回 action result 与更新过的 UI data。
-
-那个机制带来便利，不是信任：
-
-1. 从 client 可达的 action 就是可被外部调用的 entry point。
-2. 即使 TypeScript 说不是，它的 arguments 仍是敌意 input。
-3. Authentication 证明身份；authorization 证明这个身份可以对这个 resource 做这个操作。
-4. Captured variables 与 bound arguments 不是 authorization 系统。
-5. IDs 是 opaque，不是 secret capabilities。
-
-Next.js 包含 same-origin checks 与加密 closed-over values 这类 transport defenses。它也支持 allowed origins 与 request body limits 的配置。那些控制减少攻击面；它们不决定 tenant A 可否编辑 tenant B 的 row。
-
-Mutations 需要普通的 distributed-systems 设计：
-
-- 对 retried 的非幂等 operations 使用 idempotency key；
-- 当 lost updates 重要时，使用 optimistic concurrency 或 version predicate；
-- 对跨越多次 writes 的 invariants 使用 transaction；
-- 在 transaction commits 之后做明确的 cache invalidation；
-- 不泄漏 secrets 的 error mapping；
-- 带 actor、resource、outcome 与 trace context 的 observability。
-
-HTML forms 可以在 hydration 之前 invoke actions，这给了 progressive enhancement。Client transitions 可以加上 pending 与 optimistic UI。两种情况下 server 仍是权威。
-
 <br />
+
+- Client 发送一次 HTTP **POST**，携带 action reference 与 serialized arguments。未使用的 actions 可以在 build time 被消除。
+- 从 client 可达的 action 是 **可被外部调用的 entry point**。即使 TypeScript 另有说法，arguments 仍是 hostile input。
+- Authentication 证明 identity。Authorization 证明这个 identity 可以对这个 resource 执行这个操作。Captured variables 不是 authorization 系统。IDs 是 opaque，不是 secret capabilities。
+- Same-origin checks、encrypted closures、origin allowlists 与 body limits 缩小攻击面。它们不决定 tenant A 是否可以编辑 tenant B 的 row。
+- Mutations 仍需要 idempotency keys、optimistic concurrency、transactions、commit **之后** 的 invalidation、不泄漏 secrets 的 error mapping，以及 observability。
+- HTML forms 可以在 hydration 之前 invoke actions。Server 仍是权威。
 
 ---
 
 ## 11. 选最窄的 Server Entry Point
 
-Server Components、Server Actions、Route Handlers 与 Proxy 都在 server side 执行，但它们解决不同问题。
+Server Components、Server Actions、Route Handlers 与 Proxy 都在 server 上执行。它们解决不同的问题。
 
-### Server Component
+- **Server Component：** 为了 render 一棵 React tree 而存在的 reads。可直接访问 server-only modules。不是公开 protocol boundary。
+- **Server Action：** 由这个 React 应用发起的 mutations。把它当私有 HTTP endpoint。
+- **Route Handler：** 明确的 HTTP resource——webhooks、公开 APIs、files、feeds、非 React clients。Web `Request` / `Response`。一个 `route.ts` 不能与 `page.tsx` 占同一 segment。
+- **Proxy：** route handling 之前的拦截。保持便宜。它在每个匹配的 request 上跑。它不取代受保护 data 旁边的 authorization。
 
-用于为了 render 一棵 React tree 而存在的 reads。它可以直接存取 server-only modules，并通过 RSC stream 其 result。它不是公开 protocol boundary。
-
-### Server Action
-
-用于这个 React 应用发起的 mutations，当 action/form integration 与 UI refresh 有用时。从 security 角度看，把它当 private HTTP endpoint。
-
-### Route Handler
-
-用 `route.ts` 做明确的 HTTP resource：webhooks、公开 APIs、file responses、feeds、callbacks，或非 React clients 消费的 endpoints。
-
-```ts title="route.ts"
-export async function GET(
-  _request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  const { id } = await params
-  const product = await getPublicProduct(id)
-  return Response.json(product)
-}
-```
-
-Route Handlers 使用 Web `Request` 与 `Response` APIs。它们不在 React component tree 里 render，而且 `route.ts` 不能与 `page.tsx` 占同一个 route segment。
-
-### Proxy
-
-用 root-level `proxy.ts` 在 route handling 之前拦截：redirects、rewrites、request headers、experiments，或粗粒度 gates。保持它便宜。它在每个匹配的 request 上跑，也不能取代受保护 data 旁边的 authorization。
-
-Dependency 方向通常应是：
+<br />
 
 ```text
 Server Component ─┐
@@ -641,21 +423,17 @@ Server Action ────┼─→ shared server-only domain function → datab
 Route Handler ────┘
 ```
 
-而不是：
-
-```text
-Server Component → HTTP fetch to this app's Route Handler → domain function
-```
-
-后者只在 HTTP boundary 本身就是被测试或消费的能力时才合理，不是当作通用 code-reuse 机制。
-
 <br />
+
+**Failure：** Server Component → HTTP fetch 到这个应用的 Route Handler → domain function，拿来当通用 reuse。HTTP boundary 只有在那个 boundary 本身就是被测试或被消费的能力时才成立。
 
 ---
 
 ## 12. Dynamic APIs 把工作绑到 Request
 
-在 Next.js 16，`params`、`searchParams`、`cookies()` 与 `headers()` 是 asynchronous：
+在 Next.js 16 里，`params`、`searchParams`、`cookies()` 与 `headers()` 是 **asynchronous**。
+
+<br />
 
 ```tsx
 import { cookies, headers } from 'next/headers'
@@ -678,60 +456,51 @@ export default async function Page({
 }
 ```
 
-Async 形状不是装饰。它让 Next.js 可以延后 request-bound 工作，并让 build/request boundary 可见。读取 request cookie 不能为每个用户产出一个共享的 prerendered value。
-
-有 Cache Components 时，request-time APIs 属于 `'use cache'` 外面，而且通常在 Suspense 底下。没有 Cache Components 时，存取 request-bound data 会让相关 route 变成 dynamic，除非 configuration 另有说明。
-
-Page 上的 `searchParams` 是 request data，可以让 page opt into request-time rendering。`useSearchParams` 是 client router hook。它们是相关的 values，但执行与 rendering 后果不同。
-
-默认 runtime 是 Node.js。它有最广的 npm 与 platform API 相容性。Edge runtime 提供 Web APIs，环境较小，部署特性也不同，但「离用户更近」并不自动胜过 database 距离、cold-start 行为、connection limits，或不支持的 dependencies。
-
-Cache Components 需要 Node.js，不支持 `runtime = 'edge'` 的 segment export。Proxy 在 Next.js 16 有自己的 runtime 规则。只有在完整 dependency path（包括 database、secrets、crypto、observability 与 cache backend）都支持时，才选 Edge。
-
-Environment variables 有类似的 boundary。Server code 可以在 runtime 读 private values。以 `NEXT_PUBLIC_` 为前缀的 variables 可能在 build time 被替换进 client bundles；它们是公开的，而且常常固定在产生该 asset 的那个 build。Client reference 无法让 imported secret 保持私密。
-
 <br />
+
+- 这个 async 形状让 Next.js 可以推迟 request-bound 工作。读一个 cookie 无法为每个用户产出一份共享的 prerendered 值。
+- 有 Cache Components 时，request-time APIs 属于 `'use cache'` 之外，通常在 Suspense 下面。没有 Cache Components 时，它们会让相关 route 变成 dynamic，除非 configuration 另有说明。
+- Page 上的 `searchParams` 是 request data。`useSearchParams` 是 client router hook。相关的值，不同的执行与 rendering 后果。
+- 默认 runtime 是 **Node.js**。Edge 提供较小环境的 Web APIs。Cache Components 需要 Node，不支持 `runtime = 'edge'`。「更靠近用户」不会自动胜过 database 距离、cold starts，或不被支持的 dependencies。
+- `NEXT_PUBLIC_*` 变量可能在 **build** time 被替换进 client bundles。它们是公开的。Client import 无法保住 secret。
 
 ---
 
 ## 13. Loading 与 Failure 跟随 Segment Boundaries
 
-App Router 把数种 control-flow 结果变成 route-tree 行为：
+App Router 把 control-flow 结果变成 route-tree 行为。
 
-- `loading.tsx` 为 segment 提供 Suspense fallback。
-- `error.tsx` 为其下方未捕捉的 render/runtime failures 提供 Client Component error boundary。
-- `global-error.tsx` 在 root layout 失败时取代它，且必须自己 render `<html>` 与 `<body>`。
+- `loading.tsx` 为一个 segment 提供 Suspense fallback。
+- `error.tsx` 为它下面未捕捉的 failures 提供 Client Component error boundary。
+- `global-error.tsx` 在 root layout 失败时替换它，必须自己 render `<html>` 与 `<body>`。
 - `not-found.tsx` 在其 boundary 处理 `notFound()` 与未匹配的 resources。
-- `redirect()` 与 `permanentRedirect()` 用 framework control flow 终止目前 rendering path。
-- 当启用时，authorization-specific helpers 可以把预期的未验证或 forbidden 状态导到专用 UI。
+- `redirect()` 与 `permanentRedirect()` 终止当前 rendering 路径。
 
-不要吞掉 framework control-flow errors：
+<br />
 
 ```ts
 try {
   const product = await getProduct(id)
   if (!product) notFound()
 } catch (error) {
-  // A blanket catch can accidentally intercept notFound/redirect control flow.
   unstable_rethrow(error)
 }
 ```
 
-宁可把 `try` block 收窄到可能失败的 operation。若 catch 必须包住 framework control flow，用文档化的 helper 把 framework errors rethrow。
-
-Error boundary 不会让失败的 mutation 变成 transactional，retry UI 也不会让 action 变成幂等。Segment recovery 请 Next.js 重新 render 或 refetch 那个 segment。已经 commit 到外部系统的 side effects 仍然 committed。
-
-依揭示顺序放 Suspense boundaries，而不是单纯包住每个 async function。一条太大的 boundary 会拖慢独立内容；几十条极小的 boundaries 可能造成视觉跳动与 protocol overhead。最好的 boundary 通常对应一个连贯的 skeleton 与独立的 latency domain。
-
 <br />
+
+- 不要吞掉 framework control-flow errors。把 `try` 收窄到可能失败的那次操作，或用 `unstable_rethrow` 再抛出。
+- Error boundary 不会让失败的 mutation 变成 transactional。Retry UI 不会让 action 变成 idempotent。已经 commit 到外部系统的 side effects 仍然 committed。
+
+**Failure：** 一个过大的 Suspense boundary 拖住独立内容，或几十个过小的 boundaries 造成视觉 churn。按 reveal 顺序与 latency domain 放置 boundaries，而不是围住每个 async function。
 
 ---
 
 ## 14. Advanced Routing 用简单换 State Preservation
 
-Parallel 与 intercepting routes 解决 URL、可见 layers 与 navigation history 不应对应到一棵简单 page tree 的情况。
+Parallel 与 intercepting routes 解决的是 URL、可见 layers 与 navigation history 不该对应到一棵简单 page tree 的情况。
 
-Photo modal 是典型例子：
+<br />
 
 ```text
 app/
@@ -742,333 +511,162 @@ app/
   layout.tsx
 ```
 
-Soft navigation 可以把 `(.)photo/[id]` render 进目前 gallery 上的 `@modal` slot。直接请求 `/photo/123` 则 render canonical page。用 `router.back()` 关闭会还原前一个 history entry。当 Next.js 在 full reload 后无法恢复 slot 的 active state 时，`default.tsx` 提供 fallback。
-
-这之所以强大，正因为 router 追踪的是一棵 tree，不是一个 component。它也很容易被过度使用。若 modal 不需要可分享的 URL、reload 语义或 history integration，local state 更简单。
-
-Internationalization 是另一个 routing 关注点。这个网站用 `[locale]` 作为第一个 dynamic segment，并用 `next-intl` 做 locale validation、messages 与 navigation。它的 locale layout await `params`，对不支持的 locales 用 `notFound()` 拒绝，并调用 `setRequestLocale`，让本来 static 的 routes 可以依 locale 产生。
-
-Rewrites 在可见 URL 底下运作。这个 repository 把 `/ingest/*` proxy 到 PostHog，同时让浏览器留在 first-party origin。一份 production `routes-manifest.json` 记录 rewrite phases 与 regexes。Rewrites 可以简化 integrations，但也影响 cache keys、observability、security headers，以及哪个 origin 看到 credentials。
-
-Redirects 改变浏览器可见的 location。Rewrites 不会。Proxy 可以依 request data 选择其一。Route groups 两者都不改；它们只组织 source route tree。
-
 <br />
+
+- Soft navigation 可以把 `(.)photo/[id]` render 进当前 gallery 上的 `@modal` slot。对 `/photo/123` 的 direct request 渲染 canonical page。`router.back()` 恢复 history。`default.tsx` 在 full reload 之后提供 fallback。
+- 若 modal 不需要可分享 URL、reload 语义或 history 集成，本地 state 更简单。
+- 这个站点用 `[locale]` 作为第一个 dynamic segment，并用 `next-intl` 做 validation、messages 与 navigation。Locale layout await `params`，对不支持的 locales 以 `notFound()` 拒绝，并调用 `setRequestLocale`，让本来 static 的 routes 可以按 locale 生成。
+- **Rewrites** 保持 browser URL。**Redirects** 改变它。Route groups 两者都不改。这个 repository 把 `/ingest/*` proxy 到 PostHog，同时让浏览器留在 first-party origin。
 
 ---
 
 ## 15. Metadata 与 Asset Pipelines 是 Render Contract 的一部分
 
-Metadata 不是另一次 HTML templating pass。在 App Router 里，它从 route tree 解析：static `metadata` exports、`generateMetadata`，以及 `opengraph-image`、`icon`、`robots` 这类 file conventions。Parent metadata 依文档规则与 child metadata merge；leaf routes 不会因为 export 了 partial title，就意外取代整个 parent object。
+Metadata 从 route tree 解析：static `metadata` exports、`generateMetadata`，以及 `opengraph-image`、`icon`、`robots` 这类 file conventions。Parent metadata 与 child metadata **merge**；一份不完整的 leaf export 不会抹掉 parent object。
 
-```tsx
-export async function generateMetadata({
-  params,
-}: {
-  params: Promise<{ locale: string; slug: string }>
-}): Promise<Metadata> {
-  const { locale, slug } = await params
-  const page = getMdxContent('notes', slug, locale)
-
-  return {
-    title: page?.data.title ?? slug,
-    description: page?.data.description,
-    openGraph: {
-      type: 'article',
-      title: page?.data.title,
-      description: page?.data.description,
-    },
-  }
-}
-```
-
-`generateMetadata` 可以 await 与 page 相同的 server data。这对正确性有用，但若在 page body 之前造成 uncached 的序列 dependency，对 latency 就危险。共享底层 promise 或 cached function，让 metadata 与 page body 不会各自独立付完整成本，除非工作已经被 memoized。
-
-Asset helpers 重要，因为它们改变 critical path：
-
-- `next/image` 产生尺寸 variants、强制已配置的 remote hosts，并可以注入 responsive `srcset`/`sizes`。它是 rendering 与 caching subsystem，不是风格偏好。未限制的 remote host list 会变成开放的 image proxy。
-- `next/font` self-host fonts、产生 subset CSS，并去掉常见的 third-party render-blocking request。Font metrics 与 `display` policy 仍决定 layout shift。
-- `next/script` 控制 third-party JavaScript 何时争用 main thread。Strategy 选择是效能决策，不是语法决策。
-
-Framework asset pipelines 与 deployment adapter 互动。Image optimization 可能依 host 跑在 function、edge，或 CDN 后面。Self-hosted 或 OpenNext 部署可以改变 `/_next/image` 在哪里执行，以及哪个 cache 存放转换后的 bytes。公开 component API 仍是 `next/image`；运营成本则不是。
-
-<br />
+- `generateMetadata` 可以 await 与 page 相同的 server data。共享底层 promise 或 cached function，这样 metadata 就不会把 body 序列化，除非那份工作已经被 memoized。
+- `next/image` 产生定尺寸 variants、强制配置的 remote hosts，并注入 `srcset` / `sizes`。不受限的 remote host list 会变成 **open image proxy**。
+- `next/font` 自托管 fonts、生成 subset CSS，并去掉常见的第三方 render-blocking request。Font metrics 与 `display` 仍决定 layout shift。
+- `next/script` 控制第三方 JavaScript 何时争夺 main thread。Strategy 是性能决策，不是语法决策。
+- Image optimization 可能在 function、edge 或 CDN 后面跑，取决于 host。公开 API 仍是 `next/image`；运营成本不是。
 
 ---
 
 ## 16. Compilation 把一棵 Source Tree 变成多份 Artifacts
 
-Next.js build 不是「bundle the app」。它分类 modules、产出多个 graphs，并写下 runtime 用来回答稍后 requests 的 manifests。
-
-```mermaid
-flowchart TD
-  Source["app 与 shared modules"] --> Classify["分类 routes 与 directives"]
-  Classify --> ServerGraph["Server module graph"]
-  Classify --> ClientGraph["Client module graph"]
-  Classify --> EdgeGraph["Optional edge/proxy graph"]
-  ServerGraph --> ServerChunks["Server route 与 RSC chunks"]
-  ClientGraph --> BrowserChunks["Browser chunks 与 CSS"]
-  EdgeGraph --> EdgeChunks["Proxy/edge handlers"]
-  Classify --> Manifests["Route、client-reference 与 build manifests"]
-  ServerChunks --> Adapter["Deployment adapter"]
-  BrowserChunks --> Adapter
-  EdgeChunks --> Adapter
-  Manifests --> Adapter
-```
-
-数个 compilers 共享那条 pipeline：
-
-- **SWC** 转换 TypeScript/JSX，并参与 Fast Refresh 与 production transforms。
-- 启用时，**React Compiler** 可以自动 memoize 符合条件的 components 与 hooks。它不取代 Server Components、Suspense 或 cache policy。这个 repository 在 `next.config.ts` 启用它。
-- **Turbopack** 是 Next.js 16.2 的默认 bundler，当没有设 `--webpack` 也没有明确 override 时。这个 repository 的 `next dev` 与 `next build` scripts 都不传 `--webpack`，所以两者都用 Turbopack。它的工作是 module graph 与 chunking，不是另一套应用模型。
-
-诊断 production 行为时，值得检查的重要 artifacts：
-
-- 把 pathnames 或 patterns 对应到 compiled entries 的 route manifests；
-- 把 RSC placeholders 接回 browser chunks 的 client-reference metadata；
-- 在新部署后 invalidate shared caches 的 build identifiers；
-- 揭示意外 client-bundle 膨胀的 server 与 client chunk lists。
-
-Environment-variable substitution 是这份 compile-time 契约的一部分。`NEXT_PUBLIC_*` values 可以被 inline 进特定 build 的 client assets。因此轮换公开 analytics key 需要重建那些 assets，而在 runtime 读取的 server-only secret 则不必。
-
-像 OpenNext 这类 deployment adapters 消费这些 artifacts，并把它们对应到 host resources：hashed assets 的 static objects、server rendering 的 functions 或 containers、HTML 与 RSC responses 的 CDN 行为，以及可选的 shared cache backends。这个 repository 的 `open-next.config.ts` override tag cache、incremental cache 与 queue backends（DynamoDB/S3/SQS lite adapters），并使用 Lambda streaming wrapper。以目前完全 static 的表面，那些 adapters 大多闲置，但一旦引入 ISR、Cache Components 或其他可变 server output，它们就会变成承重件。[用 SST 管理 AWS 基础设施与 DevOps](/notes/using-sst-for-aws-infra-and-devops) 说明 SST 如何接上 adapter。Next.js 契约是 artifact set 与 runtime 语义；adapter 决定用多少 processes、regions 与 cache stores 实现它们。
-
-Self-hosting 暴露那份契约的 distributed-systems 边缘。多个 Node instances 需要 shared cache handler，才能有连贯的 `'use cache'` 与 revalidation 行为。Rolling deploys 必须让 build IDs 与 client references 对齐，以免旧的 browser session 调用一个不再理解其 action IDs 或 chunk map 的 server。CDN layers 必须尊重 HTML documents 与 RSC responses 之间的 content-type 与 `Vary` 区别。Adapter 限制也塑造架构：这个网站把 Orama search indexes 当 static JSON 从 CDN serve，而不是 Route Handler，因为 Lambda 上的 OpenNext 继承了 synchronous response size ceiling，让 `/api/search` 路径变脆。
+一次 Next.js build 不是「bundle 这个 app」。它分类 modules、发出多份 graphs，并写出 runtime 稍后用来回答 requests 的 manifests。
 
 <br />
+
+```text
+app and shared modules → Classify routes and directives
+  ├→ Server module graph → Server route and RSC chunks ─┐
+  ├→ Client module graph → Browser chunks and CSS ──────┼→ Deployment adapter
+  ├→ Optional edge/proxy graph → Proxy/edge handlers ───┤
+  └→ Route, client-reference, and build manifests ──────┘
+```
+
+<br />
+
+- **SWC** 转换 TypeScript/JSX。这个 repository 启用的 **React Compiler** 可以自动 memoize 符合条件的 components。它不取代 Server Components、Suspense 或 cache policy。
+- **Turbopack** 是 Next.js 16.2 的默认 bundler。这个 repository 的 `next dev` 与 `next build` scripts 不传 `--webpack`。
+- 诊断 production 行为时，检查 route manifests、client-reference metadata、build identifiers 与 chunk lists。
+- `NEXT_PUBLIC_*` 值可以被 inline 进某次 build 的 client assets。轮换一个公开 analytics key 需要重建那些 assets。运行时读取的 server-only secret 则不必。
+- OpenNext 把 artifacts 对应到 host resources。这个 repository 的 `open-next.config.ts` override tag cache、incremental cache 与 queue backends（DynamoDB/S3/SQS lite），并使用 Lambda streaming wrapper。以目前完全 static 的表面，那些 adapters 大多闲置。[用 SST 管理 AWS 基础设施与 DevOps](/notes/using-sst-for-aws-infra-and-devops) 说明 SST 如何接上 adapter。
+- Rolling deploys 必须让 build IDs 与 client references 对齐，这样旧的 browser session 才不会去调用一个已经不理解其 action IDs 的 server。CDN layers 必须尊重 content-type 与 `Vary`。这个站点把 Orama search indexes 当 static JSON 提供，因为 OpenNext on Lambda 继承了同步 response size 上限，让 `/api/search` 变得脆弱。
 
 ---
 
 ## 17. Security 与 Observability 落在每个 Boundary
 
-Next.js 把 code 与 data 移过数条 trust boundaries。当那些 boundaries 被当成 framework magic 时，security 工作就会失败。
+Next.js 把 code 与 data 移过数个 trust boundaries。当那些 boundaries 被当成 framework 魔法时，安全工作就会失败。
 
-| Boundary | 穿越的内容 | 需要的控制 |
+| Boundary | What crosses it | Required controls |
 | --- | --- | --- |
-| Browser ↔ Server Action / Route Handler | 敌意 input 与 cookies | Authn、authz、validation、rate limits、CSRF/origin policy |
-| Server Component → Client Component | Serialized props 与 references | 没有 secrets、没有 privileged objects、刻意的公开 data |
-| Proxy → Route | Request headers 与 redirects | 只做便宜检查；不是唯一 authorization |
-| App → External service | Credentials 与 PII | Scoped secrets、least privilege、audited egress |
-| CDN ↔ Origin | Cached responses | 正确的 `Vary`，shared caches 里没有 private HTML |
-
-Authentication 回答「这是谁？」Authorization 回答「这个 actor 可以对这个 resource 做这个操作吗？」Logged-in session cookie 不是把另一个 tenant 的 product 改名的权限。在执行 write 的 mutation 或 Route Handler 里，用 schema parse input 之后再 validate 与 authorize，而不只是在 render 该 form 的 Client Component 里做。
-
-Secrets 属于 server-only modules 与 runtime configuration。把 secret import 进 client graph 是 compile-time 或 runtime leak，不是风格错误。Server Actions 里的 closed-over values 有 transport 保护，但一旦 action 可达，它们仍是可被外部调用的界面的一部分。
-
-Defense in depth 仍然适用：
-
-- Content Security Policy 与 trusted-types 决策，用来限制 XSS blast radius；
-- Action endpoints 的 origin allowlists 与 body-size limits；
-- 记录 actor、resource、outcome 与 request ID、但不倾倒 secrets 的 logging；
-- 对 error tracking 可用、但不会变成公开 source dump 的 source maps。
-
-`instrumentation.ts` 是注册 OpenTelemetry 或其他 boot-time observability 的受支持位置。宁可把 document requests、Flight navigations、Server Actions 与 Route Handlers 用同一套 trace model 关联。没有它，慢的「page」无法与慢的 mutation、cold function，或另一个 replica 上的 cache miss 区分。
+| Browser ↔ Server Action / Route Handler | Hostile input and cookies | Authn, authz, validation, rate limits, CSRF/origin policy |
+| Server Component → Client Component | Serialized props and references | No secrets, no privileged objects, intentional public data |
+| Proxy → Route | Request headers and redirects | Cheap checks only; no sole authorization |
+| App → External service | Credentials and PII | Scoped secrets, least privilege, audited egress |
+| CDN ↔ Origin | Cached responses | Correct `Vary`, no private HTML in shared caches |
 
 <br />
+
+- Authentication 回答「这是谁？」Authorization 回答「这个 actor 可以对这个 resource 执行这个操作吗？」用 schema parse input 之后，在 mutation 或 Route Handler **里面** validate 并 authorize。
+- Secrets 属于 server-only modules 与 runtime configuration。Server Actions 里 closed-over 的值有传输保护，但一旦 action 可达，它们仍是可被外部调用界面的一部分。
+- Defense in depth 仍然适用：CSP、origin allowlists、body-size limits、记录 actor/resource/outcome 而不 dump secrets 的 logs、给 error tracking 用但不成为公开 dump 的 source maps。
+- `instrumentation.ts` 是注册 OpenTelemetry 的受支持位置。用同一套 trace model 关联 document requests、Flight navigations、Server Actions 与 Route Handlers。
 
 ---
 
 ## 18. Performance 是 Boundaries 的架构
 
-多数 Next.js 效能失败是 boundary 错误：
+多数 Next.js 性能失败都是 boundary 错误。
 
-1. Tree 里太高的 `'use client'` 扩大 hydration 与 JavaScript 表面。
+1. 树里过高的 `'use client'` 加宽 hydration 与 JavaScript。
 2. Sequential awaits 把独立 latency domains 序列化。
-3. 缺少 Suspense 迫使整个 response 等最慢的 region。
-4. 过度 cache personalized data 造成巨大 key cardinality 或隐私事故。
-5. 对 shared data under-caching，让每次 navigation 都变成 origin 工作。
-6. 只量本地 `next dev` 会隐藏 production chunking、compression 与 cache 行为。
+3. 缺少 Suspense 迫使整个 response 等最慢的区域。
+4. 过度 cache 个性化 data 会造成巨大的 key cardinality 或隐私事故。
+5. 共享 data 缓存不足，会把每次 navigation 变成 origin 工作。
+6. 只量本地 `next dev` 会藏起 production chunking、compression 与 cache 行为。
 
-把那些选择接到用户可见的 metrics：
-
-- **LCP** 关心 critical HTML、fonts 与 images 是否能被提早发现，以及 server 工作是否挡住最大内容。
-- **INP** 关心 hydration、client JS 与 interaction handlers 造成的 main-thread contention。
+- **LCP** 关心关键 HTML、fonts 与 images 是否能尽早被发现，以及 server 工作是否挡住最大的内容。
+- **INP** 关心 hydration、client JS 与 handlers 对 main thread 的争夺。
 - **CLS** 关心预留的 image/font 空间与晚注入的 UI。
 - 一个 subtree 的 time-to-interactive 关心那个 subtree 拉进了多少 Client Component JavaScript。
 
-Browser critical path 仍统治最后一公里。Next.js 可以把工作在那条路径上提早或延后，但它不能废除 parser blocking、layout 或 paint。那一层见 [Browser 中的 Critical Rendering Path](/notes/critical-rendering-path-in-the-browser)。至于 speculative render、commit 与 hydration 的 React 侧，见 [深入理解 React](/notes/understanding-react-in-depth)。
+Browser critical path 仍统治最后一公里。见 [Browser 中的 Critical Rendering Path](/notes/critical-rendering-path-in-the-browser)。至于 React 的 speculative render、commit 与 hydration，见 [深入理解 React](/notes/understanding-react-in-depth)。
 
-量 production builds。在 Network 检查 document 对上 `text/x-component` navigations、挂在 route 上的 client chunks 大小、image 是否走了 `/_next/image`，以及 mutation 是否造成预期的 cache miss。一份本地看起来很快、却 ship 了 400 KB client provider tree 的页面，并不快。
-
-<br />
+量 production builds：document 对比 `text/x-component`、client chunk size、一张 image 是否走了 `/_next/image`，以及一次 mutation 是否造成预期的 cache miss。
 
 ---
 
 ## 19. 从头到尾跟一页 Product Page
 
-考虑一页 product page，它显示：
+一个 product page 展示给所有用户 cache 的共享 catalog fields、基于 session cookie 的个性化 recommendations，以及一份需认证的 rename form。
 
-- 对所有用户 cache 的 shared catalog fields；
-- 依 session cookie 的 personalized recommendations；
-- 需验证的 rename form。
+<br />
 
-```tsx
-import { Suspense } from 'react'
-import { cookies } from 'next/headers'
-import { cacheLife, cacheTag, updateTag } from 'next/cache'
-import { z } from 'zod'
-import { requireEditor } from '@/lib/auth'
-import { db } from '@/lib/db'
-
-export default async function ProductPage({
-  params,
-}: {
-  params: Promise<{ id: string }>
-}) {
-  const { id } = await params
-
-  return (
-    <>
-      <ProductDetails id={id} />
-      <Suspense fallback={<RecommendationsSkeleton />}>
-        <Recommendations id={id} />
-      </Suspense>
-      <Suspense fallback={null}>
-        <RenameForm id={id} />
-      </Suspense>
-    </>
-  )
-}
+```text
+Browser → CDN: GET /products/123
+CDN → Server: Document request on miss
+Server → Cache: Read cached ProductDetails
+Cache → Server: Shared product fields
+Server → Browser: Static shell HTML + RSC + fallbacks
+Browser: Paint title and hydrate client boundaries
+Server → DB: Fetch recommendations with session
+Server → Browser: Stream personalized region
+Browser → Server: Prefetch sibling product via Link
+Server → Browser: RSC patch stored in Router Cache
+Browser → Server: POST rename Server Action
+Server → DB: Authorized update
+Server → Cache: updateTag product 123
+Server → Browser: Action result and refreshed route data
 ```
 
 <br />
 
-Shared catalog fields 可以 cache。Recommendations 依赖 session cookie，所以留在 `'use cache'` 外面。
+- 共享的 `ProductDetails` 使用 `'use cache'` + `cacheTag`。Recommendations 在 cache **外面**、Suspense 下面读 `cookies()`。
+- Document 可以在 recommendations 完成之前 paint product title。
+- 授权去 **render** form，不等于授权去 **跑** action。Action 会再检查、validate、写入，然后 `updateTag`。
+- 到另一个 product 的 client navigation 请求 RSC data，而不是完整 HTML document，除非 adapter 或 link configuration 另有强制。
+- 两位 editors 并发 rename 需要应用层 concurrency 策略。Next.js 不会发明一个。
+- 部署之后，旧 tab 可能无法 invoke action，直到它 reload 到新 build 的 references。
 
-<br />
-
-```tsx
-async function ProductDetails({ id }: { id: string }) {
-  'use cache'
-  cacheLife('hours')
-  cacheTag(`product:${id}`)
-
-  const product = await db.product.findUniqueOrThrow({ where: { id } })
-  return <h1>{product.name}</h1>
-}
-
-async function Recommendations({ id }: { id: string }) {
-  const sessionId = (await cookies()).get('session')?.value
-  const items = await getRecommendations(id, sessionId)
-  return <RecommendationList items={items} />
-}
-```
-
-<br />
-
-Rename form 是 Server Action。Auth 跑两次：一次决定要不要渲染 form，一次在 action 里再确认。
-
-<br />
-
-```tsx
-async function RenameForm({ id }: { id: string }) {
-  await requireEditor()
-
-  async function rename(formData: FormData) {
-    'use server'
-    const actor = await requireEditor()
-    const input = z
-      .object({
-        id: z.string().uuid(),
-        name: z.string().trim().min(1).max(120),
-      })
-      .parse(Object.fromEntries(formData))
-
-    await db.product.update({
-      where: { id: input.id, tenantId: actor.tenantId },
-      data: { name: input.name },
-    })
-    updateTag(`product:${input.id}`)
-  }
-
-  return (
-    <form action={rename}>
-      <input type="hidden" name="id" value={id} />
-      <input name="name" />
-      <button type="submit">Rename</button>
-    </form>
-  )
-}
-```
-
-追踪这个 lifecycle：
-
-```mermaid
-sequenceDiagram
-  participant Browser
-  participant CDN
-  participant Server
-  participant Cache
-  participant DB
-
-  Browser->>CDN: GET /products/123
-  CDN->>Server: Miss 时的 document request
-  Server->>Cache: 读取 cached ProductDetails
-  Cache-->>Server: Shared product fields
-  Server-->>Browser: Static shell HTML + RSC + fallbacks
-  Browser->>Browser: Paint title 并 hydrate client boundaries
-  Server->>DB: 用 session fetch recommendations
-  Server-->>Browser: Stream personalized region
-  Browser->>Server: 通过 Link prefetch sibling product
-  Server-->>Browser: 存进 Router Cache 的 RSC patch
-  Browser->>Server: POST rename Server Action
-  Server->>DB: Authorized update
-  Server->>Cache: updateTag product 123
-  Server-->>Browser: Action result 与 refreshed route data
-```
-
-Production 调查应确认：
-
-1. Build classification 显示 shared product 工作可 cache，recommendations 是 Suspense 底下的 request-time。
-2. Document response 可以在 recommendations 完成前 paint product title。
-3. 到另一个 product 的 client navigation 请求 RSC data，而不是完整 HTML document，除非 adapter 或 link configuration 另有强制。
-4. Action POST 带目前 build 的 action identifier、validate input、再检查 authorization，并在 write commits 之后 update tag。
-5. 两个 editors 同时 rename 需要应用层 concurrency 策略；Next.js 不会发明一个。
-6. 部署后，旧 tab 可能在 reload 到新 build 的 references 之前，action invocation 失败。
-
-若 recommendations 意外被放进 `'use cache'` 同时直接读 `cookies()`，build 应拒绝那种 composition。若它们依 session ID cache 而没有隐私审查，机制有效，政策仍可能是错的。
-
-<br />
+**Failure：** 把 `cookies()` 放进 `'use cache'`——build 应该拒绝这种组合。按 session ID cache 却没有隐私审查：机制有效，政策仍可能是错的。
 
 ---
 
 ## 20. 调试问题与常见误解
 
-当 Next.js 行为意外时，依序问这些：
+当 Next.js 行为让你意外时，按这个顺序问：
 
 1. **这是哪条 pipeline？** Document request、Flight navigation、prefetch、Server Action、Route Handler，还是 proxy？
-2. **哪个 graph 拥有这个 module？** Server、client，还是 edge？有没有 directive 把 boundary 移得比预期更高？
-3. **这个 value 何时被计算？** Build/revalidation time、request time，还是 client time？
+2. **哪个 graph 拥有这个 module？** Server、client，还是 edge？
+3. **这个值何时被计算？** Build/revalidation time、request time，还是 client time？
 4. **Cache identity 是什么？** Function arguments、captured values、tags、route path、build ID，以及 CDN variant。
-5. **网络实际返回了什么？** HTML、`text/x-component`、JSON、redirect，还是带错误 `Vary` 的 cached CDN object？
+5. **Network 实际返回了什么？** HTML、`text/x-component`、JSON、redirect，还是带错误 `Vary` 的 cached CDN object？
 6. **React 是 commit 了，还是只尝试了一次 render？** Streaming 与 transitions 可以放弃工作。
-7. **Authorization 有没有在 write boundary 强制执行？** UI 隐藏不是 enforcement。
-8. **Deployment adapter 有没有保留 headers、content types 与 shared cache 语义？**
+7. **Authorization 是否在 write boundary 强制执行？** UI 隐藏不是 enforcement。
+8. **Deployment adapter 是否保留 headers、content types 与 shared cache 语义？**
 
-### 误解
+常见误解：
 
-**「Next.js 只是 SSR。」** App Router routes 组合 prerendered、cached、streamed 与 request-time 工作。许多 production pages 是混合的。
-
-**「`'use client'` 代表只在 client rendering。」** 它标记 client module-graph boundary。Component 仍可以 SSR 成 HTML，然后 hydrate。
-
-**「所有 `fetch` calls 都会被 cache。」** 自 Next.js 15 起，`fetch` 默认不会被 persistent cache。明确的 Cache Components 与 cache APIs 定义重用。
-
-**「Server Actions 因为是 server functions 所以安全。」** 它们是可达的 mutation endpoints。每次调用都要 validate input 并 authorize。
-
-**「Dynamic 代表没有 caching。」** Request-time regions 可以坐在 cached regions 旁边。Dynamic APIs 强制为读取它们的工作做 request binding，不一定对每个 sibling。
-
-**「Edge 一定更快。」** 当 workload 符合 runtime、瓶颈是靠近用户时，Edge 有帮助。当瓶颈是远程 database、不支持的 native dependency，或 connection pooling 模型时，它没有帮助。
-
-**「RSC 取代 APIs。」** RSC 是 Next.js server 与 client runtimes 之间的 framework protocol。公开 clients、webhooks 与非 React 消费者仍需要 Route Handlers 或其他 HTTP APIs。
-
-**「Fiber/Flight 细节是应用 APIs。」** 对诊断有用；作为产品契约则不稳定。依赖文档化行为与受支持的 entry points。
-
-<br />
+- **Next.js 不只是 SSR。** App Router routes 组合 prerendered、cached、streamed 与 request-time 工作。
+- **`'use client'` 不代表只在 client render。** 它标记一条 module-graph boundary。Component 仍可以 SSR 成 HTML，然后再 hydrate。
+- 自 Next.js 15 起，**`fetch` 默认不被 cache**。明确的 Cache Components 与 cache APIs 定义 reuse。
+- **Server Actions 是可达的 mutation endpoints。** 每次调用都要 validate input 并 authorize。
+- **Dynamic 不代表没有 caching。** Request-time 区域可以坐在 cached 区域旁边。
+- **Edge 不总是更快。** 当 workload 适合 runtime、瓶颈是靠近用户时，它才有帮助。
+- **RSC 不取代 APIs。** 公开 clients、webhooks 与非 React consumers 仍需要 Route Handlers。
+- **Fiber/Flight 细节不是应用 APIs。** 有助于诊断；作为产品契约则不稳定。
 
 ---
 
 ## 21. 最终心智模型
 
-最短且准确的模型是：
+最短且准确的模型：
+
+<br />
 
 ```text
 Folders define a route tree.
@@ -1084,10 +682,80 @@ Invalidation reconnects writes to later reads.
 Adapters map artifacts onto infrastructure.
 ```
 
-Next.js 不取代 React 的 rendering model。它决定哪些 React trees 为哪些 URLs 存在、它们的 modules 在哪里执行、哪些 results 可以重用、那些 results 如何穿过网络，以及浏览器如何把稍后的 server output merge 进已经 mounted 的 document。
+<br />
 
-Compile-time classification、request-time coordination 与 client navigation 是三个不同阶段。多数 production 事故来自把它们塌成一个含糊的「page rendered」想法。
+Next.js 不取代 React 的 rendering model。它决定哪些 React trees 对应哪些 URLs、它们的 modules 在哪里执行、哪些 results 可以重用、那些 results 如何穿过 network，以及浏览器如何把稍后的 server output merge 进已经 mounted 的 document。
 
-至于 React 自身的 render/commit/hydration 机制，继续看 [深入理解 React](/notes/understanding-react-in-depth)。Browser pixels 与 main-thread 限制见 [Browser 中的 Critical Rendering Path](/notes/critical-rendering-path-in-the-browser)。这个 repository 的 AWS/OpenNext 交付路径见 [用 SST 管理 AWS 基础设施与 DevOps](/notes/using-sst-for-aws-infra-and-devops)。Server Components 所依赖的 React 19 APIs 见 [React 19 新功能](/notes/react-19-new-features)。
+Compile-time classification、request-time coordination 与 client navigation 是三个不同的阶段。多数 production incidents 来自把它们压成一个模糊的「这个 page rendered」。
 
-这篇文章中的实现观察对应 **Next.js 16.2.11** App Router 行为，以及这个 repository 安装的周边 React Server Components 模型。公开惯例（file names、文档化 directives、cache APIs 与受支持的 runtime functions）是耐用的契约。Manifest layouts、内部 headers 与确切的 Flight bytes 是今天 toolchain 的调试证据，不是要 hard-code 的 API。
+至于 React 自身的 render/commit/hydration 机制，继续看 [深入理解 React](/notes/understanding-react-in-depth)。Browser pixels 与 main-thread 限制见 [Browser 中的 Critical Rendering Path](/notes/critical-rendering-path-in-the-browser)。这个 repository 的 AWS/OpenNext 交付路径见 [用 SST 管理 AWS 基础设施与 DevOps](/notes/using-sst-for-aws-infra-and-devops)。Server Components 所依赖的 React 19 APIs 见 [React 19 新功能](/notes/react-19-new-features)。Origin threat model（cookies、Server Actions、cache vs privacy）见 [Next.js 里的 Security](/notes/security-in-next-js)。
+
+这篇文章里的实现观察对应这个 repository 安装的 **Next.js 16.2.11** App Router 行为。公开惯例——file names、文档化的 directives、cache APIs，以及受支持的 runtime functions——才是耐用契约。Manifest layouts、内部 headers 与确切的 Flight bytes 是今天 toolchain 的调试证据，不是该写死的 API。
+
+---
+
+## Recap Q&A
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="next-orchestrator">
+    <AccordionTrigger>1. Next.js 在 React 周围加了什么，route tree 又是什么？</AccordionTrigger>
+    <AccordionContent>
+
+      - Next.js 是围绕 React 的 **orchestrator**。React 定义 components、reconciliation、Suspense、Server Components 与 hydration。它不决定 URLs 如何对应到 trees、component 在哪里执行、route 如何被 cache，或 server function 如何通过 HTTP 寻址。
+      - 在 build time，Next 把一棵 source tree 转成数个 module graphs。在 runtime，它选出一棵 **route tree**、协调 data 与 caches、请 React 产生 Server Component stream、可选择把该 stream 转成 HTML，并让 client router 在不 reload document 的情况下 merge 稍后的 patches。
+      - App Router 不会执行 `getStaticProps`。Rendering 与 caching 在 route、component 与 function boundaries 组合。
+      - Document request 与 client navigation 是不同的 pipelines：HTML 加上 hydration，对比对着保留 layouts 的 RSC patch。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="next-use-client">
+    <AccordionTrigger>2. `'use client'` 实际切开的是什么？</AccordionTrigger>
+    <AccordionContent>
+
+      - Server Components 是默认。这个短语不代表「每次 HTTP request 跑一次」。它代表实现留在 **server graph**，而 rendered result 穿过 RSC boundary。
+      - `'use client'` 是 **module-graph entry directive**。它不代表没有 server HTML、每个 descendant 都必须是 client module，或因为 parent 是 Server Component 就可以 import server secrets。
+      - 把 directive 放在 **窄的 interactive leaves**。放在高层 shell 会把 providers 与 utilities 拉进 browser chunks。
+      - Client Component 仍可以通过 `children` 接收 Server Component result。穿过 boundary 的 values 必须 serializable。用 `server-only` 让泄漏在 compile time 失败。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="next-caching">
+    <AccordionTrigger>3. 为什么「这个 page 被 cache 了吗？」是错误的问题？</AccordionTrigger>
+    <AccordionContent>
+
+      - 一个 Next.js 应用可以在多个 scopes 重用工作：request memoization、data/function cache、prerendered HTML 与 RSC、client Router Cache，以及 CDN。每一层有自己的 **identity 与 invalidation**。
+      - 一行新鲜的 database row 不保证已经坐在浏览器里的 RSC response 也是新鲜的。`router.refresh()` 可以请求新的 server result，而不删除 persistent data-cache entry。
+      - `'use cache'` 加上 `cacheTag` / `cacheLife` 是在某个 key 与 lifetime 下的 reuse。**Suspense** 是 streaming boundary，不是 cache。
+      - Tags 是 invalidation index；arguments 与 captured scope 才是 key。
+      - **Failure：** tag 漏掉 tenant identity，invalidation 宽度就错了。指望 Suspense 去 cache 一次 query，或指望 cached data 自动 stream。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="next-server-actions">
+    <AccordionTrigger>4. 为什么 Server Action 不是受信任的 function？</AccordionTrigger>
+    <AccordionContent>
+
+      - `'use server'` 建立一个可以穿过 RSC boundary 的 server reference。Invoke 时，client 发送一次带 action reference 与 serialized arguments 的 HTTP **POST**。
+      - 从 client 可达的 action 是 **可被外部调用的 entry point**。即使 TypeScript 另有说法，arguments 仍是 hostile input。
+      - Authentication 证明 identity；authorization 证明这个 identity 可以对这个 resource 执行这个操作。Captured variables 不是 authorization 系统。IDs 是 opaque，不是 secret capabilities。
+      - Same-origin checks 与 encrypted closed-over values 缩小攻击面；它们不决定 tenant A 是否可以编辑 tenant B 的 row。
+      - 用 Zod validate，在 action 里 authorize，在 transaction commit **之后** invalidate cache。HTML forms 可以在 hydration 之前 invoke actions。Server 仍是权威。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="next-streaming">
+    <AccordionTrigger>5. 什么决定 streaming 质量，sequential await 又如何伤害它？</AccordionTrigger>
+    <AccordionContent>
+
+      - 一个 async Server Component 可以直接 query database。把这次调用绕过同一个应用的 Route Handler，会加上 HTTP serialization 与一次 hop。
+      - 独立的 `await getProduct` 再 `await getInventory` 会把本可重叠的工作 **序列化**。先启动两者，再 `Promise.all`。对独立 data 做 sequential await，是你引入的 waterfall。
+      - 若你要 static shell 加上延后区域——Partial Prerendering——request-time 工作（`cookies()`、`headers()`、`searchParams`）必须坐在 **Suspense** 下面。
+      - Boundary 说明什么可以独立揭示。决定 stream 看起来像 shell 还是 stall 的，是 data dependencies，不是文件数量。
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>

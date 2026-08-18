@@ -4,17 +4,32 @@ import { type InferPageType, loader, type PageData } from "fumadocs-core/source"
 import { toFumadocsSource } from "fumadocs-mdx/runtime/server"
 import type { DocData, DocMethods } from "fumadocs-mdx/runtime/types"
 import { fumadocsI18n } from "@/lib/fumadocs-i18n"
+import {
+  FULL_STACK_QA_SECTION_SLUGS,
+  isFullStackQaSection,
+  isHiddenSourcePage,
+} from "@/lib/source-hidden"
 
 const NOTES_CATEGORY = "notes"
 
-/** Generated `.source/server` is `@ts-nocheck`, so assert the doc entry shape for loader inference. */
-type DocsEntry = DocData &
-  DocMethods &
+/** Generated `.source/server` is `@ts-nocheck`, so assert the async doc entry shape for loader inference. */
+type DocsEntry = DocMethods &
   PageData & {
+    load: () => Promise<DocData>
+    structuredData: () => Promise<DocData["structuredData"]>
     author?: string
     date?: string | Date
     pinned?: boolean
-    category?: "frontend" | "backend" | "ai" | "computer-science" | "personal"
+    category?:
+      | "frontend"
+      | "backend"
+      | "system-design"
+      | "ai"
+      | "security"
+      | "devops"
+      | "computer-science"
+      | "full-stack"
+      | "personal"
   }
 
 export const content = loader({
@@ -39,11 +54,7 @@ export type NotesFolderNode = {
 
 export type NotesNode = NotesPostNode | NotesFolderNode
 
-/** Drafts: MDX files whose basename starts with `_` are on disk but unpublished. */
-export function isHiddenSourcePage(path: string) {
-  const file = path.split("/").pop() ?? ""
-  return file.startsWith("_")
-}
+export { FULL_STACK_QA_SLUG, isHiddenSourcePage } from "@/lib/source-hidden"
 
 function isNotesFolder(node: Node): node is Folder {
   return node.type === "folder" && node.$ref?.folder === NOTES_CATEGORY
@@ -59,7 +70,13 @@ function mapNotesNodes(
   for (const node of nodes) {
     if (node.type === "page") {
       const page = content.getNodePage(node as Item, locale)
-      if (!page || isHiddenSourcePage(page.path)) continue
+      if (
+        !page ||
+        isHiddenSourcePage(page.path) ||
+        isFullStackQaSection(page.path)
+      ) {
+        continue
+      }
       result.push({ type: "post", page })
       continue
     }
@@ -101,7 +118,8 @@ export function getCategoryPages(category: string, locale: string) {
       (page) =>
         page.slugs[0] === category &&
         page.slugs.length > 1 &&
-        !isHiddenSourcePage(page.path)
+        !isHiddenSourcePage(page.path) &&
+        !isFullStackQaSection(page.path)
     )
 }
 
@@ -137,7 +155,8 @@ export function getCategoryStaticParams(category: string) {
       (param) =>
         param.slug[0] === category &&
         param.slug.length > 1 &&
-        !param.slug.at(-1)?.startsWith("_")
+        !isHiddenSourcePage(param.slug.at(-1) ?? "") &&
+        !isFullStackQaSection(param.slug.at(-1) ?? "")
     )
     .map((param) => ({
       locale: param.locale,
@@ -154,6 +173,34 @@ export function getMdxContent(category: string, slug: string, locale: string) {
   const page = content.getPage([category, slug], locale)
   if (!page || isHiddenSourcePage(page.path)) return
   return page
+}
+
+export async function loadMdxCompiled(page: NotesPage) {
+  return page.data.load()
+}
+
+export async function loadFullStackQa(locale: string) {
+  const sections: {
+    slug: string
+    body: DocData["body"]
+    toc: DocData["toc"]
+  }[] = []
+
+  for (const slug of FULL_STACK_QA_SECTION_SLUGS) {
+    const page = content.getPage([NOTES_CATEGORY, slug], locale)
+    if (!page) continue
+    const compiled = await page.data.load()
+    sections.push({
+      slug,
+      body: compiled.body,
+      toc: compiled.toc ?? [],
+    })
+  }
+
+  return {
+    sections,
+    toc: sections.flatMap((section) => section.toc),
+  }
 }
 
 const getPageDate = (date?: string | Date) => {

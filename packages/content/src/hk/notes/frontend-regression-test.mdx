@@ -5,11 +5,12 @@ date: 2026-08-05
 category: frontend
 ---
 
-Frontend 的 **regression tests** 不是為了追逐 coverage 百分比，而是為了保護用戶早已依賴的行為：表單仍然可以提交、draft 在請求失敗後仍然保留、login flow 在 refactor 之後仍然會落到正確位置。
+Frontend 的 **regression tests** 保護用戶早已依賴的行為：表單仍然可以提交、draft 在請求失敗後仍然保留、login flow 在 refactor 之後仍然會落到正確位置。
 
 <br />
 
-這篇 note 是一份實用 playbook。它會講清楚什麼算 frontend regression、哪些行為值得保護、應該由哪一層攔截，以及如何把這套做法放進 pull requests，搭配 **Vitest**、**React Testing Library** 與 **Cypress**。
+- 它們不是為了追逐 coverage 百分比。
+- 在**仍能證明行為、成本最低的那一層**攔截 regression——**Vitest**、**React Testing Library**，或 **Cypress**。
 
 <br />
 
@@ -17,11 +18,7 @@ Frontend 的 **regression tests** 不是為了追逐 coverage 百分比，而是
 
 ## 1. 測什麼、在哪裡測
 
-按 **blast radius** 排優先順序，而不是按寫測試有多容易。聚焦金錢、auth、資料遺失路徑、高流量入口流程，以及曾經上線過的 bug。通常可略過一次性 chrome 與純視覺 polish。
-
-<br />
-
-在**仍能證明行為、成本最低的那一層**攔截 regressions：
+按 **blast radius** 排優先順序，而不是按寫測試有多容易。
 
 <br />
 
@@ -34,7 +31,11 @@ Frontend 的 **regression tests** 不是為了追逐 coverage 百分比，而是
 
 <br />
 
-經驗法則：如果結果必須依賴 **real browser** 與 **real navigation** 才可信，就用 Cypress；否則留在 Vitest。避免同一件事在每一層都證明一次。
+- 聚焦金錢、auth、資料遺失路徑、高流量入口流程，以及曾經上線過的 bug。
+- 略過一次性 chrome 與純視覺 polish。
+- 在**仍能證明行為、成本最低的那一層**攔截 regressions。
+- 如果結果必須依賴 **real browser** 與 **real navigation** 才可信，就用 Cypress；否則留在 Vitest。
+- **Failure：** 同一件事在每一層都證明一次。
 
 <br />
 
@@ -42,11 +43,7 @@ Frontend 的 **regression tests** 不是為了追逐 coverage 百分比，而是
 
 ## 2. 用 Vitest 與 RTL 攔截 Unit 與 Component Regressions
 
-測 component regressions 時，測**用戶可觀察的結果**。用 role 與 accessible name 查詢，用 `userEvent` 驅動 UI，並 assert 用戶接下來能看到或做到什麼。避免 assert internal state、CSS class lists，或 private function calls。
-
-<br />
-
-用它保護的 regression 來命名測試。`keeps draft when network fails` 對未來讀者的幫助，遠大於 `handles error`。
+測 component regressions 時，測**用戶可觀察的結果**。
 
 <br />
 
@@ -97,7 +94,10 @@ describe("DraftForm", () => {
 
 <br />
 
-當 component 變得難測時，抽出 pure logic，而不是跟 render tree 硬鬥。Formatting、validation 與 URL building 適合放進小函式並配 unit tests。Component test 就可以繼續聚焦 wiring 與 interaction。
+- 用 **role** 與 accessible name 查詢，用 `userEvent` 驅動 UI，並 assert 用戶接下來能看到或做到什麼。
+- 用它保護的 regression 來命名測試。`keeps draft when network fails` 對未來讀者的幫助，遠大於 `handles error`。
+- 當 component 變得難以測試時，抽出 pure logic——formatting、validation、URL building——並對這些 functions 做 unit-test。把 component test 留在 wiring 與 interaction。
+- **Failure：** assert internal state、CSS class lists，或 private function calls。
 
 <br />
 
@@ -126,7 +126,7 @@ describe("getNextDraftStatus", () => {
 
 ### Testing Custom Hooks
 
-當複雜的 state logic 不需要 UI 時，直接用 `renderHook` 與 `act` 測 hook。這樣不必 mount 多餘的 DOM elements，仍能證明 state transitions 可行。
+當複雜 state logic 不需要 UI 時，用 `renderHook` 與 `act` 直接測 hook。
 
 <br />
 
@@ -153,13 +153,13 @@ describe("usePagination", () => {
 
 <br />
 
-### Type-Safe Test Data
-
-對行為來說，優先用 **deterministic fixtures**，而不是寬泛的 snapshots。Snapshots 在某些 serialization 場景有用，但當真正重要的 contract 是「用戶仍能從 failed save 恢復」時，它們是偏弱的 regression signal。
+- 這能證明 state transitions，而不必 mount 不必要的 DOM。
 
 <br />
 
-為了讓 fixtures 保持 deterministic，又不必在每個測試重複大型 objects，可用 TypeScript 的 `Partial<T>` 建立 type-safe data factories。
+### Type-Safe Test Data
+
+對行為來說，優先用 **deterministic fixtures**，而不是寬泛的 snapshots。
 
 <br />
 
@@ -181,19 +181,14 @@ export function buildNote(overrides?: Partial<Note>): Note {
 
 <br />
 
-### Test Async States Explicitly
-
-多數 data-driven components 不只一種 success state：
-
-1. Initial or empty
-2. Loading
-3. Success
-4. Error
-5. Retry or recovery
+- Snapshots 對某些 serialization 場景有用，但當契約是「用戶仍然能從失敗的 save 裡恢復」時，它們是弱的 regression 信號。
+- 用 TypeScript 的 `Partial<T>` 建立 type-safe data factories，而不必在每個測試裡重複大型 objects。
 
 <br />
 
-Regression 往往藏在這些 states 之間的 transition。**MSW** 可以把測試留在 HTTP boundary，同時讓每個 response 都 deterministic。
+### Test Async States Explicitly
+
+多數 data-driven components 不只成功態：initial 或 empty、loading、success、error、retry 或 recovery。
 
 <br />
 
@@ -240,7 +235,9 @@ it("retries after the first request fails", async () => {
 
 <br />
 
-這個測試保護的不只是 error copy。它證明 failure 可見、retry 仍然可行，以及後續 success 會取代 error state。它不必知道 component 內部用的是 `fetch`、query library，還是 custom hook。
+- Regression 常常活在這些 states 之間的 **transition**。
+- **MSW** 把測試留在 HTTP boundary，同時讓每個 response 都是 deterministic。
+- 這個測試證明失敗是可見的、retry 仍然可能，以及後來的 success 會替換 error——而不必知道 component 用的是 `fetch`、query library，還是 custom hook。
 
 <br />
 
@@ -248,33 +245,7 @@ it("retries after the first request fails", async () => {
 
 ## 3. 用 Cypress 保護 Critical-Path E2E
 
-Cypress 適合保護那些只有搭配 routing、auth 與真實 page shell 才存在的 journeys。這套 suite 要保持精簡：通常是 **三到七** 條 journeys，而不是把每個 component test 再鏡像一次。
-
-<br />
-
-一組典型的保護集合大概像這樣：
-
-1. Sign in
-2. 完成產品的核心任務
-3. Sign out，或到達一個 durable success state
-
-<br />
-
-用 fixtures 做 seed，讓測試不依賴 production content。Assert 用戶在意的結果——URL、heading、success message——而不是沿途每一個 CSS class。若測試開始 flake，先 quarantine，再修復或刪除。把 flake 正常化，等於教導 suite 說謊。
-
-<br />
-
-穩定的 E2E tests 需要控制的不只是 data：
-
-- **Authentication：** 透過 API 或 task 建立 session，而不是在每個測試重複 sign-in UI
-- **Time：** 當 expiry、relative dates 或 scheduled behavior 重要時，凍結時鐘
-- **Network：** 等待 named request 或可見結果，絕不要任意 timeout
-- **Isolation：** 為測試建立獨有 records，並清理乾淨
-- **Selectors：** 優先用 roles 與 labels；只有在沒有 user-facing selector 時才用 test ID
-
-<br />
-
-要讓 `cy.loginAs()` 這類 custom commands 既 type-safe 又容易發現，請在 global `Cypress` namespace 裡宣告它們。
+Cypress 保護的是那些只有搭配 routing、auth 與真實 page shell 才存在的 journeys。
 
 <br />
 
@@ -322,11 +293,11 @@ describe("create note", () => {
 
 <br />
 
-不是每個 edge case 都該放在這裡。當 UI contract 不必靠完整 browser 就能證明時，edge cases 應留在 Vitest。Cypress 的價值，在於那些一旦出現 false green build，就會把壞掉的產品送上線的路徑。
-
-<br />
-
-一條 E2E test 應該只因一個可理解的原因失敗。單一測試若連續做 sign in、改 profile settings、create a note、搜尋、刪除，再 sign out，看起來很像真實 session，但接近尾聲的失敗幾乎沒有診斷價值。在 durable boundaries 切開 journeys，並透過 API commands 重用 setup。
+- 把這套 suite 保持很小：通常 **三到七條** journeys——sign in、完成核心產品任務、sign out 或到達一個耐久的 success state。
+- Seed fixtures，讓測試不依賴 production content。Assert URL、heading、success message——而不是沿途每一個 CSS class。
+- 透過 API 或 task 控制 **authentication**；expiry 重要時 freeze **time**；等待 named request 或可見結果；每個測試隔離 records；優先用 roles 與 labels（只有在沒有面向用戶的 selector 時才用 test ID）。
+- 當 UI contract 不必靠完整 browser 就能證明時，edge cases 屬於 Vitest。Cypress 賺回成本的地方，是 false green 會把壞產品送上線的那些路徑。
+- **Failure：** 單一測試 sign in、改 settings、create a note、search、delete，再 sign out。在耐久邊界切開 journeys。永遠不要等待任意 timeout。
 
 <br />
 
@@ -334,17 +305,81 @@ describe("create note", () => {
 
 ## Takeaway
 
-Frontend regression testing 最好當成一套 **triage system**。在成本最低且可靠的一層保護高價值行為，從真實 failures 長出 coverage，並讓 Cypress 保持夠薄，好讓 red build 仍然有意義。
+Frontend regression testing 最好當成一套 **triage system**。
 
 <br />
 
-比工具選擇更重要的習慣是：當某件事壞過一次，就要確保 suite 會在第二次抓住它——最好還用一個幾個月後讀起來仍像產品承諾的測試名稱。
+- 在成本最低、仍然可靠的那一層保護高價值行為，從真實 failures 增長 coverage，並把 Cypress 保持夠薄，讓紅掉的 build 仍然有意義。
+- 當某件事壞過一次，確保 suite 第二次會抓住它——最好用幾個月後讀起來仍然像 **product promise** 的測試名稱。
+- 修 bug 時 **先寫會失敗的測試**，並確認它因正確原因失敗，再套上 fix。
+- 本地跑 focused tests，PRs 上跑 unit/component suite，merge 前跑 critical E2E journeys。
+- **Failure：** 把 flake 常態化。如果測試隨機失敗，先 quarantine，再修或刪。第三次才過的測試，仍然是 flaky test。略過 pixel-perfect visual diffs、窮盡的 E2E edge cases，以及對 framework internals 的 assertions。Manual exploratory testing 仍然重要。
 
-<br />
+---
 
-**幾條維持 suite 健康的流程規則：**
+## Recap Q&A
 
-- **修 bug 時先寫會失敗的測試**，並確認它因正確原因失敗，再套上修復。
-- **在重要的地方跑測試：** 本地跑 focused tests，PRs 跑 unit/component suite，merge 前跑 critical E2E journeys。
-- **不要把 flake 正常化：** 若測試隨機失敗，先 quarantine。第三次才通過的測試，仍然是 flaky test。
-- **不要自動化一切：** 略過 pixel-perfect visual diffs、exhaustive E2E edge cases，以及對 framework internals 的 assertions。Manual exploratory testing 仍然重要。
+<Accordion type="single" collapsible>
+  <AccordionItem value="test-where">
+    <AccordionTrigger>1. 如何決定測什麼、在哪一層測？</AccordionTrigger>
+    <AccordionContent>
+
+      - 按 **blast radius** 排優先順序，而不是按寫測試有多容易。聚焦金錢、auth、資料遺失路徑、高流量入口流程，以及曾經上線過的 bug。
+      - 略過一次性 chrome 與純視覺 polish。在**仍能證明行為、成本最低的那一層**攔截 regressions。
+      - Unit（Vitest）測 pure logic。Component（Vitest + RTL）測 click → state → text/role。Integration-ish（RTL + MSW）測搭配 mocked network 的 page sections。
+      - 當必須依賴 **real browser** 與 **real navigation** 時，用 E2E（Cypress）。
+      - **Failure：** 同一件事在每一層都證明一次。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="test-rtl">
+    <AccordionTrigger>2. Vitest + RTL 測試保護的是什麼，Cypress 不該重複？</AccordionTrigger>
+    <AccordionContent>
+
+      - Component tests 保護 **interaction contracts**：表單仍然可以提交、draft 在請求失敗後仍然保留、按鈕仍然暴露正確的 role。
+      - 用 role 與 label 查詢，而不是 CSS class。當 page section 需要的是 response shape、而不是一台跑著的 server 時，用 MSW mock network。
+      - 當 UI contract 不必靠完整 browser 就能證明時，edge cases 屬於這裡。
+      - Cypress 賺回成本的地方，是 false green 會把壞產品送上線的那些路徑。
+      - Suite 是一套 **triage system**，不是 coverage 百分比。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="test-e2e">
+    <AccordionTrigger>3. Cypress suite 該保持多小，它 assert 什麼？</AccordionTrigger>
+    <AccordionContent>
+
+      - 保持 **三到七條** journeys，而不是每一條 component test 的鏡像。
+      - 典型集合：sign in、完成核心產品任務、sign out 或到達一個耐久的 success state。
+      - Seed fixtures，讓測試不依賴 production content。Assert URL、heading、success message——而不是每一個 CSS class。
+      - 透過 API 或 task 控制 authentication；expiry 重要時 freeze time；等待 named request 或可見結果；每個測試隔離 records；優先用 roles 與 labels。
+      - 不是每一個 edge case 都屬於這裡。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="test-flake">
+    <AccordionTrigger>4. 遇到 flaky test 怎麼辦？</AccordionTrigger>
+    <AccordionContent>
+
+      - 如果測試 flake，先 **quarantine**，再修或刪。把 flake 常態化，等於教 suite 撒謊。
+      - 第三次才過的測試，仍然是 flaky test。永遠不要等待任意 timeout。
+      - 修 bug 時 **先寫會失敗的測試**，並確認它因正確原因失敗，再套上 fix。
+      - 本地跑 focused tests，PRs 上跑 unit/component suite，merge 前跑 critical E2E journeys。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="test-takeaway">
+    <AccordionTrigger>5. 比工具選擇更重要的習慣是什麼？</AccordionTrigger>
+    <AccordionContent>
+
+      - 當某件事壞過一次，確保 suite 第二次會抓住它——最好用幾個月後讀起來仍然像 **product promise** 的測試名稱。
+      - 在成本最低、仍然可靠的那一層保護高價值行為，從真實 failures 增長 coverage，並把 Cypress 保持夠薄，讓紅掉的 build 仍然有意義。
+      - 不要自動化一切：略過 pixel-perfect visual diffs、窮盡的 E2E edge cases，以及對 framework internals 的 assertions。
+      - Manual exploratory testing 仍然重要。
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>

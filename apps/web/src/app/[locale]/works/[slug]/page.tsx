@@ -11,6 +11,7 @@ import {
   getCategoryStaticParams,
   getMdxContent,
   getPageLocales,
+  loadMdxCompiled,
 } from "@/lib/source"
 
 type Props = {
@@ -37,7 +38,7 @@ const Page = async ({ params }: Props) => {
   setRequestLocale(locale)
 
   const page = getMdxContent("works", slug, locale)
-  const toc = page?.data.toc ?? []
+  const toc = page ? ((await loadMdxCompiled(page)).toc ?? []) : []
 
   return (
     <PageLayout className="grid lg:grid-cols-2 content-start items-start">

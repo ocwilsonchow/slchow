@@ -14,7 +14,13 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
-      use: { ...devices["Desktop Chrome"] },
+      use: {
+        ...devices["Desktop Chrome"],
+        // GitHub-hosted Ubuntu already has Google Chrome. Playwright's
+        // Chrome-for-Testing zip on cdn.playwright.dev 403s from some
+        // Azure regions ("not available in your location").
+        ...(process.env.CI ? { channel: "chrome" as const } : {}),
+      },
     },
   ],
   webServer: {

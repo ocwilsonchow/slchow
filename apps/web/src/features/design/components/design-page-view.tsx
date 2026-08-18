@@ -14,8 +14,8 @@ import {
   type Transition,
   useReducedMotion,
 } from "motion/react"
-import { useTranslations } from "next-intl"
 import { useSearchParams } from "next/navigation"
+import { useTranslations } from "next-intl"
 import {
   type ReactNode,
   Suspense,
@@ -110,7 +110,8 @@ function DesignPageInner({
   useEffect(() => {
     if (expandedSlug || !closingSlug) return
     const album = designs.find((design) => design.slug === closingSlug)
-    const lastDelay = Math.max(0, (album?.images.length ?? 1) - 1) * STAGGER_EACH
+    const lastDelay =
+      Math.max(0, (album?.images.length ?? 1) - 1) * STAGGER_EACH
     // Drop `closingSlug` after the last staggered tile finishes (or the fade).
     const timeout = window.setTimeout(
       () => setClosingSlug(null),

@@ -36,7 +36,11 @@ Client
   → logs / metrics / alarms
 ```
 
-在 Lambda 上，identity 是 infrastructure 边界。在 Fargate 上，它在 request 打到 task 之后于 process 内执行。两边都仍需要 edge controls。
+<br />
+
+- 保持 entrypoint 精简。Business logic 不必知道 Lambda 或 ECS。
+- 在 Lambda 上，identity 是 infrastructure 边界。在 Fargate 上，它在 request 打到 task 之后于 process 内执行。
+- 两边都仍需要 edge controls。
 
 <br />
 
@@ -44,7 +48,7 @@ Client
 
 ## 2. Hono
 
-保持 entrypoint 精简。Business logic 不必知道 Lambda 或 ECS。
+保持 entrypoint 精简。Routes、Zod schemas 与 services 在两种 runtime 上保持相同。
 
 <br />
 
@@ -63,7 +67,8 @@ export const handler = handle(app)
 
 <br />
 
-在 Fargate 上，同一个 app 用 `serve({ fetch: app.fetch })` 提供服务。Routes、Zod schemas 与 services 保持不变。
+- 在 Fargate 上，同一个 app 用 `serve({ fetch: app.fetch })` 来 serve。
+- `OPTIONS` 与 `/api/health` 保持 public。其余一切在正确边界走 auth。
 
 <br />
 
@@ -71,13 +76,12 @@ export const handler = handle(app)
 
 ## 3. 用 Zod OpenAPI 定义 Contract
 
-Contract 是 route 接受什么、返回什么，以及 errors 长什么样。一份 Zod definition 同时驱动 validation、TypeScript types 与 OpenAPI。
+Contract 是一条 route 接受什么、返回什么，以及 errors 长什么样。一份 Zod definition 同时驱动 **validation**、**TypeScript types** 与 **OpenAPI**。
 
 <br />
 
 ```ts
 import { createRoute, z } from "@hono/zod-openapi"
-import { ErrorSchema, GatewayErrorSchema } from "./schemas"
 
 app.openAPIRegistry.registerComponent("securitySchemes", "CookieAuth", {
   type: "apiKey",
@@ -87,87 +91,52 @@ app.openAPIRegistry.registerComponent("securitySchemes", "CookieAuth", {
 })
 
 const UserSchema = z
-  .object({
-    id: z.string().uuid(),
-    email: z.string().email(),
-    name: z.string(),
-  })
+  .object({ id: z.string().uuid(), email: z.string().email(), name: z.string() })
   .openapi("User")
 
 const CreateUserSchema = z
-  .object({
-    email: z.string().email(),
-    name: z.string().min(1).max(100),
-  })
+  .object({ email: z.string().email(), name: z.string().min(1).max(100) })
   .openapi("CreateUser")
-```
 
-<br />
-
-```ts
 const createUserRoute = createRoute({
   method: "post",
   path: "/users",
   security: [{ CookieAuth: [] }],
   request: {
-    body: {
-      content: {
-        "application/json": {
-          schema: CreateUserSchema,
-        },
-      },
-    },
+    body: { content: { "application/json": { schema: CreateUserSchema } } },
   },
   responses: {
     201: {
       description: "User created",
-      content: {
-        "application/json": {
-          schema: UserSchema,
-        },
-      },
+      content: { "application/json": { schema: UserSchema } },
     },
     400: {
       description: "Invalid request",
-      content: {
-        "application/json": {
-          schema: ErrorSchema,
-        },
-      },
+      content: { "application/json": { schema: ErrorSchema } },
     },
     401: {
       description: "Authentication cookie is missing",
-      content: {
-        "application/json": {
-          schema: GatewayErrorSchema,
-        },
-      },
+      content: { "application/json": { schema: GatewayErrorSchema } },
     },
     403: {
       description: "The session is invalid or not authorized",
-      content: {
-        "application/json": {
-          schema: GatewayErrorSchema,
-        },
-      },
+      content: { "application/json": { schema: GatewayErrorSchema } },
     },
   },
 })
-```
 
-<br />
-
-```ts
 app.openapi(createUserRoute, async (c) => {
   const input = c.req.valid("json")
-  const user = await createUser(input)
-  return c.json(user, 201)
+  return c.json(await createUser(input), 201)
 })
 ```
 
 <br />
 
-共用的 error shapes 让 `400` / `404` / `409` 保持一致。API Gateway authorizer 失败则用较小的 gateway shape 表示 `401` / `403`——两边都要文档化。
+- Security schemes 注册一次。`createRoute` 点名 method、path、request body 与 response codes。
+- 共享的 error shapes 让 `400` / `404` / `409` 保持一致。API Gateway authorizer failures 用更小的 gateway shape 表示 `401` / `403` —— 两边都要 document。
+- 尽早挂上 **request ID**，并把它写进 logs 与 error responses。
+- 在 handler 思考 **之前** 先 validate 形状。表单上的 TypeScript 不是 parser。
 
 <br />
 
@@ -215,44 +184,13 @@ const app = new OpenAPIHono({
 
 <br />
 
-尽早附上 **request ID**，并把它放进 logs 与 error responses。
-
-<br />
-
 ---
 
 ## 4. Drizzle 与 PostgreSQL
 
-PostgreSQL 是持久化的权威来源。Drizzle 让 schema 与 queries 保持 typed，又不隐藏 SQL。Statement 模型见 [SQL 核心概念](/notes/core-sql-concepts)。在 concurrency 下，优先用 database constraints，而不是 check-then-insert。
+PostgreSQL 是 durable authority。Drizzle 让 schema 与 queries 保持 typed，同时不把 SQL 藏起来。Statement 模型见 [SQL 核心概念](/notes/core-sql-concepts)。在 concurrency 下，优先用 **database constraints**（unique email、`timestamptz`），而不是 check-then-insert。
 
-<br />
-
-```ts
-import {
-  pgTable,
-  text,
-  timestamp,
-  uniqueIndex,
-  uuid,
-} from "drizzle-orm/pg-core"
-
-export const users = pgTable(
-  "users",
-  {
-    id: uuid("id").defaultRandom().primaryKey(),
-    email: text("email").notNull(),
-    name: text("name").notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true })
-      .defaultNow()
-      .notNull(),
-  },
-  (table) => [uniqueIndex("users_email_idx").on(table.email)]
-)
-```
-
-<br />
-
-在 Lambda 上，于 handler 外创建 client，让 warm environments 可以重用，并把 pool 保持得很小：
+在 Lambda 上，把 client 创建在 handler **之外**，让 warm environments 重用它，并把 pool 保持很小：
 
 <br />
 
@@ -273,9 +211,11 @@ export const db = drizzle(client)
 
 <br />
 
-每个 warm environment 的重用并不是全局 pooling。要限制 concurrency、设置 timeouts，规模大时使用 pooler 或 RDS Proxy。当 transaction-mode pooler 有要求时，停用 prepared statements（`prepare: false`）。
-
-Migrations 是 **deploy step**，永远不要放进 request path。用 Drizzle Kit 生成 SQL、审阅它、在可丢弃的 DB 上测试，再于代码依赖新 shape 之前套用。当变更无法原子性上线时，使用 expand-and-contract。
+- 每个 warm environment 的 reuse 不是 global pooling。限制 concurrency、设 timeouts，规模上来时用 pooler 或 RDS Proxy。
+- 当 transaction-mode pooler 要求时，关掉 prepared statements（`prepare: false`）。
+- Migrations 是 **deploy step**，绝不是 request path 的一部分。用 Drizzle Kit 生成 SQL，审阅它，在可丢弃的 DB 上测试，在代码依赖新形状之前 apply。
+- 无法原子出货的改动，用 expand-and-contract。
+- Secrets 来自 **linked** SST resources，不是 hardcoded env。
 
 <br />
 
@@ -283,7 +223,7 @@ Migrations 是 **deploy step**，永远不要放进 request path。用 Drizzle K
 
 ## 5. Better Auth 与 Authorizer
 
-Better Auth 跑在 API 里：sign-up、sign-in、sessions、accounts 通过 Drizzle adapter 存进 Postgres。Secrets 来自 linked SST resources。
+Better Auth 跑在 API 里：sign-up、sign-in、sessions、accounts 经 Drizzle adapter 进 Postgres。Secrets 来自 linked SST resources。
 
 <br />
 
@@ -304,17 +244,13 @@ export const auth = betterAuth({
 
 <br />
 
-把 auth mount 在公开 route。让 `/api/health` 与 `/api/auth/*` 不经过 authorizer。
+- 把 auth mount 在 public route：`app.on(["GET", "POST"], "/api/auth/*", (c) => auth.handler(c.req.raw))`。
+- 让 `/api/health` 与 `/api/auth/*` **离开** authorizer。
+- `trustedOrigins` 是 auth config 的一部分，不是注释。CORS 点名带 credentials 的 app origin —— wildcard origin 配 cookies 是 misconfiguration。
+- 优先用 same-site domains（`app.example.com` / `api.example.com`）加上 secure HTTP-only cookies。
+- 一开始关掉 authorizer caching，这样被 revoked 的 sessions 不会滞留。
 
-<br />
-
-```ts
-app.on(["GET", "POST"], "/api/auth/*", (c) => auth.handler(c.req.raw))
-```
-
-<br />
-
-Lambda authorizer 在 API function 执行前验证 session：
+Lambda authorizer 在 API function 跑之前验证 session：
 
 <br />
 
@@ -358,34 +294,12 @@ export const handler: APIGatewayRequestSimpleAuthorizerHandlerV2WithContext<
 
 <br />
 
-缺少 cookie → `401`。Authorizer deny → `403`。两者都不会 invoke API Lambda。成功时，Hono 从 authorizer context 读取 identity——永远不要从 client 的 `X-User-Id` 读。
+- 缺少 cookie → `401`。Authorizer deny → `403`。两者都不会 invoke API Lambda。
+- 成功时，Hono 从 authorizer context 读 identity —— 绝不从 client 的 `X-User-Id`：`c.env.event.requestContext.authorizer.lambda`。
+- Authentication 回答 *谁*。Authorization（roles、org membership、RLS）留在 app 里 —— 见 [multi-tenant 笔记](/notes/multi-tenant-backend-drizzle-hono-better-auth)。
+- 在 Fargate 上，同一套 Better Auth session check 作为 Hono middleware，在 request 到达 task 之后跑。
 
-<br />
-
-```ts
-app.get("/users/me", (c) => {
-  const identity = (
-    c.env.event.requestContext as {
-      authorizer?: { lambda?: { userId: string; sessionId: string } }
-    }
-  ).authorizer?.lambda
-
-  if (!identity) {
-    return c.json(
-      { code: "UNAUTHORIZED", message: "Authentication is required." },
-      401
-    )
-  }
-
-  return c.json({ userId: identity.userId })
-})
-```
-
-<br />
-
-Authentication 回答 *是谁*。Authorization（roles、org membership、RLS）留在 app 里——见 [multi-tenant 笔记](/notes/multi-tenant-backend-drizzle-hono-better-auth)。优先使用 same-site domains（`app.example.com` / `api.example.com`）搭配 secure HTTP-only cookies。一开始先关掉 authorizer caching，避免已撤销的 sessions 继续残留。
-
-在 Fargate 上，同一个 Better Auth session check 会在 request 到达 task 后，以 Hono middleware 执行。
+**Failure:** 信任 client 的 `X-User-Id` header，或 wildcard CORS origin 配 credentials。
 
 <br />
 
@@ -393,26 +307,10 @@ Authentication 回答 *是谁*。Authorization（roles、org membership、RLS）
 
 ## 6. OpenAPI 与 Scalar
 
-<br />
+OpenAPI JSON 是可携带的 artifact（CI、typed clients、breaking-change checks）。Scalar 是 presentation layer。
 
-```ts
-app.doc("/openapi.json", {
-  openapi: "3.0.0",
-  info: { title: "Example API", version: "1.0.0" },
-})
-
-app.get(
-  "/docs",
-  Scalar({
-    url: "/openapi.json",
-    theme: "kepler",
-  })
-)
-```
-
-<br />
-
-在 production 用 stage-gate 或 authentication 保护 docs。公开的 reference 等于免费侦察。OpenAPI JSON 是可携带的 artifact（CI、typed clients、breaking-change checks）；Scalar 是呈现层。
+- `app.doc("/openapi.json", { openapi: "3.0.0", info: { title: "Example API", version: "1.0.0" } })` 以及 `app.get("/docs", Scalar({ url: "/openapi.json", theme: "kepler" }))`。
+- Production 里对 docs 做 stage-gate 或 authenticate。公开的 reference 等于免费侦察。
 
 <br />
 
@@ -420,7 +318,7 @@ app.get(
 
 ## 7. 用 SST 部署
 
-一个 catch-all 后面的 Hono API Lambda，让 middleware、errors、OpenAPI 与 DB setup 集中在一处。Authorizer 分开，作为 security boundary。只有出于运营理由（permissions、timeouts、async work）才拆 functions，不要只因为 paths 不同就拆。
+一个 catch-all 后面的 Hono API Lambda，让 middleware、errors、OpenAPI 与 DB setup 留在一处。Authorizer 单独留下，作为 security boundary。只为 operational 原因拆 functions（permissions、timeouts、async work），不要因为 paths 不同就拆。
 
 <br />
 
@@ -471,7 +369,10 @@ api.route("$default", apiFunction.arn, {
 
 <br />
 
-明确的公开 `OPTIONS` 很重要：带 authorizer 的 `$default` 会拒绝浏览器 preflight。只有必须访问 private resources 时，才把 functions 放进 VPC。
+- 明确的 public `OPTIONS` 很重要：带 authorizer 的 `$default` 会拒绝 browser preflight。
+- 只有 functions 必须碰到 private resources 时，才把它们放进 VPC。
+- 与 runtime 无关的 app hardening：strict CORS、secure cookies、request IDs、structured logs（不要 tokens）、WAF 之下对 `/api/auth/*` 的 app-level rate limits、Zod validation，以及 production 需要时的 invite-only signup。
+- Production stages 使用 `protect` 与 `removal: "retain"`（[SST config](https://sst.dev/docs/reference/config/#removal)）。
 
 Container 路径：`Vpc` → `Cluster` → `Service`，TLS 与 WAF 放在 [`sst.aws.Router`](https://sst.dev/docs/component/aws/router) 上。
 
@@ -522,17 +423,11 @@ router.route("/", service.url)
 
 <br />
 
-与 runtime 无关的 app hardening：严格 CORS、secure cookies、request IDs、structured logs（不含 tokens）、在 WAF 之下对 `/api/auth/*` 做 app-level rate limits、Zod validation，以及 production 需要时的 invite-only signup。
-
-Production stages 使用 `protect` 与 `removal: "retain"`（[SST config](https://sst.dev/docs/reference/config/#removal)）。
-
-<br />
-
 ---
 
 ## 8. Monitor 与 Recover
 
-Logs、metrics 与 traces 应共用同一个 request id。
+Logs、metrics 与 traces 应共享一个 request id。针对症状告警。SNS 是「告诉人」的总线。
 
 <br />
 
@@ -541,10 +436,6 @@ Logs、metrics 与 traces 应共用同一个 request id。
 | Logs | Service `logging.retention` → CloudWatch | Function `logging.retention` |
 | Metrics | ALB 5xx / latency，ECS CPU / memory | Errors、duration、throttles、concurrency |
 | Alarms | Unhealthy hosts、p99、CPU | Error rate、throttles、timeout proximity |
-
-<br />
-
-针对症状告警。SNS 是「通知人」的 bus：
 
 <br />
 
@@ -572,36 +463,17 @@ new aws.cloudwatch.MetricAlarm("Api5xx", {
     LoadBalancer: service.nodes.loadBalancer.arnSuffix,
   },
 })
-
-new aws.cloudwatch.MetricAlarm("ApiLambdaErrors", {
-  alarmName: `${$app.name}-${$app.stage}-api-lambda-errors`,
-  comparisonOperator: "GreaterThanThreshold",
-  evaluationPeriods: 1,
-  metricName: "Errors",
-  namespace: "AWS/Lambda",
-  period: 60,
-  statistic: "Sum",
-  threshold: 5,
-  treatMissingData: "notBreaching",
-  alarmActions: [alerts.arn],
-  dimensions: {
-    FunctionName: apiFunction.name,
-  },
-})
 ```
 
 <br />
 
-CloudTrail 与 GuardDuty 留在 account 层级——确认它们已开启；不要用 Console 去改 SST 管理的 resources。
+- CloudTrail 与 GuardDuty 留在 account 层 —— 确认它们开着；不要在 Console 里人手编辑 SST-managed resources。
+- 为 Lambda 镜像同一条 alarm：namespace `AWS/Lambda`，metric `Errors`，dimension `FunctionName`。
+- Durable state 几乎全部是 **Postgres**。Compute 可以从 git + SST 重新部署。
+- 先写下 **RPO** 与 **RTO**，然后：automated backups，retention 对齐 RPO；产品重要时做 cross-region snapshot copy；versioned Drizzle migrations，让 restored DB 能赶上来。
+- Restore drill：snapshot → 非 prod `DATABASE_URL` → migrate → `/api/health` + 一条 critical path → 记下真实 RTO。
 
-Durable state 几乎全在 **Postgres**。Compute 可从 git + SST 重新部署。先写下 **RPO** 与 **RTO**，然后：
-
-- 自动化 backups，retention 符合 RPO
-- 产品重要时做 cross-region snapshot copy
-- Versioned Drizzle migrations，让还原后的 DB 可以跟上
-- 一次 restore drill：snapshot → non-prod `DATABASE_URL` → migrate → `/api/health` + 一条关键路径 → 记录真实 RTO
-
-Multi-AZ 是同一 region 内的 high availability，不是 cross-region disaster recovery。
+**Failure:** 把 Multi-AZ 叫做「disaster recovery」。它是同一 region 内的 high availability，不是 cross-region DR。
 
 <br />
 
@@ -611,9 +483,10 @@ Multi-AZ 是同一 region 内的 high availability，不是 cross-region disaste
 
 对 Lambda 上的 `POST /users`：API Gateway → authorizer（Better Auth session）→ Hono adapter → request ID middleware → Zod → service → Drizzle → Postgres → `201`。同一份 route schema 也出现在 `/openapi.json`。
 
-测试多半放在 Lambda adapter **之下**，用 `app.request` 与 mock authorizer context。Queries 与 migrations 用真实可丢弃的 Postgres。把 deployed tests 留给 authorizer decisions、CORS、linked secrets 与 domains。
-
-接受的 trade-offs：OpenAPI response 重复、cold starts、刻意的 connection limits，以及 TypeScript 在 runtime 消失——Zod 与 Postgres constraints 仍然重要。每一层都保持可替换。
+- 测试多半放在 Lambda adapter **之下**，用 `app.request` 与 mock authorizer context。
+- Queries 与 migrations 用真实可丢弃的 Postgres。
+- 把 deployed tests 留给 authorizer decisions、CORS、linked secrets 与 domains。
+- 接受的 trade-offs：OpenAPI response 重复、cold starts、刻意的 connection limits，以及 TypeScript 在 runtime 消失——Zod 与 Postgres constraints 仍然重要。每一层都保持可替换。
 
 <br />
 
@@ -633,10 +506,77 @@ Recover    → RPO/RTO → backups → restore drills → sst deploy + DNS
 
 <br />
 
----
-
-## 结语
-
 保持路径简短：validated request、trusted identity、typed query、durable constraint、generated docs、可审阅的 infra。依流量形态选择 **Lambda** 或 **Fargate**，把 WAF 与 identity 放在正确边界，针对症状告警，在 restore drill 符合你写下的 RPO/RTO 之前，不要说它 production-ready。
 
 Stages 与 CI deploy loop，请继续看 [用 SST 管理 AWS 基础设施与 DevOps](/notes/using-sst-for-aws-infra-and-devops)。Tenant isolation 见 [multi-tenant 后端笔记](/notes/multi-tenant-backend-drizzle-hono-better-auth)。
+
+---
+
+## Recap Q&A
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="hono-arch">
+    <AccordionTrigger>1. 默认架构是什么，什么时候选 Lambda，什么时候选 Fargate？</AccordionTrigger>
+    <AccordionContent>
+
+      - 默认形态：一个 **Hono API Lambda** 放在 **API Gateway** 后面，第二个 Lambda 作为 **Better Auth authorizer**。被拒绝的 sessions 永远不会 invoke API function。
+      - 同一个 Hono app 也可以跑在 Fargate 上，用 `serve({ fetch: app.fetch })` 取代 `handle(app)`。保持 entrypoint 精简。Business logic 不必知道 Lambda 或 ECS。
+      - 选 **Lambda**：流量尖峰或闲置、handlers 短、authorizer 先拒绝。
+      - 选 **Fargate**：稳定流量、长请求、streaming、agents，以及 connection reuse。
+      - 在 Lambda 上，identity 是 infrastructure 边界。在 Fargate 上，它在 request 打到 task 之后于 process 内执行。两边都仍需要 edge controls。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="hono-zod-openapi">
+    <AccordionTrigger>2. 一份 Zod definition 驱动什么，为什么那就是 contract？</AccordionTrigger>
+    <AccordionContent>
+
+      - Contract 是一条 route 接受什么、返回什么，以及 errors 长什么样。一份 Zod definition 同时驱动 **validation**、**TypeScript types** 与 **OpenAPI**。
+      - Security schemes 注册一次。`createRoute` 点名 method、path、request body 与 response codes。Scalar 读生成的 OpenAPI JSON。
+      - 在 handler 思考 **之前** 先 validate 形状。表单上的 TypeScript 不是 parser。
+      - 公开的 OpenAPI/Scalar 表面就是侦察 —— production 里做 stage-gate。
+      - Production 默认是一个 catch-all Hono function，让 middleware、errors、OpenAPI 与 DB setup 留在一处。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="hono-drizzle">
+    <AccordionTrigger>3. Drizzle 在 Lambda 上该怎么放，migrations 何时跑？</AccordionTrigger>
+    <AccordionContent>
+
+      - PostgreSQL 是 durable authority。Drizzle 让 schema 与 queries 保持 typed，同时不把 SQL 藏起来。在 concurrency 下，优先用 **database constraints**，而不是 check-then-insert。
+      - 在 Lambda 上，把 client 创建在 handler **之外**，让 warm environments 重用它，并把 pool 保持很小（`max: 1`）。每个 warm environment 的 reuse 不是 global pooling。
+      - 限制 concurrency、设 timeouts，规模上来时用 pooler 或 RDS Proxy。当 transaction-mode pooler 要求时，关掉 prepared statements。
+      - Migrations 是 **deploy step**，绝不是 request path 的一部分。用 Drizzle Kit 生成 SQL，审阅它，在可丢弃的 DB 上测试，在代码依赖新形状之前 apply。
+      - 无法原子出货的改动，用 expand-and-contract。Secrets 来自 **linked** SST resources，不是 hardcoded env。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="hono-auth">
+    <AccordionTrigger>4. Better Auth 跑在哪里，authorizer 把什么挡在 API function 之外？</AccordionTrigger>
+    <AccordionContent>
+
+      - Better Auth 跑在 API 里：sign-up、sign-in、sessions、accounts 经 Drizzle adapter 进 Postgres。把它 mount 在 public route。
+      - 让 `/api/health` 与 `/api/auth/*` **离开** authorizer。Lambda authorizer 从 Cookie header 验证 session，**然后** API function 才跑。
+      - `trustedOrigins` 是 auth config 的一部分，不是注释。CORS 点名带 credentials 的 app origin —— wildcard origin 配 cookies 是 misconfiguration。
+      - 只为 operational 原因拆 functions（permissions、timeouts、async work），不要因为 paths 不同就拆。
+      - **Failure:** 信任 client 的 `X-User-Id`，或打开 authorizer caching 让被 revoked 的 sessions 滞留。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="hono-sst">
+    <AccordionTrigger>5. SST 如何接上 API，什么仍然是 security boundary？</AccordionTrigger>
+    <AccordionContent>
+
+      - 一个 catch-all 后面的 Hono API Lambda。**Authorizer 单独留下**。Link `DatabaseUrl` 与 `BetterAuthSecret`。
+      - `/api/auth/{proxy+}` 与 `OPTIONS` 不带 auth；`$default` 走 authorizer。Domain、CORS 与 logging retention 和 function 写在同一份 TypeScript 里。
+      - Stages、`sst dev` 与 CI boundary 属于 SST DevOps 笔记。这篇笔记是 typed API，一路到 production 的 protect、monitor 与 recover。
+      - Tenant isolation 是另一篇：identity、request context 与 RLS 必须彼此一致。
+      - 在 restore drill 符合你写下的 RPO/RTO 之前，不要说它 production-ready。
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>

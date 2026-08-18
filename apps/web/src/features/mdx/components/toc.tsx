@@ -177,7 +177,10 @@ export const Toc = ({ toc, className, labelled = true }: TocProps) => {
   }
 
   return (
-    <nav aria-label={t("tableOfContents")} className={cn("mt-5 space-y-2", className)}>
+    <nav
+      aria-label={t("tableOfContents")}
+      className={cn("mt-5 space-y-2", className)}
+    >
       <div className="text-xs text-content-subdued">Table of Contents</div>
       {list}
     </nav>

@@ -5,11 +5,12 @@ date: 2026-08-05
 category: frontend
 ---
 
-**Regression tests** on the frontend are not about chasing a coverage percentage. They are about protecting behavior that users already rely on: a form that still submits, a draft that still survives a failed request, a login flow that still lands in the right place after a refactor.
+**Regression tests** on the frontend protect behavior that users already rely on: a form that still submits, a draft that still survives a failed request, a login flow that still lands in the right place after a refactor.
 
 <br />
 
-This note is a practical playbook. It covers what counts as a frontend regression, what is worth protecting, which layer should catch it, and how to fold that into pull requests with **Vitest**, **React Testing Library**, and **Cypress**.
+- They are not about chasing a coverage percentage.
+- Catch the regression at the cheapest layer that still proves the behavior — **Vitest**, **React Testing Library**, or **Cypress**.
 
 <br />
 
@@ -17,11 +18,7 @@ This note is a practical playbook. It covers what counts as a frontend regressio
 
 ## 1. What to Test and Where
 
-Prioritize by **blast radius**, not by how easy the test is to write. Focus on money, auth, data-loss paths, high-traffic entry flows, and bugs that already shipped once. Usually skip one-off chrome and purely visual polish.
-
-<br />
-
-Catch regressions at the **cheapest layer that still proves the behavior**:
+Prioritize by **blast radius**, not by how easy the test is to write.
 
 <br />
 
@@ -34,7 +31,11 @@ Catch regressions at the **cheapest layer that still proves the behavior**:
 
 <br />
 
-Rule of thumb: if a **real browser** and **real navigation** are required to trust the result, use Cypress. Otherwise stay in Vitest. Avoid proving the same fact at every layer.
+- Focus on money, auth, data-loss paths, high-traffic entry flows, and bugs that already shipped once.
+- Skip one-off chrome and purely visual polish.
+- Catch regressions at the **cheapest layer that still proves the behavior**.
+- If a **real browser** and **real navigation** are required to trust the result, use Cypress. Otherwise stay in Vitest.
+- **Failure:** proving the same fact at every layer.
 
 <br />
 
@@ -42,11 +43,7 @@ Rule of thumb: if a **real browser** and **real navigation** are required to tru
 
 ## 2. Unit and Component Regressions with Vitest and RTL
 
-For component regressions, test **user-observable outcomes**. Query by role and accessible name, drive the UI with `userEvent`, and assert what the user can see or do next. Avoid asserting internal state, CSS class lists, or private function calls.
-
-<br />
-
-Name the test after the regression it protects. `keeps draft when network fails` tells a future reader more than `handles error`.
+For component regressions, test **user-observable outcomes**.
 
 <br />
 
@@ -97,7 +94,10 @@ describe("DraftForm", () => {
 
 <br />
 
-When a component becomes hard to test, extract pure logic instead of fighting the render tree. Formatting, validation, and URL building belong in small functions with unit tests. The component test can then stay focused on wiring and interaction.
+- Query by **role** and accessible name, drive the UI with `userEvent`, and assert what the user can see or do next.
+- Name the test after the regression it protects. `keeps draft when network fails` tells a future reader more than `handles error`.
+- When a component becomes hard to test, extract pure logic — formatting, validation, URL building — and unit-test those functions. Keep the component test on wiring and interaction.
+- **Failure:** asserting internal state, CSS class lists, or private function calls.
 
 <br />
 
@@ -126,7 +126,7 @@ describe("getNextDraftStatus", () => {
 
 ### Testing Custom Hooks
 
-When complex state logic does not need a UI, test the hook directly using `renderHook` and `act`. This avoids mounting unnecessary DOM elements while still proving the state transitions work.
+When complex state logic does not need a UI, test the hook directly with `renderHook` and `act`.
 
 <br />
 
@@ -153,13 +153,13 @@ describe("usePagination", () => {
 
 <br />
 
-### Type-Safe Test Data
-
-For behavior, prefer **deterministic fixtures** over broad snapshots. Snapshots are useful for some serialization cases, but they are a weak regression signal when the important contract is “user can still recover from a failed save.”
+- This proves state transitions without mounting unnecessary DOM.
 
 <br />
 
-To keep fixtures deterministic without repeating large objects in every test, use TypeScript's `Partial<T>` to build type-safe data factories.
+### Type-Safe Test Data
+
+For behavior, prefer **deterministic fixtures** over broad snapshots.
 
 <br />
 
@@ -181,19 +181,14 @@ export function buildNote(overrides?: Partial<Note>): Note {
 
 <br />
 
-### Test Async States Explicitly
-
-Most data-driven components have more than a success state:
-
-1. Initial or empty
-2. Loading
-3. Success
-4. Error
-5. Retry or recovery
+- Snapshots are useful for some serialization cases, but they are a weak regression signal when the contract is “user can still recover from a failed save.”
+- Use TypeScript's `Partial<T>` to build type-safe data factories without repeating large objects in every test.
 
 <br />
 
-The regression often lives in the transition between those states. **MSW** can keep the test at the HTTP boundary while making each response deterministic.
+### Test Async States Explicitly
+
+Most data-driven components have more than a success state: initial or empty, loading, success, error, retry or recovery.
 
 <br />
 
@@ -240,7 +235,9 @@ it("retries after the first request fails", async () => {
 
 <br />
 
-This test protects more than error copy. It proves that the failure is visible, retry remains possible, and a later success replaces the error state. It does not need to know whether the component uses `fetch`, a query library, or a custom hook internally.
+- The regression often lives in the **transition** between those states.
+- **MSW** keeps the test at the HTTP boundary while making each response deterministic.
+- This test proves the failure is visible, retry remains possible, and a later success replaces the error — without knowing whether the component uses `fetch`, a query library, or a custom hook.
 
 <br />
 
@@ -248,33 +245,7 @@ This test protects more than error copy. It proves that the failure is visible, 
 
 ## 3. Critical-Path E2E with Cypress
 
-Cypress is where journeys that only exist with routing, auth, and the real page shell get protected. Keep that suite small: usually **three to seven** journeys, not a mirror of every component test.
-
-<br />
-
-A typical protected set looks like:
-
-1. Sign in
-2. Complete the core task for the product
-3. Sign out, or reach a durable success state
-
-<br />
-
-Seed fixtures so the test does not depend on production content. Assert outcomes users care about—URL, heading, success message—not every CSS class along the way. If a test flakes, quarantine it, then fix or delete it. Normalizing flake teaches the suite to lie.
-
-<br />
-
-Stable E2E tests need control over more than data:
-
-- **Authentication:** create a session through an API or task instead of repeating the sign-in UI in every test
-- **Time:** freeze the clock when expiry, relative dates, or scheduled behavior matters
-- **Network:** wait on a named request or visible outcome, never an arbitrary timeout
-- **Isolation:** create records unique to the test and clean them up
-- **Selectors:** prefer roles and labels; use a test ID only when no user-facing selector exists
-
-<br />
-
-To make custom commands like `cy.loginAs()` type-safe and discoverable, declare them in the global `Cypress` namespace.
+Cypress is where journeys that only exist with routing, auth, and the real page shell get protected.
 
 <br />
 
@@ -322,11 +293,11 @@ describe("create note", () => {
 
 <br />
 
-Not every edge case belongs here. Edge cases belong in Vitest when the UI contract can be proven without a full browser. Cypress earns its keep on the paths where a false green build would ship a broken product.
-
-<br />
-
-An E2E test should fail for one understandable reason. A single test that signs in, changes profile settings, creates a note, searches for it, deletes it, and signs out may resemble a real session, but a failure near the end gives poor diagnostic information. Split journeys at durable boundaries while reusing setup through API commands.
+- Keep that suite small: usually **three to seven** journeys — sign in, complete the core product task, sign out or reach a durable success state.
+- Seed fixtures so the test does not depend on production content. Assert URL, heading, success message — not every CSS class along the way.
+- Control **authentication** through an API or task, freeze **time** when expiry matters, wait on a named request or visible outcome, isolate records per test, prefer roles and labels (test ID only when no user-facing selector exists).
+- Edge cases belong in Vitest when the UI contract can be proven without a full browser. Cypress earns its keep on paths where a false green would ship a broken product.
+- **Failure:** a single test that signs in, changes settings, creates a note, searches, deletes, and signs out. Split journeys at durable boundaries. Never wait on an arbitrary timeout.
 
 <br />
 
@@ -334,17 +305,81 @@ An E2E test should fail for one understandable reason. A single test that signs 
 
 ## Takeaway
 
-Frontend regression testing works best as a **triage system**. Protect high-value behavior at the cheapest reliable layer, grow coverage from real failures, and keep Cypress thin enough that a red build still means something.
+Frontend regression testing works best as a **triage system**.
 
 <br />
 
-The habit that matters more than any tool choice: when something breaks once, make sure the suite will catch it the second time—preferably with a test name that still reads like a product promise months later.
-
-<br />
-
-**A few process rules to keep the suite healthy:**
-
+- Protect high-value behavior at the cheapest reliable layer, grow coverage from real failures, and keep Cypress thin enough that a red build still means something.
+- When something breaks once, make sure the suite will catch it the second time — preferably with a test name that still reads like a **product promise** months later.
 - **Write the failing test first** when fixing a bug, and make sure it fails for the right reason before applying the fix.
-- **Run tests where they matter:** run focused tests locally, the unit/component suite on PRs, and critical E2E journeys before merge.
-- **Don't normalize flake:** if a test fails randomly, quarantine it. A test that passes on its third attempt is still a flaky test.
-- **Don't automate everything:** skip pixel-perfect visual diffs, exhaustive E2E edge cases, and assertions on framework internals. Manual exploratory testing still matters.
+- Run focused tests locally, the unit/component suite on PRs, and critical E2E journeys before merge.
+- **Failure:** normalizing flake. If a test fails randomly, quarantine it, then fix or delete it. A test that passes on its third attempt is still a flaky test. Skip pixel-perfect visual diffs, exhaustive E2E edge cases, and assertions on framework internals. Manual exploratory testing still matters.
+
+---
+
+## Recap Q&A
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="test-where">
+    <AccordionTrigger>1. How do you decide what to test and at which layer?</AccordionTrigger>
+    <AccordionContent>
+
+      - Prioritize by **blast radius**, not by how easy the test is to write. Focus on money, auth, data-loss paths, high-traffic entry flows, and bugs that already shipped once.
+      - Skip one-off chrome and purely visual polish. Catch regressions at the **cheapest layer that still proves the behavior**.
+      - Unit (Vitest) for pure logic. Component (Vitest + RTL) for click → state → text/role. Integration-ish (RTL + MSW) for page sections with mocked network.
+      - E2E (Cypress) when a **real browser** and **real navigation** are required.
+      - **Failure:** proving the same fact at every layer.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="test-rtl">
+    <AccordionTrigger>2. What does a Vitest + RTL test protect that Cypress should not duplicate?</AccordionTrigger>
+    <AccordionContent>
+
+      - Component tests protect **interaction contracts**: a form that still submits, a draft that still survives a failed request, a button that still exposes the right role.
+      - Query by role and label, not CSS class. Mock the network with MSW when the page section needs a response shape, not a running server.
+      - Edge cases belong here when the UI contract can be proven without a full browser.
+      - Cypress earns its keep on paths where a false green would ship a broken product.
+      - The suite is a **triage system**, not a coverage percentage.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="test-e2e">
+    <AccordionTrigger>3. How small should the Cypress suite stay, and what does it assert?</AccordionTrigger>
+    <AccordionContent>
+
+      - Keep it **three to seven** journeys, not a mirror of every component test.
+      - A typical set: sign in, complete the core product task, sign out or reach a durable success state.
+      - Seed fixtures so the test does not depend on production content. Assert URL, heading, success message — not every CSS class.
+      - Control authentication through an API or task, freeze time when expiry matters, wait on a named request or visible outcome, isolate records per test, prefer roles and labels.
+      - Not every edge case belongs here.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="test-flake">
+    <AccordionTrigger>4. What do you do with a flaky test?</AccordionTrigger>
+    <AccordionContent>
+
+      - If a test flakes, **quarantine it**, then fix or delete it. Normalizing flake teaches the suite to lie.
+      - A test that passes on its third attempt is still a flaky test. Never wait on an arbitrary timeout.
+      - Write the **failing test first** when fixing a bug, and make sure it fails for the right reason before applying the fix.
+      - Run focused tests locally, the unit/component suite on PRs, and critical E2E journeys before merge.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="test-takeaway">
+    <AccordionTrigger>5. What habit matters more than the tool choice?</AccordionTrigger>
+    <AccordionContent>
+
+      - When something breaks once, make sure the suite will catch it the second time — preferably with a test name that still reads like a **product promise** months later.
+      - Protect high-value behavior at the cheapest reliable layer, grow coverage from real failures, and keep Cypress thin enough that a red build still means something.
+      - Do not automate everything: skip pixel-perfect visual diffs, exhaustive E2E edge cases, and assertions on framework internals.
+      - Manual exploratory testing still matters.
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>

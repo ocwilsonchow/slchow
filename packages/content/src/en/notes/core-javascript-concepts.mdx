@@ -4,167 +4,94 @@ description: How the call stack, event loop, task queues, closures, promises, an
 category: frontend
 ---
 
-It is possible to use promises and `async`/`await` every day without a clear picture of what the runtime is doing underneath. These notes revisit JavaScript's execution model from the inside out.
+Synchronous code runs on the **call stack**. The host handles work off that stack. The **event loop** coordinates when queued callbacks can run. Closures retain lexical state. Promises, `async`/`await`, and generators pause and resume work.
 
-The concepts form one system: synchronous code runs on the **call stack**, the host environment handles work outside that stack, and the **event loop** coordinates when queued callbacks can run. Closures explain how functions retain state, while promises, `async`/`await`, and generators provide different ways to pause and resume work.
-
-This note is when code runs. `class`, prototype, and `this` are [TypeScript Classes and Runtime Identity](/notes/typescript-classes-and-runtime-identity).
+This note is when code runs. `class`, prototype, and `this` are [TypeScript Classes and Runtime Identity](/notes/typescript-classes-and-runtime-identity). Queues and the `5 1 3 4 2` puzzle: [The JavaScript Event Loop in Depth](/notes/javascript-event-loop-in-depth).
 
 <br />
 
 ![JavaScript Event Loop in the browser](./images/javascript-event-loop-browser.webp)
 
-The browser event loop at a glance: synchronous code runs on the call stack, host APIs complete work in the background and enqueue tasks, and promise reactions join the higher-priority microtask queue. Whenever the stack empties, the event loop pushes the next callback onto it—microtasks first, then one task at a time.
+<br />
+
+- Synchronous code runs on the stack.
+- Host APIs finish work off the stack and enqueue a callback.
+- When the stack is empty, the loop empties the **microtask queue**, then moves **one** task onto the stack.
 
 ---
 
 ## 1. Event Loop
 
-A common first impression is that the event loop simply checks whether asynchronous work has finished. The more useful model is that each browser event-loop iteration generally runs **one task**, drains **all microtasks**, gives the browser an opportunity to render, and then moves to another task. The dedicated walkthrough of the stack, host APIs, both queues, and the `5 1 3 4 2` ordering puzzle is [The JavaScript Event Loop in Depth](/notes/javascript-event-loop-in-depth).
-
-<br />
-
-The important consequence is that JavaScript does not interrupt the code currently on the stack. A timer may finish in the background, but its callback has to wait until the current task and its microtasks are done. This is why a zero-millisecond timer still does not run immediately.
+Each browser iteration generally runs **one task**, drains **all microtasks**, may render, then takes another task.
 
 <br />
 
 ```ts
-const log: string[] = []
-
 log.push("sync start")
-
-setTimeout(() => {
-  log.push("macrotask")
-}, 0)
-
-Promise.resolve().then(() => {
-  log.push("microtask")
-})
-
+setTimeout(() => log.push("macrotask"), 0)
+Promise.resolve().then(() => log.push("microtask"))
 log.push("sync end")
-
-// After the timer runs:
 // ["sync start", "sync end", "microtask", "macrotask"]
 ```
 
 <br />
 
+- JavaScript does not interrupt the code currently on the stack.
+- A timer may finish in the background; its callback waits for the current task and its microtasks.
+- **Failure:** a zero-millisecond timer is still not immediate. The delay is a lower bound on a **timer task**.
+
 ---
 
 ## 2. Call Stack
 
-The **call stack** is JavaScript's record of what it is currently doing. It is a last-in, first-out structure: calling a function pushes a frame, and returning or throwing removes that frame. Only the frame at the top can execute.
-
-<br />
-
-This explains why deeply recursive code can fail even when the algorithm is logically correct. Every recursive call consumes another stack frame until the engine reaches its limit. For input with unbounded depth, iteration or another constant-stack technique is the safer choice. ES2015 specified proper tail calls, which would make some recursive shapes constant-space, but among major engines only JavaScriptCore implemented them—recursion depth remains a practical limit.
+The **call stack** is a last-in, first-out record of what the engine is currently executing. Calling a function pushes a frame; returning or throwing pops it. Only the top frame runs.
 
 <br />
 
 ```ts
 function factorialRecursive(n: number): number {
-  if (!Number.isInteger(n) || n < 0) {
-    throw new RangeError("n must be a non-negative integer")
-  }
   if (n <= 1) return 1
   return n * factorialRecursive(n - 1)
 }
 
 function factorialIterative(n: number): number {
-  if (!Number.isInteger(n) || n < 0) {
-    throw new RangeError("n must be a non-negative integer")
-  }
-
   let result = 1
-  for (let i = 2; i <= n; i++) {
-    result *= i
-  }
+  for (let i = 2; i <= n; i++) result *= i
   return result
 }
-
-// Same result; iterative keeps O(1) stack frames
-factorialRecursive(5) // 120
-factorialIterative(5) // 120
 ```
 
 <br />
+
+- Deep recursion consumes a frame per call until the engine hits its limit.
+- ES2015 specified proper tail calls; among major engines only JavaScriptCore implemented them. Recursion depth remains a practical limit.
+- **Failure:** a tight loop does not share the thread. It owns it — no paint, clicks, or timers until it returns.
 
 ---
 
 ## 3. Macrotask Queue
 
-**Macrotask** is common terminology, while the HTML specification usually calls these simply **tasks**. Timers, user interactions, and messages can place work into task queues. Browsers may maintain multiple queues and choose which runnable task to process next, so one global FIFO queue is only a simplified mental model.
+**Macrotask** is informal; the HTML spec usually says **tasks**. Timers, user interactions, and messages enqueue work. Browsers may keep several queues and **select** a runnable task, so one global FIFO is a cartoon.
 
-<br />
-
-The rule to keep in mind is that the event loop runs one selected task, then performs a microtask checkpoint before selecting another task. A nested `setTimeout` therefore schedules future work; it cannot continue inside its parent's current turn.
-
-<br />
-
-```ts
-const order: string[] = []
-
-setTimeout(() => {
-  order.push("timeout-1")
-  setTimeout(() => {
-    order.push("timeout-2")
-  }, 0)
-}, 0)
-
-setTimeout(() => {
-  order.push("timeout-3")
-}, 0)
-
-// Typical order: timeout-1 → timeout-3 → timeout-2
-```
-
-<br />
+- The loop runs one selected task, then a microtask checkpoint, then another task.
+- A nested `setTimeout` schedules **future** work. Typical order: `timeout-1` → `timeout-3` → `timeout-2`.
+- **Failure:** treating `setTimeout(fn, 0)` as "before the next line." It means "as soon as a timer task is allowed."
 
 ---
 
 ## 4. Microtask Queue
 
-**Microtasks** are the piece most often missing from an initial understanding of asynchronous JavaScript. Promise handlers, `queueMicrotask`, and `MutationObserver` callbacks use this higher-priority queue. After a task finishes and the stack is empty, the runtime drains microtasks **until the queue is empty**.
+**Microtasks** — Promise handlers, `queueMicrotask`, `MutationObserver` — are the higher-priority queue on the **same** thread. After a task finishes and the stack is empty, the runtime drains them **until the queue is empty**.
 
-<br />
-
-This explains why promise handlers run before a ready `setTimeout` callback. It also carries a risk: a microtask can enqueue another microtask, so an unbounded chain can delay timers, user input, and rendering indefinitely.
-
-<br />
-
-```ts
-const order: string[] = []
-
-setTimeout(() => {
-  order.push("macrotask")
-}, 0)
-
-queueMicrotask(() => {
-  order.push("micro-1")
-  queueMicrotask(() => {
-    order.push("micro-2")
-  })
-})
-
-Promise.resolve().then(() => {
-  order.push("promise")
-})
-
-// Final order after the timeout runs:
-// micro-1 → promise → micro-2 → macrotask
-```
-
-<br />
+- A microtask that queues another microtask adds work to the **same** checkpoint. Typical order: `micro-1` → `promise` → `micro-2` → `macrotask`.
+- That is why a promise handler runs before a ready `setTimeout`.
+- **Failure:** an unbounded microtask chain delays timers, input, and rendering indefinitely — a freeze without a `while`.
 
 ---
 
 ## 5. Execution Context
 
-An **execution context** connects the call stack with scope. When JavaScript enters global code or calls a function, it creates the environment needed to execute that code: its bindings, outer lexical environment, and `this` value.
-
-<br />
-
-Each function call gets its own context and stack frame. When the function returns, the frame is removed, but its lexical environment can remain reachable when a returned function closes over it. Arrow functions add a useful distinction: they do not create their own `this`; they capture it from the surrounding context.
+An **execution context** is the environment created when JavaScript enters global code or calls a function: bindings, outer lexical environment, and `this`.
 
 <br />
 
@@ -177,44 +104,26 @@ const obj = {
   },
 }
 
-const globalLabel = "global"
-
-function outer(prefix: string) {
-  const local = "inner"
-
-  function inner(): string {
-    // Scope chain: inner → outer → global
-    return `${prefix}:${local}:${globalLabel}`
-  }
-
-  return inner
-}
-
-// The regular method receives `obj` as `this`, and its arrow captures it.
-obj.regular() // "object"
-
-// The returned function retains `prefix` and `local`.
-outer("ctx")() // "ctx:inner:global"
+obj.regular() // "object" — arrow captures the method's `this`
 ```
 
 <br />
+
+- Each call gets its own context and stack frame.
+- When the function returns, the frame is removed, but the lexical environment stays reachable if a returned function closes over it.
+- Arrow functions do not create their own `this`; they capture it from the surrounding context.
 
 ---
 
 ## 6. Closures
 
-A **closure** is easiest to grasp as something other than a special type of function. A function naturally carries access to the lexical environment where it was created, even if it is called after the outer function has returned.
-
-<br />
-
-This is what makes private state, event handlers, and many hook patterns possible. It pays to be deliberate about what a closure retains: captured objects stay reachable, and callbacks created in a loop with `var` share one function-scoped binding. A `let` loop variable creates a new binding for each iteration and avoids that common trap.
+A **closure** is not a special kind of function. A function carries access to the **lexical environment** where it was created, even after the outer function has returned.
 
 <br />
 
 ```ts
 function createCounter(start = 0) {
   let count = start
-
   return {
     inc(): number {
       count += 1
@@ -228,123 +137,166 @@ function createCounter(start = 0) {
 
 const counter = createCounter(10)
 counter.inc() // 11
-counter.inc() // 12
-counter.value() // 12 — `count` is private to the closure
+counter.value() // 11 — `count` is private to the closure
 ```
 
 <br />
+
+- Private state, event handlers, and many hook patterns are closures.
+- Captured objects stay reachable. A callback that closes over a large tree can leak it.
+- **Failure:** callbacks created in a loop with `var` share one function-scoped binding. `let` creates a new binding per iteration. A closure is a live environment, not a copy of values.
 
 ---
 
 ## 7. Promises
 
-A **Promise** represents the eventual result of an operation. It begins as `pending` and becomes either `fulfilled` or `rejected`. One easily overlooked detail is that calling `.then`, `.catch`, or `.finally` does not run the handler immediately; a settled promise queues that handler as a microtask.
-
-<br />
-
-Promise combinators are easier to choose when treated as different coordination strategies: `Promise.all` fails fast, `Promise.allSettled` records every outcome, and `Promise.race` settles with the first result. Starting several promises before awaiting them allows the underlying operations to overlap.
+A **Promise** is `pending`, then `fulfilled` or `rejected`. Calling `.then`, `.catch`, or `.finally` does not run the handler immediately; a settled promise queues it as a **microtask**.
 
 <br />
 
 ```ts
-type User = { id: string; name: string }
-type Settings = { theme: "light" | "dark" }
-
-function delay<T>(value: T, milliseconds: number): Promise<T> {
-  return new Promise((resolve) => {
-    setTimeout(() => resolve(value), milliseconds)
-  })
+function delay<T>(value: T, ms: number): Promise<T> {
+  return new Promise((resolve) => setTimeout(() => resolve(value), ms))
 }
 
-// Both timers start immediately; neither waits for the other.
-const userPromise = delay<User>({ id: "1", name: "Ada" }, 100)
-const settingsPromise = delay<Settings>({ theme: "dark" }, 50)
+const user = delay({ name: "Ada" }, 100)
+const settings = delay({ theme: "dark" }, 50)
 
-Promise.all([userPromise, settingsPromise]).then(([user, settings]) => {
-  console.log(user.name, settings.theme)
-  // "Ada", "dark" — after roughly 100 ms, not 150 ms
+Promise.all([user, settings]).then(([u, s]) => {
+  // "Ada", "dark" — after ~100 ms, not 150 ms
+  console.log(u.name, s.theme)
 })
 ```
 
 <br />
 
+- `Promise.all` fails fast. `Promise.allSettled` records every outcome. `Promise.race` settles with the first result.
+- Start independent promises before awaiting them so the underlying work overlaps.
+- **Failure:** wrapping a timer in a Promise does not make the timer a microtask. `setTimeout` still schedules a **task**; `.then` runs as a microtask **after** that task.
+
 ---
 
 ## 8. Async/Await
 
-`async`/`await` is syntax built on promises rather than a separate concurrency system. An `async` function always returns a promise. When it reaches `await`, that function yields control; after the awaited promise settles, the rest of the function is queued to continue as a microtask.
-
-<br />
-
-`await` does not block the JavaScript thread, and it does not make JavaScript multi-threaded. It only pauses that async function. Independent operations should start together rather than be awaited one at a time.
+`async`/`await` is syntax on promises, not a second concurrency system. An `async` function always returns a promise. Reaching `await` yields; after the promise settles, the rest continues as a **microtask**.
 
 <br />
 
 ```ts
-type User = { id: string; name: string }
-type Settings = { theme: "light" | "dark" }
-
-async function getJson<T>(url: string): Promise<T> {
-  const response = await fetch(url)
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`)
-  }
-
-  // This assertion describes the expected shape; it does not validate it.
-  return (await response.json()) as T
-}
-
 async function loadDashboard(userId: string) {
-  // Start both independent requests before waiting.
   const userPromise = getJson<User>(`/api/users/${userId}`)
   const settingsPromise = getJson<Settings>("/api/settings")
-
-  const [user, settings] = await Promise.all([
-    userPromise,
-    settingsPromise,
-  ])
-
+  const [user, settings] = await Promise.all([userPromise, settingsPromise])
   return { user, settings }
 }
 ```
 
 <br />
 
+- `await` does not block the JavaScript thread and does not make JavaScript multi-threaded. It pauses **that** async function. Even `await Promise.resolve()` yields.
+- A `response.json() as T` assertion describes the expected shape; it does not validate it.
+- **Failure:** sequential `await` of independent fetches is a waterfall. Start them together, then `Promise.all`.
+
 ---
 
 ## 9. Generators
 
-A **generator** (`function*`) is another angle on suspended execution. Calling a generator does not immediately run its body. It returns an iterator, and each `.next()` resumes execution until the next `yield` or until the function returns.
-
-<br />
-
-This makes generators useful for lazy sequences because values are produced only when requested. With an **async generator**, `.next()` returns a promise for an iterator result, and `for await...of` waits for each result. That pattern is useful when values arrive over time, such as paginated responses or streams.
+A **generator** (`function*`) does not run its body when called. It returns an iterator. Each `.next()` resumes until the next `yield` or until the function returns.
 
 <br />
 
 ```ts
-function* range(start: number, end: number): Generator<number, void, unknown> {
-  for (let i = start; i < end; i++) {
-    console.log(`producing ${i}`)
-    yield i
-  }
+function* range(start: number, end: number): Generator<number> {
+  for (let i = start; i < end; i++) yield i
 }
 
-const values = range(0, 3) // logs nothing: the body has not run
-
-values.next() // logs "producing 0"; { value: 0, done: false }
-values.next() // logs "producing 1"; { value: 1, done: false }
+const values = range(0, 3) // body has not run
+values.next() // { value: 0, done: false }
+values.next() // { value: 1, done: false }
 // 2 is not produced unless another value is requested.
 ```
 
 <br />
 
+- Values are produced only when requested — a lazy sequence, not a one-shot eventual result.
+- An **async generator** makes `.next()` return a promise; `for await...of` waits for each result. That fits paginated responses and streams.
+- **Failure:** treating `yield` as `await` in a non-async generator. Promises coordinate one eventual value. Generators coordinate a sequence of pauses.
+
 ---
 
 ## Takeaway
 
-<br />
+The call stack and execution contexts explain **what** is running. Task queues, microtasks, and the event loop explain **when** deferred work can run. Closures explain why state remains reachable. Promises, `async`/`await`, and generators organize work that pauses and resumes.
 
-These are not isolated JavaScript features. The call stack and execution contexts explain what is running. Task queues, microtasks, and the event loop explain when deferred work can run. Closures explain why state remains reachable, while promises, `async`/`await`, and generators provide different ways to organize work that pauses and resumes.
+When async code surprises: **What is on the stack?** **What is queued as a microtask?** **What must wait for a later task?**
 
-When async code behaves unexpectedly, three questions resolve most cases: **What is currently on the stack? What will be queued as a microtask? What must wait for a later task?** That mental model is more useful than memorizing the output of individual event-loop examples.
+---
+
+## Recap Q&A
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="js-event-loop-stack">
+    <AccordionTrigger>1. How do the call stack and the event loop share one thread?</AccordionTrigger>
+    <AccordionContent>
+
+      - Synchronous code runs on the **call stack**. Only the top frame executes. JavaScript does not interrupt the function currently on the stack.
+      - A timer may finish in the background, but its callback waits until the current task and its microtasks are done.
+      - Deep recursion still consumes frames; among major engines, recursion depth remains a practical limit.
+      - The **event loop** is the coordinator, not a second thread: **one task**, drain **all microtasks**, maybe render, then another task.
+      - **Failure:** a tight loop that “shares the thread” — it owns it.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="js-macro-micro">
+    <AccordionTrigger>2. What is the difference between a task and a microtask?</AccordionTrigger>
+    <AccordionContent>
+
+      - Informal writing says **macrotasks**; the HTML spec usually says **tasks**. Timers, user interactions, and messages enqueue tasks.
+      - After one selected task, the runtime performs a microtask checkpoint before selecting another. A nested `setTimeout` cannot continue inside its parent’s current turn.
+      - **Microtasks** — Promise handlers, `queueMicrotask`, `MutationObserver` — drain **until the queue is empty**.
+      - That is why a promise handler runs before a ready `setTimeout`. They are a higher-priority queue on the **same** thread, not a faster one.
+      - **Failure:** an unbounded microtask chain delays timers, input, and rendering indefinitely.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="js-closures">
+    <AccordionTrigger>3. What is a closure, and what does it retain?</AccordionTrigger>
+    <AccordionContent>
+
+      - A **closure** is not a special type of function. A function carries access to the **lexical environment** where it was created, even after the outer function has returned.
+      - That is what makes private state, event handlers, and many hook patterns possible.
+      - Captured objects stay reachable, so a callback that closes over a large tree can leak it.
+      - Callbacks created in a loop with `var` share one function-scoped binding; a `let` loop variable creates a new binding per iteration.
+      - **Failure:** treating the closure as a copy of values rather than a live environment.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="js-promises-await">
+    <AccordionTrigger>4. How do Promises and async/await actually pause work?</AccordionTrigger>
+    <AccordionContent>
+
+      - A **Promise** is `pending`, then `fulfilled` or `rejected`. Calling `.then` does not run the handler immediately; a settled promise queues it as a **microtask**.
+      - `Promise.all` fails fast, `allSettled` records every outcome, `race` settles with the first result. Start independent promises before awaiting them so the work overlaps.
+      - `async`/`await` is syntax on promises. An `async` function always returns a promise. `await` yields; after settle, the rest continues as a microtask.
+      - It does not block the thread and does not make JavaScript multi-threaded.
+      - **Failure:** sequential `await` of independent fetches is a waterfall. Wrapping a timer in a Promise still uses a **task** to `resolve`.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="js-generators">
+    <AccordionTrigger>5. When is a generator the right shape instead of a Promise?</AccordionTrigger>
+    <AccordionContent>
+
+      - Calling a **generator** (`function*`) does not run its body. It returns an iterator; each `.next()` resumes until the next `yield` or until the function returns.
+      - Values are produced only when requested — a lazy sequence, not a one-shot eventual result.
+      - An **async generator** makes `.next()` return a promise; `for await...of` waits for each one. That fits paginated responses or streams.
+      - Promises coordinate one eventual value. Generators coordinate a sequence of pauses.
+      - **Failure:** treating `yield` as `await` in a non-async generator.
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>

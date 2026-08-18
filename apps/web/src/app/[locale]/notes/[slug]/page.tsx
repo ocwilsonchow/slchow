@@ -1,4 +1,3 @@
-import { ArrowLeftIcon } from "lucide-react"
 import type { Metadata } from "next"
 import type { Locale } from "next-intl"
 import { getTranslations, setRequestLocale } from "next-intl/server"
@@ -10,9 +9,12 @@ import { CollapsibleToc } from "@/features/mdx/components/toc"
 import { NextNoteLink } from "@/features/notes/components/next-note-link"
 import { buildPageMetadata } from "@/lib/metadata"
 import {
+  FULL_STACK_QA_SLUG,
   getMdxContent,
   getNotesStaticParams,
   getPageLocales,
+  loadFullStackQa,
+  loadMdxCompiled,
 } from "@/lib/source"
 
 type Props = {
@@ -39,7 +41,12 @@ const Page = async ({ params }: Props) => {
   setRequestLocale(locale)
 
   const page = getMdxContent("notes", slug, locale)
-  const toc = page?.data.toc ?? []
+  const toc =
+    slug === FULL_STACK_QA_SLUG
+      ? (await loadFullStackQa(locale)).toc
+      : page
+        ? ((await loadMdxCompiled(page)).toc ?? [])
+        : []
 
   return (
     <PageLayout className="grid lg:grid-cols-2 content-start items-start">
@@ -52,12 +59,12 @@ const Page = async ({ params }: Props) => {
           data-lenis-prevent
         >
           <div className="mt-8 lg:mt-0 space-y-3 max-w-prose">
-            <h1 className="text-lg lg:text-sm font-semibold tracking-tight text-content-ink leading-tight">
+            <h1 className="text-lg font-semibold tracking-tight text-content-ink leading-tight">
               {page?.data.title}
             </h1>
 
             {page?.data.category ? (
-              <div className="w-fit font-semibold text-content-body/70 text-[11px] bg-surface-alpha px-1.25 py-px rounded-md">
+              <div className="w-fit font-semibold text-content-body/80 text-[11px] bg-surface-alpha px-1.25 py-px rounded-md">
                 {t(`categories.${page?.data.category}`)}
               </div>
             ) : null}

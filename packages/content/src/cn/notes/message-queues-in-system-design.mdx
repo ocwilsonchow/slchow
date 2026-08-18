@@ -1,0 +1,375 @@
+---
+title: System Design 里的 Message Queues
+description: 为什么工作要离开 request cycle —— brokers、delivery semantics、idempotent consumers，以及随之而来的 failure modes
+date: 2026-08-17
+category: system-design
+---
+
+Request cycle 不适合放慢、突发、或必须在这个 process 挂掉之后还活着的工作。**Message queue** 是 producer 与 consumer 之间的 durable buffer。HTTP handler 做完 authenticate、persist intent、enqueue，然后返回 **202**。
+
+Typed API 一路到 production 的 protect、monitor 与 recover 见 [用 Hono、Drizzle、Zod OpenAPI 与 SST 打造 Backend APIs](/notes/backend-apis-hono-sst)。Stages 与 deploy loop 见 [用 SST 管理 AWS 基础设施与 DevOps](/notes/using-sst-for-aws-infra-and-devops)。这篇 note 讲的是 queue。
+
+<br />
+
+---
+
+## Pattern Map
+
+| Pattern | Typical input | Reach for it when |
+| --- | --- | --- |
+| Async offload | HTTP request | Response 不需要做完的结果 —— email、thumbnails、invoices |
+| Fan-out | One event, many subscribers | 多个独立 consumers 必须看到同一次 write |
+| Buffering | Spike vs worker capacity | Inbound RPS 可以跳；workers 不该跟着跳 |
+| Reliability | Side effect that must retry | 工作必须在这个 process 消失之后还发生 |
+
+<br />
+
+---
+
+## 1. 为什么需要 queue
+
+Queue **decouple** producer 与 consumer。Producer 不等 side effect。Consumer 不必在 write 的那一刻在线。
+
+<br />
+
+- **Decouple.** Hono 先 return。一个 worker——也许在另一个 process，也许更晚——再去做 email、webhook、search index。
+- **Buffer.** 10x spike 是 queue-depth 问题，不是 API-fleet 问题。Ingest 跟 requests 扩；workers 跟 depth 扩。
+- **Retry.** 接住 request 的那个 process 可以死。Broker 仍然握着 message。必须在这台机器消失之后发生的工作，属于 queue。
+
+<br />
+
+**Failure:** 在 request 里做 CRM sync、emails 与 domain workflows，于是 spike 打垮 API，provider 的 retries 再把它放大。Ingest 是 write-ahead log。其他都是 consumer。
+
+<br />
+
+---
+
+## 2. Producer、broker、consumer
+
+三个角色。**Producer** 写一条 message。**Broker** 把它 durable 存下来再发出去。**Consumer** 做完工作然后 **ack**。
+
+<br />
+
+```text
+Client → Hono → Postgres + enqueue → Broker → Worker → Side effect
+```
+
+<br />
+
+- Handler 保持薄：validate、persist intent、enqueue、**202**。Status row 是用户稍后能读到的东西。
+- Broker 是 shock absorber——这套 stack 上是 SQS，或等价物。它不是 business write 的 source of truth。Postgres 才是。
+- Worker pull、apply、ack。如果它在 ack 之前 crash，broker 会再 deliver 一次。
+
+<br />
+
+```ts title="src/routes/invoices.ts"
+app.post("/invoices/:id/send", async (c) => {
+  const { id } = c.req.valid("param")
+  const eventId = c.req.header("idempotency-key") ?? crypto.randomUUID()
+
+  await db.transaction(async (tx) => {
+    await tx.update(invoices).set({ status: "queued" }).where(eq(invoices.id, id))
+    await tx.insert(outbox).values({
+      id: eventId,
+      type: "invoice.send",
+      payload: { invoiceId: id },
+    })
+  })
+
+  return c.json({ id, status: "queued" }, 202)
+})
+```
+
+<br />
+
+**Failure:** enqueue 还没有被 durable 记下来的工作。Crash 等于 lost intent。如果 queue 挂了也必须发生，**request 里的 database write** 才是 source of truth；queue 只是 relay。
+
+<br />
+
+---
+
+## 3. 留在 request 还是离开
+
+工作留在 request cycle，当用户 **没有答案就无法继续**。它离开，当 HTTP response 不需要做完的结果。
+
+<br />
+
+| Stays synchronous | Leaves for a queue |
+| --- | --- |
+| Password check | Email、outbound webhooks |
+| 屏幕上的 price | Thumbnails、search indexing |
+| UI 马上要展示的 payment **authorization** | Invoices、flaky third parties |
+
+<br />
+
+即便同步路径也保持薄。Authenticate、persist、return。Payment authorization 是 UI 现在需要的 yes 或 no；扣卡与发收据不是同一份工作。
+
+<br />
+
+**Failure:** **sync-over-async** —— enqueue 然后堵住 socket 等到 worker 做完。Broker 的 latency、timeout 与 retry policy 现在成了 HTTP request 的 latency。另一个是 persist 之前就返回 **200**：crash 等于 lost events。
+
+<br />
+
+---
+
+## 4. Queue vs pub/sub vs stream
+
+**Queue** 把每条 message 交给 **一个** consumer。**Pub/sub** 把同一条 message 交给 **每一个** subscriber。**Stream** 是可 replay 的 log：consumers 握着 offset，可以再读。
+
+<br />
+
+| Shape | Who gets the message | Reach for it when |
+| --- | --- | --- |
+| Queue | N 个 competing consumers 中的一个 | 一份 job 只该跑一次 —— 发这张 invoice |
+| Pub/sub | Every subscriber | 一次 write，多个独立反应 —— cache bust、notify、audit |
+| Stream | 每个 consumer group，按 offset | Replay、多个独立 readers、有序 history |
+
+<br />
+
+- Queue 上的 competing consumers 提高 throughput。它们不 fan out。如果两个 services 都必须看到这笔 order，那是 pub/sub，或从 outbox 喂两条 queues。
+- Stream（Kafka、Kinesis）不是更好的 queue。它是 log。Offsets、retention 与 replay 才是重点。把它当一次性 work queue 是浪费这个模型。
+- Redis pub/sub 是 **bus**，不是 broker：没有 durability，没有 retry。适合跨 instances 的 WebSocket fan-out。不适合 invoices。
+
+<br />
+
+**Failure:** 一条 queue、两个都需要这个 event 的 consumers，然后称之为 fan-out。其中一个永远看不到 message。另一个是只在 process 内 publish——一台机器上能用，另外三台沉默。
+
+<br />
+
+---
+
+## 5. Delivery semantics
+
+**At-most-once** 是 send and forget：duplicates 少见，**允许 loss**。**At-least-once** 是 retry until ack：**允许 duplicates**，不允许 loss。Production 里大多数 brokers 是 at-least-once。
+
+<br />
+
+- Application space 里的「exactly-once」通常是 at-least-once **加上 idempotent consumer**。Broker 会 deliver 两次。Consumer 必须让两次都安全。
+- Lambda 可以两次 invoke 同一个 handler。Client timeout 不是 negative acknowledgment。Network 是带可变 delay 的 lossy queue。即便 slide 写 exactly-once，也按 at-least-once 设计。
+- Publishers 保持无聊：同一把 key，同一份 payload。Consumers 仍然保持 idempotent，因为 retries 还是会发生。
+
+<br />
+
+**Failure:** 把 broker 的「exactly-once」checkbox 当成 inbox 的替代。FIFO SQS 在一个 window 内去重。它不能让 window 之后、crash 发生在 side-effect 中途、或第二个 producer 之后的 double charge 变得不可能。
+
+<br />
+
+---
+
+## 6. Idempotent consumers
+
+给定 at-least-once：稳定的 **event id**、带 unique constraint 的 **inbox** 表，**database effects 与 inbox insert 在同一笔 transaction**。Durable write **之后** 再 **ack**。
+
+<br />
+
+```sql
+CREATE TABLE inbox (
+  event_id   uuid PRIMARY KEY,
+  processed_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- same transaction as the business effect
+INSERT INTO inbox (event_id) VALUES ($1);
+UPDATE invoices SET status = 'sent' WHERE id = $2;
+```
+
+<br />
+
+- Side effects 做成 **upserts**，不要盲 increment。`UPDATE … SET sent_at = now() WHERE sent_at IS NULL` 可以安全 retry。`SET send_count = send_count + 1` 不行。
+- 对 Stripe 或 email，先 persist 一行 operation，ack 之前带上 provider 的 **idempotency key**。Provider 是另一个 at-least-once 系统。
+- `event_id` 上的 unique constraint 就是 lock。Check-then-insert 会 race；`ON CONFLICT` 是一条 statement。Schema 才是 API —— [SQL 核心概念](/notes/core-sql-concepts)。
+
+<br />
+
+**Failure:** 在 side effect 之前 ack，或做了 side effect 却不记录 id——retry 就会 double-charge。Catch 了 errors 仍然 ack，于是 poison message 消失。At-least-once 只有在 failure **nack**、success **idempotent** 时才有用。
+
+<br />
+
+---
+
+## 7. Dual-write 与 outbox
+
+Dual-write 是：`COMMIT` business row，然后再 publish。Process 可以死在两者之间。Row 在，message 不在。或者 message 在，row 已经 rollback。
+
+<br />
+
+```text
+BEGIN → Business row → Outbox row → COMMIT → Relay publishes → Broker
+```
+
+<br />
+
+- **Outbox** 修掉它：在 **同一笔 Postgres transaction** 里写入 business row 与 outbox row。Relay 再 publish 到 broker。Delivery 仍然是 at-least-once，所以 consumers 保持 idempotent。
+- Distributed transactions 不跨 services 跑。Two-phase commit **堵在 in-doubt transactions 上**，并把每个 participant 的 availability 绑在一起。每个 service 的 database 保持 transactional；协调靠 messages。
+- **Saga** 是一串 local transactions。第三步失败，就对第一步和第二步跑 **compensations**。Compensation 不是 undo。Payment compensation 是一笔 **refund**，有自己的 audit——durable 且 retryable。
+
+<br />
+
+**Failure:** 跳过 outbox，指望 `COMMIT` 之后再 send 就够了。第一次 crash 就会失败。把 compensation 当成 distributed transaction 的 rollback 是另一个——钱已经动了。
+
+<br />
+
+---
+
+## 8. Ordering 与 competing consumers
+
+**FIFO 是 per key 的**，不是 global。一条有许多 consumers 的 queue 提高 throughput，同时 **打破 order**——除非必须保持顺序的 messages 共享一把 key。
+
+<br />
+
+- SQS standard：尽力 order、at-least-once、几乎无限 throughput。SQS FIFO：按 `MessageGroupId`，在 deduplication window 内 exactly-once，更低 throughput。
+- Kafka / Kinesis：order 在 **partition** 内部。选 partition key 的方式与选 FIFO group 一样——`invoiceId`，而不是 `tenantId`，如果一个 tenant 能把 log 打成 hot-spot。
+- Competing consumers：N 个 workers 从一条 queue pull。Throughput 可扩。同一张 invoice 的两条 messages 可以同时跑，除非它们共享一个 group，或 consumer 用 row lock 串行化。
+
+<br />
+
+**Failure:** 在一条热 queue 上要求 global order，然后加 consumers 来「修 latency」。Latency 下降了。Invoice 在生成之前就被发出去。Order 是 keying 问题，不是 replica-count 问题。
+
+<br />
+
+---
+
+## 9. Retry、jitter、DLQ
+
+先分类。Timeouts、503s、lock contention、「connection reset」——**retry**。Validation errors、400s、未知 event types——**不要 retry**；它们不会自愈，却会永远占着 consumer。
+
+<br />
+
+- 四个控制：**exponential backoff**（`base * 2^attempt`，带 cap）、**jitter** 让一万个 workers 不会在同一毫秒醒来、**max attempts** 让 poison 不能转一整夜、天花板之后进 **dead-letter queue**，DLQ depth 上升时要有 metric 与 page。
+- Retry 住在 **queue** 里（visibility timeout、内建 backoff）或同形状的 library——不是 handler 里的 `while`。只 retry **idempotent** handlers。
+- 沉默的 DLQ 是多了几步的 lost business event。Depth 是 page，不是 dashboard 上的好奇。
+
+<br />
+
+**Failure:** retry 一个非 idempotent 的 POST，或永远 retry 且没有 DLQ，于是一份坏 JSON 坐在热 partition 上。共享 outage 之后 **没有 jitter** 的 backoff 是 thundering herd。
+
+<br />
+
+---
+
+## 10. Backpressure
+
+Workers 按 **queue depth** 扩，不按 inbound RPS。API 吸收；worker fleet 才是 throttle。
+
+<br />
+
+- Visibility timeout 必须 **比 handler 长**。如果 timeout 在 worker 还在跑时触发，另一个 consumer 会拿走同一条 message——inbox 必须扛得住这份 duplicate。
+- 给每个 worker cap concurrency。一个打开二十个 Postgres sessions、又被允许无限 in-flight messages 的 handler，会在 queue 看起来还不够深之前耗尽 pool。
+- SIGTERM 时：停止 fetch，做完当前 messages，deadline 到了就 **nack**，最后才关 DB pool。只 drain HTTP 却让 consumers 跑到被 kill，就是 in-flight jobs 再被 deliver 一次外加 502 的原因。
+
+<br />
+
+**Failure:** 按 RPS autoscaling API，worker count 却是常数。Queue 无界增长，visibility timeouts 堆起来，每次 retry 看起来都像更多 traffic。另一个是 handler 要调一个 45 秒的 third party，visibility timeout 却是 30s。
+
+<br />
+
+---
+
+## 11. Broker 怎么选
+
+Broker 是 durability 与 delivery 的合同，不是品牌。这套 stack 上 AWS 的默认是 **SQS**，跟 API 一样经 SST 接线 —— [用 SST 管理 AWS 基础设施与 DevOps](/notes/using-sst-for-aws-infra-and-devops)。
+
+<br />
+
+| Broker | Shape | Reach for it when |
+| --- | --- | --- |
+| **SQS** | Queue，at-least-once，optional FIFO | AWS 上的默认 work queue。Lambda 或 worker fleet 来 consume。 |
+| **RabbitMQ** | Queue + routing | 复杂 routing keys、已有 AMQP ops、还不在 AWS 上。 |
+| **Kafka / Kinesis** | Replayable log | 多个独立 readers、有序 history、replay。 |
+| **Redis lists / streams** | Fast，更弱的 durability | Ephemeral jobs、caches、fan-out。不是钱。 |
+
+<br />
+
+- 「做这份 job」的 production 默认是 SQS standard。需要一把 key 保持有序、且 throughput 允许时才用 FIFO。
+- 把 Kafka 当 work queue、却没有把 offsets 当成产品，通常是多了 ops 的 SQS。把 Redis 当 invoice broker，是在赌 failover 时 AOF 不会丢掉一次 write。
+- Handler 仍然不必认识 broker。Adapter 负责 enqueue。Tests 可以换 adapter。Inbox 与 outbox 留在 Postgres。
+
+<br />
+
+**Failure:** 因为「以后也许需要 replay」而选 Kafka，然后把 consumer groups 当成 competing-consumer queues，再奇怪为什么一个 crash 的 reader 会卡住一个 partition。或者把 invoice send 的唯一副本放进 Redis list。
+
+<br />
+
+---
+
+## 12. Tenant 与 traces
+
+一个处理「generate invoice」的 worker，如果 message 上没有 tenant，consume 时也不做 membership check，就会写进它碰巧握着的那条 database connection。
+
+<br />
+
+- 每条 message 带上已验证 request 里的 `organizationId`。Consumer 为那个 org 打开 RLS transaction。如果 client 能 enqueue，tenant 不能只从 job payload 取。Isolation 只活在 Hono 里，少一个 filter 就会漏 —— [用 Hono、Better Auth、Drizzle 与 Postgres RLS 打造 Multi-Tenant 后端](/notes/multi-tenant-backend-drizzle-hono-better-auth)。
+- **Correlation id** 在 edge 出生，并复制到这次 request 去过的每个地方。每条 queue message 把它放进 **attributes**，不只放进可能被剥掉的 JSON body。**W3C `traceparent`** 是结构化形式。
+- 缺了就生成，永远不要拿它做 auth，并且给它建 index。用户说「14:02 失败了」，就能从 gateway span 跳到处理那次 SQS hop 的 worker。
+
+<br />
+
+**Failure:** 只有 HTTP 上的 ids——consumer 打一条新 uuid，trail 死在 queue。Worker 信任 payload 里的 `organizationId` 却没有 RLS。Queue 没有泄漏。Consumer 泄漏了。
+
+<br />
+
+---
+
+## Recap Q&A
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="mq-when">
+    <AccordionTrigger>1. 什么时候该让 request 离开 request cycle，进 queue？</AccordionTrigger>
+    <AccordionContent>
+
+      - 工作离开 request cycle，当 **HTTP response 不需要做完的结果**，或工作慢、突发、必须 **在这个 process 消失之后还能 retry**。Email、outbound webhooks、thumbnails、invoices、search indexing、flaky third parties——那就是 **queue**。Authenticate、persist intent、enqueue、返回 **202**。
+      - 用户没有答案就无法继续时，它保持同步：password check、屏幕上的 price、UI 马上要展示的 payment **authorization**。即便如此 handler 也保持薄。
+      - 如果 queue 挂了也必须发生，**request 里的 database write** 才是 source of truth；queue 只是 relay。
+      - **Failure:** **sync-over-async** —— enqueue 然后堵住 socket 等到 worker 做完。另一个是 enqueue 还没有被 durable 记下来的工作——crash 等于 lost intent。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="mq-delivery">
+    <AccordionTrigger>2. At-least-once 实际上要求 consumer 做什么？</AccordionTrigger>
+    <AccordionContent>
+
+      - **At-most-once** 是 send and forget：duplicates 少见，**允许 loss**。**At-least-once** 是 retry until ack：**允许 duplicates**，不允许 loss。Production 里大多数 brokers 是 at-least-once。
+      - Application space 里的「exactly-once」是 at-least-once **加上 idempotent consumer**：稳定的 **event id**、**inbox** unique constraint、**effects 与 inbox insert 在同一笔 transaction**。Durable write **之后** 再 **ack**。
+      - Side effects 做成 **upserts**，不要盲 increment。对 Stripe 或 email，ack **之前** 带上 provider 的 idempotency key。
+      - **Failure:** 在 side effect 之前 ack，或做了 side effect 却不记录 id。At-least-once 只有在 failure **nack**、success **idempotent** 时才有用。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="mq-outbox">
+    <AccordionTrigger>3. 为什么 COMMIT-then-publish 是 dual-write，outbox 改了什么？</AccordionTrigger>
+    <AccordionContent>
+
+      - 先 `COMMIT` business row，再 publish：process 可以死在两者之间。Row 在而 message 不在——或反过来。
+      - **Outbox** 在 **同一笔 Postgres transaction** 里写入 business row 与 outbox row。Relay 再 publish 到 broker。Delivery 仍然是 at-least-once，所以 consumers 保持 idempotent。
+      - Distributed transactions 不跨 services 跑。协调靠 messages。**Saga** 是 local transactions 加上 **compensations**——refund，不是 undo。
+      - **Failure:** 跳过 outbox，指望 `COMMIT` 之后再 send 就够了。第一次 crash 就会失败。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="mq-retry">
+    <AccordionTrigger>4. 怎么 retry 一个失败的 worker，同时不毒化 queue？</AccordionTrigger>
+    <AccordionContent>
+
+      - 先分类。Timeouts、503s、lock contention——**retry**。Validation errors、400s、未知 event types——**不要 retry**。
+      - 四个控制：带 cap 的 **exponential backoff**、**jitter**、**max attempts**、天花板之后的 **dead-letter queue**——DLQ depth 上升时要有 metric 与 page。
+      - Retry 住在 **queue** 里，不是 handler 里的 `while`。只 retry **idempotent** handlers。Visibility timeout 必须比 handler 长。
+      - **Failure:** 永远 retry 且没有 DLQ，于是一份坏 JSON 坐在热 partition 上。共享 outage 之后 **没有 jitter** 的 backoff 是 thundering herd。沉默的 DLQ 是多了几步的 lost business event。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="mq-shapes">
+    <AccordionTrigger>5. 什么时候 queue 是错的形状——该用什么代替？</AccordionTrigger>
+    <AccordionContent>
+
+      - **Queue** 把每条 message 交给 N 个 competing consumers 中的 **一个**。适合「发这张 invoice」。
+      - **Pub/sub** 把同一条 message 交给 **每一个** subscriber。适合一次 write、多个独立反应。Redis pub/sub 是 bus，不是 broker——适合 WebSocket fan-out，不适合 invoices。
+      - **Stream** 是可 replay 的 log。Offsets、retention 与 replay 才是重点。把 Kafka 当一次性 work queue 是浪费这个模型。
+      - **Failure:** 一条 queue、两个都需要这个 event 的 consumers，然后称之为 fan-out。其中一个永远看不到 message。
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>

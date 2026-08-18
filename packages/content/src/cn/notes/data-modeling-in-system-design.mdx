@@ -1,0 +1,269 @@
+---
+title: System Design 里的 Data Modeling
+description: 为什么先定 schema 再画 boxes —— stores、keys、relationships、indexes、normalization、sharding，以及随之而来的 failure modes
+date: 2026-08-17
+category: system-design
+---
+
+**Data modeling** 是决定有哪些 entities、怎么 identify、怎么 connect。Tables、keys、relationships。标准是一份能服务 APIs 的 schema —— 不是 3NF 表演。Postgres 是默认。
+
+这篇 note 依 [Evan 的 walkthrough](https://www.youtube.com/watch?v=TUcPS6dsWx4)。Statement 模型见 [SQL 核心概念](/notes/core-sql-concepts)。Access patterns 来自 [System Design 里的 API Design](/notes/api-design-in-system-design)。Denormalized 副本住在 [System Design 里的 Caching](/notes/caching-in-system-design)。Tenant rows 见 [用 Hono、Better Auth、Drizzle 与 Postgres RLS 打造 Multi-Tenant 后端](/notes/multi-tenant-backend-drizzle-hono-better-auth)。这篇 note 讲的是 schema。
+
+<br />
+
+---
+
+## Pattern Map
+
+| Pattern | Shape | Reach for it when |
+| --- | --- | --- |
+| SQL / Postgres | Tables、FKs、ACID | 默认。Entities 与 relationships 清楚 |
+| Document | Nested JSON documents | Schema 真的在变；nested blobs 拆成 joins 会爆炸 |
+| Key-value | Exact key lookup | Cache、sessions、hot feed —— 放在 Postgres 前面，不是取代它 |
+| Wide-column | Column families、append | Massive writes、time-series、telemetry |
+| Graph | Nodes and edges | 几乎不用。连 Facebook 都用 MySQL |
+
+<br />
+
+---
+
+## 1. 为什么需要 model
+
+Schema 是 database 会 enforce 的 API。画在 database box 旁边，不是单独一场面试。
+
+<br />
+
+- 它出现两次。早：那些 **nouns** —— auction、item、bid、user。晚，在服务每个 endpoint 时：让那次 GET 变便宜的 columns、keys、indexes。
+- 一份说得过去的 schema 撑起 reads、writes、consistency 与 growth。一份糊的，会逼后面的设计一直道歉。
+- 这不是 data-engineering loop。点名 entities、identifiers、queries。然后往下走。
+
+<br />
+
+**Failure:** 把一小时花在 3NF 证明上，或跳过 schema，让 sharding 与 caching 没有立足点。
+
+<br />
+
+---
+
+## 2. 选 store
+
+**Postgres** 是 production 默认。另外几个要自己挣位置。
+
+<br />
+
+```text
+APIs
+  → Postgres → Redis cache     (default)
+  → Document                   (evolving schema)
+  → Wide-column                (append-heavy)
+  → Graph                      (almost never)
+```
+
+<br />
+
+- **Relational.** Tables、foreign keys、ACID。Users、posts、likes。`JOIN` 让「我 follow 的人发的 posts」是一条 query，不是一个产品。Strong consistency —— payments、inventory、unique email —— 是这套 stack 留在 Postgres 的原因。Scale 是 replicas、pooling、caching，然后 sharding —— 不是换一个 database。
+- **Document.** JSON blobs，fields 灵活。把 posts embed 进 user，一次 load 两边都有。Joins 更弱，所以你 denormalize。常见理由是 evolving schema。Scoped design 已经冻住了 requirements。除非 interviewer 点名字段会狂变，否则跳过。
+- **Key-value.** Exact match。`user:123`、`feed:123`。快，看不见关系。不能 join，所以同一份 value 会在多个 keys 上重复。Postgres 前面的 Redis 才是 production 用法。DynamoDB 是带 document 能力的 key-value —— 仍不是这里的默认 source of truth。
+- **Wide-column.** 每行可以有不同 columns，append-heavy。Telemetry、IoT、time-series。Queue 再 batch 进 Postgres，面试里往往比伸手去拿 Cassandra 更合适。
+- **Graph.** Nodes 与 edges。Social network 听起来像。Facebook 仍然用 MySQL 建模那张 graph。因为问题里有一条 follow edge 就伸手 Neo4j，是 junior 的信号。
+
+<br />
+
+**Failure:** 为了显得高级去选 Mongo 或 graph store，然后需要 joins 与 unique constraint，而那个 store 不会帮你 enforce。
+
+<br />
+
+---
+
+## 3. 三个 drivers
+
+Volume、access patterns、consistency。这节之后的每一招，都是为这三个服务的工具。
+
+<br />
+
+- **Volume** 决定 rows 能住在哪。百万级 users 可能把 user data 与 post data 拆到不同 stores。两套 schema 就必须说清怎么互相指向。
+- **Access patterns** 是最重要的那个。它们来自 APIs。`GET /users/{id}/posts` 是一个 index，或一份 denormalized list。问每个 endpoint 要跑什么 query。
+- **Consistency** 决定 data 能绑多紧。一笔 charge 留在同一个 ACID database。Feed 上的一个 like 可以晚一秒进 Redis。
+
+<br />
+
+**Failure:** schema 无视 `GET /users/{id}/posts` 实际怎么 query，然后奇怪 join 成了 outage。
+
+<br />
+
+---
+
+## 4. Entities、keys、relationships
+
+System-generated ids。Foreign keys 让 cardinality 一目了然。用领域名字，不是 "Entity A"。
+
+<br />
+
+```text
+organizations: id (PK), name
+users:         id (PK), email UNIQUE
+memberships:   organization_id (FK), user_id (FK)   -- PK (organization_id, user_id)
+invoices:      id (PK), organization_id (FK), created_at
+```
+
+<br />
+
+```text
+users ──────────┐
+                ├── memberships
+organizations ──┤
+                └── invoices
+```
+
+<br />
+
+- **Primary key** 唯一标识这一行。用 `id`，不要用 email —— 业务数据会变。**Foreign key** 是指向另一张表 PK 的字段。`invoices.organization_id → organizations.id` 就是 tenant 拥有一行的方式。
+- 把 FKs 写出来。一个 user、许多 memberships 就清楚了。Likes 表同时有 `user_id` 与 `post_id`，就是 many-to-many，不必把词说出来。背诵 1:N vs N:M 是 candidates 卡住的方式。
+- One-to-one 很少见。两张表总是一起 load，往往该是一张表。
+- 这套 stack 在每一行 tenant-owned 的 row 上放 `organization_id`。只活在 Hono 里的 isolation，离 leak 只差一个被忘掉的 filter。
+
+<br />
+
+**Failure:** 用 email 当 primary key，用户改地址后所有 child rows 变孤儿 —— 或者跨 tenants 猜 sequential integer，还把它叫做 access control。
+
+<br />
+
+---
+
+## 5. Constraints
+
+Schema 就是 API。Application 的 `WHERE` clauses 是习惯，不是保证。
+
+<br />
+
+- `NOT NULL`、`UNIQUE`、`CHECK` —— email 唯一，qty 为正，status 属于已知集合。Postgres 拒绝坏行。Hono 根本看不到。
+- Foreign keys enforce **referential integrity**：不存在的 organization 不能有 invoice。Write 时多一次 lookup。极大 write scale 时，有的店会丢掉 FKs、改在 app 里 enforce。把这个 trade-off 说出来。不要默认就跳过 FKs。
+- Drizzle 可以给 column 上类型。它不能替代 database 里没有的 constraint。
+
+<br />
+
+**Failure:** uniqueness 只活在 Hono handler。两个 concurrent POSTs 都读到 "free"，都 insert。Unique email 现在是两行。
+
+<br />
+
+---
+
+## 6. Normalization
+
+每个事实只存一处。只有 indexes 救不了的、被点名的 read，才 duplicate。
+
+<br />
+
+- **Normalized：** user data 只住在 `users`。Posts 拿着 `user_id`。Rename 是一次 `UPDATE`。Join 把名字和 post 一起 load 出来。
+- **Denormalized：** 每个 post 上都抄一份 `username`。Feed 不用 join。Rename 是这个用户写过的每一条 post。漏一条，系统就在说谎。
+- 从 normalized 开始。先 index。如果 read 仍然是事故 —— feed、dashboard aggregate —— 再 denormalize。副本优先放 **Redis**，让 Postgres 保持干净。Event logs 与 audit snapshots 是另一种诚实的例外：它们本来就是在拍某一刻。
+- Statement 模型，以及 join 何时变成产品本身，见 [SQL 核心概念](/notes/core-sql-concepts)。
+
+<br />
+
+**Failure:** 每个 post 上都有 username，然后一次 rename 重写整张表 —— 或者因为「joins 慢」先 denormalize，而没有任何 query 需要它。
+
+<br />
+
+---
+
+## 7. Indexes
+
+Index 让 lookup 变便宜，write 稍微变贵。从 APIs 往回推。
+
+<br />
+
+- `GET /users/{id}/posts` 需要 `posts.user_id` 上的 index。按 recency 排：composite `(user_id, created_at)`。某个 post 的 comments：`comments.post_id`。不要因为列存在就建 index。
+- B-Tree 是默认。Equality 与 range 都走它。在 laptop 上瞬间完成的 sequential scan，在 production 里就是缺的那个 index。
+- Index 太多会拖慢每一次 `INSERT`。覆盖你点名的 endpoints。其余的等 `EXPLAIN` 来要。
+
+<br />
+
+**Failure:** list endpoint 过滤的 foreign key 上没有 index，然后用 `OFFSET` 在 sequential scan 上分页。API 没问题。Access path 有问题。
+
+<br />
+
+---
+
+## 8. Sharding
+
+只有 data 再也装不进一个 node 时才 shard。Key 通常是永久的。完整 map 见 [System Design 里的 Sharding](/notes/sharding-in-system-design)。
+
+<br />
+
+- 按 **primary access pattern** shard，让相关 rows 落在一起。Posts 按 `post_id`，comments 与对应的 post 在同一 shard —— 一篇 post 和它的 comments 是一个 database，不是 scatter-gather。
+- Hash key 来均匀铺开。Write-heavy 表按 time-range shard，等于每次 insert 都打在 **今天的** shard。那是 hot shard。Time-range 属于 archival 与 analytics，不属于 OLTP write path。
+- Cross-shard joins 是代价。按 `user_id` shard 的 following timeline，要查许多 nodes 再 merge。把 merge cache 起来，或换 key，或接受 fan-out。不要在 data 拆开之后才发现。
+- 同一个 Postgres 里的 partitioning 不是 sharding。一个 primary，一份 WAL。区别见 [SQL 核心概念](/notes/core-sql-concepts) 与 database Q&A。
+
+<br />
+
+**Failure:** 按 `created_at` shard，于是所有 writes 打在今天的 shard；或 posts 与 comments 用不同 keys，于是每个 detail page 都是 cross-shard join。
+
+<br />
+
+---
+
+## Recap Q&A
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="model-store">
+    <AccordionTrigger>1. 什么时候 Postgres 是对的默认，其他 stores 什么时候赢？</AccordionTrigger>
+    <AccordionContent>
+
+      - **Postgres** 是默认：tables、foreign keys、ACID、joins。Entities 与 relationships 清楚。除非 requirement 点名另一种模型，这套 stack 留在这里。
+      - **Document** 当 schema 真的在变，或 nested blobs 拆成 joins 会爆炸。Scoped interview 已经冻住了 fields。
+      - **Key-value** 用于 exact lookup —— Redis 在 Postgres 前面，不是取代它。**Wide-column** 用于 append-heavy telemetry。**Graph** 几乎不用；Facebook 仍然用 MySQL。
+      - **Failure:** 为了显得高级去选 Mongo 或 Neo4j，然后需要 join 与 unique constraint，而那个 store 不会帮你 enforce。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="model-drivers">
+    <AccordionTrigger>2. 哪三个因素驱动 schema？</AccordionTrigger>
+    <AccordionContent>
+
+      - **Volume** —— rows 能实际住在哪，user data 与 post data 是否必须拆开。
+      - **Access patterns** —— 最重要的那个。它们来自 APIs。每个 endpoint 是一条需要 index、denormalized list 或 cache 的 query。
+      - **Consistency** —— 一笔 charge 留在同一个 ACID database；feed 上的 like 可以晚一秒落地。
+      - **Failure:** schema 无视 `GET /users/{id}/posts` 实际怎么 query。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="model-keys">
+    <AccordionTrigger>3. 不背诵 cardinality，怎么把 relationships 讲清楚？</AccordionTrigger>
+    <AccordionContent>
+
+      - **Primary key** 唯一标识这一行。System-generated `id`，不是 email。**Foreign key** 指向另一张表的 PK。
+      - 把 FKs 写出来。`posts.user_id → users.id` 就是一个 user、许多 posts。Likes 表同时有两个 keys 就是 many-to-many。那些词是可选的。
+      - `UNIQUE`、`NOT NULL`、`CHECK` 属于表。Application `WHERE` 是习惯。
+      - **Failure:** 用 email 当 PK，或 uniqueness 只活在 Hono，于是两个 concurrent inserts 都成功。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="model-normalize">
+    <AccordionTrigger>4. 什么时候 index、denormalize、或 cache？</AccordionTrigger>
+    <AccordionContent>
+
+      - 从 **normalized** 开始。给 APIs 过滤和排序的 columns 建 index —— `GET /users/{id}/posts` → `(user_id, created_at)`。
+      - 只有 indexes 救不了的、被点名的 read，才 **denormalize**。副本优先放 **Redis**，让 Postgres 仍是 source of truth。
+      - Event logs 与 audit snapshots 本来就是在拍某一刻。每个 post 上都抄一份 username 是另一种。
+      - **Failure:** 因为「joins 慢」先 denormalize，而没有任何 query 需要它。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="model-shard">
+    <AccordionTrigger>5. 怎么选 shard key？</AccordionTrigger>
+    <AccordionContent>
+
+      - 只有 data 再也装不进一个 node 时才 shard。Key 通常是永久的。
+      - 按 **primary access pattern** shard。让相关 rows 住在一起 —— comments 跟它们的 post —— 这样常见 read 不是 cross-shard join。
+      - Hash 来均匀铺开。Write-heavy 表上的 time-range 是 **hot shard**。Cross-shard 工作是代价；拆开之前先说出来。
+      - **Failure:** 按 `created_at` shard，于是所有 writes 打在今天；或把 posts 与 comments 拆到不同 keys。
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>

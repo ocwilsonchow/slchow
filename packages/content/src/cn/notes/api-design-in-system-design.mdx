@@ -1,0 +1,330 @@
+---
+title: System Design 里的 API Design
+description: 为什么先定 contract 再画 boxes —— REST、resources、idempotency、pagination、versioning，以及随之而来的 failure modes
+date: 2026-08-17
+category: system-design
+---
+
+**API** 是 clients 给工作起名的方式。选 protocol，给 resources 起名，说清 data 怎么进去、怎么回来。Gateways、caches 与 retries 都相信这些名字。先画 contract，再画 boxes。
+
+这篇 note 依 [Evan 的 walkthrough](https://www.youtube.com/watch?v=DQ57zYedMdQ)。Typed Hono 路径见 [用 Hono、Drizzle、Zod OpenAPI 与 SST 打造 Backend APIs](/notes/backend-apis-hono-sst)。这篇 note 讲的是 contract。
+
+<br />
+
+---
+
+## Pattern Map
+
+| Pattern | Shape | Reach for it when |
+| --- | --- | --- |
+| REST | Resources + HTTP methods | Default public contract。URLs、CDNs、多种语言 |
+| GraphQL | 一个 endpoint，client 决定 query 形状 | Web 与 mobile 需要同一张 graph 的不同切片 |
+| gRPC | Procedures over HTTP/2 + protobuf | Internal service-to-service、type-safe、streaming |
+| SSE / WebSockets | Persistent connection | Notifications、chat、live boards —— 不是第三种 CRUD |
+
+<br />
+
+---
+
+## 1. 为什么需要 contract
+
+Clients 会 retry。Caches 与 API Gateway 相信 method semantics。Timeout 不是 negative acknowledgment。
+
+<br />
+
+- 先给 **resources** 起名，再画 boxes。Events、tickets、bookings —— 不是 `createBooking`。
+- **Stateless** request 带着 server 需要的一切。Conversational server state 是一台无法扩的 replica。
+- 会写的 GET、被当成 retry-safe 的 POST、cache 存了一份 private JSON body —— 都是 contract 在说谎。
+
+<br />
+
+**Failure:** 把 POST-everything 的 RPC 标成 "REST"，然后奇怪 retries、caches 与 gateways 行为不对。
+
+<br />
+
+---
+
+## 2. REST vs GraphQL vs RPC
+
+面向 public HTTP API，**REST** 是 production 默认。另外两个要自己挣位置。
+
+<br />
+
+```text
+Client → REST / Hono → Postgres
+REST / Hono → (optional) gRPC → Inventory service
+```
+
+<br />
+
+- **REST.** Resources 在 URLs 上。`GET /invoices/{id}` 可 cache。Java partner 不需要 GraphQL runtime。这套 stack 的 public surface 是经 Hono 的 REST。
+- **GraphQL.** 一个 endpoint；client 点名 fields。适合 mobile 只要薄薄的 event、dashboard 要 venue + tickets 一次拿完。代价是 schema、按 field 的 authz，以及没有 DataLoader batch 时的 **N+1**。不要当默认。
+- **gRPC.** 动作形状：`checkPermission(userId, resource)`。Binary + HTTP/2。Generated clients。Booking、payment、inventory 之间的 internal hops —— 不是 mobile URL。Public REST、internal RPC 是正常拆分。
+- **Realtime** 是 persistent connection。Server 是唯一 publisher 时用 SSE；两边都说话用 WebSockets。它不是 timeout 更长的 REST。
+
+<br />
+
+**Failure:** 把 GraphQL 当 public surface，query 无界，也没有 persisted-query allowlist。一次 nested request 变成 N-plus-one，再变成 outage。
+
+<br />
+
+---
+
+## 3. Resources
+
+REST resources 是 **things**，复数名词。动作活在 method 里，不在 path 里。
+
+<br />
+
+```text
+GET    /events
+GET    /events/{id}
+GET    /events/{id}/tickets
+POST   /events/{id}/bookings
+GET    /bookings/{id}
+```
+
+<br />
+
+- 父级是必须的就 **nest**：`/events/{id}/tickets` 没有 event 就没有意义。Filter 是可选的就用 **query**：`/tickets?eventId=123&section=VIP`。
+- **Path** 标识 resource。**Query** 修改 retrieval —— filter、sort、page。**Body** 是你 create 或 replace 的 payload。敏感和大体量的 data 不属于 URL。
+- 这些名字会变成 tables。[System Design 里的 Data Modeling](/notes/data-modeling-in-system-design)。
+
+<br />
+
+```ts title="src/routes/bookings.ts"
+app.post("/events/:eventId/bookings", async (c) => {
+  const { eventId } = c.req.valid("param")
+  const notify = c.req.query("notify") === "true"
+  const body = c.req.valid("json") // tickets, payment_method
+  // ...
+})
+```
+
+<br />
+
+**Failure:** `/createBooking` 和 `/getEventById`。Gateway 无法 cache 一个它叫不出名字的 GET。下一个工程师再加第二个动词。
+
+<br />
+
+---
+
+## 4. Methods 与 idempotency
+
+**Idempotency** 是对 server state 的效果：N 次相同 request 留下的 resource 与第一次相同。**Safe** 更严 —— client 并没有在请求一次变更。
+
+<br />
+
+| Method | Safe | Idempotent | Use |
+| --- | --- | --- | --- |
+| GET | Yes | Yes | Read。没有 side effects。 |
+| PUT | No | Yes | 整份 replace，或在已知 id 上 create。 |
+| DELETE | No | Yes | Remove。第二次可能是 204 之后的 404。 |
+| POST | No | No | Create。每次 call 都是新 intent。 |
+| PATCH | No | Depends | Partial update。"Set email" 是；"append to list" 不是。 |
+
+<br />
+
+- Clients、proxies 与 meshes 会 retry。没有 **idempotency key** 的超时 `POST /bookings` 就是两笔 bookings。Key 是每个 user intent 一把 UUID；同一把 key 同一份 body 返回存下来的 201；同一把 key 不同 body 是 **409**。
+- 必须离开 request cycle 的工作 —— email、webhooks、thumbnails —— 是 **202** 加一条 queue，不是堵住的 POST。[System Design 里的 Message Queues](/notes/message-queues-in-system-design)。
+
+<br />
+
+**Failure:** 把 timeout 当成「server 从没看见它」。Server 可能已经 committed。会 append 的 PUT、会 decrement counter 的 DELETE —— 同一个 method 名，不是 idempotent。
+
+<br />
+
+---
+
+## 5. Status codes
+
+Code 是给机器的 contract。Body 是给人和 logs 的。4xx 是 client 的问题。5xx 是你的。
+
+<br />
+
+| Code | Meaning |
+| --- | --- |
+| **200** | OK，有 body |
+| **201** | Created，新 resource 的 Location |
+| **202** | Accepted，还没做完 —— poll 或等 worker |
+| **204** | OK，没有 body |
+| **400** | Malformed |
+| **401** | 未 authenticated |
+| **403** | 已 authenticated，但不允许 |
+| **404** | 缺失，或故意隐藏 |
+| **409** | Conflict —— duplicate intent、stale version |
+| **429** | Rate limited |
+| **500** | Handler 失败 |
+
+<br />
+
+- 401 vs 403 是 identity vs permission。混在一起会训练 clients 在答案是「永远不行」时再 login 一次。
+- 不要给 validation error 发明一个 2xx，好让 dashboard 保持绿。
+
+<br />
+
+**Failure:** 200 配 `{ success: false }`，于是每个 cache 和每次 retry 都把这次 write 当成做完了。
+
+<br />
+
+---
+
+## 6. Pagination
+
+会增长的 list 不是一份 list。它是一扇窗口。
+
+<br />
+
+- **Offset**（`?page=2&limit=25` 或 `OFFSET 25`）是页码。跳到第五十页很容易。Postgres 仍要走过被 skip 的 rows。Inserts 与 deletes 会移动窗口 —— duplicates 或 gaps。
+- **Cursor / keyset** 返回最后一行的 opaque token，再按 index 从 `(created_at, id)` 往后 seek。每一页是 range scan，不是丢掉的前缀。你不能跳到第五十页。这正是重点。
+- Production 默认：feeds、search、audit logs 用 keyset。只有页码就是产品的小 admin screens 才用 offset。Seek 见 [SQL 核心概念](/notes/core-sql-concepts)。
+
+<br />
+
+```text
+GET /events?limit=10
+→ { events: [...], next_cursor: "..." }
+
+GET /events?cursor=...&limit=10
+```
+
+<br />
+
+**Failure:** 把 offset 塞进 cursor string，再称之为 cursor pagination。Skip 的成本和被 skip 的 rows 都还在。
+
+<br />
+
+---
+
+## 7. Versioning
+
+APIs 会变。Clients 不会按你的时间表变 —— 尤其是 mobile。
+
+<br />
+
+- 优先 **additive** 变更：新的 optional fields、新 endpoints。一次 version cut 是你接下来要跑两套的产品。
+- 真要 cut 时，**URL versioning**（`/v1/events`）是明确的默认。好 route、好解释、好在 browser 里测。
+- Header versioning 让 URLs 更干净，也更不明显。除非 interviewer 或平台已经活在那里，否则跳过。
+- 这套 stack 真正 ship 的 version 是 OpenAPI contract —— [用 Hono、Drizzle、Zod OpenAPI 与 SST 打造 Backend APIs](/notes/backend-apis-hono-sst)。
+
+<br />
+
+**Failure:** 原地 rename 一个 field，因为「还没人用旧名字」。一份已 ship 的 mobile build 在用。
+
+<br />
+
+---
+
+## 8. Authn 与 authz
+
+**Authentication** 回答谁。**Authorization** 回答他们可以做什么。Client 送来的任何东西，对这两者都不是 source of truth。
+
+<br />
+
+- 用户 session 用 **JWT**：signed claims、expiry，verifying key 共享时不必每 hop 查库。Revocation 是代价 —— short TTL，或一份 denylist。
+- 机器用 **API keys**：`Authorization: Bearer sk_live_…`，lookup、scoped、可 rotate。用户不去管理它们。Internal services 与 partner access 才管。
+- 两个都要查：token 有效，然后「这个 principal 是否拥有这张 booking」。Tenant 来自 verified session，不是 `X-Organization-Id`。[用 Hono、Better Auth、Drizzle 与 Postgres RLS 打造 Multi-Tenant 后端](/notes/multi-tenant-backend-drizzle-hono-better-auth)。
+
+<br />
+
+**Failure:** API 相信 client 声明的 `organizationId`。Query 返回另一个 tenant 的 rows。Encryption in transit 帮不上忙。
+
+<br />
+
+---
+
+## 9. Rate limits
+
+Rate limits 保护系统免于恶意，也免于一个 loop。它们不是产品功能。
+
+<br />
+
+- 放在 **gateway** 或 middleware 里，赶在 handler 打开 pool connection 之前。返回带 `Retry-After` 的 **429**。
+- Authenticated traffic 按 user。Anonymous 按 IP。热 write 更紧 —— booking attempts、login、password reset。
+- Algorithm 细节（fixed window、token bucket）等人问起。Contract 是 429，以及你数的是哪份 identity。
+
+<br />
+
+**Failure:** 只在 Hono handler 里、已经做完 200ms DB read 之后才 limit，或 429 没有任何 hint，于是 client 立刻 retry，自己变成羊群。
+
+<br />
+
+---
+
+## 10. Cacheable GET
+
+**Safe** 的 GET 可以被 cache。会 create 一笔 order 的 GET 不行。Gateways 与 CDNs 会相信你。
+
+<br />
+
+- `Cache-Control` 与 `ETag` / `Last-Modified` 是省带宽的方式。Private 或 tenant-scoped JSON 离开 shared edge，或使用真正匹配 identity 的 `Vary`。
+- Redis 里的 cache-aside 是同一个想法的 application 副本。HTTP cache 是别人的 process。[System Design 里的 Caching](/notes/caching-in-system-design)。
+
+<br />
+
+**Failure:** CDN cache 了一份本该 private 的 JSON，或一个仍有 side effects 的 uncacheable GET，于是一次 prefetch 订出一张票。
+
+<br />
+
+---
+
+## Recap Q&A
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="api-protocol">
+    <AccordionTrigger>1. 什么时候 REST 是对的默认，GraphQL 或 gRPC 何时赢？</AccordionTrigger>
+    <AccordionContent>
+
+      - **REST** 是 public HTTP contract：resources 在 URLs 上、多种语言、CDNs、partners。这套 stack 的 Hono surface 是 REST。
+      - **GraphQL** 当 web 与 mobile 需要同一张 graph 的不同切片、一次 round trip。自己扛 N+1、field authz 与 query cost。不要当默认。
+      - **gRPC** 给 internal service-to-service：procedures、protobuf、HTTP/2、generated clients。不是 mobile URL。
+      - Realtime 是 SSE 或 WebSockets —— persistent connection，不是第三种 CRUD。
+      - **Failure:** 把 GraphQL 当 public surface，query 无界。一次 nested request 变成 outage。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="api-resources">
+    <AccordionTrigger>2. 怎么给 resources 起名，data 放哪？</AccordionTrigger>
+    <AccordionContent>
+
+      - Resources 是 **things**，复数名词。`/events/{id}/bookings`，不是 `/createBooking`。父级必须时 nest；filter 可选时用 query params。
+      - **Path** 标识。**Query** 修改 retrieval。**Body** 是 create/replace payload。Secrets 与大体量 data 离开 URL。
+      - **Failure:** path 里的动词，让 gateway 无法 cache 一个它叫不出名字的 GET。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="api-idempotency">
+    <AccordionTrigger>3. 为什么 retried POST 会创造出两笔 bookings？</AccordionTrigger>
+    <AccordionContent>
+
+      - GET、PUT、DELETE 是 **idempotent**。POST 不是。PATCH 看情况。Timeout 不是 negative acknowledgment —— server 可能已经 committed。
+      - Creates 带着 **idempotency key**。同一把 key 同一份 body 返回存下来的 201。同一把 key 不同 body 是 409。离开 request 的工作是 **202** 加一条 queue。
+      - **Failure:** 把「client 没听到回音」当成「write 从没发生」。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="api-pagination">
+    <AccordionTrigger>4. Offset 还是 cursor —— 哪种 list 用哪种？</AccordionTrigger>
+    <AccordionContent>
+
+      - **Offset** 是页码。好跳。Postgres 走过被 skip 的 rows。Inserts 移动窗口 —— duplicates 或 gaps。
+      - **Cursor / keyset** 按 index 从 `(created_at, id)` 往后 seek。Feeds、search、audit logs。你不能跳到第五十页。
+      - **Failure:** 把 offset 塞进 cursor string。Skip 成本还在。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="api-auth">
+    <AccordionTrigger>5. JWT 还是 API key —— 谁在调用，他们可以做什么？</AccordionTrigger>
+    <AccordionContent>
+
+      - **Authentication** 是谁。**Authorization** 是他们可以做什么。两个都要查。
+      - 用户 session 用 **JWT**。机器与 partners 用 **API keys**。Tenant 来自 verified session，不是 client header。
+      - **Failure:** 相信 JSON 里的 `organizationId`。Query 返回另一个 tenant 的 rows。
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>

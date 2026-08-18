@@ -1,4 +1,4 @@
-import { getDesigns, type DesignImage } from "./get-designs"
+import { type DesignImage, getDesigns } from "./get-designs"
 
 export type FeaturedImage = DesignImage & { slug: string }
 

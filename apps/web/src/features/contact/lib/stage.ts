@@ -1,14 +1,6 @@
-export function getSstStage() {
-  return process.env.SST_STAGE || "local"
-}
+import { isSstDev, isSstProduction } from "@/lib/stage"
 
-export function isSstProduction() {
-  return getSstStage() === "production"
-}
-
-export function isSstDev() {
-  return getSstStage() === "dev"
-}
+export { getSstStage, isSstDev, isSstProduction } from "@/lib/stage"
 
 export function shouldSendContactDiscord() {
   return isSstProduction() || isSstDev()

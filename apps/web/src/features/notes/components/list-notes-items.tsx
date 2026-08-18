@@ -7,8 +7,12 @@ import { Link } from "@/i18n/navigation"
 export type ListNoteCategory =
   | "frontend"
   | "backend"
+  | "system-design"
   | "ai"
+  | "security"
+  | "devops"
   | "computer-science"
+  | "full-stack"
   | "personal"
 
 export type ListNoteItem = {
@@ -50,7 +54,7 @@ export function ListNotesItems({
           </h2>
         </Link>
       )}
-      <ul className="grid list-disc list-outside ml-4 gap-px">
+      <ul className="grid list-disc list-outside ml-4 gap-0.5">
         {visibleNotes.map((page, index) => (
           <li
             key={page.url}
@@ -63,7 +67,7 @@ export function ListNotesItems({
             <Link href={`/notes/${page.slug}`} className={linkClassName}>
               <span>{page.title}</span>
               {page.category ? (
-                <span className="inline-block font-semibold text-content-body/70 text-[11px] bg-surface-alpha px-1.25 py-px rounded-md">
+                <span className="inline-block font-semibold text-content-body/80 text-[11px] bg-surface-alpha px-1.25 py-px rounded-md">
                   {t(`categories.${page.category}`)}
                 </span>
               ) : null}

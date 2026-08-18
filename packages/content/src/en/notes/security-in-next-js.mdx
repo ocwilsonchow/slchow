@@ -1,0 +1,298 @@
+---
+title: Security in Next.js
+description: How Next.js App Router fails as a browser origin — cookies, RSC, Server Actions, cache vs privacy — and the defenses this stack ships
+date: 2026-08-14
+category: security
+---
+
+A **Next.js** document lives in a browser **origin**. A React Native screen lives in a **device**. Both UIs are untrusted. Both still talk to the same Hono / Better Auth API. This note is the origin.
+
+The category map is [Web Security and the OWASP Top 10](/notes/web-security-owasp-top-10). The device host is [Security in React Native](/notes/security-in-react-native). This is a defensive reading of **Next.js 16 App Router**: failure modes and attacker goals, not exploits.
+
+<br />
+
+---
+
+## 1. The Host
+
+A Next.js request leaves through the origin, then meets the same server a native client uses:
+
+<br />
+
+```text
+Next.js:
+  Document / RSC → HttpOnly cookie → Server Action POST
+Server Action POST → Hono API → Authn then authz
+```
+
+<br />
+
+| | Next.js | React Native |
+| --- | --- | --- |
+| Isolation unit | Browser origin | App ID / keychain access group |
+| Session | `HttpOnly; Secure; SameSite` cookie | SecureStore / Keychain / Keystore |
+| XSS surface | DOM, `dangerouslySetInnerHTML`, `next/script` | WebView plus any JS bridge you expose |
+| Secrets | `server-only` modules; `NEXT_PUBLIC_*` is public | Nothing in the binary is secret |
+| Deep entry | `searchParams`, open redirects, `router.push` | Custom URL schemes, universal links, push payloads |
+
+<br />
+
+- The shared lie is the same on both hosts: **the UI is not authorization**. Hiding a button or checking a role in a Client Component does not decide whether a row may be read.
+- [Understanding Next.js in Depth](/notes/understanding-next-js-in-depth) covers the rendering machinery; [Local Storage, Session Storage, and Cookies](/notes/browser-storage-localstorage-sessionstorage-cookies) covers why the cookie jar is a different primitive from Web Storage.
+
+<br />
+
+---
+
+## 2. The Server/Client Graph
+
+Next.js compiles one source tree into **several module graphs**. `'use client'` is a bundle boundary, not a security flag.
+
+- Everything that module imports — and everything those imports import — can appear in a browser chunk. A secret that crosses that boundary is a leak at **build time**.
+- `import "server-only"` makes the contract explicit. A client import then fails the build instead of shipping the database URL.
+- `NEXT_PUBLIC_*` is a rebuild-time public constant, inlined into client assets. Anything that must stay secret is read at **runtime** on the server, from SST Secrets or the function environment.
+- RSC props serialize across the same boundary. Pass the **public view** the UI needs: a display name, not a session, a Stripe customer id, or a role the client will "enforce."
+- React's `experimental_taintUniqueValue` and `experimental_taintObjectReference` can fail the render if a tainted secret would otherwise serialize. They are a belt. They do not replace refusing to pass the value.
+
+<br />
+
+```ts
+import "server-only"
+
+export async function getBillingAccount(organizationId: string) {
+  return db.query.billingAccounts.findFirst({
+    where: (table, { eq }) => eq(table.organizationId, organizationId),
+  })
+}
+```
+
+<br />
+
+**Failure:** `'use client'` too high in the tree. A fatter graph widens XSS blast radius: more JavaScript on the origin, more chance a later Markdown renderer or analytics snippet runs there.
+
+<br />
+
+---
+
+## 3. Server Actions Are Public POSTs
+
+`'use server'` does not mean "only this form can call this." The build creates a server reference. The browser POSTs that reference plus serialized arguments.
+
+- From a security perspective the action is an HTTP endpoint that happens to refresh UI.
+- Next.js adds transport defenses: same-origin checks, encrypted closed-over values, `serverActions.allowedOrigins`, body-size limits. Those reduce CSRF and confused-proxy cases. They do **not** decide whether this session may rename this product.
+- Bound arguments and closed-over IDs are not capabilities. An opaque action id is not a secret.
+- Authorize beside the write, after parsing input, every time.
+
+<br />
+
+```ts
+"use server"
+
+const Input = z.object({
+  id: z.string().uuid(),
+  name: z.string().trim().min(1).max(120),
+})
+
+export async function renameProduct(formData: FormData) {
+  const actor = await requireEditor()
+  const input = Input.parse(Object.fromEntries(formData))
+  await db.product.update({
+    where: { id: input.id, tenantId: actor.tenantId },
+    data: { name: input.name },
+  })
+}
+```
+
+<br />
+
+- `requireEditor()` reads the session cookie on the **server**. The Client Component that rendered the form is not part of the trust decision.
+- TypeScript on the form fields is not a parser. Zod is. Tenant scope on the `where` is authorization, not a courtesy filter.
+- Set `serverActions.allowedOrigins` when the app sits behind a reverse proxy whose host is not the public origin. The longer argument lives in the Next.js note. The security sentence is short: **reachable means callable**.
+
+<br />
+
+---
+
+## 4. `proxy.ts` Is a Cheap Gate
+
+In Next.js 16, root-level `proxy.ts` replaces `middleware.ts`. It runs before the route tree.
+
+- Right place for redirects, rewrites, extra headers, and coarse "is there a session cookie at all?" checks.
+- Wrong place to be the only authorization. Matchers miss paths. Rewrites change what the app thinks the URL is.
+- A cookie-presence check that redirects to `/login` improves UX. It does not prove the user may load `/organizations/[id]/billing`. That proof belongs next to the data — in the Server Action, the Route Handler, or the Hono API behind them.
+
+<br />
+
+```ts title="proxy.ts"
+import { NextResponse } from "next/server"
+import type { NextRequest } from "next/server"
+
+export function proxy(request: NextRequest) {
+  const session = request.cookies.get("session")
+  const isApp = request.nextUrl.pathname.startsWith("/app")
+
+  if (isApp && !session) {
+    return NextResponse.redirect(new URL("/login", request.url))
+  }
+
+  return NextResponse.next()
+}
+
+export const proxyConfig = {
+  matcher: ["/app/:path*"],
+}
+```
+
+<br />
+
+**Failure:** copying identity into a request header here and then trusting that header in a Server Component. The session cookie is the identity. Anything `proxy.ts` adds is still just a header. A missing matcher on `/app/export` or a Route Handler under `/api` is not a theoretical gap.
+
+<br />
+
+---
+
+## 5. Cache vs Privacy
+
+Next.js will happily cache a personalized tree if you let it. A shared CDN entry that includes another user's HTML or RSC payload is a privacy incident that looks like a performance win.
+
+- Reading `cookies()`, `headers()`, or a user-specific `searchParams` binds the work to **this request**. That output must not become one object for every visitor.
+- Shared catalog fields can be cached. Recommendations, dashboards, and anything keyed by session stay dynamic — or they are cached with a key that is actually private and a `Vary` the CDN honors.
+- Split the tree: public catalog under `'use cache'` or ISR; the session-shaped region stays a request-time Server Component that reads the cookie and passes **display fields** into the client view, not the session.
+- Source maps follow the same audience rule. Error tracking may need them. A public `/.map` dump is a source leak.
+
+**Failure:** caching the wrong audience, not "forgot `revalidateTag`." A full-route cache of `/account` is a cross-user leak waiting for a hit. If it would be wrong to show user A's page to user B, it does not belong in a shared cache.
+
+<br />
+
+---
+
+## 6. XSS in React and Next.js
+
+React escapes text children. `{user.name}` in a `<p>` is data. The remaining holes are the places the app opts out.
+
+- `dangerouslySetInnerHTML` — CMS HTML, Markdown pipelines, and "rich text from the API" are the usual sources. If the product truly needs markup, sanitize with a maintained library on the **server** before it reaches the client, then still assume a miss.
+- `next/script` and inline snippets — third-party tags are script on your origin. Prefer `next/script` with an explicit strategy, and keep the allowlist of hosts in CSP.
+- User-controlled `href`, `src`, and `router.push` — a non-http(s) scheme in a destination is an injection into the page context. Do not concatenate `searchParams` into those APIs.
+- Hydration is not a sanitizer. Markup that is unsafe on the server is unsafe after hydrate.
+
+<br />
+
+```ts
+import "server-only"
+import { JSDOM } from "jsdom"
+import createDOMPurify from "dompurify"
+
+const purify = createDOMPurify(new JSDOM("").window)
+
+export function sanitizeArticleHtml(html: string) {
+  return purify.sanitize(html, { USE_PROFILES: { html: true } })
+}
+```
+
+<br />
+
+- CSP is a **backup**, not a substitute for not rendering untrusted HTML. The header set in the OWASP note is the starting point. Trusted Types shrink remaining `innerHTML` sinks where the browser supports them.
+
+**Failure:** treating sanitization as a license to skip CSP. `dangerouslySetInnerHTML` should be a review comment every time.
+
+<br />
+
+---
+
+## 7. Untrusted Navigation
+
+`searchParams`, callback URLs, and `next/image` sources are attacker-controlled input that happens to look like routing.
+
+- Open redirects: a `?next=` parameter passed to `redirect()` or `router.push` will send the user wherever the link said.
+- Allowlist **paths on this origin**, reject protocol-relative URLs, and default to a known-safe location.
+- `searchParams` used as a query, a filter, or an id still belong in Zod on the server. The URL is not a trusted database.
+- `next/image` will fetch remote URLs you allow. `remotePatterns` is an allowlist against using the optimizer as an open proxy — prefer a specific host. Local static imports do not need this; user-uploaded or CMS images do.
+
+<br />
+
+```ts
+const ALLOWED_NEXT = new Set(["/app", "/settings", "/billing"])
+
+export function safeNextPath(value: string | undefined) {
+  if (!value || !value.startsWith("/") || value.startsWith("//")) {
+    return "/app"
+  }
+
+  return ALLOWED_NEXT.has(value) ? value : "/app"
+}
+```
+
+<br />
+
+**Failure:** a public `?preview=true` that skips auth because a Server Component checked the query string. That is insecure design, not a routing trick. A wildcard hostname in `remotePatterns` is the same class as fetching a caller-supplied URL from a Server Action.
+
+<br />
+
+---
+
+## 8. Defaults
+
+- Secrets stay behind `server-only`. `NEXT_PUBLIC_*` is for public identifiers. RSC props are a public API.
+- Server Actions and Route Handlers authenticate and authorize on the server, after Zod. `proxy.ts` is a cheap cookie gate, not the lock.
+- Personalized HTML and RSC never go in a shared cache.
+- Text is data. Markup is a review. Navigation and `remotePatterns` are allowlists. CSP backs the origin; it does not define it.
+
+The origin, the session, and the authorization check are the product. The renderer is not. The same sentence on device is [Security in React Native](/notes/security-in-react-native).
+
+---
+
+## Recap Q&A
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="next-sec-origin">
+    <AccordionTrigger>1. Why is the Next.js document an untrusted origin, not a trusted UI?</AccordionTrigger>
+    <AccordionContent>
+
+      - A **Next.js** document lives in a browser **origin**. The UI is untrusted. It still talks to the same Hono / Better Auth API as the native client.
+      - Authorization does not move into the component tree because the renderer is React. Hiding a button is not a permission check.
+      - Next.js carries an **HttpOnly cookie** and Server Action POSTs. The cookie jar is the isolation unit; Web Storage is not.
+      - `'use client'` is a **bundle boundary**, not a security flag. `NEXT_PUBLIC_*` is a rebuild-time public constant. Secrets are read at **runtime** on the server.
+      - **Failure:** RSC props that pass a privileged object have published it to the browser.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="next-sec-actions">
+    <AccordionTrigger>2. Why are Server Actions public POSTs?</AccordionTrigger>
+    <AccordionContent>
+
+      - `'use server'` does not mean “only this form can call this.” The build creates a server reference. The browser POSTs that reference plus serialized arguments.
+      - From a security perspective the action is an HTTP endpoint that happens to refresh UI.
+      - Same-origin checks and encrypted closed-over values reduce CSRF. They do **not** decide whether this session may rename this product.
+      - Bound arguments are not capabilities. An opaque action id is not a secret.
+      - Authorize beside the write, after Zod, every time. `requireEditor()` reads the session cookie on the **server**. Tenant scope on `where` is authorization, not a courtesy filter.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="next-sec-cache">
+    <AccordionTrigger>3. When does a Next.js cache become a privacy incident?</AccordionTrigger>
+    <AccordionContent>
+
+      - Next.js will happily cache a personalized tree if you let it. A shared CDN entry that includes another user’s HTML or RSC payload is a privacy incident that looks like a performance win.
+      - Reading `cookies()`, `headers()`, or a user-specific `searchParams` binds the work to **this request**.
+      - Split the tree: public catalog cached; the session-shaped region stays request-time.
+      - Source maps follow the same audience rule.
+      - **Failure:** caching the wrong audience, not “forgot `revalidateTag`.” If it would be wrong to show user A’s page to user B, it does not belong in a shared cache.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="next-sec-xss">
+    <AccordionTrigger>4. What does React actually escape, and where does XSS still live?</AccordionTrigger>
+    <AccordionContent>
+
+      - React escapes text children. `{user.name}` in a `<p>` is data.
+      - The remaining holes are where the app **opts out**: `dangerouslySetInnerHTML`, CMS/Markdown HTML, user-controlled `href` / `src` / `router.push`, `next/script` tags on your origin.
+      - Sanitize markup on the **server** if the product truly needs HTML, then still assume a miss. Hydration is not a sanitizer.
+      - CSP is a backup. `'use client'` too high in the tree widens XSS blast radius.
+      - Open redirects: allowlist **paths on this origin**, reject protocol-relative URLs.
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>
