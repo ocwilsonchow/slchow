@@ -10,6 +10,7 @@
     "back": "返回",
     "works": "支线任务",
     "designs": "设计",
+    "components": "组件",
     "comingSoon": "即将推出",
     "notes": "笔记",
     "listAll": "显示全部",
@@ -98,6 +99,10 @@
     "contact": {
       "title": "联系",
       "description": "欢迎联系 Wilson Chow。"
+    },
+    "components": {
+      "title": "组件",
+      "description": "Wilson Chow 的 UI 组件与模式。"
     }
   },
   "contact": {
@@ -168,6 +173,10 @@
     "intro": "我喜欢打造用户界面。以前我花很多时间在 Figma 上。",
     "fullCollection": "全部作品 ({count})",
     "preview": "预览"
+  },
+  "components": {
+    "intro": "我收藏的 UI 组件与模式。",
+    "comingSoon": "即将推出！"
   },
   "code": {
     "copy": "复制代码",

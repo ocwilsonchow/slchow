@@ -1,11 +1,12 @@
 import type { MetadataRoute } from "next"
+import { publicResumeVariant } from "@/features/resume/variants"
 import { routing } from "@/i18n/routing"
 import { getSiteUrl } from "@/lib/metadata"
 import { getNativeCategoryPages } from "@/lib/source"
 
 const staticPaths = [
   "",
-  "/resume",
+  `/resume/${publicResumeVariant}`,
   "/notes",
   "/works",
   "/design",

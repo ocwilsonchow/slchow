@@ -5,15 +5,18 @@ import Image from "next/image"
 import { useTranslations } from "next-intl"
 import { Fragment } from "react"
 import profilePicture from "@/assets/profile-pic.webp"
+import { publicResumeVariant } from "@/features/resume/variants"
 import { Link, usePathname } from "@/i18n/navigation"
 import { LanguageSettings, ThemeSettings } from "../navbar-settings"
 import { useNavbarContext } from "./context"
 import { Navbar } from "./parts"
 import { useHideNavbarForOverlay } from "./visibility"
 
+const publicResumePath = `/resume/${publicResumeVariant}` as const
+
 const PATH_TITLE_KEYS = {
   "/": "homePage",
-  "/resume": "resume",
+  [publicResumePath]: "resume",
   "/works": "works",
   "/notes": "notes",
   "/design": "designs",
@@ -21,14 +24,14 @@ const PATH_TITLE_KEYS = {
 } as const
 
 type NavItem = {
-  href: "/" | "/resume" | "/notes" | "/works" | "/design" | "/contact"
+  href: "/" | typeof publicResumePath | "/notes" | "/works" | "/design" | "/contact"
   labelKey: "home" | "resume" | "notes" | "works" | "designs" | "contact"
   countKey?: "notesCount" | "designsCount"
 }
 
 const NAV_ITEMS: NavItem[] = [
   { href: "/", labelKey: "home" },
-  { href: "/resume", labelKey: "resume" },
+  { href: publicResumePath, labelKey: "resume" },
   { href: "/notes", labelKey: "notes", countKey: "notesCount" },
   // { href: "/works", labelKey: "works" },
   { href: "/design", labelKey: "designs", countKey: "designsCount" },
@@ -52,6 +55,7 @@ function getPathTitleKey(pathname: string) {
   if (pathname in PATH_TITLE_KEYS) {
     return PATH_TITLE_KEYS[pathname as keyof typeof PATH_TITLE_KEYS]
   }
+  if (pathname.startsWith("/resume/")) return "resume"
   if (pathname.startsWith("/notes/")) return "notes"
   if (pathname.startsWith("/works/")) return "works"
   return null

@@ -2,6 +2,7 @@ import { cn } from "@repo/ds"
 import { getLocale, getTranslations } from "next-intl/server"
 import type { ComponentProps } from "react"
 import { getDesigns } from "@/features/design/get-designs"
+import { publicResumeVariant } from "@/features/resume/variants"
 import { Link } from "@/i18n/navigation"
 import { getCategoryPages } from "@/lib/source"
 import { HeaderSearchTrigger } from "./header-search-trigger"
@@ -65,7 +66,9 @@ export const Links = async ({ className, ...props }: ComponentProps<"div">) => {
   return (
     <div {...props} className={cn("hidden md:flex flex-col gap-8", className)}>
       <ul className="flex flex-col gap-px">
-        <HeaderLink href="/resume">{t("resume")}</HeaderLink>
+        <HeaderLink href={`/resume/${publicResumeVariant}`}>
+          {t("resume")}
+        </HeaderLink>
         <HeaderLink href="/notes">
           {t("notes")} <sup className="text-content-subdued">{notesCount}</sup>
         </HeaderLink>
@@ -73,6 +76,7 @@ export const Links = async ({ className, ...props }: ComponentProps<"div">) => {
           {t("designs")}{" "}
           <sup className="text-content-subdued">{designsCount}</sup>
         </HeaderLink>
+        <HeaderLink href="/components">{t("components")}</HeaderLink>
         <HeaderLink href="/contact">{t("contact")}</HeaderLink>
       </ul>
       <ul className="flex flex-col gap-px">

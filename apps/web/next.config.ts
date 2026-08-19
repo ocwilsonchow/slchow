@@ -16,6 +16,11 @@ const nextConfig: NextConfig = {
         destination: "/:locale/notes/security-in-next-js",
         permanent: true,
       },
+      {
+        source: "/:locale/resume",
+        destination: "/:locale/resume/full-stack",
+        permanent: true,
+      },
     ]
   },
   async rewrites() {

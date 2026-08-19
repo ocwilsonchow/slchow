@@ -10,6 +10,7 @@
     "back": "Back",
     "works": "Side Quests",
     "designs": "Designs",
+    "components": "Components",
     "comingSoon": "coming soon",
     "notes": "Notes",
     "listAll": "List all",
@@ -98,6 +99,10 @@
     "contact": {
       "title": "Contact",
       "description": "Get in touch with Wilson Chow."
+    },
+    "components": {
+      "title": "Components",
+      "description": "UI components and patterns by Wilson Chow."
     }
   },
   "contact": {
@@ -168,6 +173,10 @@
     "intro": "I like crafting user interfaces. I used to spend a lot of time on Figma back in the days.",
     "fullCollection": "Full collection ({count})",
     "preview": "Preview"
+  },
+  "components": {
+    "intro": "My collection of UI components and patterns.",
+    "comingSoon": "Coming soon!"
   },
   "code": {
     "copy": "Copy code",
