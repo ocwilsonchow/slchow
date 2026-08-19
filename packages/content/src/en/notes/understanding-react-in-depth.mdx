@@ -25,6 +25,8 @@ event, promise, or external store
 
 Render purity, state snapshots, identity by type and key, and the render/commit split are public. Names such as **Fiber**, **lanes**, and `beginWork` describe the React 19.2 implementation. Application code should not depend on them.
 
+The Fiber walk and interruptible rendering are visualized in Beyond The DOM's [React Fiber](https://www.youtube.com/watch?v=HxmCFGicFK0) and [Concurrent Rendering in React 18](https://www.youtube.com/watch?v=r3gjA9WzzEs).
+
 ---
 
 ## 1. JSX Produces Descriptions, Not DOM Nodes
@@ -81,11 +83,24 @@ Host tree        DOM nodes, native views, or another renderer's output
 
 Elements are temporary descriptions. React needs a persistent structure that survives from one render to the next: the **Fiber tree**.
 
-- A Fiber is a **virtual stack frame** for one component, host element, text node, or Suspense boundary.
-- Fibers use `child`, `sibling`, and `return` links so React can walk one unit at a time, pause, and resume.
+- A Fiber is a **virtual stack frame** for one component, host element, text node, or Suspense boundary. Host nodes get Fibers too — not only function components.
+- Fibers use `child`, `sibling`, and `return` links. That is a **linked list**, not an array of children. The next unit of work is always a pointer follow.
+- The old stack reconciler walked the tree by recursion on the JavaScript call stack and could not pause. Fiber walks with a **work loop**, so React can stop between units and resume from the saved pointer.
 - The **current** Fiber is the tree on screen. Its `alternate` is the **work-in-progress** Fiber where React computes the next state.
 - This is **double buffering**: mutate WIP privately, keep the current tree and DOM stable. Abandon work by throwing away WIP, not by mutating the screen.
 - Fibers and subtrees can be reused. React does not clone the entire application from scratch.
+
+<br />
+
+```text
+{
+  type,            // function, host tag, or other Fiber kind
+  child, sibling, return,
+  memoizedProps,
+  memoizedState,
+  alternate,       // the other buffer
+}
+```
 
 <br />
 
@@ -172,10 +187,20 @@ retry for Suspense        ─┘
 
 <br />
 
+A long **blocking** render owns the main thread: the browser cannot paint, handle a click, or scroll until React finishes. That is the freeze Fiber and lanes exist to avoid — but only for renders that opt in.
+
+Concurrent rendering is **opt-in per feature**. A default `setState` still renders as one uninterrupted transaction. `startTransition`, `useTransition`, `useDeferredValue`, and related Suspense behavior mark work that React may interrupt.
+
+During a concurrent render, the scheduler can yield between Fibers (`shouldYield` in the implementation — a time slice on the order of a few milliseconds, not an API). React returns control to the browser, then resumes the same work-in-progress tree. If a higher-priority update arrives, it can throw that WIP away and restart.
+
+<br />
+
 - React may begin a transition, receive urgent input, discard the transition attempt, commit the urgent result, then restart the transition against the latest tree.
 - `startTransition` marks the React updates scheduled synchronously inside that function with transition priority.
 - It does not move JavaScript to another thread, make expensive computation free, or delay the function passed to `startTransition`.
-- Lane names can change between versions. The durable lesson: React tracks **which work is pending** separately from **which work should be attempted now**.
+- `useTransition` is the same mark plus an `isPending` flag so you can show pending UI **without hiding** the last committed tree.
+- `useDeferredValue` is the counterpart for a value you did not schedule yourself: keep showing the previous value while a heavier derived render catches up.
+- Lane names and yield budgets can change between versions. The durable lesson: React tracks **which work is pending** separately from **which work should be attempted now**.
 
 <br />
 
@@ -189,6 +214,24 @@ function handleChange(value: string) {
 }
 ```
 
+<br />
+
+```tsx
+const [isPending, startTransition] = useTransition()
+
+function regenerate() {
+  startTransition(() => {
+    setSeed(nextSeed())
+  })
+}
+
+return (
+  <button onClick={regenerate} disabled={isPending}>
+    {isPending ? "Updating…" : "Regenerate"}
+  </button>
+)
+```
+
 ---
 
 ## 5. The Render Phase Computes a Candidate Tree
@@ -198,19 +241,22 @@ Rendering answers: "If these updates are applied, what should the tree look like
 <br />
 
 ```text
-beginWork(parent)
-  → beginWork(first child)
-    → beginWork(grandchild)
-    → completeWork(grandchild)
-  → completeWork(first child)
-→ completeWork(parent)
+while next unit of work:
+  beginWork(fiber)          // descend: invoke component, reconcile children
+  → if child exists, that child is next
+  → else completeWork(fiber) // ascend: prepare host, bubble effect flags
+      then sibling, or return to parent
+
+  concurrent and shouldYield?  pause; resume this pointer later
 ```
 
 <br />
 
-- `beginWork` processes a Fiber's inputs. For a function component, this is where React invokes it and runs Hooks, then reconciles returned children.
-- `completeWork` runs after descendants finish. For host components, React can create or prepare DOM instances and bubble effect flags toward the root.
-- The render phase must be **pure** because it is speculative. Concurrent React may yield, restart, render more than once, or throw the result away without committing.
+The visit order is still depth-first. The difference from a recursive call stack is that the loop **holds the next Fiber in a variable**, so it can stop between units.
+
+- `beginWork` processes a Fiber's inputs. For a function component, this is where React invokes it and runs Hooks, then reconciles returned children. For a host element, it reconciles children without calling a component function.
+- `completeWork` runs after descendants finish. For host components, React can create or prepare DOM instances and bubble effect flags toward the root. The DOM is not mutated here.
+- The render phase must be **pure** because it is speculative. A **concurrent** render may yield, restart, render more than once, or throw the result away without committing. A default blocking render still runs this loop start to finish.
 - Rendering may read props, state, context, and immutable snapshots. It may calculate and return elements.
 - It must not send analytics, mutate shared objects, subscribe, or edit the DOM.
 
@@ -264,6 +310,23 @@ A key can intentionally reset state. `<Editor key={documentId} />` is often clea
 ```
 
 <br />
+
+When an item is removed, React walks the new element list against the current Fibers:
+
+<br />
+
+```text
+keys in the new list:  1, 3
+current sibling list:  1 → 2 → 3
+
+key 1 matches → reuse / clone that Fiber
+key 2 is gone → mark a deletion flag (no DOM removal yet)
+key 3 matches → reuse / clone that Fiber
+```
+
+<br />
+
+The missing Fiber is only **flagged** during render. The host node is deleted in the **commit** phase. That keeps the render phase pure and interruptible.
 
 - Keys only need to be unique among siblings. They are not a normal prop.
 - State does not live "inside the component function." React associates it with a Fiber's identity at a place in the parent tree.
@@ -444,16 +507,18 @@ In development, Strict Mode may call render functions twice, run an extra setup-
 
 ## 13. One Update, End to End
 
+Without a concurrent feature, a heavy `setState` would run the work loop to completion on the main thread. The page could not paint or take the next keystroke until that render finished.
+
 A user types into a search field. The app updates the input urgently and filters a large list in a transition.
 
 1. The handler calls `setQuery` (urgent) and `startTransition` + `setFilter` (transition).
 2. React selects urgent work first, renders, reconciles, and **commits** the input DOM.
 3. The browser can paint the latest input value.
-4. React attempts the transition. If another keystroke arrives, it can abandon this attempt and commit the newer urgent input.
+4. React attempts the transition in interruptible slices. If another keystroke arrives, it can discard this WIP and commit the newer urgent input, then restart the filter against the latest tree.
 5. When a transition render completes, React commits the filtered list. Passive Effects run after.
 
 - React never mutates the `query` binding inside an older handler. It creates new renders with new snapshots.
-- A partially rendered transition never leaks into the DOM. Only a completed commit changes the visible host tree.
+- A partially rendered transition never leaks into the DOM. Only a completed commit changes the visible host tree. The last committed UI stays on screen, even if `isPending` is true.
 
 The shortest accurate model:
 
@@ -485,11 +550,12 @@ When React behavior surprises:
 Common misconceptions:
 
 - **Fiber is not "the virtual DOM."** Elements are descriptions; Fibers are the reconciler's persistent work and state.
-- **Fiber does not make every render faster.** Its benefit is prioritizing work and avoiding blocking the browser.
-- **Concurrent does not mean parallel.** React still coordinates JavaScript on the main thread. It can interleave, yield, and discard obsolete renders.
+- **Fiber is a loop on a linked list, not recursion on the JavaScript stack.** That is what makes pause and resume possible.
+- **Fiber does not make every render faster.** Its benefit is prioritizing work and avoiding blocking the browser — and only for work that opts into concurrent rendering.
+- **Concurrent does not mean parallel, and it is not the default for every `setState`.** React still coordinates JavaScript on the main thread. Concurrent features let it interleave, yield, and discard obsolete renders.
 - **Fiber is not React Three Fiber.** One is the reconciler. The other is a Three.js renderer named after it.
 
-For newer APIs, see [What's New in React 19](./react-19-new-features). Primary references: Andrew Clark's [React Fiber architecture notes](https://github.com/acdlite/react-fiber-architecture) and React's docs on [render and commit](https://react.dev/learn/render-and-commit), [state as a snapshot](https://react.dev/learn/state-as-a-snapshot), [preserving state](https://react.dev/learn/preserving-and-resetting-state), [Effects](https://react.dev/learn/synchronizing-with-effects), [transitions](https://react.dev/reference/react/useTransition), [Suspense](https://react.dev/reference/react/Suspense), and [hydration](https://react.dev/reference/react-dom/client/hydrateRoot).
+For newer APIs, see [What's New in React 19](./react-19-new-features). Visualizations: [React Fiber](https://www.youtube.com/watch?v=HxmCFGicFK0) and [Concurrent Rendering in React 18](https://www.youtube.com/watch?v=r3gjA9WzzEs). Primary references: Andrew Clark's [React Fiber architecture notes](https://github.com/acdlite/react-fiber-architecture) and React's docs on [render and commit](https://react.dev/learn/render-and-commit), [state as a snapshot](https://react.dev/learn/state-as-a-snapshot), [preserving state](https://react.dev/learn/preserving-and-resetting-state), [Effects](https://react.dev/learn/synchronizing-with-effects), [transitions](https://react.dev/reference/react/useTransition), [Suspense](https://react.dev/reference/react/Suspense), and [hydration](https://react.dev/reference/react-dom/client/hydrateRoot).
 
 ---
 
@@ -512,10 +578,10 @@ For newer APIs, see [What's New in React 19](./react-19-new-features). Primary r
     <AccordionTrigger>2. What is allowed in the render phase versus the commit phase?</AccordionTrigger>
     <AccordionContent>
 
-      - The **render phase** answers: if these updates are applied, what should the tree look like? It must be **pure** because it is speculative.
-      - Concurrent React may yield, restart, render a component more than once, or throw the result away without committing.
-      - The **commit phase** publishes: host mutations, layout, then passive Effects.
-      - A state setter does not mutate the current closure; it **schedules** work at a **lane**.
+      - The **render phase** answers: if these updates are applied, what should the tree look like? It must be **pure** because it is speculative. Traversal is a **work loop** on Fibers, not a recursive call stack.
+      - Concurrent rendering is **opt-in**. Default updates still block. A concurrent render may yield between units, restart, render a component more than once, or throw the result away without committing.
+      - The **commit phase** publishes: host mutations, layout, then passive Effects. It is atomic.
+      - A state setter does not mutate the current closure; it **schedules** work at a **lane**. `useTransition` exposes `isPending` without hiding the last committed tree.
       - **Failure:** treating `setState` as an immediate assignment, or mutating a module-level counter during render.
 
     </AccordionContent>
