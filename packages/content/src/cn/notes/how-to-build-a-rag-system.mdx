@@ -340,6 +340,253 @@ const { runId } = await run.startAsync({
 
 <br />
 
+### 用 LangGraph 组合同一条 DAG
+
+如果团队本来就在 LangChain/LangGraph 上，同一条 DAG 可以组合成一个 `StateGraph`。Nodes 取代 Mastra steps。Checkpointer 的 `thread_id` 取代 `runId` 成为 ingest status。以上每条 invariant 照样成立——org 来自 server、delete-first、embed 用 `embedText`、存 `text`。
+
+<br />
+
+| Mastra | LangGraph |
+| --- | --- |
+| `createWorkflow` + `createStep` | `StateGraph` nodes 与 edges |
+| Step `execute` | 返回 partial state update 的 node |
+| `runId`、snapshots、per-step retries | `thread_id` + checkpointer + `retryPolicy` |
+| `requestContext` org | 由 server 组装的 invoke input |
+| Studio run list | `graph.getState(config)` / LangSmith traces |
+
+<br />
+
+```text
+ingestion-graph  (one thread per organizationId:path)
+  loadFile        exists(path) → readFile → upload to Reducto
+                  missing → Command goto deleteVectors { status: "skipped" }
+  parseReducto    parse cache hit ? cached JSON : parse.run → persist JSON
+  mapChunks       chunks → { text, embedText, page, bbox, blockType, chunkIndex }
+  deleteVectors   deleteMany(path) in namespace=organizationId
+  planBatches     chunks > 0 → Send upsertBatch × ceil(n / 100)
+                  chunks = 0 → finalize
+  upsertBatch     embed dense+sparse → upsert batch (parallel per Send)
+  finalize        { status, chunkCount } from summed indexedCount
+```
+
+<br />
+
+State 是每个 node 共享的 memory。只有一个 writer 的字段维持 plain zod。会被 fan-out 写入的字段需要 reducer——没有的话，最后一个 parallel batch 会覆盖其他全部。
+
+<br />
+
+```ts title="src/graphs/ingestion/state.ts"
+import { StateSchema, ReducedValue } from "@langchain/langgraph"
+import { z } from "zod/v4"
+
+const Chunk = z.object({
+  chunkIndex: z.number(),
+  text: z.string(),      // display
+  embedText: z.string(), // vectors
+  page: z.number().optional(),
+  blockType: z.string().optional(),
+})
+
+export const IngestState = new StateSchema({
+  // input — organizationId is assembled by the server at invoke, never by the client
+  path: z.string(),
+  filename: z.string(),
+  mediaType: z.string(),
+  organizationId: z.string(),
+  // intermediates — one writer each, so plain fields
+  fileId: z.string().optional(),
+  parseJson: z.unknown().optional(),
+  chunks: z.array(Chunk).default(() => []),
+  // fan-out accumulator — N upsertBatch workers write it, so it needs a reducer
+  indexedCount: new ReducedValue(z.number().default(0), {
+    inputSchema: z.number(),
+    reducer: (current, n) => current + n,
+  }),
+  status: z.string().default(""),
+  chunkCount: z.number().default(0),
+})
+
+export type IngestStateType = typeof IngestState.State
+```
+
+<br />
+
+Nodes 返回 partial updates；graph 负责套用。`loadFile` 返回 `Command`——state update 与 routing 合并成一次 return——所以它**没有**对外的 static edge。
+
+<br />
+
+```ts title="src/graphs/ingestion/nodes.ts"
+import { Command, Send } from "@langchain/langgraph"
+import type { IngestStateType } from "./state"
+
+const BATCH_SIZE = 100 // ~100 vectors at 1536-d with text in metadata
+
+export async function loadFile(state: IngestStateType) {
+  if (!(await filesystem.exists(state.path))) {
+    // skip-with-delete: route straight to the shared delete node
+    return new Command({
+      update: { status: "skipped", chunks: [] },
+      goto: "deleteVectors",
+    })
+  }
+  const file = await filesystem.readFile(state.path)
+  const upload = await reducto.upload({ file })
+  return new Command({ update: { fileId: upload.fileId }, goto: "parseReducto" })
+}
+
+export async function parseReducto(state: IngestStateType) {
+  // retryPolicy retries this node; the cache check keeps a retry from re-paying for Parse
+  const cached = await readParseCache(state.path)
+  if (cached) return { parseJson: cached }
+
+  const result = await reducto.parse.run({
+    input: state.fileId!,
+    retrieval: {
+      chunking: { chunk_mode: "variable", chunk_size: 1000 },
+      embedding_optimized: true,
+      filter_blocks: ["Header", "Footer", "Page Number"],
+    },
+  })
+  await writeParseCache(state.path, result)
+  return { parseJson: result }
+}
+
+export async function mapChunks(state: IngestStateType) {
+  const chunks = state.parseJson.result.chunks.map((chunk, chunkIndex) => ({
+    chunkIndex,
+    text: chunk.content,           // display
+    embedText: chunk.embed,        // vectors
+    page: chunk.blocks[0]?.bbox.page,
+    blockType: chunk.blocks[0]?.type,
+  }))
+  return { chunks }
+}
+
+export async function deleteVectors(state: IngestStateType) {
+  await pc
+    .Index(PINECONE_INDEX_NAME)
+    .namespace(state.organizationId)
+    .deleteMany({ path: state.path })
+  return {}
+}
+
+type BatchJob = {
+  organizationId: string
+  path: string
+  filename: string
+  mediaType: string
+  batch: IngestStateType["chunks"]
+  offset: number
+}
+
+export function planBatches(state: IngestStateType) {
+  if (state.chunks.length === 0) return "finalize"
+  const sends: Send[] = []
+  for (let offset = 0; offset < state.chunks.length; offset += BATCH_SIZE) {
+    sends.push(
+      new Send("upsertBatch", {
+        organizationId: state.organizationId,
+        path: state.path,
+        filename: state.filename,
+        mediaType: state.mediaType,
+        batch: state.chunks.slice(offset, offset + BATCH_SIZE),
+        offset,
+      }),
+    )
+  }
+  return sends
+}
+
+export async function upsertBatch(job: BatchJob) {
+  const dense = await embedDense(job.batch.map((c) => c.embedText))
+  const sparse = await embedSparse(job.batch.map((c) => c.embedText), "passage")
+
+  await pc
+    .Index(PINECONE_INDEX_NAME)
+    .namespace(job.organizationId)
+    .upsert({
+      records: job.batch.map((chunk, i) => ({
+        id: `${job.path}:${job.offset + i}`,
+        values: dense[i],
+        sparseValues: sparse[i],
+        metadata: {
+          path: job.path,
+          filename: job.filename,
+          chunkIndex: job.offset + i,
+          page: chunk.page,
+          blockType: chunk.blockType,
+          text: chunk.text,
+          mediaType: job.mediaType,
+        },
+      })),
+    })
+  return { indexedCount: job.batch.length }
+}
+
+export async function finalize(state: IngestStateType) {
+  return {
+    status: state.indexedCount > 0 ? "indexed" : "skipped",
+    chunkCount: state.indexedCount,
+  }
+}
+```
+
+<br />
+
+接线。`Command` 的目的地用 `ends` 声明。Fan-out 是一条返回 `Send[]` 的 conditional edge。要付费、会 flake 的 nodes 加上 `retryPolicy`。Checkpointer 让每个 `thread_id` 成为可 resume 的 run。
+
+<br />
+
+```ts title="src/graphs/ingestion/graph.ts"
+import { StateGraph, START, END, MemorySaver } from "@langchain/langgraph"
+import { IngestState } from "./state"
+
+const checkpointer = new MemorySaver() // prod: PostgresSaver on the same Postgres as everything else
+
+export const ingestionGraph = new StateGraph(IngestState)
+  .addNode("loadFile", loadFile, { ends: ["parseReducto", "deleteVectors"] })
+  .addNode("parseReducto", parseReducto, { retryPolicy: { maxAttempts: 3, initialInterval: 1.0 } })
+  .addNode("mapChunks", mapChunks)
+  .addNode("deleteVectors", deleteVectors)
+  .addNode("upsertBatch", upsertBatch, { retryPolicy: { maxAttempts: 3, initialInterval: 1.0 } })
+  .addNode("finalize", finalize)
+  .addEdge(START, "loadFile")
+  .addEdge("mapChunks", "deleteVectors")
+  .addConditionalEdges("deleteVectors", planBatches, ["upsertBatch", "finalize"])
+  .addEdge("upsertBatch", "finalize")
+  .addEdge("finalize", END)
+  .compile({ checkpointer })
+```
+
+<br />
+
+Upload handler 把 `createRun` / `startAsync` 换成在名为 `{organizationId}:{path}` 的 thread 上 `invoke`：
+
+<br />
+
+```ts
+const config = { configurable: { thread_id: `${organizationId}:${path}` } }
+void ingestionGraph.invoke({ path, filename, mediaType, organizationId }, config)
+
+// "is this file searchable yet?" — the latest checkpoint is the latest run for that org + path
+const { values } = await ingestionGraph.getState(config)
+```
+
+<br />
+
+- `loadFile` 用 `Command` 路由，所以它没有对外的 `addEdge`。若照样加一条，两个目标**都会**跑——skip path 会去 parse 一个不存在的 file。
+- `chunks` 不需要 reducer：只有 `mapChunks` 写它。`indexedCount` 需要 `ReducedValue`，因为 N 个并行的 `upsertBatch` workers 都写它。Reducer 对应的是写入 pattern，不是字段类型。
+- Delete 自成一个 node，让 skip path 与 index path 共用同一份 delete。Delete-before-upsert 变成 graph topology，不是 step 内的约定。
+- `thread_id = organizationId:path` 取代「列出该 `resourceId` 的 runs，再匹配 `input.path`」。重新 upload 会 resume 同一条 thread；同一 path 的 concurrent re-uploads 在它上面序列化。
+- `retryPolicy` retry 的是 *node*，不是里面那个付费 call——parse cache 检查才是让 `parseReducto` retry 不必再向 Reducto 付费的东西。
+- `MemorySaver` 随 process 死掉。Production 用 `@langchain/langgraph-checkpoint-postgres` 的 `PostgresSaver`——就是整个 stack 本来在用的同一个 Postgres。LangSmith 取代 Studio 看 traces。
+- 换 model 时的 re-embed 是同一批 node functions 重新接线（`START` → `mapChunks`，读缓存的 parse）。抽换 nodes，不是 fork 一条 graph。
+- 只有 workflow 被换掉。Agent、search tool 与 Hono routes 照旧——read path 分不出 vectors 是哪个 framework 写的。
+
+**失败：** `Send` fan-out 写进没有 reducer 的字段——最后一批的 count 获胜。而 invoke input 里的 `organizationId` 是 server 在 membership 检查之后组装的；由 client 提供 org 等同由 client 提供 namespace，是同一种泄漏。
+
+<br />
+
 ---
 
 ## 6. Retrieval
@@ -535,6 +782,7 @@ await filesystem.deleteFile(path, { force: true })
 
       - 一套能跑的 RAG stack 是两条共享 embedding space 的 pipelines：一条写 vectors 的 **deterministic ingest workflow**，一条读它们的 **tool-called retriever**。
       - Upload 与 ingest 是 **一条** workflow，四步：`loadFile` → `parseReducto` → `mapChunks` → `indexChunks`。一个 `runId` 就是 ingest status。Parse 是一步，不是第二条 workflow。「User asked about the handbook」是 open-ended 的；「hi」时跳过 retrieval。
+      - 同一条 DAG 也可以组成 LangGraph `StateGraph`：nodes 取代 steps，checkpointer 的 `thread_id`（`organizationId:path`）取代 `runId`，`Send` 把分批 upsert 并行扇出。Invariants 不变——org 照样来自 server，永不来自 model。
       - Hybrid search 与 rerank 属于 read path，绝不在 upload 这条线上。Write path 到 upsert 为止。Extract 与 re-embed 是以后的 workflows，可以 reuse steps，不是额外的 ingest pipelines。
       - Always-on injection 会 embed 每一句问候并烧掉 tokens。
       - Tenant key 活在 **`requestContext`** 里，绝不在 tool args 里。Upload 与 chat 用同一套方式填 context：session → 验证 membership → 设置 `organizationId` 与 `userId`。
