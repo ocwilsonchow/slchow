@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it } from "vitest"
-import { isFullStackQaSection, isHiddenSourcePage } from "./source-hidden"
+import {
+  isFullStackQaSection,
+  isHiddenSourcePage,
+  isPinnedSourcePage,
+  stripPinPrefix,
+} from "./source-hidden"
 
 describe("isHiddenSourcePage", () => {
   const original = process.env.SST_STAGE
@@ -40,6 +45,39 @@ describe("isHiddenSourcePage", () => {
 
     expect(isHiddenSourcePage("en/notes/core-javascript-concepts.mdx")).toBe(
       false
+    )
+  })
+})
+
+describe("isPinnedSourcePage", () => {
+  it("matches *-prefixed filenames", () => {
+    expect(
+      isPinnedSourcePage("en/notes/*javascript-event-loop-in-depth.mdx")
+    ).toBe(true)
+    expect(isPinnedSourcePage("*understanding-react-in-depth")).toBe(true)
+  })
+
+  it("does not match unpinned files", () => {
+    expect(isPinnedSourcePage("en/notes/core-javascript-concepts.mdx")).toBe(
+      false
+    )
+    expect(isPinnedSourcePage("javascript-event-loop-in-depth")).toBe(false)
+  })
+})
+
+describe("stripPinPrefix", () => {
+  it("strips a leading * from a slug or filename stem", () => {
+    expect(stripPinPrefix("*javascript-event-loop-in-depth")).toBe(
+      "javascript-event-loop-in-depth"
+    )
+    expect(stripPinPrefix("*javascript-event-loop-in-depth.mdx")).toBe(
+      "javascript-event-loop-in-depth.mdx"
+    )
+  })
+
+  it("leaves unpinned segments unchanged", () => {
+    expect(stripPinPrefix("javascript-event-loop-in-depth")).toBe(
+      "javascript-event-loop-in-depth"
     )
   })
 })

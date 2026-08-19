@@ -4,7 +4,7 @@ title: Resume — Frontend
 
 ## Wilson, Chow Sin Long
 
-**Senior product frontend engineer** with **5 years of experience** owning React and React Native product flows — from Figma and typed APIs through release — across **15+** production apps. Strongest work includes agent chat and commerce interfaces, editorial publishing and search, and student and membership apps released on the Apple App Store and Google Play.
+**Senior product frontend engineer** with **5 years of experience** owning React and React Native product flows — from Figma, design systems, frontend development, to tRPC APIs and release - shipped **15+** production apps.
 
 ---
 
@@ -12,34 +12,47 @@ title: Resume — Frontend
 
 ### Frontend Developer, Vioo Company Limited, May 2022 – Present
 
-Primary frontend engineer for concurrent client products, scoping UX with designers and stakeholders and owning each product flow through release.
+Primary frontend engineer for concurrent client products, scoping UX with designers and stakeholders, turning Figma into tokenized, composable UI, and owning each product flow through release.
 
-### Healthcare AI Agent, July 2025 – Apr 2026
+### Healthcare AI Agent, 2025 – 2026
 
-- Owned the client-facing chat and admin flows — document upload, in-chat questionnaire, product and cart actions — with separate client and admin roles enforced through **Better Auth**, HttpOnly cookies, and RBAC.
+- Owned the client-facing chat and admin flows — document upload, in-chat questionnaire, product and cart actions.
+- Enforced security of Next.js admin and client apps through **Better Auth**, HttpOnly cookies, CORS and RBAC.
 - Shipped an in-thread questionnaire, a form builder with conditional logic, product cards, and cart actions, keeping recommendations within the same flow.
-- Separated admin list state by responsibility: URL parameters owned shareable filters and pagination, **TanStack Query** owned server cache, and **TanStack Table** owned presentation, preventing a refetch on every interaction.
+- Optimized expensive component with memorization and `useTransition` for smoother UI updates.
+- **TanStack Query** with server prefetch and client-side rehydration for data lists, and **TanStack Table** with pagination, filters and sorting; states stored in URL search parameters for .
+- Multi-step flows with **XState** and **React Hook Form** / **Zod** for health questionnaire.
 
-### High-Performance Editorial Platform, Nov 2025
+### High-Performance Editorial Platform, 2025
 
-Led frontend development for a content and search editorial platform built with Strapi CMS, Meilisearch, and **Next.js**. This was one site in the studio-wide WordPress-to-headless migration described below.
+Led frontend development for a content and search editorial platform built with Strapi CMS, Meilisearch, and **Next.js**.
 
-- Reserved image space to prevent layout shifts and used caching and image optimization to reduce LCP: **LCP &lt; 0.5s**, **CLS &lt; 0.1**, PageSpeed Insights **>90** (lab).
-- Chose hybrid ISR over full SSG or on-demand rendering: generated the main pages and latest 100 articles at build time, then rendered the rest on demand. Tagged Strapi **GraphQL** queries with **Next.js** cache tags and used webhook revalidation so published content went live without a full rebuild.
+- Latest 100 articles statically rendered at build time, leave the rest incrementally rendered on demand. Strapi **GraphQL** queries tagged properly with **Next.js** cache tags; revalidated through webhook triggered by content update events.
+- Lighthouse average scores **>90**; Reserved image space to prevent layout shifts and used caching and image optimization to reduce LCP: **FCP &lt; 0.3s**, **LCP &lt; 0.5s**, **CLS &lt; 0.001**.
+- Shipped instant search feature using Meilisearch with fuzzy matching; result hits in **&lt; 50ms**.
 - Made keyboard-accessible navigation, accessible form-error handling, semantic structure, and Lighthouse and axe checks release requirements rather than post-launch fixes.
-- Separated interactive state from page data: used **XState** with **TanStack Form** / **Zod** for multi-step flows, stored locale in the route (for copy, dates, and numbers), and served content through hybrid ISR.
 
-### React Native Membership Platform, shipped Apr 2024
+### React Native Skia App, 2024
 
-- Owned membership flows (digital card, points, offers) from Figma through release on the Apple App Store and Google Play; also owned the **Next.js** admin.
-- Mitigated session risk by storing refresh tokens in **SecureStore** / Keychain and requiring Face ID / fingerprint to unlock the session; generated typed **REST** clients from **OpenAPI**.
+- Owned the photobooth app from design, development through release on the Apple App Store and Google Play.
+- An event photobooth app; user take selfie -> load onto canvas -> edit with stickers and pen tools -> upload and share.
+- Built canvas with React Native Skia and React Native Reanimated and gesture handlers; image with react-native-vision-camera.
+- SVG stickers are converted to Skia-svg react components, enable resize, rotate, pan and scale on the canvas.
+- Freehand drawing achived consistent 50+ FPS in RN Perf Monitor when over 100 stickers and strokes on the canvas.
+- States managed by **Zustand**; ensured atomic selections and debounced high frequency state updates.
+- Optimized components through memorization and context isolation; achieved consistent 55+ FPS in RN Perf Monitor with over 100 stickers and strokes rendered.
+
+### React Native Student App, 2023
+
+- Owned student flows (course catalog, booking, announcements) from Figma through release on the Apple App Store and Google Play.
 - Maintained **99%** crash-free sessions after launch by diagnosing crashes, device compatibility issues, and API bottlenecks with **Sentry**.
-- Reduced feed scroll jank after profiling identified JS-thread stalls from long lists and full-resolution images; migrated lists to **FlashList** with row memoization, cached and downscaled feed images, and ran **Reanimated** / **Moti** transitions on the native thread. Froze inactive tabs and deferred mounts, accepting a later first paint on those tabs; achieved a consistent **60 FPS** in RN Perf Monitor (lab).
+- Reduced feed scroll jank after profiling identified JS-thread stalls from long lists and full-resolution images; migrated lists to **FlashList** with row memoization, cached and downscaled feed images, and ran **Reanimated** transitions and gesture handlers on the native thread.
+- Froze inactive tabs or blurred screens and deferred mounts, preventing unnecesary re-renders.
 - Routed promo and milestone notifications to the matching screen via Firebase Cloud Messaging deep links.
 
 Across client products:
 
-- Owned shared **Radix** / **Tailwind** / **shadcn/ui** component and hook APIs, with usage guidance and examples in **Storybook**, Fumadocs, and MDX; adoption across client apps eliminated duplicate UI implementations.
+- Built shared **design systems** on **Radix** / **Tailwind** / **shadcn/ui**: themed with CSS **tokens** (color, type, space) instead of per-app hex, and exposed typed, reusable component APIs via React composition — compound components, Slot / `children`, and shared hooks — rather than prop-heavy leaves. **Storybook**, Fumadocs, and MDX documented the contract; adoption across client apps eliminated duplicate UI.
 - Established **Vitest** and **Playwright** / **Cypress** as quality gates for shared UI and the product flows using it.
 - Instrumented all client web and mobile apps and their APIs with **Sentry**, making production crashes, device issues, and API errors visible after release.
 - Led adoption of **tRPC** and Scalar-generated API documentation, cutting API integration time by **50%** and eliminating schema-mismatch errors that blocked product work.
@@ -60,9 +73,9 @@ Also shipped student apps and restaurant loyalty apps (React Native), a homeboun
 
 ## Skills
 
-- **Frontend**: TypeScript, React, Next.js, React Native, Expo, HTML/CSS, Tailwind CSS, shadcn/ui, Figma
+- **Frontend**: TypeScript, React, Next.js, React Native, Expo, HTML/CSS, Tailwind CSS, shadcn/ui, design tokens, Figma
 - **UI behavior**: TanStack Query, TanStack Form, React Hook Form, XState, TanStack Table, next-intl
-- **Architecture**: state modeling (URL / server / local), component APIs, routing, SSR/ISR, GraphQL, tRPC, OpenAPI clients, Storybook, Fumadocs
+- **Architecture**: state modeling (URL / server / local), design systems, tokens, React composition, component APIs, routing, SSR/ISR, GraphQL, tRPC, OpenAPI clients, Storybook, Fumadocs
 - **Backend**: Node.js, Hono, Drizzle, Prisma, OpenAPI, tRPC, Postgres, DynamoDB, Better Auth
 - **AWS & DevOps**: SST, Docker, ECS Fargate, CloudFront / CDN, GitHub Actions, AWS
 - **Quality**: Vitest, Playwright, Cypress, React Testing Library, Lighthouse, axe, Sentry

@@ -1,6 +1,11 @@
 import { docs } from "collections/server"
 import type { Folder, Item, Node } from "fumadocs-core/page-tree"
-import { type InferPageType, loader, type PageData } from "fumadocs-core/source"
+import {
+  getSlugs,
+  type InferPageType,
+  loader,
+  type PageData,
+} from "fumadocs-core/source"
 import { toFumadocsSource } from "fumadocs-mdx/runtime/server"
 import type { DocData, DocMethods } from "fumadocs-mdx/runtime/types"
 import { fumadocsI18n } from "@/lib/fumadocs-i18n"
@@ -8,6 +13,8 @@ import {
   FULL_STACK_QA_SECTION_SLUGS,
   isFullStackQaSection,
   isHiddenSourcePage,
+  isPinnedSourcePage,
+  stripPinPrefix,
 } from "@/lib/source-hidden"
 
 const NOTES_CATEGORY = "notes"
@@ -32,10 +39,23 @@ type DocsEntry = DocMethods &
       | "personal"
   }
 
+function storagePathFromFile(path: string) {
+  const [maybeLocale, ...rest] = path.split("/")
+  if (
+    maybeLocale &&
+    rest.length > 0 &&
+    (fumadocsI18n.languages as string[]).includes(maybeLocale)
+  ) {
+    return rest.join("/")
+  }
+  return path
+}
+
 export const content = loader({
   baseUrl: "/",
   source: toFumadocsSource(docs as DocsEntry[], []),
   i18n: fumadocsI18n,
+  slugs: (file) => getSlugs(storagePathFromFile(file.path)).map(stripPinPrefix),
 })
 
 export type NotesPage = InferPageType<typeof content>
@@ -203,16 +223,46 @@ export async function loadFullStackQa(locale: string) {
   }
 }
 
+const NOTES_CATEGORY_ORDER = [
+  "frontend",
+  "backend",
+  "system-design",
+  "ai",
+  "security",
+  "devops",
+  "computer-science",
+  "full-stack",
+  "personal",
+] as const
+
 const getPageDate = (date?: string | Date) => {
   if (!date) return 0
   return new Date(date).getTime()
 }
 
-/** Next note in date-descending list order (typically older). Null on the oldest. */
+const getCategoryIndex = (category?: string) => {
+  if (!category) return NOTES_CATEGORY_ORDER.length
+  const index = (NOTES_CATEGORY_ORDER as readonly string[]).indexOf(category)
+  return index === -1 ? NOTES_CATEGORY_ORDER.length : index
+}
+
+export function compareNotesPages(a: NotesPage, b: NotesPage) {
+  const pinnedDiff =
+    Number(isPinnedSourcePage(b.path)) - Number(isPinnedSourcePage(a.path))
+  if (pinnedDiff !== 0) return pinnedDiff
+  const categoryDiff =
+    getCategoryIndex(a.data.category) - getCategoryIndex(b.data.category)
+  if (categoryDiff !== 0) return categoryDiff
+  return getPageDate(b.data.date) - getPageDate(a.data.date)
+}
+
+export function getSortedNotes(locale: string) {
+  return getCategoryPages(NOTES_CATEGORY, locale).sort(compareNotesPages)
+}
+
+/** Next note in list order. Null on the last item. */
 export function getNextNote(slug: string, locale: string) {
-  const notes = getCategoryPages(NOTES_CATEGORY, locale).sort(
-    (a, b) => getPageDate(b.data.date) - getPageDate(a.data.date)
-  )
+  const notes = getSortedNotes(locale)
   const index = notes.findIndex(
     (page) => page.slugs.slice(1).join("/") === slug
   )
