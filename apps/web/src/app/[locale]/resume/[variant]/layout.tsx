@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation"
-import type { Locale } from "next-intl"
+import { hasLocale, type Locale } from "next-intl"
 import { setRequestLocale } from "next-intl/server"
 import type { ReactNode } from "react"
 import { BackLink } from "@/features/layout/components/back-link"
@@ -7,17 +7,20 @@ import { Header } from "@/features/layout/components/header"
 import { PageLayout } from "@/features/layout/components/page"
 import { Toc } from "@/features/mdx/components/toc"
 import { isResumeVariant, resumeVariants } from "@/features/resume/variants"
+import { routing } from "@/i18n/routing"
 import { getMdxContent, loadMdxCompiled } from "@/lib/source"
 
 type Props = {
   children: ReactNode
-  params: Promise<{ locale: Locale; variant: string }>
+  params: Promise<{ locale: string; variant: string }>
 }
 
 export default async function ResumeLayout({ children, params }: Props) {
   const { locale, variant } = await params
 
-  setRequestLocale(locale)
+  if (!hasLocale(routing.locales, locale)) notFound()
+
+  setRequestLocale(locale as Locale)
 
   if (!isResumeVariant(variant)) notFound()
 
