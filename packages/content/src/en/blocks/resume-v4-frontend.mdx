@@ -30,8 +30,9 @@ Led frontend development for a content and search editorial platform built with 
 
 - Latest 100 articles statically rendered at build time, leaving the rest incrementally rendered on demand. Strapi **GraphQL** queries tagged properly with **Next.js** cache tags; revalidated through webhook triggered by content update events.
 - Shipped instant search feature using Meilisearch with full-text search and fuzzy matching; result hits in **&lt; 50ms**.
-- PageSpeed Insights average scores **>90**; Reserved image space to prevent layout shifts and used caching and image optimization to reduce LCP: **FCP &lt; 0.3s**, **LCP &lt; 0.5s**, **CLS &lt; 0.001**.
+- PageSpeed Insights average scores **>90**; Reserved image space to prevent layout shifts and used **caching** and **image optimization** (enforced webp / avif formats and compression to **&lt; 100 KB**) to reduce LCP: **FCP &lt; 0.3s**, **LCP &lt; 0.5s**, **CLS &lt; 0.001**.
 - Treated keyboard-accessible navigation, accessible form-error handling, semantic structure, and Lighthouse / axe checks as release requirements rather than post-launch fixes.
+- Built a Strapi plugin for AI content generation with AI SDK.
 
 ### React Native Skia App, 2024
 
@@ -46,6 +47,7 @@ Led frontend development for a content and search editorial platform built with 
 
 - Owned student flows (course catalog, booking, announcements) from Figma through release on the Apple App Store and Google Play.
 - Maintained **99%** crash-free sessions after launch by diagnosing crashes, device compatibility issues, and API bottlenecks with **Sentry**.
+- Data fetched with **Tanstack Query**, cut duplicate fetches with cache and staleTime; client state managed with **Redux Toolkit**.
 - Reduced feed scroll jank after profiling identified JS-thread stalls from long lists and full-resolution images; migrated lists to **FlashList** with row memoization, cached and downscaled feed images, and ran **Reanimated** transitions and gesture handlers on the native thread.
 - Froze inactive tabs and blurred screens, and deferred mounts, to prevent unnecessary re-renders.
 - Routed promo and milestone notifications to the matching screen via Firebase Cloud Messaging deep links.
