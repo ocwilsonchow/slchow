@@ -6,6 +6,7 @@ import { Link } from "@/i18n/navigation"
 
 export type ListNoteCategory =
   | "frontend"
+  | "typescript"
   | "backend"
   | "system-design"
   | "ai"

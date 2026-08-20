@@ -2,7 +2,7 @@
 title: TypeScript Classes and Runtime Identity
 description: A class is a constructor plus a prototype. A class earns a keep when instanceof or a mutable lifetime is required; otherwise types and functions
 date: 2026-08-15
-category: frontend
+category: typescript
 ---
 
 In production React, Next, and Hono code, a class is not how application code is organized. It is a **runtime identity**: a constructor, a prototype, and an object that `instanceof` can recognize.
@@ -86,6 +86,7 @@ lookalike instanceof Bird // false
 
 - `instanceof` walks the instance chain and returns true when it finds the right `.prototype`. It is a **runtime** test, not a TypeScript one. The walk reaches `Object.prototype`, so `bird instanceof Object` is true.
 - `super()` runs the parent constructor before the child touches `this`. Forgetting it is a syntax error in a derived class.
+- Type-level `extends` — a constraint, a ternary, `infer` — is [TypeScript Infer, Extends, and Ternaries](/notes/typescript-infer-extends-and-ternaries). This section is the prototype chain.
 - **Failure:** targeting older emit so the prototype chain is gone after compilation. Target ES2015 or later. A lookalike plain object with the same fields fails `instanceof`.
 
 ---

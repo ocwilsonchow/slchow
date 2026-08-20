@@ -17,6 +17,7 @@ export const docs = defineCollections({
     category: z
       .enum([
         "frontend",
+        "typescript",
         "backend",
         "system-design",
         "ai",

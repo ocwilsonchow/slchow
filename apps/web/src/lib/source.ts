@@ -30,6 +30,7 @@ type DocsEntry = DocMethods &
     pinned?: boolean
     category?:
       | "frontend"
+      | "typescript"
       | "backend"
       | "system-design"
       | "ai"
@@ -226,6 +227,7 @@ export async function loadFullStackQa(locale: string) {
 
 const NOTES_CATEGORY_ORDER = [
   "frontend",
+  "typescript",
   "backend",
   "system-design",
   "ai",

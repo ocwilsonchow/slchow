@@ -160,6 +160,7 @@
     "readNext": "Read the next note",
     "categories": {
       "frontend": "Frontend",
+      "typescript": "TypeScript",
       "backend": "Backend",
       "system-design": "System Design",
       "ai": "AI",

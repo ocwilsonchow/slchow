@@ -1,0 +1,322 @@
+---
+title: TypeScript Infer, Extends, and Ternaries
+description: extends means assignable-to; a ternary picks a type; infer names the piece you matched — plus template literals and mapped types
+date: 2026-08-20
+category: typescript
+---
+
+`extends` at the type level is not inheritance. It is a question: is `T` **assignable to** `U`? A ternary picks one type or the other. `infer` names the piece that matched.
+
+This note follows [Kyle's walkthrough](https://www.youtube.com/watch?v=bnTAOB3P6nM). Class `extends` — the prototype chain, `super`, `instanceof` — is [TypeScript Classes and Runtime Identity](/notes/typescript-classes-and-runtime-identity). This note is the type-level half: constraints, conditionals, and the types you extract from other types.
+
+<br />
+
+---
+
+## 1. Four `extends`
+
+The same word does four jobs. Only the class form exists at runtime.
+
+<br />
+
+```ts
+class Bird extends Animal {}
+
+interface Named {
+  name: string
+}
+
+interface Aged extends Named {
+  age: number
+}
+
+type AgedAsType = Named & { age: number }
+
+type NameOf<T extends { name: string }> = T["name"]
+```
+
+<br />
+
+- Class `extends` wires prototype chains. That is a **value**. The other three are erased.
+- Interface `extends` copies fields into a new shape. Multiple parents are allowed: `interface B extends A, C`.
+- A `type` alias cannot `extend`. Intersection (`&`) is the same composition: `Named & { age: number }`.
+- A generic constraint `T extends U` is a **gate**. `T` must be assignable to `U` or the type argument is rejected. `NameOf<number>` is an error. `NameOf<{ name: "Ada"; extra: true }>` is `"Ada"`.
+
+`T extends U` means **assignable to `U`**, not "T and U" and not "T is bigger." For object types, extra fields still assign: `{ name: string; age: number }` is assignable to `{ name: string }`. For values, `"hi" extends string` — the set of values is **smaller**, not larger. A string literal is a subtype of `string`.
+
+<br />
+
+**Failure:** reading `T extends string` as `T & string`. Intersection is `&`. `extends` is a check.
+
+---
+
+## 2. Ternaries
+
+A constraint rejects a bad `T`. A conditional accepts any `T` and **branches**.
+
+<br />
+
+```ts
+type IsString<T> = T extends string ? true : false
+
+type A = IsString<"hi"> // true
+type B = IsString<number> // false
+type C = IsString<string & { brand: "x" }> // true — still assignable to string
+```
+
+<br />
+
+The type system has no `if` block. Nested ternaries are the only if/else:
+
+<br />
+
+```ts
+type Kind<T> = T extends string
+  ? "string"
+  : T extends number
+    ? "number"
+    : "other"
+```
+
+<br />
+
+A **naked** type parameter on the left of `extends` distributes over unions. That is why `Exclude` and `Extract` exist:
+
+<br />
+
+```ts
+type Exclude<T, U> = T extends U ? never : T
+type Extract<T, U> = T extends U ? T : never
+
+type WithoutNull = Exclude<string | null, null> // string
+type OnlyString = Extract<string | number, string> // string
+```
+
+<br />
+
+`Exclude<string | null, null>` is two checks: `string extends null` (keep `string`) and `null extends null` (drop to `never`). `string | never` is `string`. Wrap both sides in a tuple to **stop** distribution:
+
+<br />
+
+```ts
+type ToArray<T> = T extends any ? T[] : never
+type Dist = ToArray<string | number> // string[] | number[]
+
+type ToArrayTogether<T> = [T] extends [any] ? T[] : never
+type Together = ToArrayTogether<string | number> // (string | number)[]
+```
+
+<br />
+
+The production default is the standard library: `Exclude`, `Extract`, `NonNullable`. Nest ternaries when the library is inventing a type — i18n params, a router, Zod's output.
+
+<br />
+
+**Failure:** a nested ternary that is `Exclude`. Hand-rolling `T extends U ? never : T` in application code is noise.
+
+---
+
+## 3. `infer`
+
+`infer` is only legal inside a conditional. It declares a type variable in the `extends` clause and uses it in the true branch. Pattern-match a shape; name the hole.
+
+<br />
+
+```ts
+type Flatten<T> = T extends Array<infer Item> ? Item : never
+
+type A = Flatten<string[]> // string
+type B = Flatten<[1, 2, 3]> // 1 | 2 | 3
+type C = Flatten<string> // never
+```
+
+<br />
+
+Returning `T` on the false branch is the other common shape — keep the input when it does not match. `Awaited` does that. `ReturnType` and `Awaited` in the standard library are this pattern:
+
+<br />
+
+```ts
+type ReturnType<T extends (...args: never[]) => unknown> = T extends (
+  ...args: never[]
+) => infer R
+  ? R
+  : never
+
+type Unwrap<T> = T extends Promise<infer U> ? U : T
+
+type FetchReturn = ReturnType<typeof fetch> // Promise<Response>
+type FetchValue = Unwrap<FetchReturn> // Response
+```
+
+<br />
+
+The builtin `Awaited` recurses until there is no `Promise` left. The one-liner is the idea. A second ternary on the inferred piece is still just a ternary: if the array element `extends string`, return something else.
+
+<br />
+
+The production default is the standard library: `ReturnType`, `Parameters`, `Awaited`, `ConstructorParameters`, `InstanceType`. Reach for `infer` when the shape is yours — a tagged template, a route string, a builder's accumulated type.
+
+<br />
+
+**Failure:** a hand-rolled `ReturnType` in app code. The stdlib already named it.
+
+---
+
+## 4. Template literals
+
+A template literal type is a string type with holes. Combined with `infer`, it splits a string the way a regex captures groups:
+
+<br />
+
+```ts
+type Split<T extends string> = T extends `${infer K}:${infer V}`
+  ? { key: K; value: V }
+  : never
+
+type A = Split<"name:Kyle"> // { key: "name"; value: "Kyle" }
+type B = Split<"no-colon"> // never
+```
+
+<br />
+
+The i18n `{param}` extractor in the video is this nested: match a prefix, a `{...}` capture, and the rest; pull the capture; recurse on the rest. Same three keywords. No fourth.
+
+---
+
+## 5. Mapped types
+
+A mapped type is a loop over keys. `{ [P in keyof T]: ... }` rebuilds an object type. A ternary inside the value, or `as` on the key, is how one object type becomes another.
+
+<br />
+
+```ts
+type O = { name: string; age: number }
+
+type StringsToNumbers<T> = {
+  [P in keyof T]: T[P] extends string ? number : T[P]
+}
+
+type N = StringsToNumbers<O> // { name: number; age: number }
+```
+
+<br />
+
+Modifiers add or remove `readonly` and optionality. `-` strips; a bare keyword (or `+`) adds:
+
+<br />
+
+```ts
+type Mutable<T> = { -readonly [P in keyof T]: T[P] }
+type Optional<T> = { [P in keyof T]?: T[P] }
+type RequiredKeys<T> = { [P in keyof T]-?: T[P] }
+type Frozen<T> = { readonly [P in keyof T]: T[P] }
+```
+
+<br />
+
+`Partial`, `Required`, and `Readonly` in the standard library are these one-liners.
+
+Key remapping uses `as`. `Capitalize` is a builtin string helper. `keyof T` can be `string | number | symbol`, so intersect with `string` when the new key is a template:
+
+<br />
+
+```ts
+type Getters<T extends Record<string, unknown>> = {
+  [P in keyof T & string as `get${Capitalize<P>}`]: () => T[P]
+}
+
+type G = Getters<{ name: string; age: number }>
+// { getName: () => string; getAge: () => number }
+```
+
+<br />
+
+The production default is the stdlib (`Partial`, `Readonly`, `Pick`, `Omit`) unless the public type is a transformation — getters, an event map, `on${Capitalize<P>}` handlers.
+
+<br />
+
+**Failure:** rewriting `Partial` or `Readonly` by hand. Remap keys when the name on the outside is the thing that changed.
+
+---
+
+## Takeaway
+
+`extends` is a check. A ternary is a branch. `infer` is a named hole. Mapped types are the loop; `as` is the rename.
+
+When the question is whether to write one:
+
+1. **Is this a constraint** (`T extends U` on the parameter), **a branch** (`T extends U ? X : Y`), or **an extract** (`infer`)?
+2. **Does the standard library already name it?** `ReturnType`, `Awaited`, `Exclude`, `Partial`.
+3. **Or is this a type the library is inventing?** A route string, an i18n param, a builder. Then write it.
+
+---
+
+## Recap Q&A
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="ts-four-extends">
+    <AccordionTrigger>1. What are the four jobs of `extends`?</AccordionTrigger>
+    <AccordionContent>
+
+      - Class `extends` wires prototype chains. That is a **value**. `instanceof` walks it. [TypeScript Classes and Runtime Identity](/notes/typescript-classes-and-runtime-identity).
+      - Interface `extends` copies fields. A `type` alias uses `&` for the same composition.
+      - A generic constraint `T extends U` is a **gate**: `T` must be assignable to `U` or the type argument is rejected.
+      - A conditional `T extends U ? X : Y` is a **branch**: any `T` is accepted; the result depends on assignability.
+      - `T extends U` means **assignable to `U`**, not intersection. Extra object fields still assign. `"hi"` is a subtype of `string` — the value set is smaller.
+      - **Failure:** reading `T extends string` as `T & string`.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="ts-ternaries">
+    <AccordionTrigger>2. How do conditional types branch, and why do Exclude and Extract work?</AccordionTrigger>
+    <AccordionContent>
+
+      - `T extends U ? X : Y` is the only if/else. Nest ternaries for more cases. There is no `if` block.
+      - A **naked** `T` on the left of `extends` distributes over unions. `Exclude<T, U>` is `T extends U ? never : T`. `Extract` keeps the members that match.
+      - Wrap both sides in a tuple — `[T] extends [U]` — to treat the union as one type.
+      - The production default is `Exclude`, `Extract`, `NonNullable`. Nest ternaries when the library is inventing a type.
+      - **Failure:** a nested ternary that is `Exclude`.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="ts-infer">
+    <AccordionTrigger>3. What does `infer` do, and when do you write your own?</AccordionTrigger>
+    <AccordionContent>
+
+      - `infer` is only legal inside a conditional. It names a piece of a matched shape and uses that name in the true branch.
+      - Array element: `T extends Array<infer Item> ? Item : never`. Return type: `T extends (...args: never[]) => infer R ? R : never`. Promise: `T extends Promise<infer U> ? U : T`.
+      - `ReturnType`, `Parameters`, `Awaited`, `ConstructorParameters`, `InstanceType` are that pattern in the standard library. The builtin `Awaited` recurses.
+      - Reach for `infer` when the shape is yours — a tagged template, a route string, a builder. Do not reimplement `ReturnType`.
+      - **Failure:** a hand-rolled `ReturnType` in app code.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="ts-template-literals">
+    <AccordionTrigger>4. How do template literal types split a string?</AccordionTrigger>
+    <AccordionContent>
+
+      - A template literal type is a string type with holes. Combined with `infer`, it captures the pieces the way a regex captures groups.
+      - `` T extends `${infer K}:${infer V}` ? { key: K; value: V } : never `` splits on the first colon. No match is `never`.
+      - Nested captures plus recursion on the rest is how an i18n `{param}` extractor walks a whole string. Same `extends`, ternary, and `infer`. No fourth keyword.
+      - `Capitalize`, `Uppercase`, `Lowercase`, `Uncapitalize` are builtin string helpers used in the same holes.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="ts-mapped-types">
+    <AccordionTrigger>5. How do mapped types loop, strip modifiers, and rename keys?</AccordionTrigger>
+    <AccordionContent>
+
+      - `{ [P in keyof T]: ... }` rebuilds an object type. A ternary on `T[P]` changes values. `as` on the key changes names.
+      - `-readonly` and `-?` strip modifiers. A bare `readonly` or `?` (or `+`) adds them. `Partial`, `Required`, and `Readonly` are these one-liners.
+      - Key remap with `as` and `Capitalize`: the new key is `` `get${Capitalize<P>}` ``, the value is `() => T[P]`. Intersect `keyof T` with `string` because `keyof` includes `number` and `symbol`.
+      - The production default is the stdlib unless the public type is a transformation — getters, an event map, `on${Capitalize<P>}` handlers.
+      - **Failure:** rewriting `Partial` or `Readonly` by hand.
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>

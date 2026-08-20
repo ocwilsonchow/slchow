@@ -99,7 +99,7 @@ function Swatch({
     <span
       aria-hidden
       className={cn(
-        "h-10 w-full flex overflow-hidden rounded border-2 border-content-ink",
+        "h-8 w-full flex overflow-hidden rounded border-2 border-content-ink",
         selected &&
           "ring-2 ring-content-accent ring-offset-2 ring-offset-surface-popover",
         className

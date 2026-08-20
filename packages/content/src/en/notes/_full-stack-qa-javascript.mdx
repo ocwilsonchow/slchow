@@ -218,7 +218,7 @@ category: full-stack
     <AccordionContent>
 
       - A **generic** is a type parameter the caller (or inference) fills in. `function first<T>(xs: T[]): T | undefined` ties the output to the input. Without `T`, the relationship is lost.
-      - **Constraints** (`T extends { id: string }`) name the minimum shape. `keyof T` and indexed access (`T[K]`) then stay accurate. **`infer`** appears in conditional types: `T extends Promise<infer U> ? U : T` unwraps a Promise. `ReturnType` and `Awaited` are that pattern in the standard library.
+      - **Constraints** (`T extends { id: string }`) name the minimum shape. `keyof T` and indexed access (`T[K]`) then stay accurate. **`infer`** appears in conditional types: `T extends Promise<infer U> ? U : T` unwraps a Promise. `ReturnType` and `Awaited` are that pattern in the standard library. Full map: [TypeScript Infer, Extends, and Ternaries](/notes/typescript-infer-extends-and-ternaries).
       - A generic **adds no safety** when it is unused, immediately widened, or unconstrained: `function wrap<T>(x: T): T { return x as T }`; `function log<T>(x: T): void` — `unknown` would be honest; `T extends any`; a component prop `T extends string = string` that is never inferred from usage.
       - The production default is: add `T` when two positions must stay in sync (input key and output value, action and payload). Infer at the call site; do not make callers write `<HugeDto>`.
       - **Failure:** a generic repository `get<T>(id: string): Promise<T>` that casts the JSON — the generic is a fiction, and Zod plus a named type is the honest API.
@@ -233,7 +233,7 @@ category: full-stack
       - **`interface`** names an object shape and can **declaration-merge**: two `interface User` blocks in the same scope become one. That is how `@types` packages grow, and how a library lets apps augment `Window`.
       - **`type`** aliases any type: unions, tuples, mapped types, primitives, `typeof` values. Types do not merge; a second `type User` is a conflict. Unions and intersections are the composition tools (`A | B`, `A & B`).
       - The production default is `interface` for public object contracts that may be augmented; `type` for unions, function types, and computed types. The difference is small for a closed app repo — consistency matters more than dogma.
-      - Interview hooks that only `type` expresses cleanly: **mapped types** (`Pick`, `Readonly`, `Record`), **conditional types** (`T extends Foo ? A : B`, often with `infer`), **template literal types** (`` `org:${string}` ``).
+      - Interview hooks that only `type` expresses cleanly: **mapped types** (`Pick`, `Readonly`, `Record`), **conditional types** (`T extends Foo ? A : B`, often with `infer`), **template literal types** (`` `org:${string}` ``). Full map: [TypeScript Infer, Extends, and Ternaries](/notes/typescript-infer-extends-and-ternaries).
       - **Failure:** declaration merging as an accident — a second `interface` in a `.d.ts` silently adds fields — or using `interface` for a union of events. Prefer a discriminated `type` union for events.
 
     </AccordionContent>

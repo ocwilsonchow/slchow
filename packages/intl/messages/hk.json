@@ -160,6 +160,7 @@
     "readNext": "閱讀下一篇筆記",
     "categories": {
       "frontend": "前端",
+      "typescript": "TypeScript",
       "backend": "後端",
       "system-design": "系統設計",
       "ai": "AI",
