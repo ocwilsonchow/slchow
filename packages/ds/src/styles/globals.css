@@ -48,6 +48,27 @@
   --stroke-hard-on-accent: #0f0f10;
 }
 
+.meta {
+  --accent-surface-canvas: #58C4DC;
+  --surface-canvas: #23272F;
+  --surface-card: #283540;
+  --surface-backdrop: #0f0f10;
+  --surface-popover: #353A46;
+  --surface-canvas-inverse: #ffffff;
+  --surface-alpha: #fafafa20;
+  --content-accent: #58C4DC;
+  --content-ink: #ffffff;
+  --content-body: #c1c1c1;
+  --content-subdued: #8a8a8a;
+  --content-error: var(--color-red-500);
+  --content-ink-inverse: #3f3d39;
+  --content-ink-on-accent: #0f0f10;
+  --content-ink-on-popover: #ffffff;
+  --content-body-on-popover: #c1c1c1;
+  --stroke-soft: #343A46;
+  --stroke-hard-on-accent: #0f0f10;
+}
+
 @theme inline {
   --color-accent-surface-canvas: var(--accent-surface-canvas);
   --color-surface-canvas: var(--surface-canvas);

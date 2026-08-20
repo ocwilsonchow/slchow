@@ -41,6 +41,11 @@
   font-style: var(--shiki-dark-font-style);
 }
 
+.meta .shiki code span {
+  color: var(--shiki-meta);
+  font-style: var(--shiki-meta-font-style);
+}
+
 /* Design page only — hide native WebKit scrollbars (html/body + overlay). */
 html:has(.hide-webkit-scrollbar),
 html:has(.hide-webkit-scrollbar) body {

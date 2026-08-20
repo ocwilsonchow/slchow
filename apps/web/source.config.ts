@@ -2,6 +2,7 @@ import { rehypeCodeDefaultOptions } from "fumadocs-core/mdx-plugins"
 import { pageSchema } from "fumadocs-core/source/schema"
 import { defineCollections, defineConfig } from "fumadocs-mdx/config"
 import { z } from "zod"
+import { reactDocsDark } from "./shiki-meta-theme"
 
 export const docs = defineCollections({
   type: "doc",
@@ -35,6 +36,7 @@ export default defineConfig({
       themes: {
         light: "github-light",
         dark: "vesper",
+        meta: reactDocsDark,
       },
       addLanguageClass: true,
       transformers: [
