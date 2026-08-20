@@ -14,34 +14,43 @@ title: Resume — Frontend
 
 Primary frontend engineer for concurrent client products, scoping UX with designers and stakeholders, turning Figma into tokenized, composable UI, and owning each product flow through release.
 
+- Built **design systems** on **Radix** / **Tailwind** / **shadcn/ui**: themed with CSS **tokens** (color, type, space); Built composable components and shared hooks. Documented with **Storybook**, **Fumadocs**, MDX.
+- Migrated WordPress across client sites to **headless CMS** platforms (Strapi / Sanity) and **unified search** (Meilisearch / Algolia) on **Next.js**; cut load times by **80%** and search latency by **90%**, and achieved PageSpeed Insights scores above **95**.
+- Established **Vitest** and **Playwright** / **Cypress** as quality gates for shared UI and the product flows using it.
+- Instrumented client web and mobile apps and their APIs with **Sentry**, making production crashes, device issues, and API errors visible after release.
+- Led adoption of **tRPC** and Scalar-generated API documentation, cutting API integration time by **50%** and eliminating schema-mismatch errors that blocked product work.
+- Mentored summer interns and junior developers through pair programming, code reviews, and guidance as they shipped production UI.
+
+## Selected Projects
+
 ### Healthcare AI Agent, 2025 – 2026
 
 - Designed the chat and admin UX in **Figma** and owned the client-facing flows — document upload, in-chat questionnaire, product and cart actions.
 - Hardened Next.js admin and client apps with **Better Auth**, HttpOnly cookies, CORS, and RBAC.
 - Streamed **LangGraph** agent replies into the chat with the **AI SDK** over tRPC, rendering tool calls as product cards, cart actions, and questionnaires instead of plain text.
-- Built an admin form builder with conditional logic and ran those questionnaires in-thread, so product recommendations and cart actions never left the conversation.
+- Built an admin form builder with conditional logic, modeled with **React Hook Form**, **Zod** and **XState**.
 - Optimized expensive components with **memoization** and **useTransition** for heavy UI updates.
 - Used **TanStack Query** with server prefetch and client-side rehydration for data lists, and **TanStack Table** with pagination, filters, and sorting; stored table state in URL search parameters so lists stay shareable and bookmarkable.
-- Modeled multi-step health questionnaires with **XState** and **React Hook Form** / **Zod**.
 
 ### High-Performance Editorial Platform, 2025
 
 Led frontend development for a content and search editorial platform built with Strapi CMS, Meilisearch, and **Next.js**.
 
-- Latest 100 articles statically rendered at build time, leaving the rest incrementally rendered on demand. Strapi **GraphQL** queries tagged properly with **Next.js** cache tags; revalidated through webhook triggered by content update events.
+- Latest 100 articles statically rendered at build time, leaving the rest incrementally rendered on demand. Strapi **GraphQL** queries tagged properly with **Next.js** cache tags; revalidated through **webhook** triggered by content update events.
 - Shipped instant search feature using Meilisearch with full-text search and fuzzy matching; result hits in **&lt; 50ms**.
 - PageSpeed Insights average scores **>90**; Reserved image space to prevent layout shifts and used **caching** and **image optimization** (enforced webp / avif formats and compression to **&lt; 100 KB**) to reduce LCP: **FCP &lt; 0.3s**, **LCP &lt; 0.5s**, **CLS &lt; 0.001**.
-- Treated keyboard-accessible navigation, accessible form-error handling, semantic structure, and Lighthouse / axe checks as release requirements rather than post-launch fixes.
-- Built a Strapi plugin for AI content generation with AI SDK.
+- Static assets cached at **CloudFront** to reduce latency and improve SEO.
+- Improved **web accessibility** with keyboard-accessible navigation, accessible form-error handling, semantic structure, and Lighthouse / axe checks as release requirements rather than post-launch fixes.
+- Built a **Strapi plugin** for AI content generation with **AI SDK**.
 
 ### React Native Skia App, 2024
 
 - Owned the photobooth app from design and development through release on the Apple App Store and Google Play.
 - Users take a selfie, load it onto the canvas, edit with stickers and pen tools, then upload and share.
-- Built the canvas with React Native Skia, React Native Reanimated, and gesture handlers; captured images with react-native-vision-camera.
-- Converted SVG stickers into Skia SVG React components, enabling resize, rotate, pan, and scale on the canvas.
+- Built the canvas with **React Native Skia**, **React Native Reanimated**, and gesture handlers; captured images with **react-native-vision-camera**.
+- Converted SVG stickers into Skia SVG React components, enabling **resize, rotate, pan, and scale** on the canvas.
 - Managed state with **Zustand**; kept selections atomic and debounced high-frequency updates.
-- Optimized with memoization and context isolation; held **55+ FPS** in RN Perf Monitor with over 100 stickers and strokes on the canvas.
+- Optimized with **memoization** and context isolation; held **55+ FPS** in RN Perf Monitor with over 100 stickers and strokes on the canvas.
 
 ### React Native Student App, 2023
 
@@ -51,15 +60,6 @@ Led frontend development for a content and search editorial platform built with 
 - Reduced feed scroll jank after profiling identified JS-thread stalls from long lists and full-resolution images; migrated lists to **FlashList** with row memoization, cached and downscaled feed images, and ran **Reanimated** transitions and gesture handlers on the native thread.
 - Froze inactive tabs and blurred screens, and deferred mounts, to prevent unnecessary re-renders.
 - Routed promo and milestone notifications to the matching screen via Firebase Cloud Messaging deep links.
-
-Across client products:
-
-- Built shared **design systems** on **Radix** / **Tailwind** / **shadcn/ui**: themed with CSS **tokens** (color, type, space) instead of per-app hex, and exposed typed, reusable component APIs via React composition — compound components, Slot / `children`, and shared hooks — rather than prop-heavy leaf components. **Storybook**, Fumadocs, and MDX documented the contract; adoption across client apps eliminated duplicate UI.
-- Established **Vitest** and **Playwright** / **Cypress** as quality gates for shared UI and the product flows using it.
-- Instrumented client web and mobile apps and their APIs with **Sentry**, making production crashes, device issues, and API errors visible after release.
-- Led adoption of **tRPC** and Scalar-generated API documentation, cutting API integration time by **50%** and eliminating schema-mismatch errors that blocked product work.
-- Replaced WordPress across client sites with **headless CMS** platforms (Strapi / Sanity) and **unified search** (Meilisearch / Algolia) on **Next.js**; cut load times by **80%** and search latency by **90%**, and achieved PageSpeed Insights scores above **95**.
-- Mentored summer interns and junior developers through pair programming, code reviews, and guidance as they shipped production UI.
 
 <br />
 
