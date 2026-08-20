@@ -179,6 +179,15 @@
     "intro": "My collection of UI components and patterns.",
     "comingSoon": "Coming soon!"
   },
+  "resume": {
+    "downloadPdf": "Download Resume as PDF ({variant})",
+    "view": "View Resume ({variant})",
+    "variants": {
+      "frontend": "Frontend",
+      "full-stack": "Full Stack",
+      "ai": "AI"
+    }
+  },
   "code": {
     "copy": "Copy code",
     "copied": "Copied"

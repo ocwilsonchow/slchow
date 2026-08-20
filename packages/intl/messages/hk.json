@@ -179,6 +179,15 @@
     "intro": "我收藏的 UI 組件與模式。",
     "comingSoon": "即將推出！"
   },
+  "resume": {
+    "downloadPdf": "下載履歷 PDF（{variant}）",
+    "view": "查看履歷（{variant}）",
+    "variants": {
+      "frontend": "前端",
+      "full-stack": "全棧",
+      "ai": "AI"
+    }
+  },
   "code": {
     "copy": "複製程式碼",
     "copied": "已複製"
