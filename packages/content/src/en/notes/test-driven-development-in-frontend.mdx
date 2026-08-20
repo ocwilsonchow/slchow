@@ -1,0 +1,627 @@
+---
+title: Test-Driven Development in Frontend Engineering
+description: Design frontend behavior with Red-Green-Refactor — Vitest, React Testing Library, and tests that survive refactors
+date: 2026-08-20
+category: frontend
+---
+
+**Test-Driven Development (TDD)** writes a failing test before the production code that makes it pass. On the frontend, that means turning UI behavior, accessibility, and business rules into executable specifications — not treating tests as a final verification step.
+
+<br />
+
+- Each cycle delivers one **observable behavior**, not a whole feature.
+- Tests that speak in user-visible outcomes stay valid when you swap `useState` for a form library, a reducer, or a server action.
+- Layers, MSW, and how thin E2E should stay live in [Frontend Regression Tests](/notes/_frontend-regression-test). This note is the **design habit**: red, then green, then refactor.
+
+<br />
+
+---
+
+## 1. Red, Green, Refactor
+
+TDD is a tight loop:
+
+<br />
+
+1. **Red** — Write a small test for the behavior you want. Run it. Confirm it fails for the right reason.
+2. **Green** — Implement the simplest code that makes it pass.
+3. **Refactor** — Improve names, structure, and duplication while the tests stay green.
+
+<br />
+
+You do not write every test for a feature, then build the feature. You ship one behavior per loop.
+
+A quantity selector in a cart is four cycles, not one suite:
+
+<br />
+
+- Clicking **Increase** moves quantity from 1 to 2.
+- Clicking **Decrease** never goes below 1.
+- Changing quantity recalculates the displayed subtotal.
+- The controls remain keyboard-accessible.
+
+<br />
+
+**Failure:** a single test that opens the cart, changes quantity, checks tax, applies a coupon, and checks out. When it fails, you cannot tell which behavior broke.
+
+<br />
+
+---
+
+## 2. Why Frontend TDD Is Different
+
+Frontend code sits at the intersection of several concerns:
+
+<br />
+
+- **Business rules:** pricing, eligibility, validation, permissions.
+- **User interaction:** clicks, keyboard, focus, loading, errors.
+- **Rendering:** conditional content, responsive layouts, state transitions.
+- **Accessibility:** semantic elements, labels, focus management, ARIA where necessary.
+- **Integration:** APIs, storage, analytics, routing, feature flags.
+
+<br />
+
+TDD works when tests focus on what users and surrounding systems can **observe**, not on private implementation: React state, component methods, or exact DOM nesting.
+
+A strong test says:
+
+> When the user submits invalid credentials, they see an accessible error and the sign-in request is not sent.
+
+A fragile test says:
+
+> The `isInvalid` state is `true` and the component has a `div` with class `error-text`.
+
+The first survives a move from `useState` to a form library, a reducer, a server action, or a state machine. The second locks the implementation in place.
+
+<br />
+
+**Failure:** asserting `component.state`, CSS class lists, or a specific tree of `div`s. Query by role and accessible name.
+
+<br />
+
+---
+
+## 3. Walkthrough: a Search Form
+
+A product search form with four requirements:
+
+<br />
+
+- The search button is disabled when the input is empty.
+- Typing a non-empty query enables the button.
+- Submitting trims whitespace before calling the search handler.
+- A user can submit with the Enter key.
+
+<br />
+
+Start with the first behavior. The component may not exist yet.
+
+<br />
+
+```tsx
+import { render, screen } from "@testing-library/react"
+import { describe, expect, it, vi } from "vitest"
+
+import { SearchForm } from "./search-form"
+
+describe("SearchForm", () => {
+  it("disables submission when the query is empty", () => {
+    render(<SearchForm onSearch={vi.fn()} />)
+
+    expect(
+      screen.getByRole("button", { name: /search/i })
+    ).toBeDisabled()
+  })
+})
+```
+
+<br />
+
+Implement only enough to satisfy that assertion:
+
+<br />
+
+```tsx
+import { useState } from "react"
+
+type SearchFormProps = {
+  onSearch: (query: string) => void
+}
+
+export function SearchForm({ onSearch }: SearchFormProps) {
+  const [query, setQuery] = useState("")
+
+  return (
+    <form>
+      <label htmlFor="product-search">Search products</label>
+
+      <input
+        id="product-search"
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+      />
+
+      <button type="submit" disabled={!query.trim()}>
+        Search
+      </button>
+    </form>
+  )
+}
+```
+
+<br />
+
+Next cycle: a valid query enables the button.
+
+<br />
+
+```tsx
+import userEvent from "@testing-library/user-event"
+
+it("enables submission after the user enters a query", async () => {
+  const user = userEvent.setup()
+
+  render(<SearchForm onSearch={vi.fn()} />)
+
+  await user.type(
+    screen.getByRole("textbox", { name: /search products/i }),
+    "wireless headphones"
+  )
+
+  expect(screen.getByRole("button", { name: /search/i })).toBeEnabled()
+})
+```
+
+<br />
+
+Then specify submission:
+
+<br />
+
+```tsx
+it("submits a trimmed query", async () => {
+  const user = userEvent.setup()
+  const onSearch = vi.fn()
+
+  render(<SearchForm onSearch={onSearch} />)
+
+  await user.type(
+    screen.getByRole("textbox", { name: /search products/i }),
+    "  wireless headphones  "
+  )
+
+  await user.click(screen.getByRole("button", { name: /search/i }))
+
+  expect(onSearch).toHaveBeenCalledWith("wireless headphones")
+})
+```
+
+<br />
+
+The missing implementation is now obvious:
+
+<br />
+
+```tsx
+export function SearchForm({ onSearch }: SearchFormProps) {
+  const [query, setQuery] = useState("")
+
+  function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+
+    const normalizedQuery = query.trim()
+
+    if (normalizedQuery) {
+      onSearch(normalizedQuery)
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <label htmlFor="product-search">Search products</label>
+
+      <input
+        id="product-search"
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+      />
+
+      <button type="submit" disabled={!query.trim()}>
+        Search
+      </button>
+    </form>
+  )
+}
+```
+
+<br />
+
+Enter-to-submit is a fourth cycle: type, press Enter, assert `onSearch`. Because the handler is on the form, that test often passes without extra code — confirm it anyway.
+
+The tests never mention `useState`. They would still pass under React Hook Form, a state machine, or a server-oriented form flow. They specify behavior through **accessible controls**.
+
+<br />
+
+**Failure:** writing all four tests, then implementing the whole form. Diagnose one red assertion at a time.
+
+<br />
+
+---
+
+## 4. Choose the Test Level
+
+Match the test level to the risk and scope of the behavior.
+
+<br />
+
+| Test level | Best for | Example |
+| --- | --- | --- |
+| Unit | Pure logic and transformations | Price calculation, form validation, permission checks |
+| Component | User-visible behavior of one component or feature | Modal opening, invalid form feedback, pagination |
+| Integration | Multiple components and service boundaries | Checkout with mocked payment and inventory APIs |
+| End-to-end | Critical real-browser workflows | Sign-up, login, checkout, account recovery |
+
+<br />
+
+Keep most behavior in fast unit and component tests. Use end-to-end tests for a small number of critical journeys.
+
+A common TypeScript frontend setup:
+
+<br />
+
+- **Vitest** for fast unit and component tests — this is where the TDD loop lives.
+- **React Testing Library** for interaction-focused component tests.
+- **Mock Service Worker (MSW)** for HTTP at the network boundary, not mocked hooks.
+- **Playwright or Cypress** for browser-level journeys. The published playbook on this site uses Cypress; Playwright fills the same slot. Details: [Frontend Regression Tests](/notes/_frontend-regression-test).
+
+<br />
+
+**Failure:** proving the same fact at every layer. If Vitest already shows the coupon rejects, Cypress does not need to re-prove the math.
+
+<br />
+
+---
+
+## 5. What to Test First
+
+TDD pays off on code with meaningful behavior or expensive regression risk.
+
+<br />
+
+### Pure domain logic
+
+Extract rules from UI components. A checkout surface should not own tax, discounts, or entitlement checks.
+
+<br />
+
+```ts
+export function calculateDiscount(
+  subtotal: number,
+  discountPercent: number
+): number {
+  if (subtotal <= 0 || discountPercent <= 0) {
+    return 0
+  }
+
+  return Math.round(subtotal * (discountPercent / 100))
+}
+```
+
+<br />
+
+These functions are fast, easy to read, and independent of the UI framework.
+
+<br />
+
+### Form behavior and validation
+
+Forms have clear input-output contracts:
+
+<br />
+
+- Required fields, formatting, and normalization.
+- Async validation and server-side error handling.
+- Submission, loading, and disabled controls.
+- Accessible error announcements.
+
+<br />
+
+Specify that an API error **appears to the user**, not that an internal `error` variable changed.
+
+<br />
+
+### State transitions
+
+Complex UI gets easier when you name the states first:
+
+<br />
+
+- Idle → loading → success.
+- Idle → loading → failure → retrying.
+- Editing → saving → saved.
+- Editing → saving → conflict resolution.
+
+<br />
+
+Useful for onboarding, payments, uploads, approvals, and AI-assisted interfaces where streaming, retry, and partial failure must be explicit.
+
+<br />
+
+### Accessibility behavior
+
+Accessibility is a product requirement, not a post-launch audit.
+
+<br />
+
+- A control has an accessible name.
+- A dialog receives focus when opened.
+- A keyboard user can complete the interaction.
+- An error is exposed to assistive technology.
+- Fields are associated with labels.
+
+<br />
+
+Prefer `getByRole`, `getByLabelText`, and `getByText`. Use a test id only when no meaningful accessible query exists.
+
+<br />
+
+**Failure:** TDD-ing CSS class names, pixel offsets, or a `data-testid` on every node. Those tests describe markup, not behavior.
+
+<br />
+
+---
+
+## 6. Common Mistakes
+
+### Testing implementation details
+
+Do not inspect React state, call component methods, or assert exact markup.
+
+Instead of:
+
+```tsx
+expect(component.state.isMenuOpen).toBe(true)
+```
+
+test:
+
+```tsx
+await user.click(screen.getByRole("button", { name: /open menu/i }))
+
+expect(
+  screen.getByRole("menu", { name: /account options/i })
+).toBeVisible()
+```
+
+<br />
+
+The second is closer to the user and survives an implementation change.
+
+<br />
+
+### Over-mocking
+
+Mocking every hook, child, and utility produces tests of your mocks. Prefer real components together. Mock at meaningful boundaries:
+
+<br />
+
+- HTTP requests.
+- Browser APIs missing from the test runtime.
+- Payments, email, authentication, or third-party SDKs.
+- Time, randomness, and other external side effects.
+
+<br />
+
+MSW intercepts at the network layer. The frontend keeps its real data-fetching code; tests control the response.
+
+<br />
+
+### Writing large tests before implementation
+
+A test with ten interactions and twenty assertions is hard to diagnose. Ask: **what is the smallest observable behavior I can implement next?**
+
+<br />
+
+### Treating snapshots as primary tests
+
+Snapshots can catch unexpected rendering changes. They rarely explain whether a feature works. Large snapshots become noise and get approved without review.
+
+Use explicit interaction assertions for behavior. Keep snapshots small and intentional, if you use them at all.
+
+<br />
+
+### Ignoring asynchronous states
+
+Modern UI is rarely synchronous. Test loading, empty, success, failure, retry, cancellation, and stale data on purpose.
+
+For a data-driven dashboard, that usually includes:
+
+<br />
+
+- Initial loading indicator.
+- Successful data rendering.
+- Empty state.
+- API failure message and retry.
+- Disabled interactions while a mutation is pending.
+- Correct behavior when a response arrives after navigation or input has changed.
+
+<br />
+
+**Failure:** only asserting the happy path. The loading spinner and the retry button are the behavior users hit when the network is unkind.
+
+<br />
+
+---
+
+## 7. TDD and Component Design
+
+TDD often reveals too many responsibilities. If a test needs routing, auth, global stores, feature flags, API mocks, locale providers, and browser APIs before it can check a simple behavior, the code is overly coupled.
+
+A more maintainable split:
+
+<br />
+
+```text
+features/
+  checkout/
+    domain/
+      calculateTotal.ts
+      validateCoupon.ts
+    api/
+      checkoutClient.ts
+    components/
+      CouponForm.tsx
+      CheckoutSummary.tsx
+    hooks/
+      useCheckout.ts
+```
+
+<br />
+
+Not every widget needs this shape. Business rules should be independently testable, UI should expose clear behavior, and external dependencies should sit at boundaries.
+
+In a multi-tenant SaaS product, test tenant policy as **pure logic**, then test the UI’s response to allowed, denied, or restricted. That is safer than scattering authorization across visual components.
+
+<br />
+
+**Failure:** a 200-line `CheckoutPage` test whose setup is longer than the assertions. Extract the rule; test the widget against a result.
+
+<br />
+
+---
+
+## 8. Team Workflow and When Not to Force It
+
+TDD succeeds when it fits daily engineering rather than becoming ceremony.
+
+<br />
+
+1. Clarify the user-facing behavior and acceptance criteria.
+2. Write one failing test for the highest-value behavior.
+3. Implement the smallest change that makes it pass.
+4. Refactor production code and test setup.
+5. Repeat until the important paths are covered.
+6. Add or update an end-to-end test only for the critical customer journey.
+7. Run the relevant tests locally; let CI run the broader suite.
+
+<br />
+
+Code review should ask more than “are there tests?”
+
+<br />
+
+- Does the test describe an important user or business behavior?
+- Would it fail if the feature regressed?
+- Does it use accessible, user-oriented queries?
+- Is it coupled to a private implementation choice?
+- Are failure, loading, and edge states considered?
+- Can it run reliably in CI?
+
+<br />
+
+TDD is a tool, not a measure of engineering worth. It is less useful when exploring visual direction, rapidly prototyping, or dealing with highly uncertain requirements.
+
+A productive sequence is often:
+
+<br />
+
+1. Prototype the interface quickly.
+2. Learn from product, design, or user feedback.
+3. Stabilize the behavior.
+4. Add tests before refactoring, extending, or shipping broadly.
+
+<br />
+
+For pixel-level visual requirements, complement TDD with visual regression testing and design review. For complex browser workflows, complement component tests with a small E2E set. For performance-sensitive work, pair tests with performance budgets and real-user monitoring.
+
+<br />
+
+**Failure:** blocking a spike because there is no failing test yet. Explore first; lock the behavior before it becomes load-bearing.
+
+<br />
+
+---
+
+## Takeaway
+
+The value of frontend TDD is not test count or 100% coverage. It is **confidence in change**.
+
+<br />
+
+- Design from observable behavior outward: define what the user must accomplish, prove it with a failing test, implement it simply, improve the code beneath it.
+- Keep the TDD loop in Vitest and Testing Library. Keep E2E thin. Extract domain rules so they do not live inside JSX.
+- When you can reorganize components, replace state management, or migrate an API client without silently breaking a workflow, the tests are doing their job.
+
+<br />
+
+**Failure:** a green suite that would still pass if the user could no longer complete the task.
+
+---
+
+## Recap Q&A
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="tdd-cycle">
+    <AccordionTrigger>1. What is the TDD cycle, and how small should each loop be?</AccordionTrigger>
+    <AccordionContent>
+
+      - **Red:** write a small test for one behavior and confirm it fails for the right reason. **Green:** the simplest code that passes. **Refactor:** improve structure while tests stay green.
+      - One observable behavior per loop — not every test for the feature, then the whole implementation.
+      - A quantity selector is four cycles: increment, floor at 1, recalculate subtotal, keyboard access.
+      - **Failure:** one test that drives a whole checkout. When it fails, you cannot tell which behavior broke.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="tdd-strong">
+    <AccordionTrigger>2. What makes a frontend TDD test strong rather than fragile?</AccordionTrigger>
+    <AccordionContent>
+
+      - Assert what the user or a surrounding system can observe: roles, labels, visible text, network calls at the boundary.
+      - A strong test: invalid credentials show an accessible error and no sign-in request is sent.
+      - A fragile test: `isInvalid` is `true` and a `div` has class `error-text`.
+      - Query with `getByRole`, `getByLabelText`, `getByText`. Use a test id only when no accessible query exists.
+      - Those tests survive replacing `useState` with a form library, a reducer, or a server action.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="tdd-first">
+    <AccordionTrigger>3. What should you TDD first on a frontend codebase?</AccordionTrigger>
+    <AccordionContent>
+
+      - Pure domain logic extracted from UI: tax, discounts, validation, permissions.
+      - Form contracts: required fields, normalization, async errors, loading and disabled controls, accessible announcements.
+      - Named state transitions: idle → loading → success or failure → retry.
+      - Accessibility: accessible names, focus on open, keyboard completion, labeled fields.
+      - Leave pixel polish, visual exploration, and uncertain prototypes outside the loop until the behavior stabilizes.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="tdd-mistakes">
+    <AccordionTrigger>4. What are the common frontend TDD mistakes?</AccordionTrigger>
+    <AccordionContent>
+
+      - Testing implementation details: component state, private methods, exact markup.
+      - Over-mocking hooks and children. Mock HTTP with MSW, plus browser APIs, third-party SDKs, time, and randomness.
+      - Writing a giant test before any implementation. Ask for the smallest next observable behavior.
+      - Treating large snapshots as the spec. They get approved without explaining whether the feature works.
+      - Skipping loading, empty, failure, retry, cancellation, and stale-data states.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="tdd-when-not">
+    <AccordionTrigger>5. When should you not force TDD, and what is the real benefit?</AccordionTrigger>
+    <AccordionContent>
+
+      - Do not force it while exploring visual direction, spiking an interaction, or living with highly uncertain requirements.
+      - Prototype, learn, stabilize, then add tests before refactoring or shipping broadly.
+      - Review questions: does it describe an important behavior, would it fail on regression, is it coupled to a private choice, can CI run it reliably?
+      - The benefit is **confidence in change**, not coverage percentage. A green suite that still lets the user fail the task is a failed suite.
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>

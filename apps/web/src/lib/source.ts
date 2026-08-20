@@ -11,6 +11,7 @@ import type { DocData, DocMethods } from "fumadocs-mdx/runtime/types"
 import { fumadocsI18n } from "@/lib/fumadocs-i18n"
 import {
   FULL_STACK_QA_SECTION_SLUGS,
+  isDraftSourcePage,
   isFullStackQaSection,
   isHiddenSourcePage,
   isPinnedSourcePage,
@@ -92,7 +93,7 @@ function mapNotesNodes(
       const page = content.getNodePage(node as Item, locale)
       if (
         !page ||
-        isHiddenSourcePage(page.path) ||
+        isDraftSourcePage(page.path) ||
         isFullStackQaSection(page.path)
       ) {
         continue
@@ -138,7 +139,7 @@ export function getCategoryPages(category: string, locale: string) {
       (page) =>
         page.slugs[0] === category &&
         page.slugs.length > 1 &&
-        !isHiddenSourcePage(page.path) &&
+        !isDraftSourcePage(page.path) &&
         !isFullStackQaSection(page.path)
     )
 }
