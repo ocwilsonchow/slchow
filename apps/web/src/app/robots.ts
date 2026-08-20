@@ -1,10 +1,15 @@
 import type { MetadataRoute } from "next"
-import { resumeVariantParams } from "@/features/resume/variants"
+import {
+  publicResumeVariant,
+  resumeVariantParams,
+} from "@/features/resume/variants"
 import { routing } from "@/i18n/routing"
 import { getSiteUrl } from "@/lib/metadata"
 
 const hiddenResumePaths = routing.locales.flatMap((locale) =>
-  resumeVariantParams.map((variant) => `/${locale}/resume/${variant}`)
+  resumeVariantParams
+    .filter((variant) => variant !== publicResumeVariant)
+    .map((variant) => `/${locale}/resume/${variant}`)
 )
 
 export default function robots(): MetadataRoute.Robots {

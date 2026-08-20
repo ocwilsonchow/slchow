@@ -1,0 +1,237 @@
+---
+title: TypeScript Beyond Strict
+description: strict 是八个 flags。仍然 type-check 通过的 bugs 住在 tsconfig 其余的地方
+date: 2026-08-20
+category: typescript
+---
+
+`strict: true` 是 table stakes。它是 **八个 flags**，不是整道围栏。`arr[i]` 仍然是 `T`。少一个 `break` 仍然 fall through。`enum` 仍然 emit 一个 value。
+
+这篇 note 依 [Kyle 的 walkthrough](https://www.youtube.com/watch?v=35cESnxXH6o)。Object model 见 [TypeScript Class 与 Runtime Identity](/notes/typescript-classes-and-runtime-identity)。Type-level 那一半见 [TypeScript Infer、Extends 与 Ternaries](/notes/typescript-infer-extends-and-ternaries)。这篇讲的是 compiler。
+
+<br />
+
+---
+
+## 1. 八个 flags
+
+`strict` 打开一个 family。它不会打开那个 family 之后才加进来的全部东西。
+
+<br />
+
+- `strictNullChecks`、`noImplicitAny`、`strictFunctionTypes`、`strictBindCallApply`
+- `strictPropertyInitialization`、`noImplicitThis`、`useUnknownInCatchVariables`、`alwaysStrict`
+
+那一套是预设前提。新的 TypeScript 把 `strict` 变成 default。这篇 note 讲的是仍然坐在它 **外面** 的东西。
+
+这个 repo 的 shared packages（`ds`、`db`、`auth`、`intl`、`content`、`infra`）已经加上 `noFallthroughCasesInSwitch`、`noUncheckedIndexedAccess`、`noImplicitOverride`，以及 `verbatimModuleSyntax`。`apps/web` 与 `apps/api` 大致是 `strict` 加上 `paths`。Kyle 没提 `verbatimModuleSyntax`。这套 stack 已经选了：type-only imports 用 `import type`。
+
+<br />
+
+**Failure:** 把 `strict: true` 读成「所有有用的 check」。仍然能 compile 的 crash，通常是 indexed access。
+
+---
+
+## 2. Hygiene
+
+这些 flags 抓 typos 与 dead code。它们不改变 `arr[i]` 的 type。
+
+<br />
+
+```jsonc
+{
+  "compilerOptions": {
+    "paths": { "@/*": ["./src/*"] },
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "allowUnusedLabels": false,
+    "noUncheckedSideEffectImports": true,
+    "noFallthroughCasesInSwitch": true,
+    "allowUnreachableCode": false
+  }
+}
+```
+
+<br />
+
+- `paths` 是 DX，不是 check。这个 repo 的 web 与 api 已经用 `@/*`。它取代的是相对路径 `../../../`。
+- `noUnusedLocals` / `noUnusedParameters` 帮从未被读的 binding 画底线。这个 repo 在 packages 里把它们 **关掉**，apps 也没设。Unused code 在这里是 lint 的工作，不是 `tsc` 的工作。
+- `allowUnusedLabels: false` 与 `allowUnreachableCode: false` 把预设的 **suggestion** 升级成 error。Object 外面的 `name:` 是 JavaScript label，不是少写的 property。`return` 后面再 `log` 是 dead。
+- `noUncheckedSideEffectImports` 在文件叫 `analytics.ts` 时，对 `import "./analytic"` 报 error。带 typo 的 side-effect import 否则会 silently fail。
+- `noFallthroughCasesInSwitch` 在 packages 里已经开。相邻、共用同一个 body 的 `case` labels 仍然允许。一个 body 跑进下一个 `case` 则不行。
+
+<br />
+
+**Failure:** 在 app code 打开 `noUnusedLocals` 来「更 strict」。Handler 里没用的 `_`、没用的 catch binding、stub 里没用的 prop —— lint 加 ignore，比每次 WIP 都吃 compiler error 便宜。
+
+---
+
+## 3. Runtime
+
+这三个改变 type **意思什么**，或允许怎样 emit。`strict` 不包含它们。
+
+<br />
+
+```ts
+const numbers = [1, 2, 3]
+numbers[10].toString()
+// error with noUncheckedIndexedAccess — type is number | undefined
+numbers[10]?.toString()
+
+type Settings = {
+  darkMode: boolean
+  [key: string]: string | number | boolean
+}
+
+const settings: Settings = { darkMode: true, username: "wds" }
+settings.darkMode // ok — declared key
+settings.username
+// error with noPropertyAccessFromIndexSignature
+settings["username"] // ok — index signature, on purpose
+```
+
+<br />
+
+- `noUncheckedIndexedAccess` 让 `arr[i]` 与 `record[key]` 变成 `T | undefined`。TypeScript 不会用 length 对 index。Default 在说谎。这就是 `strict` 漏掉的 production crash：`Cannot read properties of undefined`。这个 repo 的 packages 已经开。Apps 还没有。
+- `noPropertyAccessFromIndexSignature` 切开 syntax。**Dot** 是 declared key。**Brackets** 是 index signature。Typo `settings.darkMod` 就 compile 不过。这个 repo 把它 **关掉**。
+- `erasableSyntaxOnly` 禁止会 **emit 一个 value** 的 syntax。Constructor parameter properties（`constructor(private name: string)`）会改写 constructor。`enum` 变成 object。Types 必须能干净地 strip —— Bun 与 Node 的 type stripper 不会改写。[TypeScript Class](/notes/typescript-classes-and-runtime-identity) 宁用 `#` 而不是 TypeScript `private`，原因相同：`#` 是 JavaScript。
+
+<br />
+
+**Failure:** `strict` 之后写 `users[0].name`，而 array 可以是空的。或在 Bun 只做 strip 的文件里用 `enum`。
+
+---
+
+## 4. Preference
+
+有用。不是免费。三个里面两个，这个 repo 的 packages 已经决定。
+
+<br />
+
+```ts
+class Box {
+  close(): void {}
+}
+
+class Modal extends Box {
+  override close(): void {}
+}
+
+type User = { name?: string }
+const omitted: User = {}
+const explicit: User = { name: undefined }
+// error with exactOptionalPropertyTypes — optional means missing, not T | undefined
+"name" in omitted // false
+"name" in explicit // true
+```
+
+<br />
+
+- `noImplicitOverride` 要求 child method 取代 parent method 时写 `override`。意外 overwrite 是 class hierarchy 里的 typo。Packages 已经开。Object model 见 [TypeScript Class](/notes/typescript-classes-and-runtime-identity)。
+- `noErrorTruncation` 在 error hover 印出完整 type。预设关。为了 debug 一个难搞的 conditional 才打开，然后关掉。Hover 不是 log。
+- `exactOptionalPropertyTypes` 让 `name?: string` 表示 key **不存在** 或是 `string`。`{ name: undefined }` 不是 `User`。这就是 `in` operator 的 bug：设成 `undefined` 的 key 仍在 object 里。Video 里最 opinionated 的 flag。这个 repo 没设。
+
+<br />
+
+**Failure:** 把 `override` 当装饰，写在 parent 上根本没有的 method。Flag 检查的是名字仍然对得上。
+
+---
+
+## 5. JavaScript
+
+一个还有 `.js` 文件的 TS repo 需要两个开关。它们不是 TypeScript 的 type safety。
+
+<br />
+
+```ts
+// analytics.js
+export const t = 10
+```
+
+<br />
+
+- `allowJs` 让 `.ts` 文件 import 那个 module。`apps/web` 与 `packages/ds` 已经开。
+- `checkJs` 对每一个 `.js` 文件做 type-check。Migration 期间那是洪水。宁可在文件顶一次加一行 `// @ts-check`。当你愿意忽略的 `.js` 都没了，再打开 `checkJs`。
+
+<br />
+
+**Failure:** Conversion 第一天就 `checkJs: true`，然后因为 log 读不下去把 flag 关掉。Per-file comment 才是 migration。
+
+---
+
+## Takeaway
+
+`strict` 是一个 family。Indexed access、fallthrough、emit，以及 override 坐在它外面。
+
+当问题是该加哪个 flag：
+
+1. **`arr[i]` 有没有在说谎？** `noUncheckedIndexedAccess`。Apps 补上。Packages 已经有。
+2. **这个 syntax 会不会 emit 一个 value？** `enum`、constructor parameter properties。`erasableSyntaxOnly`，或者干脆别写。`#` 与 string unions。
+3. **这是 unused code 还是 typo？** Unused 交给 lint。其余用 `noFallthroughCasesInSwitch` 与 `noUncheckedSideEffectImports`。这个 repo 不要把 unused-locals 提升成 `tsc`。
+
+---
+
+## Recap Q&A
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="ts-strict-family">
+    <AccordionTrigger>1. `strict: true` 实际上打开什么？</AccordionTrigger>
+    <AccordionContent>
+
+      - 八个 flags：`strictNullChecks`、`noImplicitAny`、`strictFunctionTypes`、`strictBindCallApply`、`strictPropertyInitialization`、`noImplicitThis`、`useUnknownInCatchVariables`、`alwaysStrict`。
+      - 那个 family 是 table stakes。它不是 `noUncheckedIndexedAccess`，不是 `noFallthroughCasesInSwitch`，不是 `erasableSyntaxOnly`，不是 `verbatimModuleSyntax`。
+      - 这个 repo 的 shared packages 加上 fallthrough、indexed access、`noImplicitOverride`，以及 `verbatimModuleSyntax`。`apps/web` 与 `apps/api` 大致是 `strict` 加上 `paths`。
+      - **Failure:** 把 `strict` 读成整道围栏。仍然能 compile 的 crash，通常是 `arr[i]`。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="ts-hygiene">
+    <AccordionTrigger>2. 哪些 flags 是 hygiene，这个 repo 又把哪些留给 lint？</AccordionTrigger>
+    <AccordionContent>
+
+      - `paths` 是 DX。Web 与 api 已经把 `@/*` map 到 `./src/*`。
+      - Packages 已开 `noFallthroughCasesInSwitch`。`noUncheckedSideEffectImports` 抓 side-effect import 的 typo。`allowUnusedLabels: false` 与 `allowUnreachableCode: false` 把 suggestions 升级成 errors。
+      - `noUnusedLocals` 与 `noUnusedParameters` 在这里是 **关** 的。Unused bindings 是 lint 的工作，不是 `tsc` 的工作。
+      - **Failure:** 在 app code 打开 unused-locals，然后跟 handler 里每个没用的 `_` 打架。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="ts-indexed-access">
+    <AccordionTrigger>3. noUncheckedIndexedAccess 与 noPropertyAccessFromIndexSignature 抓什么？</AccordionTrigger>
+    <AccordionContent>
+
+      - `noUncheckedIndexedAccess` 让 `arr[i]` 与 `record[key]` 变成 `T | undefined`。TypeScript 不知道 length。Default type 在说谎。这就是 `strict` 漏掉的 runtime crash。
+      - Packages 已经有。Apps 还没有。这是下一个该加的 flag。
+      - `noPropertyAccessFromIndexSignature`：dot notation 是 declared key；brackets 是 index signature。`settings.darkMod` 失败。`settings["username"]` 是 escape。这个 repo 关掉它。
+      - **Failure:** 在可以是空的 array 上写 `users[0].name`，`strict` 底下 compile 干净。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="ts-erasable">
+    <AccordionTrigger>4. erasableSyntaxOnly 禁止什么，这套 stack 为什么在意？</AccordionTrigger>
+    <AccordionContent>
+
+      - 会 **emit 一个 value** 的 syntax：constructor parameter properties（`constructor(private name: string)`）、`enum`，以及其他会改写 JS 的 TypeScript-only 形式。
+      - Types 必须能干净地 strip。Bun 与 Node 的 type stripper 只 erase，不改写。`verbatimModuleSyntax`（packages 已开）是 import 那一侧的亲戚：types 用 `import type`。
+      - [TypeScript Class](/notes/typescript-classes-and-runtime-identity) 宁用 `#` 而不是 TypeScript `private`，原因相同。`#` 是 JavaScript。大多数 enum 用 string union 取代。
+      - **Failure:** 在 runtime 只做 strip 的文件里用 `enum`。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="ts-exact-optional-override">
+    <AccordionTrigger>5. 什么时候要 noImplicitOverride 或 exactOptionalPropertyTypes？</AccordionTrigger>
+    <AccordionContent>
+
+      - `noImplicitOverride` 要求 child method 取代 parent method 时写 `override`。Packages 已经开。意外 overwrite 是 class hierarchy 里的 typo。
+      - `exactOptionalPropertyTypes` 让 `name?: string` 表示不存在或是 `string`，不是 `string | undefined`。`{ name: undefined }` 于是是 error。`"name" in obj` 终于跟 type 一致。
+      - `noErrorTruncation` 只在 debug 时开。Hover 看完整 types，然后关掉。
+      - 这个 repo 不设 exact optional。`override` 已经是 package default。Object model 见 [TypeScript Class](/notes/typescript-classes-and-runtime-identity)。
+      - **Failure:** parent 已经没有的 method 还写 `override` —— 或把 `{ name: undefined }` 当成「optional」，而 `in` 仍然返回 true。
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>

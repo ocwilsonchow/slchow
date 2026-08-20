@@ -12,8 +12,18 @@ const nextConfig: NextConfig = {
       { source: "/ja", destination: "/en", permanent: true },
       { source: "/ja/:path*", destination: "/en/:path*", permanent: true },
       {
+        source: "/resume.pdf",
+        destination: "/resume-full-stack.pdf",
+        permanent: true,
+      },
+      {
         source: "/:locale/notes/frontend-security-nextjs-react-native",
         destination: "/:locale/notes/security-in-next-js",
+        permanent: true,
+      },
+      {
+        source: "/:locale/resume",
+        destination: "/:locale/resume/full-stack",
         permanent: true,
       },
     ]

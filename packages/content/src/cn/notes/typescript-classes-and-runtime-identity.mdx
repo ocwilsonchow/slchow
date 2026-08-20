@@ -2,7 +2,7 @@
 title: TypeScript Class 与 Runtime Identity
 description: class 是 constructor 加上 prototype。需要 instanceof 或可变 lifetime 时才值得写；否则用 types 与 functions
 date: 2026-08-15
-category: frontend
+category: typescript
 ---
 
 在 production 的 React、Next 与 Hono code 里，class 不是组织 application code 的方式。它是一种 **runtime identity**：一个 constructor、一个 prototype，以及一个 `instanceof` 能认出来的 object。
@@ -86,6 +86,8 @@ lookalike instanceof Bird // false
 
 - `instanceof` 沿着 instance chain 走，找到对的 `.prototype` 就返回 true。这是 **runtime** 测试，不是 TypeScript 测试。这条 walk 会到 `Object.prototype`，所以 `bird instanceof Object` 为 true。
 - `super()` 在 child 碰 `this` 之前跑 parent constructor。派生 class 里忘了它是 syntax error。
+- Type-level `extends` —— constraint、ternary、`infer` —— 见 [TypeScript Infer、Extends 与 Ternaries](/notes/typescript-infer-extends-and-ternaries)。这节讲的是 prototype chain。
+- `noImplicitOverride` 要求 child method 取代 parent method 时写 `override`。那个 flag 见 [TypeScript Beyond Strict](/notes/typescript-beyond-strict)。
 - **Failure:** target 太旧，compile 之后 prototype chain 就没了。Target ES2015 或更新。长得一样的 plain object 带同样 fields，`instanceof` 仍会失败。
 
 ---
@@ -166,6 +168,7 @@ secret.reveal() // "hidden"
 
 - `implements` 是 compile-time 检查，确认 instance 形状吻合。它不改变 runtime object。
 - TypeScript `private` 与 `protected` 是同一种检查：compiler 拒绝 `obj.secret`，然后把 keyword erase 掉。`#` fields 是 JavaScript，emit 之后仍然 private。
+- Constructor parameter properties（`constructor(private name: string)`）与 `enum` 会 **emit values**。`erasableSyntaxOnly` 禁止它们，好让 types 能干净地 strip。那个 flag 见 [TypeScript Beyond Strict](/notes/typescript-beyond-strict)。
 - 如果检查必须在 `catch` block、`JSON.parse` 之后，或跨 bundle boundary 仍能工作，它必须是 **value**：`instanceof`、discriminant field（`type: "error"`），或 branded function。
 - **Failure:** 对一个 runtime 从不存在的 interface 做 `instanceof`。
 

@@ -311,7 +311,7 @@ Frontend regression testing works best as a **triage system**.
 
 - Protect high-value behavior at the cheapest reliable layer, grow coverage from real failures, and keep Cypress thin enough that a red build still means something.
 - When something breaks once, make sure the suite will catch it the second time — preferably with a test name that still reads like a **product promise** months later.
-- **Write the failing test first** when fixing a bug, and make sure it fails for the right reason before applying the fix.
+- **Write the failing test first** when fixing a bug, and make sure it fails for the right reason before applying the fix. The design habit behind that — Red, Green, Refactor on observable UI behavior — is [Test-Driven Development in Frontend Engineering](/notes/test-driven-development-in-frontend).
 - Run focused tests locally, the unit/component suite on PRs, and critical E2E journeys before merge.
 - **Failure:** normalizing flake. If a test fails randomly, quarantine it, then fix or delete it. A test that passes on its third attempt is still a flaky test. Skip pixel-perfect visual diffs, exhaustive E2E edge cases, and assertions on framework internals. Manual exploratory testing still matters.
 

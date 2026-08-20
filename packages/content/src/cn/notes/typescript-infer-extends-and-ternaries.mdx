@@ -1,0 +1,322 @@
+---
+title: TypeScript Infer、Extends 与 Ternaries
+description: extends 是 assignable-to；ternary 选一个 type；infer 帮你对上的那一块取名 —— 再加上 template literals 与 mapped types
+date: 2026-08-20
+category: typescript
+---
+
+Type level 的 `extends` 不是 inheritance。它是一个问题：`T` 能否 **assignable to** `U`？Ternary 选一个 type 或另一个。`infer` 帮对上的那一块取名。
+
+这篇 note 依 [Kyle 的 walkthrough](https://www.youtube.com/watch?v=bnTAOB3P6nM)。Class `extends` —— prototype chain、`super`、`instanceof` —— 见 [TypeScript Class 与 Runtime Identity](/notes/typescript-classes-and-runtime-identity)。这篇是 type-level 的那一半：constraints、conditionals，以及你从别的 types 抽出来的 types。
+
+<br />
+
+---
+
+## 1. 四种 `extends`
+
+同一个字做四件事。只有 class 那一种活在 runtime。
+
+<br />
+
+```ts
+class Bird extends Animal {}
+
+interface Named {
+  name: string
+}
+
+interface Aged extends Named {
+  age: number
+}
+
+type AgedAsType = Named & { age: number }
+
+type NameOf<T extends { name: string }> = T["name"]
+```
+
+<br />
+
+- Class `extends` 接上 prototype chains。那是一个 **value**。另外三种会被 erased。
+- Interface `extends` 把 fields 复制进新的 shape。可以有多个 parents：`interface B extends A, C`。`type` alias 不能 `extend`。Intersection（`&`）是同一种 composition：`Named & { age: number }`。
+- Generic constraint `T extends U` 是一道 **gate**。`T` 必须 assignable to `U`，否则 type argument 被拒。`NameOf<number>` 是 error。`NameOf<{ name: "Ada"; extra: true }>` 是 `"Ada"`。
+- Conditional `T extends U ? X : Y` 是一次 **branch**。任何 `T` 都接受；结果取决于 assignability。下一节就是这种形式。
+
+`T extends U` 的意思是 **assignable to `U`**，不是「T 和 U」，也不是「T 比较大」。Object types 多出来的 fields 仍然 assign：`{ name: string; age: number }` assignable to `{ name: string }`。Values 这边，`"hi" extends string` —— value set **更小**，不是更大。String literal 是 `string` 的 subtype。
+
+<br />
+
+**Failure:** 把 `T extends string` 读成 `T & string`。Intersection 是 `&`。`extends` 是一次 check。
+
+---
+
+## 2. Ternaries
+
+Constraint 会拒掉坏的 `T`。Conditional 接受任何 `T`，然后 **branch**。
+
+<br />
+
+```ts
+type IsString<T> = T extends string ? true : false
+
+type A = IsString<"hi"> // true
+type B = IsString<number> // false
+type C = IsString<string & { brand: "x" }> // true — still assignable to string
+```
+
+<br />
+
+Type system 没有 `if` block。Nested ternaries 是唯一的 if/else：
+
+<br />
+
+```ts
+type Kind<T> = T extends string
+  ? "string"
+  : T extends number
+    ? "number"
+    : "other"
+```
+
+<br />
+
+`extends` 左边一个 **naked** type parameter 会对 unions **distribute**。这就是 `Exclude` 与 `Extract` 存在的原因：
+
+<br />
+
+```ts
+type Exclude<T, U> = T extends U ? never : T
+type Extract<T, U> = T extends U ? T : never
+
+type WithoutNull = Exclude<string | null, null> // string
+type OnlyString = Extract<string | number, string> // string
+```
+
+<br />
+
+`Exclude<string | null, null>` 是两次 check：`string extends null`（留下 `string`）与 `null extends null`（掉成 `never`）。`string | never` 就是 `string`。两边都包进 tuple，就能 **停掉** distribution：
+
+<br />
+
+```ts
+type ToArray<T> = T extends any ? T[] : never
+type Dist = ToArray<string | number> // string[] | number[]
+
+type ToArrayTogether<T> = [T] extends [any] ? T[] : never
+type Together = ToArrayTogether<string | number> // (string | number)[]
+```
+
+<br />
+
+Production default 是 standard library：`Exclude`、`Extract`、`NonNullable`。Library 在发明一个 type 时才 nest ternaries —— i18n params、router、Zod 的 output。
+
+<br />
+
+**Failure:** 一个其实就是 `Exclude` 的 nested ternary。Application code 里手写 `T extends U ? never : T` 是噪音。
+
+---
+
+## 3. `infer`
+
+`infer` 只在 conditional 里合法。它在 `extends` clause 宣告一个 type variable，在 true branch 使用。对一个 shape 做 pattern-match；帮那个洞取名。
+
+<br />
+
+```ts
+type Flatten<T> = T extends Array<infer Item> ? Item : never
+
+type A = Flatten<string[]> // string
+type B = Flatten<[1, 2, 3]> // 1 | 2 | 3
+type C = Flatten<string> // never
+```
+
+<br />
+
+False branch 回传 `T` 是另一种常见形状 —— 对不上就保留 input。那是下面的 `Unwrap`。`ReturnType` 是对 return slot 做 `infer`：
+
+<br />
+
+```ts
+type ReturnType<T extends (...args: never[]) => unknown> = T extends (
+  ...args: never[]
+) => infer R
+  ? R
+  : never
+
+type Unwrap<T> = T extends Promise<infer U> ? U : T
+
+type FetchReturn = ReturnType<typeof fetch> // Promise<Response>
+type FetchValue = Unwrap<FetchReturn> // Response
+```
+
+<br />
+
+Builtin `Awaited` 会 recurse，直到没有 `Promise`。One-liner 是那个 idea。对 inferred 的那一块再做一次 ternary，仍然只是 ternary：如果 array element `extends string`，就回传别的东西。
+
+<br />
+
+Production default 是 standard library：`ReturnType`、`Parameters`、`Awaited`、`ConstructorParameters`、`InstanceType`。Shape 是你自己的时候才用 `infer` —— tagged template、route string、builder 累积出来的 type。
+
+<br />
+
+**Failure:** Application code 里手写一份 `ReturnType`。Stdlib 已经取过名。
+
+---
+
+## 4. Template literals
+
+Template literal type 是带洞的 string type。配上 `infer`，它拆 string 的方式就像 regex 抓 groups：
+
+<br />
+
+```ts
+type Split<T extends string> = T extends `${infer K}:${infer V}`
+  ? { key: K; value: V }
+  : never
+
+type A = Split<"name:Kyle"> // { key: "name"; value: "Kyle" }
+type B = Split<"no-colon"> // never
+```
+
+<br />
+
+Video 里的 i18n `{param}` extractor 就是这个 nested：对上 prefix、一个 `{...}` capture、以及 rest；抽出 capture；对 rest recurse。还是那三个 keywords。没有第四个。
+
+---
+
+## 5. Mapped types
+
+Mapped type 是对 keys 的 loop。`{ [P in keyof T]: ... }` 重建一个 object type。Value 里的 ternary，或 key 上的 `as`，就是一个 object type 变成另一个的方式。
+
+<br />
+
+```ts
+type O = { name: string; age: number }
+
+type StringsToNumbers<T> = {
+  [P in keyof T]: T[P] extends string ? number : T[P]
+}
+
+type N = StringsToNumbers<O> // { name: number; age: number }
+```
+
+<br />
+
+Modifiers 加上或拿掉 `readonly` 与 optionality。`-` 是剥；bare keyword（或 `+`）是加：
+
+<br />
+
+```ts
+type Mutable<T> = { -readonly [P in keyof T]: T[P] }
+type Partial<T> = { [P in keyof T]?: T[P] }
+type Required<T> = { [P in keyof T]-?: T[P] }
+type Readonly<T> = { readonly [P in keyof T]: T[P] }
+```
+
+<br />
+
+Standard library 的 `Partial`、`Required`、`Readonly` 就是这些 one-liners。
+
+Key remapping 用 `as`。`Capitalize` 是 builtin string helper。`keyof T` 可以是 `string | number | symbol`，所以新 key 是 template 时要跟 `string` intersect：
+
+<br />
+
+```ts
+type Getters<T extends Record<string, unknown>> = {
+  [P in keyof T & string as `get${Capitalize<P>}`]: () => T[P]
+}
+
+type G = Getters<{ name: string; age: number }>
+// { getName: () => string; getAge: () => number }
+```
+
+<br />
+
+Production default 是 stdlib（`Partial`、`Readonly`、`Pick`、`Omit`），除非 public type 本身就是一次 transformation —— getters、event map、`on${Capitalize<P>}` handlers。
+
+<br />
+
+**Failure:** 亲手重写 `Partial` 或 `Readonly`。外面的名字才是变了的东西时，才 remap keys。
+
+---
+
+## Takeaway
+
+`extends` 是一次 check。Ternary 是一次 branch。`infer` 是一个有名字的洞。Mapped types 是 loop；`as` 是 rename。
+
+当问题是要不要写一个时：
+
+1. **这是 constraint**（parameter 上的 `T extends U`）、**branch**（`T extends U ? X : Y`），还是 **extract**（`infer`）？
+2. **Standard library 是否已经取过名？** `ReturnType`、`Awaited`、`Exclude`、`Partial`。
+3. **还是这是 library 正在发明的 type？** Route string、i18n param、builder。那才写。
+
+---
+
+## Recap Q&A
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="ts-four-extends">
+    <AccordionTrigger>1. `extends` 的四种工作是什么？</AccordionTrigger>
+    <AccordionContent>
+
+      - Class `extends` 接上 prototype chains。那是一个 **value**。`instanceof` 沿着它走。[TypeScript Class 与 Runtime Identity](/notes/typescript-classes-and-runtime-identity)。
+      - Interface `extends` 复制 fields。`type` alias 用 `&` 做同一种 composition。
+      - Generic constraint `T extends U` 是一道 **gate**：`T` 必须 assignable to `U`，否则 type argument 被拒。
+      - Conditional `T extends U ? X : Y` 是一次 **branch**：任何 `T` 都接受；结果取决于 assignability。
+      - `T extends U` 的意思是 **assignable to `U`**，不是 intersection。多出来的 object fields 仍然 assign。`"hi"` 是 `string` 的 subtype —— value set 更小。
+      - **Failure:** 把 `T extends string` 读成 `T & string`。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="ts-ternaries">
+    <AccordionTrigger>2. Conditional types 怎么 branch，Exclude 与 Extract 为什么有效？</AccordionTrigger>
+    <AccordionContent>
+
+      - `T extends U ? X : Y` 是唯一的 if/else。更多 cases 就 nest ternaries。没有 `if` block。
+      - `extends` 左边一个 **naked** `T` 会对 unions distribute。`Exclude<T, U>` 是 `T extends U ? never : T`。`Extract` 留下对上的 members。
+      - 两边都包进 tuple —— `[T] extends [U]` —— 就把 union 当一个 type。
+      - Production default 是 `Exclude`、`Extract`、`NonNullable`。Library 在发明 type 时才 nest ternaries。
+      - **Failure:** 一个其实就是 `Exclude` 的 nested ternary。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="ts-infer">
+    <AccordionTrigger>3. `infer` 做什么，什么时候该自己写？</AccordionTrigger>
+    <AccordionContent>
+
+      - `infer` 只在 conditional 里合法。它帮对上的 shape 里的一块取名，在 true branch 用那个名字。
+      - Array element：`T extends Array<infer Item> ? Item : never`。Return type：`T extends (...args: never[]) => infer R ? R : never`。Promise：`T extends Promise<infer U> ? U : T`。
+      - `ReturnType`、`Parameters`、`Awaited`、`ConstructorParameters`、`InstanceType` 是 standard library 里的同一个 pattern。Builtin `Awaited` 会 recurse。
+      - Shape 是你自己的时候才用 `infer` —— tagged template、route string、builder。不要重做 `ReturnType`。
+      - **Failure:** Application code 里手写一份 `ReturnType`。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="ts-template-literals">
+    <AccordionTrigger>4. Template literal types 怎么拆 string？</AccordionTrigger>
+    <AccordionContent>
+
+      - Template literal type 是带洞的 string type。配上 `infer`，它抓 pieces 的方式就像 regex 抓 groups。
+      - `` T extends `${infer K}:${infer V}` ? { key: K; value: V } : never `` 在第一个 colon 切开。对不上就是 `never`。
+      - Nested captures 再对 rest recurse，就是 i18n `{param}` extractor 走完整条 string 的方式。还是 `extends`、ternary、`infer`。没有第四个 keyword。
+      - `Capitalize`、`Uppercase`、`Lowercase`、`Uncapitalize` 是用在同一个洞里的 builtin string helpers。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="ts-mapped-types">
+    <AccordionTrigger>5. Mapped types 怎么 loop、剥 modifiers、rename keys？</AccordionTrigger>
+    <AccordionContent>
+
+      - `{ [P in keyof T]: ... }` 重建一个 object type。`T[P]` 上的 ternary 改 values。Key 上的 `as` 改 names。
+      - `-readonly` 与 `-?` 剥 modifiers。Bare `readonly` 或 `?`（或 `+`）加上它们。`Partial`、`Required`、`Readonly` 就是这些 one-liners。
+      - Key remap 用 `as` 与 `Capitalize`：新 key 是 `` `get${Capitalize<P>}` ``，value 是 `() => T[P]`。`keyof T` 要跟 `string` intersect，因为 `keyof` 包含 `number` 与 `symbol`。
+      - Production default 是 stdlib，除非 public type 本身就是一次 transformation —— getters、event map、`on${Capitalize<P>}` handlers。
+      - **Failure:** 亲手重写 `Partial` 或 `Readonly`。
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>

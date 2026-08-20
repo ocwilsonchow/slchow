@@ -15,6 +15,7 @@ export const ThemeProvider = ({
     defaultTheme="dark"
     disableTransitionOnChange
     enableSystem
+    themes={["light", "dark", "meta"]}
     // next-themes injects an inline <script> for FOUC prevention. React 19.2
     // warns about inline <script> tags created during client renders. The
     // script only needs to execute in the server-rendered HTML, so on the

@@ -340,6 +340,253 @@ const { runId } = await run.startAsync({
 
 <br />
 
+### Composing the same DAG with LangGraph
+
+If the team already lives in LangChain/LangGraph, the same DAG composes as a `StateGraph`. Nodes replace Mastra steps. A checkpointer's `thread_id` replaces `runId` as ingest status. Every invariant above still holds — org from the server, delete-first, embed `embedText`, store `text`.
+
+<br />
+
+| Mastra | LangGraph |
+| --- | --- |
+| `createWorkflow` + `createStep` | `StateGraph` nodes and edges |
+| Step `execute` | Node returning a partial state update |
+| `runId`, snapshots, per-step retries | `thread_id` + checkpointer + `retryPolicy` |
+| `requestContext` org | Invoke input assembled server-side |
+| Studio run list | `graph.getState(config)` / LangSmith traces |
+
+<br />
+
+```text
+ingestion-graph  (one thread per organizationId:path)
+  loadFile        exists(path) → readFile → upload to Reducto
+                  missing → Command goto deleteVectors { status: "skipped" }
+  parseReducto    parse cache hit ? cached JSON : parse.run → persist JSON
+  mapChunks       chunks → { text, embedText, page, bbox, blockType, chunkIndex }
+  deleteVectors   deleteMany(path) in namespace=organizationId
+  planBatches     chunks > 0 → Send upsertBatch × ceil(n / 100)
+                  chunks = 0 → finalize
+  upsertBatch     embed dense+sparse → upsert batch (parallel per Send)
+  finalize        { status, chunkCount } from summed indexedCount
+```
+
+<br />
+
+State is the shared memory every node reads. Fields with one writer stay plain zod. Fields written by the fan-out need a reducer — without one, the last parallel batch overwrites the rest.
+
+<br />
+
+```ts title="src/graphs/ingestion/state.ts"
+import { StateSchema, ReducedValue } from "@langchain/langgraph"
+import { z } from "zod/v4"
+
+const Chunk = z.object({
+  chunkIndex: z.number(),
+  text: z.string(),      // display
+  embedText: z.string(), // vectors
+  page: z.number().optional(),
+  blockType: z.string().optional(),
+})
+
+export const IngestState = new StateSchema({
+  // input — organizationId is assembled by the server at invoke, never by the client
+  path: z.string(),
+  filename: z.string(),
+  mediaType: z.string(),
+  organizationId: z.string(),
+  // intermediates — one writer each, so plain fields
+  fileId: z.string().optional(),
+  parseJson: z.unknown().optional(),
+  chunks: z.array(Chunk).default(() => []),
+  // fan-out accumulator — N upsertBatch workers write it, so it needs a reducer
+  indexedCount: new ReducedValue(z.number().default(0), {
+    inputSchema: z.number(),
+    reducer: (current, n) => current + n,
+  }),
+  status: z.string().default(""),
+  chunkCount: z.number().default(0),
+})
+
+export type IngestStateType = typeof IngestState.State
+```
+
+<br />
+
+Nodes return partial updates; the graph applies them. `loadFile` returns `Command` — state update and routing in one return — so it has **no static edge** out of it.
+
+<br />
+
+```ts title="src/graphs/ingestion/nodes.ts"
+import { Command, Send } from "@langchain/langgraph"
+import type { IngestStateType } from "./state"
+
+const BATCH_SIZE = 100 // ~100 vectors at 1536-d with text in metadata
+
+export async function loadFile(state: IngestStateType) {
+  if (!(await filesystem.exists(state.path))) {
+    // skip-with-delete: route straight to the shared delete node
+    return new Command({
+      update: { status: "skipped", chunks: [] },
+      goto: "deleteVectors",
+    })
+  }
+  const file = await filesystem.readFile(state.path)
+  const upload = await reducto.upload({ file })
+  return new Command({ update: { fileId: upload.fileId }, goto: "parseReducto" })
+}
+
+export async function parseReducto(state: IngestStateType) {
+  // retryPolicy retries this node; the cache check keeps a retry from re-paying for Parse
+  const cached = await readParseCache(state.path)
+  if (cached) return { parseJson: cached }
+
+  const result = await reducto.parse.run({
+    input: state.fileId!,
+    retrieval: {
+      chunking: { chunk_mode: "variable", chunk_size: 1000 },
+      embedding_optimized: true,
+      filter_blocks: ["Header", "Footer", "Page Number"],
+    },
+  })
+  await writeParseCache(state.path, result)
+  return { parseJson: result }
+}
+
+export async function mapChunks(state: IngestStateType) {
+  const chunks = state.parseJson.result.chunks.map((chunk, chunkIndex) => ({
+    chunkIndex,
+    text: chunk.content,           // display
+    embedText: chunk.embed,        // vectors
+    page: chunk.blocks[0]?.bbox.page,
+    blockType: chunk.blocks[0]?.type,
+  }))
+  return { chunks }
+}
+
+export async function deleteVectors(state: IngestStateType) {
+  await pc
+    .Index(PINECONE_INDEX_NAME)
+    .namespace(state.organizationId)
+    .deleteMany({ path: state.path })
+  return {}
+}
+
+type BatchJob = {
+  organizationId: string
+  path: string
+  filename: string
+  mediaType: string
+  batch: IngestStateType["chunks"]
+  offset: number
+}
+
+export function planBatches(state: IngestStateType) {
+  if (state.chunks.length === 0) return "finalize"
+  const sends: Send[] = []
+  for (let offset = 0; offset < state.chunks.length; offset += BATCH_SIZE) {
+    sends.push(
+      new Send("upsertBatch", {
+        organizationId: state.organizationId,
+        path: state.path,
+        filename: state.filename,
+        mediaType: state.mediaType,
+        batch: state.chunks.slice(offset, offset + BATCH_SIZE),
+        offset,
+      }),
+    )
+  }
+  return sends
+}
+
+export async function upsertBatch(job: BatchJob) {
+  const dense = await embedDense(job.batch.map((c) => c.embedText))
+  const sparse = await embedSparse(job.batch.map((c) => c.embedText), "passage")
+
+  await pc
+    .Index(PINECONE_INDEX_NAME)
+    .namespace(job.organizationId)
+    .upsert({
+      records: job.batch.map((chunk, i) => ({
+        id: `${job.path}:${job.offset + i}`,
+        values: dense[i],
+        sparseValues: sparse[i],
+        metadata: {
+          path: job.path,
+          filename: job.filename,
+          chunkIndex: job.offset + i,
+          page: chunk.page,
+          blockType: chunk.blockType,
+          text: chunk.text,
+          mediaType: job.mediaType,
+        },
+      })),
+    })
+  return { indexedCount: job.batch.length }
+}
+
+export async function finalize(state: IngestStateType) {
+  return {
+    status: state.indexedCount > 0 ? "indexed" : "skipped",
+    chunkCount: state.indexedCount,
+  }
+}
+```
+
+<br />
+
+Wire it. `Command` destinations are declared with `ends`. The fan-out is a conditional edge returning `Send[]`. Paid and flaky nodes get `retryPolicy`. The checkpointer makes each `thread_id` a resumable run.
+
+<br />
+
+```ts title="src/graphs/ingestion/graph.ts"
+import { StateGraph, START, END, MemorySaver } from "@langchain/langgraph"
+import { IngestState } from "./state"
+
+const checkpointer = new MemorySaver() // prod: PostgresSaver on the same Postgres as everything else
+
+export const ingestionGraph = new StateGraph(IngestState)
+  .addNode("loadFile", loadFile, { ends: ["parseReducto", "deleteVectors"] })
+  .addNode("parseReducto", parseReducto, { retryPolicy: { maxAttempts: 3, initialInterval: 1.0 } })
+  .addNode("mapChunks", mapChunks)
+  .addNode("deleteVectors", deleteVectors)
+  .addNode("upsertBatch", upsertBatch, { retryPolicy: { maxAttempts: 3, initialInterval: 1.0 } })
+  .addNode("finalize", finalize)
+  .addEdge(START, "loadFile")
+  .addEdge("mapChunks", "deleteVectors")
+  .addConditionalEdges("deleteVectors", planBatches, ["upsertBatch", "finalize"])
+  .addEdge("upsertBatch", "finalize")
+  .addEdge("finalize", END)
+  .compile({ checkpointer })
+```
+
+<br />
+
+The upload handler swaps `createRun` / `startAsync` for `invoke` on a thread named `{organizationId}:{path}`:
+
+<br />
+
+```ts
+const config = { configurable: { thread_id: `${organizationId}:${path}` } }
+void ingestionGraph.invoke({ path, filename, mediaType, organizationId }, config)
+
+// "is this file searchable yet?" — the latest checkpoint is the latest run for that org + path
+const { values } = await ingestionGraph.getState(config)
+```
+
+<br />
+
+- `loadFile` routes with `Command`, so it has no `addEdge` out of it. Add one anyway and **both** targets run — the skip path would parse a missing file.
+- `chunks` has no reducer: only `mapChunks` writes it. `indexedCount` needs `ReducedValue` because N parallel `upsertBatch` workers write it. Match the reducer to the write pattern, not the field type.
+- Delete is its own node so the skip path and the index path share exactly one delete. Delete-before-upsert becomes graph topology, not a convention inside a step.
+- `thread_id = organizationId:path` replaces "list runs by `resourceId`, match `input.path`." A re-upload resumes the same thread, and concurrent re-uploads of one path serialize on it.
+- `retryPolicy` retries the *node*, not the paid call inside it — the parse-cache check is what keeps a `parseReducto` retry from re-paying Reducto.
+- `MemorySaver` dies with the process. Production wants `PostgresSaver` from `@langchain/langgraph-checkpoint-postgres` — the same Postgres the rest of the stack already uses. LangSmith replaces Studio for traces.
+- Re-embed on model change is the same node functions re-wired (`START` → `mapChunks`, reading the cached parse). Extract nodes, not a forked graph.
+- Only the workflow swaps. The agent, the search tool, and the Hono routes stay as written — the read path cannot tell which framework wrote the vectors.
+
+**Failure:** a `Send` fan-out into a field with no reducer — the last batch's count wins. And `organizationId` in the invoke input is assembled by the server after the membership check; a client-supplied org is the same leak as a client-supplied namespace.
+
+<br />
+
 ---
 
 ## 6. Retrieval
@@ -535,6 +782,7 @@ That is the system: a four-step ingest DAG in a single workflow, a hybrid dotpro
 
       - A working RAG stack is two pipelines that share an embedding space: a **deterministic ingest workflow** that writes vectors, and a **tool-called retriever** that reads them.
       - Upload and ingest are **one** workflow, four steps: `loadFile` → `parseReducto` → `mapChunks` → `indexChunks`. One `runId` is ingest status. Parse is a step, not a second workflow. “User asked about the handbook” is open-ended; skip retrieval on “hi.”
+      - The same DAG also composes as a LangGraph `StateGraph`: nodes replace steps, a checkpointer `thread_id` (`organizationId:path`) replaces `runId`, and `Send` fans batched upserts out in parallel. Invariants unchanged — org still comes from the server, never the model.
       - Hybrid search and rerank belong on the read path, never on the upload line. The write path ends at upsert. Extract and re-embed are later workflows that may reuse steps, not extra ingest pipelines.
       - Always-on injection embeds every greeting and burns tokens.
       - The tenant key lives in **`requestContext`**, never in tool args. Populate context the same way on upload and on chat: session → verify membership → set `organizationId` and `userId`.

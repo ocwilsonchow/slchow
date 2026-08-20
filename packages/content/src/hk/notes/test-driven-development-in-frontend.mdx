@@ -1,0 +1,627 @@
+---
+title: Frontend Engineering 中的 Test-Driven Development
+description: 用 Red-Green-Refactor 設計 frontend 行為——Vitest、React Testing Library，以及能在 refactor 後仍然成立的測試
+date: 2026-08-20
+category: frontend
+---
+
+**Test-Driven Development (TDD)** 是在寫出讓測試通過的 production code 之前，先寫一條會失敗的測試。在 frontend，這意味著把 UI 行為、accessibility 與 business rules 變成可執行的規格——而不是把測試當成最後的 verification。
+
+<br />
+
+- 每個 cycle 交付一個 **observable behavior**，而不是整個 feature。
+- 用使用者可見結果說話的測試，在你把 `useState` 換成 form library、reducer 或 server action 時仍然成立。
+- 分層、MSW，以及 E2E 該有多薄，見 [Frontend Regression Tests](/notes/_frontend-regression-test)。這篇講的是 **design habit**：先紅，再綠，再 refactor。
+
+<br />
+
+---
+
+## 1. Red, Green, Refactor
+
+TDD 是一個緊湊的循環：
+
+<br />
+
+1. **Red** — 為你想要的行為寫一條小測試。跑它。確認它因正確原因失敗。
+2. **Green** — 實作讓它通過的最簡單程式碼。
+3. **Refactor** — 在測試保持綠色的同時，改進命名、結構與重複。
+
+<br />
+
+不要先寫完一個 feature 的所有測試，再一次性實作。每個 loop 只交付一個行為。
+
+購物車裡的 quantity selector 是四個 cycle，不是一套 suite：
+
+<br />
+
+- 點擊 **Increase**，quantity 從 1 變成 2。
+- 點擊 **Decrease**，永遠不低於 1。
+- 改變 quantity 會重新計算顯示的 subtotal。
+- 控制項保持 keyboard-accessible。
+
+<br />
+
+**Failure：** 一條測試打開 cart、改 quantity、查 tax、套 coupon、再 checkout。它失敗時，你分不清哪段行為壞了。
+
+<br />
+
+---
+
+## 2. 為什麼 Frontend TDD 不一樣
+
+Frontend code 處在幾類關注點的交叉處：
+
+<br />
+
+- **Business rules：** pricing、eligibility、validation、permissions。
+- **User interaction：** clicks、keyboard、focus、loading、errors。
+- **Rendering：** conditional content、responsive layouts、state transitions。
+- **Accessibility：** semantic elements、labels、focus management，必要時才用 ARIA。
+- **Integration：** APIs、storage、analytics、routing、feature flags。
+
+<br />
+
+TDD 有效的前提是：測試關注使用者與周邊系統能 **observe** 的東西，而不是私有實作——React state、component methods，或精確的 DOM nesting。
+
+一條強測試會說：
+
+> 使用者提交無效憑證時，會看到可訪問的 error，並且不會發出 sign-in request。
+
+一條脆弱測試會說：
+
+> `isInvalid` state 為 `true`，元件有一個 class 為 `error-text` 的 `div`。
+
+前者在你從 `useState` 遷到 form library、reducer、server action 或 state machine 時仍然成立。後者把實作鎖死。
+
+<br />
+
+**Failure：** assert `component.state`、CSS class 列表，或特定的 `div` 樹。用 role 與 accessible name 查詢。
+
+<br />
+
+---
+
+## 3. Walkthrough：一個 Search Form
+
+一個產品搜尋表單，四條要求：
+
+<br />
+
+- 輸入為空時，search button 停用。
+- 輸入非空 query 後，button 啟用。
+- 提交前會 trim whitespace，再呼叫 search handler。
+- 使用者可以用 Enter 提交。
+
+<br />
+
+從第一條行為開始。此時元件可能還不存在。
+
+<br />
+
+```tsx
+import { render, screen } from "@testing-library/react"
+import { describe, expect, it, vi } from "vitest"
+
+import { SearchForm } from "./search-form"
+
+describe("SearchForm", () => {
+  it("disables submission when the query is empty", () => {
+    render(<SearchForm onSearch={vi.fn()} />)
+
+    expect(
+      screen.getByRole("button", { name: /search/i })
+    ).toBeDisabled()
+  })
+})
+```
+
+<br />
+
+只實作剛好滿足這條 assertion 的程式碼：
+
+<br />
+
+```tsx
+import { useState } from "react"
+
+type SearchFormProps = {
+  onSearch: (query: string) => void
+}
+
+export function SearchForm({ onSearch }: SearchFormProps) {
+  const [query, setQuery] = useState("")
+
+  return (
+    <form>
+      <label htmlFor="product-search">Search products</label>
+
+      <input
+        id="product-search"
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+      />
+
+      <button type="submit" disabled={!query.trim()}>
+        Search
+      </button>
+    </form>
+  )
+}
+```
+
+<br />
+
+下一個 cycle：有效 query 會啟用 button。
+
+<br />
+
+```tsx
+import userEvent from "@testing-library/user-event"
+
+it("enables submission after the user enters a query", async () => {
+  const user = userEvent.setup()
+
+  render(<SearchForm onSearch={vi.fn()} />)
+
+  await user.type(
+    screen.getByRole("textbox", { name: /search products/i }),
+    "wireless headphones"
+  )
+
+  expect(screen.getByRole("button", { name: /search/i })).toBeEnabled()
+})
+```
+
+<br />
+
+然後規定提交行為：
+
+<br />
+
+```tsx
+it("submits a trimmed query", async () => {
+  const user = userEvent.setup()
+  const onSearch = vi.fn()
+
+  render(<SearchForm onSearch={onSearch} />)
+
+  await user.type(
+    screen.getByRole("textbox", { name: /search products/i }),
+    "  wireless headphones  "
+  )
+
+  await user.click(screen.getByRole("button", { name: /search/i }))
+
+  expect(onSearch).toHaveBeenCalledWith("wireless headphones")
+})
+```
+
+<br />
+
+缺的實作現在很明顯：
+
+<br />
+
+```tsx
+export function SearchForm({ onSearch }: SearchFormProps) {
+  const [query, setQuery] = useState("")
+
+  function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+
+    const normalizedQuery = query.trim()
+
+    if (normalizedQuery) {
+      onSearch(normalizedQuery)
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <label htmlFor="product-search">Search products</label>
+
+      <input
+        id="product-search"
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+      />
+
+      <button type="submit" disabled={!query.trim()}>
+        Search
+      </button>
+    </form>
+  )
+}
+```
+
+<br />
+
+Enter 提交是第四個 cycle：輸入、按 Enter、assert `onSearch`。因為 handler 掛在 form 上，這條測試常常不需要額外程式碼就能過——仍然要確認它過了。
+
+這些測試從不提及 `useState`。換成 React Hook Form、state machine，或 server-oriented form flow，它們仍然成立。它們透過 **accessible controls** 規定行為。
+
+<br />
+
+**Failure：** 先寫完四條測試，再實作整個 form。一次只診斷一條紅掉的 assertion。
+
+<br />
+
+---
+
+## 4. 選擇測試層級
+
+讓測試層級匹配行為的風險與範圍。
+
+<br />
+
+| Test level | Best for | Example |
+| --- | --- | --- |
+| Unit | Pure logic 與 transformations | Price calculation、form validation、permission checks |
+| Component | 單個 component 或 feature 的使用者可見行為 | Modal opening、invalid form feedback、pagination |
+| Integration | 多個 components 與 service boundaries | 搭配 mocked payment 與 inventory APIs 的 checkout |
+| End-to-end | 關鍵的 real-browser workflows | Sign-up、login、checkout、account recovery |
+
+<br />
+
+把大多數行為放在快速的 unit 與 component tests 裡。用 end-to-end tests 覆蓋少量 critical journeys。
+
+一套常見的 TypeScript frontend 配置：
+
+<br />
+
+- **Vitest** 跑快速的 unit 與 component tests——TDD loop 發生在這裡。
+- **React Testing Library** 做以互動為中心的 component tests。
+- **Mock Service Worker (MSW)** 在 network boundary mock HTTP，而不是 mock hooks。
+- **Playwright 或 Cypress** 跑 browser-level journeys。本站已發佈的 playbook 用 Cypress；Playwright 填同一個位置。細節見 [Frontend Regression Tests](/notes/_frontend-regression-test)。
+
+<br />
+
+**Failure：** 同一件事在每一層都證明一次。如果 Vitest 已經表明 coupon 會被拒絕，Cypress 不必再證明一遍算術。
+
+<br />
+
+---
+
+## 5. 先測什麼
+
+TDD 在有實質行為、或 regression 代價很高的程式碼上回報最大。
+
+<br />
+
+### Pure domain logic
+
+把規則從 UI components 裡抽出來。Checkout 介面不該直接擁有 tax、discounts 或 entitlement checks。
+
+<br />
+
+```ts
+export function calculateDiscount(
+  subtotal: number,
+  discountPercent: number
+): number {
+  if (subtotal <= 0 || discountPercent <= 0) {
+    return 0
+  }
+
+  return Math.round(subtotal * (discountPercent / 100))
+}
+```
+
+<br />
+
+這些函式快、好讀，並且不依賴 UI framework。
+
+<br />
+
+### Form behavior 與 validation
+
+Forms 有清晰的 input-output contracts：
+
+<br />
+
+- Required fields、formatting 與 normalization。
+- Async validation 與 server-side error handling。
+- Submission、loading 與 disabled controls。
+- Accessible error announcements。
+
+<br />
+
+規定的是 API error **對使用者可見**，而不是內部 `error` 變數變了。
+
+<br />
+
+### State transitions
+
+複雜 UI 在你先命名 states 之後會更容易做：
+
+<br />
+
+- Idle → loading → success。
+- Idle → loading → failure → retrying。
+- Editing → saving → saved。
+- Editing → saving → conflict resolution。
+
+<br />
+
+適合 onboarding、payments、uploads、approvals，以及必須顯式處理 streaming、retry 與 partial failure 的 AI-assisted interfaces。
+
+<br />
+
+### Accessibility behavior
+
+Accessibility 是產品需求，不是上線後的 audit。
+
+<br />
+
+- Control 有 accessible name。
+- Dialog 打開時獲得 focus。
+- Keyboard user 能完成互動。
+- Error 對 assistive technology 可見。
+- Fields 與 labels 關聯。
+
+<br />
+
+優先用 `getByRole`、`getByLabelText` 與 `getByText`。只有在沒有有意義的 accessible query 時，才用 test id。
+
+<br />
+
+**Failure：** 對 CSS class names、pixel offsets，或每個節點上的 `data-testid` 做 TDD。那些測試描述的是 markup，不是行為。
+
+<br />
+
+---
+
+## 6. 常見錯誤
+
+### 測試實作細節
+
+不要檢查 React state、呼叫 component methods，或 assert 精確 markup。
+
+不要寫成：
+
+```tsx
+expect(component.state.isMenuOpen).toBe(true)
+```
+
+而要寫成：
+
+```tsx
+await user.click(screen.getByRole("button", { name: /open menu/i }))
+
+expect(
+  screen.getByRole("menu", { name: /account options/i })
+).toBeVisible()
+```
+
+<br />
+
+後者更接近使用者，並且能在實作變化後仍然成立。
+
+<br />
+
+### Over-mocking
+
+把每個 hook、child 與 utility 都 mock 掉，測到的是你的 mocks。優先把真實 components 放在一起測。只在有意義的邊界 mock：
+
+<br />
+
+- HTTP requests。
+- 測試執行時缺失的 Browser APIs。
+- Payments、email、authentication，或第三方 SDKs。
+- Time、randomness，以及其他外部 side effects。
+
+<br />
+
+MSW 在 network layer 攔截。Frontend 繼續使用真實的 data-fetching code；測試控制 response。
+
+<br />
+
+### 實作前寫出過大的測試
+
+一條帶十次互動、二十個 assertions 的測試很難診斷。問：**下一步能實作的最小 observable behavior 是什麼？**
+
+<br />
+
+### 把 snapshots 當成主測試
+
+Snapshots 能抓住意外的 rendering 變化。它們很少說明 feature 是否真正工作。大 snapshots 會變成噪音，並在未經仔細 review 的情況下被批准。
+
+用明確的 interaction assertions 測行為。如果要用 snapshots，保持小而有意。
+
+<br />
+
+### 忽略非同步狀態
+
+現代 UI 很少是同步的。有意識地測 loading、empty、success、failure、retry、cancellation 與 stale data。
+
+對 data-driven dashboard，通常包括：
+
+<br />
+
+- 初始 loading indicator。
+- 成功渲染資料。
+- Empty state。
+- API failure message 與 retry。
+- Mutation pending 時停用互動。
+- Response 在 navigation 或 input 已變化之後到達時的正確行為。
+
+<br />
+
+**Failure：** 只 assert happy path。Loading spinner 與 retry button，才是網路不友善時使用者會撞上的行為。
+
+<br />
+
+---
+
+## 7. TDD 與 Component Design
+
+TDD 常常會揭露職責過多。如果一條測試在驗證簡單行為之前，需要 routing、auth、global stores、feature flags、API mocks、locale providers 與 browser APIs，程式碼就已經過度耦合。
+
+更可維護的拆分：
+
+<br />
+
+```text
+features/
+  checkout/
+    domain/
+      calculateTotal.ts
+      validateCoupon.ts
+    api/
+      checkoutClient.ts
+    components/
+      CouponForm.tsx
+      CheckoutSummary.tsx
+    hooks/
+      useCheckout.ts
+```
+
+<br />
+
+不是每個 widget 都需要這套形狀。Business rules 應可獨立測試，UI 應暴露清晰行為，外部依賴應集中在邊界。
+
+在 multi-tenant SaaS 產品裡，把 tenant policy 當成 **pure logic** 來測，再測 UI 對 allowed、denied 或 restricted 的回應。這比把 authorization 散落在視覺元件裡安全得多。
+
+<br />
+
+**Failure：** 一份 200 行的 `CheckoutPage` 測試，setup 比 assertions 還長。抽出規則；用一個結果去測 widget。
+
+<br />
+
+---
+
+## 8. 團隊工作流，以及何時不必強推
+
+TDD 要嵌進日常工程才會成功，而不是變成儀式。
+
+<br />
+
+1. 澄清面向使用者的行為與 acceptance criteria。
+2. 為最高價值的行為寫一條會失敗的測試。
+3. 實作讓它通過的最小改動。
+4. Refactor production code 與 test setup。
+5. 重複，直到重要路徑都被覆蓋。
+6. 只為 critical customer journey 增加或更新 end-to-end test。
+7. 本地跑相關測試；讓 CI 跑更廣的 suite。
+
+<br />
+
+Code review 不該只問「有沒有測試？」
+
+<br />
+
+- 測試描述的是重要的使用者或業務行為嗎？
+- Feature 回歸時它會失敗嗎？
+- 它使用 accessible、面向使用者的 queries 嗎？
+- 它耦合到私有實作選擇了嗎？
+- 有考慮 failure、loading 與 edge states 嗎？
+- 它能在 CI 裡穩定跑嗎？
+
+<br />
+
+TDD 是工具，不是工程價值的度量。在探索視覺方向、快速 prototype，或需求高度不確定時，它用處較小。
+
+一套常見的有效順序：
+
+<br />
+
+1. 快速 prototype 介面。
+2. 從 product、design 或使用者回饋裡學習。
+3. 把行為穩定下來。
+4. 在 refactor、擴展或大範圍發佈之前補上測試。
+
+<br />
+
+對 pixel-level 視覺要求，用 visual regression testing 與 design review 補 TDD。對複雜 browser workflows，用一小套 E2E 補 component tests。對 performance-sensitive 的工作，把測試與 performance budgets、real-user monitoring 配對。
+
+<br />
+
+**Failure：** 因為還沒有失敗的測試，就攔住一次 spike。先探索；在行為成為承重結構之前再鎖住它。
+
+<br />
+
+---
+
+## Takeaway
+
+Frontend TDD 的價值不是測試數量，也不是 100% coverage。它是 **change 時的信心**。
+
+<br />
+
+- 從 observable behavior 往外設計：定義使用者必須完成的事，用一條失敗測試證明它，簡單地實作，再改進底下的程式碼。
+- 把 TDD loop 留在 Vitest 與 Testing Library。把 E2E 保持夠薄。抽出 domain rules，別讓它們活在 JSX 裡。
+- 當你能重組 components、替換 state management，或遷移 API client，而不靜默弄壞一條 workflow 時，測試就在做它該做的事。
+
+<br />
+
+**Failure：** 一套仍然會綠的 suite，即使此時使用者已經完成不了任務。
+
+---
+
+## Recap Q&A
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="tdd-cycle">
+    <AccordionTrigger>1. TDD cycle 是什麼，每個 loop 該有多小？</AccordionTrigger>
+    <AccordionContent>
+
+      - **Red：** 為一種行為寫一條小測試，並確認它因正確原因失敗。**Green：** 讓它通過的最簡單程式碼。**Refactor：** 在測試保持綠色時改進結構。
+      - 每個 loop 一個 observable behavior——不是先寫完 feature 的所有測試，再一次性實作。
+      - Quantity selector 是四個 cycle：increment、下限為 1、重算 subtotal、keyboard access。
+      - **Failure：** 一條測試驅動整個 checkout。它失敗時，你分不清哪段行為壞了。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="tdd-strong">
+    <AccordionTrigger>2. 怎樣的 frontend TDD 測試算強，怎樣算脆弱？</AccordionTrigger>
+    <AccordionContent>
+
+      - Assert 使用者或周邊系統能觀察到的東西：roles、labels、可見文字、邊界上的 network calls。
+      - 強測試：無效憑證會顯示可訪問的 error，並且不會發出 sign-in request。
+      - 脆弱測試：`isInvalid` 為 `true`，某個 `div` 有 class `error-text`。
+      - 用 `getByRole`、`getByLabelText`、`getByText` 查詢。只有在沒有 accessible query 時才用 test id。
+      - 這些測試能在把 `useState` 換成 form library、reducer 或 server action 後仍然成立。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="tdd-first">
+    <AccordionTrigger>3. Frontend codebase 裡該先對什麼做 TDD？</AccordionTrigger>
+    <AccordionContent>
+
+      - 從 UI 抽出的 pure domain logic：tax、discounts、validation、permissions。
+      - Form contracts：required fields、normalization、async errors、loading 與 disabled controls、accessible announcements。
+      - 命名過的 state transitions：idle → loading → success 或 failure → retry。
+      - Accessibility：accessible names、打開時的 focus、keyboard 完成互動、labeled fields。
+      - Pixel polish、視覺探索，以及不確定的 prototypes，先留在 loop 之外，等行為穩定再鎖。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="tdd-mistakes">
+    <AccordionTrigger>4. Frontend TDD 的常見錯誤有哪些？</AccordionTrigger>
+    <AccordionContent>
+
+      - 測試實作細節：component state、private methods、精確 markup。
+      - Over-mock hooks 與 children。用 MSW mock HTTP，再加上 browser APIs、第三方 SDKs、time 與 randomness。
+      - 實作前寫出巨型測試。問下一步最小的 observable behavior 是什麼。
+      - 把大 snapshots 當成 spec。它們會在說不清 feature 是否工作時被批准。
+      - 跳過 loading、empty、failure、retry、cancellation 與 stale-data states。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="tdd-when-not">
+    <AccordionTrigger>5. 何時不該強推 TDD，真正的收益是什麼？</AccordionTrigger>
+    <AccordionContent>
+
+      - 在探索視覺方向、spike 一種互動，或需求高度不確定時，不要強推。
+      - Prototype、學習、穩定，再在 refactor 或大範圍發佈前補測試。
+      - Review 問題：它描述的是重要行為嗎、回歸時會失敗嗎、有沒有耦合到私有選擇、CI 能穩定跑嗎？
+      - 收益是 **change 時的信心**，不是 coverage 百分比。一套仍然讓使用者完成不了任務的綠 suite，是失敗的 suite。
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>

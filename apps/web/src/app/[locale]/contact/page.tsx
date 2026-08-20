@@ -3,6 +3,7 @@ import type { Locale } from "next-intl"
 import { getTranslations, setRequestLocale } from "next-intl/server"
 import { ContactForm } from "@/features/contact/components/contact-form"
 import { isSstProduction } from "@/features/contact/lib/stage"
+import { BackLink } from "@/features/layout/components/back-link"
 import { Header } from "@/features/layout/components/header"
 import { PageLayout } from "@/features/layout/components/page"
 import { buildPageMetadata } from "@/lib/metadata"
@@ -34,8 +35,10 @@ const Page = async ({ params }: Props) => {
   return (
     <PageLayout className="grid lg:grid-cols-2 items-start">
       <Header.Root>
-        <Header.Info className="hidden lg:block" />
-        <Header.Column className="space-y-1">
+        <Header.Column>
+          <BackLink href="/" />
+        </Header.Column>
+        <Header.Column className="mt-10 lg:mt-0 space-y-1">
           <h1 className="font-semibold tracking-tight text-content-ink">
             {t("contact.title")}
           </h1>

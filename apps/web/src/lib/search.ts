@@ -6,7 +6,10 @@ import {
   type AdvancedIndex,
   createI18nSearchAPI,
 } from "fumadocs-core/search/server"
-import { publicResumeSlug } from "@/features/resume/variants"
+import {
+  publicResumeSlug,
+  publicResumeVariant,
+} from "@/features/resume/variants"
 import { fumadocsI18n } from "@/lib/fumadocs-i18n"
 import { createSearchTokenizer } from "@/lib/search-tokenizer"
 import {
@@ -14,6 +17,7 @@ import {
   FULL_STACK_QA_SLUG,
   isFullStackQaSection,
   isHiddenSourcePage,
+  stripPinPrefix,
 } from "@/lib/source-hidden"
 
 type LocalizedSearchIndex = AdvancedIndex & {
@@ -78,7 +82,7 @@ function getSearchTarget(slugs: string[], pageUrl: string, locale: string) {
   if (category === "blocks" && slug === publicResumeSlug) {
     return {
       category: "resume",
-      url: `/${locale}/resume`,
+      url: `/${locale}/resume/${publicResumeVariant}`,
     }
   }
 
@@ -98,7 +102,9 @@ async function buildSearchIndexes(): Promise<LocalizedSearchIndex[]> {
     if (!(fumadocsI18n.languages as string[]).includes(locale)) continue
 
     const slugParts = rest.map((part, index) =>
-      index === rest.length - 1 ? part.replace(/\.mdx$/, "") : part
+      stripPinPrefix(
+        index === rest.length - 1 ? part.replace(/\.mdx$/, "") : part
+      )
     )
     const slugs = [category, ...slugParts]
     const pageUrl = `/${slugs.join("/")}`

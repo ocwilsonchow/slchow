@@ -4,11 +4,7 @@ import { getTranslations, setRequestLocale } from "next-intl/server"
 import { BackLink } from "@/features/layout/components/back-link"
 import { Header } from "@/features/layout/components/header"
 import { PageLayout } from "@/features/layout/components/page"
-import { RenderMdxBlockByPath } from "@/features/mdx/components/render-mdx-block"
-import { Toc } from "@/features/mdx/components/toc"
-import { publicResumeSlug } from "@/features/resume/variants"
 import { buildPageMetadata } from "@/lib/metadata"
-import { getMdxContent, loadMdxCompiled } from "@/lib/source"
 
 type Props = {
   params: Promise<{ locale: Locale }>
@@ -19,14 +15,12 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const t = await getTranslations({ locale, namespace: "metadata" })
 
   return buildPageMetadata({
-    title: t("resume.title"),
-    description: t("resume.description"),
+    title: t("components.title"),
+    description: t("components.description"),
     locale,
-    pathname: "/resume",
+    pathname: "/components",
   })
 }
-
-const resumeSlug = publicResumeSlug
 
 const Page = async ({ params }: Props) => {
   const { locale } = await params
@@ -34,30 +28,22 @@ const Page = async ({ params }: Props) => {
   setRequestLocale(locale)
 
   const t = await getTranslations({ locale, namespace: "metadata" })
-  const page = getMdxContent("blocks", resumeSlug, locale)
-  const toc = page ? ((await loadMdxCompiled(page)).toc ?? []) : []
+  const tComponents = await getTranslations({ locale, namespace: "components" })
 
   return (
-    <PageLayout className="grid lg:grid-cols-2 items-start content-start">
+    <PageLayout className="grid lg:grid-cols-2 items-start">
       <Header.Root>
         <Header.Column>
           <BackLink href="/" />
         </Header.Column>
-        <Header.Column className="mt-10 lg:mt-0 grid gap-5 space-y-1">
+        <Header.Column className="mt-10 lg:mt-0 space-y-1">
           <h1 className="font-semibold tracking-tight text-content-ink">
-            {t("resume.title")}
+            {t("components.title")}
           </h1>
-          <Toc toc={toc} className="hidden lg:block" />
+          <p className="text-content-subdued">{tComponents("intro")}</p>
         </Header.Column>
       </Header.Root>
-      <article className="grid">
-        <RenderMdxBlockByPath
-          className="col-span-2 p-5 pb-24"
-          category="blocks"
-          slug={resumeSlug}
-          locale={locale}
-        />
-      </article>
+      <div className="p-5">{tComponents("comingSoon")}</div>
     </PageLayout>
   )
 }

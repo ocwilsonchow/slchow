@@ -10,6 +10,7 @@
     "back": "Back",
     "works": "Side Quests",
     "designs": "Designs",
+    "components": "Components",
     "comingSoon": "coming soon",
     "notes": "Notes",
     "listAll": "List all",
@@ -20,6 +21,7 @@
     "themeSystem": "System",
     "themeLight": "Light",
     "themeDark": "Dark",
+    "themeMeta": "Meta",
     "location": "HK",
     "play": "Play",
     "pause": "Pause",
@@ -98,6 +100,10 @@
     "contact": {
       "title": "Contact",
       "description": "Get in touch with Wilson Chow."
+    },
+    "components": {
+      "title": "Components",
+      "description": "UI components and patterns by Wilson Chow."
     }
   },
   "contact": {
@@ -154,6 +160,7 @@
     "readNext": "Read the next note",
     "categories": {
       "frontend": "Frontend",
+      "typescript": "TypeScript",
       "backend": "Backend",
       "system-design": "System Design",
       "ai": "AI",
@@ -168,6 +175,19 @@
     "intro": "I like crafting user interfaces. I used to spend a lot of time on Figma back in the days.",
     "fullCollection": "Full collection ({count})",
     "preview": "Preview"
+  },
+  "components": {
+    "intro": "My collection of UI components and patterns.",
+    "comingSoon": "Coming soon!"
+  },
+  "resume": {
+    "downloadPdf": "Download Resume as PDF ({variant})",
+    "view": "View Resume ({variant})",
+    "variants": {
+      "frontend": "Frontend",
+      "full-stack": "Full Stack",
+      "ai": "AI"
+    }
   },
   "code": {
     "copy": "Copy code",

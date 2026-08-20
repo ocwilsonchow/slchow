@@ -18,7 +18,7 @@ Primary engineer for concurrent client products, owning delivery from UX scoping
 - Migrated WordPress sites to Strapi / Sanity and Meilisearch / Algolia in a **Turborepo** on **SST** without interrupting publishing; cut load times by **80%**, search latency by **90%**, and achieved PageSpeed scores above **95**.
 - Built typed Node.js APIs with Hono, OpenAPI, and tRPC on Lambda / API Gateway and **ECS Fargate**; modeled org-scoped Postgres with Drizzle / Prisma, Better Auth, OAuth 2.0 / OIDC, and RBAC.
 - Owned shared **Radix** / **Tailwind** / **shadcn/ui** component and hook APIs; **Storybook**, Fumadocs, and MDX guidance eliminated duplicate UI across client apps.
-- Set **Vitest**, React Testing Library, and **Playwright** / **Cypress** quality gates for shared UI and critical flows.
+- Set **Vitest**, **Playwright** / **Cypress** quality gates for shared UI and critical flows.
 - Instrumented web, mobile, and API releases with **Sentry** for production crashes, device issues, and API errors.
 - Adopted **tRPC** and Scalar-generated API docs, cutting integration time by **50%** and eliminating schema-mismatch errors.
 - Built GitHub Actions + **SST** CI/CD with linting, type-checking, tests, and builds; cut deployment time by **50%+**.
@@ -36,9 +36,9 @@ Durable agent that empowers internal tools and workflows.
 
 - Built agent runs durable streams so clients could disconnect, reconnect, and resume without losing progress.
 - Built **Mastra workflows**, memory, schedules, tools, pause/resume, retries, sandboxing, and skills.
-- **RAG** (ingestion, chunking, **Pinecone** query/reranking); **SQL agent** to query database in natural language.
-- Ran Hono + Better Auth on **ECS Fargate**, with Postgres, S3, and Mastra Platform for observability.
+- **RAG** (ingestion, parsing, embedding, **Pinecone** query/reranking); also built an **SQL agent** for experimental data analysis.
 - Built a custom **@mentions-style** input component for attaching workspace files to messages.
+- Ran Hono + Better Auth on **ECS Fargate**, with Postgres, S3, and **Langfuse** for observability.
 
 ---
 
@@ -46,35 +46,47 @@ Durable agent that empowers internal tools and workflows.
 
 Healthcare and shopping assistant grounded in uploaded documents and Shopify store product data.
 
-- Questionnaires/health report -> structured insights -> personalized product recommendations -> add to product cart.
-- Owned document upload, questionnaires, product/cart actions, and admin flows.
-- Built backend with **Hono**, **LangChain**, **Qdrant**, **Better Auth**; Frontend with **Next.js**, **AI SDK**.
-- Built rich chatbot tool invocation UIs such as in-thread file upload, product cards, cart actions, multi-step questionnaires, and data charts.
-- Enforced application security with **HttpOnly cookies**, **CORS**, and **RBAC**.
+- Designed the chat and admin UX in **Figma** and owned the client-facing flows — document upload, in-chat questionnaire, product and cart actions.
+- Built the backend with **Hono**, **LangChain**, and **Qdrant**; hardened Next.js admin and client apps with **Better Auth**, HttpOnly cookies, CORS, and RBAC.
+- Streamed **LangGraph** agent replies into the chat with the **AI SDK** over tRPC, rendering tool calls as product cards, cart actions, and questionnaires instead of plain text.
+- Built an admin form builder with conditional logic for dynamic questionnaires and ran those questionnaires in-thread; modeled with **XState** and **React Hook Form** / **Zod**.
+- Optimized expensive components with **memoization** and **useTransition** for heavy UI updates.
+- Used **TanStack Query** with server prefetch and client-side rehydration for data lists, and **TanStack Table** with pagination, filters, and sorting; stored table state in URL search parameters so lists stay shareable and bookmarkable.
 - Deployed on AWS with IaC for scalable, production-ready infrastructure.
 
 ---
 
-### High-Performance Editorial Platform, Nov 2025
+### High-Performance Editorial Platform, 2025
 
 Strapi, Meilisearch, and **Next.js** editorial platform in the WordPress-to-headless migration.
 
-- Reserved image space and optimized caching/images: **LCP &lt; 0.5s**, **CLS &lt; 0.1**, PageSpeed **>90** (lab).
-- Used hybrid ISR: main pages/latest 100 articles at build, rest on demand; Strapi **GraphQL**, **Next.js** cache tags, and webhooks revalidated publishes without full rebuilds.
-- Made keyboard navigation, accessible form errors, semantics, and Lighthouse/axe checks release requirements.
-- Split interactive state from page data: **XState** + **TanStack Form** / **Zod**, route-owned locale, and hybrid-ISR content.
+- Latest 100 articles statically rendered at build time, leaving the rest incrementally rendered on demand. Strapi **GraphQL** queries tagged properly with **Next.js** cache tags; revalidated through webhook triggered by content update events.
+- Shipped instant search feature using Meilisearch with full-text search and fuzzy matching; result hits in **&lt; 50ms**.
+- PageSpeed Insights average scores **>90**; Reserved image space to prevent layout shifts and used **caching** and **image optimization** (enforced webp / avif formats and compression to **&lt; 100 KB**) to reduce LCP: **FCP &lt; 0.3s**, **LCP &lt; 0.5s**, **CLS &lt; 0.001**.
+- Treated keyboard-accessible navigation, accessible form-error handling, semantic structure, and Lighthouse / axe checks as release requirements rather than post-launch fixes.
 - Built a Strapi plugin for AI content generation with AI SDK.
 
 ---
 
-### Restaurant Membership Platform, shipped Apr 2024
+### React Native Skia App, 2024
 
-React Native membership app, paired with a **Express** backend and **Next.js** admin portal.
+- Owned the photobooth app from design and development through release on the Apple App Store and Google Play.
+- Users take a selfie, load it onto the canvas, edit with stickers and pen tools, then upload and share.
+- Built the canvas with React Native Skia, React Native Reanimated, and gesture handlers; captured images with react-native-vision-camera.
+- Converted SVG stickers into Skia SVG React components, enabling resize, rotate, pan, and scale on the canvas.
+- Managed state with **Zustand**; kept selections atomic and debounced high-frequency updates.
+- Optimized with memoization and context isolation; held **55+ FPS** in RN Perf Monitor with over 100 stickers and strokes on the canvas.
 
-- Owned application delivery from Figma, **React Native** development, through Apple App Store / Google Play release; maintained backend API and admin portal.
-- Maintained **99%** crash-free sessions by diagnosing crashes, device issues, and API bottlenecks with **Sentry**.
-- Fixed JS-thread feed stalls with **FlashList**, memoized rows, smaller cached images, and native-thread **Reanimated** / **Moti**; froze/deferred inactive tabs, ensured consistent **60 FPS** performance.
-- Routed Firebase Cloud Messaging promo/milestone deep links to the matching screen.
+---
+
+### React Native Student App, 2023
+
+- Owned student flows (course catalog, booking, announcements) from Figma through release on the Apple App Store and Google Play.
+- Maintained **99%** crash-free sessions after launch by diagnosing crashes, device compatibility issues, and API bottlenecks with **Sentry**.
+- Data fetched with **Tanstack Query**, cut duplicate fetches with cache and staleTime; client state managed with **Redux Toolkit**.
+- Reduced feed scroll jank after profiling identified JS-thread stalls from long lists and full-resolution images; migrated lists to **FlashList** with row memoization, cached and downscaled feed images, and ran **Reanimated** transitions and gesture handlers on the native thread.
+- Froze inactive tabs and blurred screens, and deferred mounts, to prevent unnecessary re-renders.
+- Routed promo and milestone notifications to the matching screen via Firebase Cloud Messaging deep links.
 
 <br />
 
@@ -82,7 +94,7 @@ React Native membership app, paired with a **Express** backend and **Next.js** a
 
 ## Other Work
 
-Also shipped React Native student and restaurant loyalty apps, a Flutter elderly-care app, Shopify storefronts, CMS sites, a Skia photobooth, and multiple RBAC admin systems.
+Also shipped restaurant loyalty/membership apps (React Native), a homebound elderly care app (Flutter), campaign / e-commerce storefronts (Next.js, Shopify **GraphQL**), CMS content sites, and multiple RBAC admin systems.
 
 <br />
 
@@ -90,17 +102,15 @@ Also shipped React Native student and restaurant loyalty apps, a Flutter elderly
 
 ## Skills
 
-- **Languages**: TypeScript, Node.js, SQL, Python
-- **Design**: Figma
-- **Frontend**: React, Next.js, React Native, Expo, HTML/CSS, Tailwind CSS, shadcn/ui, TipTap
+- **Frontend**: TypeScript, React, Next.js, React Native, Tailwind CSS, shadcn/ui, Figma, Zustand, Redux, TipTap
 - **UI behavior**: TanStack Query, TanStack Form, React Hook Form, XState, TanStack Table, next-intl
-- **Architecture**: state modeling (URL/server/local), component APIs, routing, SSR/ISR, GraphQL, tRPC, OpenAPI clients, Storybook, Fumadocs
-- **Backend**: Hono, Drizzle, Prisma, Postgres, DynamoDB, Better Auth
-- **Auth & security**: OAuth 2.0/OIDC, JWT, HttpOnly cookies, CORS, RBAC
+- **Architecture**: state modeling (URL / server / local), design systems, tokens, React composition, component APIs, routing, SSR/ISR, GraphQL, tRPC, OpenAPI, Storybook, Fumadocs
+- **Backend**: Node.js, Hono, Drizzle, Prisma, OpenAPI, tRPC, Postgres, DynamoDB, Better Auth
+- **Auth & security**: OAuth 2.0 / OIDC, JWT, HttpOnly cookies, CORS, RBAC
 - **AI**: Mastra, Vercel AI SDK, LangChain, Pinecone, Strands, AWS Bedrock
-- **QA**: Vitest, Playwright, Cypress, Lighthouse, axe, Sentry
-- **Mobile**: FlashList, Reanimated, Moti, Skia, Unistyles
-- **AWS & DevOps**: SST, Terraform, Docker, GitHub Actions, AWS, Turborepo
+- **AWS & DevOps**: SST, Terraform, Docker, GitHub Actions, AWS, Vercel, Cloudflare, Turborepo
+- **Quality**: Vitest, Playwright, Cypress, React Testing Library, Lighthouse, axe, Sentry
+- **Mobile**: Expo, FlashList, Reanimated, Moti, Skia, Unistyles, FCM
 
 <br />
 
@@ -119,11 +129,11 @@ Also shipped React Native student and restaurant loyalty apps, a Flutter elderly
 
 ### University College London
 
-- Master of Pharmacy (MPharm), 2016 – 2020 — First Class Honours
+- Master of Pharmacy (MPharm, undergraduate), 2016 – 2020 — First Class Honours
 - Transitioned from pharmacy to software development after finding passion in building applications.
 
 <br />
 
 ---
 
-You can also download my resume [here](/resume.pdf).
+You can also download my resume [here](/resume-full-stack.pdf).

@@ -22,6 +22,11 @@ const themeOptions = [
     labelKey: "themeDark",
     color: ["#3f3d39"],
   },
+  {
+    id: "meta",
+    labelKey: "themeMeta",
+    color: ["#23272F"],
+  },
 ] as const
 
 function Root({ className, ...props }: ComponentProps<"div">) {
@@ -44,7 +49,7 @@ function List({ className, ...props }: ComponentProps<"fieldset">) {
   return (
     <fieldset
       className={cn(
-        "m-0 flex min-w-0 items-center gap-2 border-0 p-0",
+        "m-0 grid grid-cols-4 min-w-0 gap-2 border-0 p-0",
         className
       )}
       {...props}
@@ -62,7 +67,7 @@ function Option({
       type="button"
       aria-pressed={selected}
       className={cn(
-        "flex items-center gap-2",
+        "flex flex-col items-start gap-1",
         selected
           ? "text-content-ink-on-popover"
           : "text-content-body-on-popover",
@@ -83,14 +88,20 @@ function Separator({ className, ...props }: ComponentProps<"div">) {
 
 function Swatch({
   colors,
+  selected = false,
   className,
   ...props
-}: ComponentProps<"span"> & { colors: readonly string[] }) {
+}: ComponentProps<"span"> & {
+  colors: readonly string[]
+  selected?: boolean
+}) {
   return (
     <span
       aria-hidden
       className={cn(
-        "aspect-square w-4 flex overflow-hidden rounded-full border-2",
+        "h-8 w-full flex overflow-hidden rounded border-2 border-content-ink",
+        selected &&
+          "ring-2 ring-content-accent ring-offset-2 ring-offset-surface-popover",
         className
       )}
       {...props}
@@ -131,10 +142,13 @@ export function ThemeSettings({ className, ...props }: ThemeSettingsProps) {
               selected={theme === option.id}
               onClick={() => setTheme(option.id)}
             >
-              <Settings.Swatch colors={option.color} />
+              <Settings.Swatch
+                colors={option.color}
+                selected={theme === option.id}
+              />
               <span>{t(option.labelKey)}</span>
             </Settings.Option>
-            {index < themeOptions.length - 1 ? <Settings.Separator /> : null}
+            {/* {index < themeOptions.length - 1 ? <Settings.Separator /> : null} */}
           </Fragment>
         ))}
       </Settings.List>
@@ -189,7 +203,7 @@ export function LanguageSettings({
             >
               {option.title}
             </Settings.Option>
-            {index < localeOptions.length - 1 ? <Settings.Separator /> : null}
+            {/* {index < localeOptions.length - 1 ? <Settings.Separator /> : null} */}
           </Fragment>
         ))}
       </Settings.List>

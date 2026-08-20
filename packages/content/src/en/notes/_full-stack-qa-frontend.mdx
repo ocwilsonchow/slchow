@@ -206,7 +206,7 @@ category: full-stack
 
       - Test by **blast radius**, at the cheapest layer that still proves the behavior. **Unit, Vitest:** pure functions — query-key builders, dose parsers, reducers, URL helpers. Fast, no DOM. **Component, Testing Library:** user-observable contracts. Query by role and name, `userEvent`, assert the next thing the user can see. Mock the network at the boundary (MSW). **E2E, Playwright:** journeys that need a real browser, cookies, and a running app. One path per critical risk.
       - Deliberately do **not** test: implementation details (function names, CSS class lists, Redux action types), third-party library internals, every presentational tweak, or the same fact at all three layers. Do not snapshot a whole page to "lock the design." Do not unit-test that React's `useState` works.
-      - The published playbook on this site uses Cypress for the e2e slot; Playwright fills the same job here. If a real browser is required to trust the result, go e2e. Otherwise stay in Vitest. Details: [Frontend Regression Tests](/notes/frontend-regression-test).
+      - The published playbook on this site uses Cypress for the e2e slot; Playwright fills the same job here. If a real browser is required to trust the result, go e2e. Otherwise stay in Vitest. Details: [Frontend Regression Tests](/notes/_frontend-regression-test).
 
     </AccordionContent>
   </AccordionItem>

@@ -1,20 +1,19 @@
 import type { Metadata } from "next"
 import { notFound } from "next/navigation"
 import type { Locale } from "next-intl"
-import { setRequestLocale } from "next-intl/server"
-import { BackLink } from "@/features/layout/components/back-link"
-import { Header } from "@/features/layout/components/header"
-import { PageLayout } from "@/features/layout/components/page"
+import { getTranslations, setRequestLocale } from "next-intl/server"
 import { RenderMdxBlockByPath } from "@/features/mdx/components/render-mdx-block"
-import { Toc } from "@/features/mdx/components/toc"
 import {
   isResumeVariant,
+  publicResumeVariant,
   resumeVariantParams,
   resumeVariants,
 } from "@/features/resume/variants"
 import { routing } from "@/i18n/routing"
 import { buildPageMetadata } from "@/lib/metadata"
-import { getMdxContent, getPageLocales, loadMdxCompiled } from "@/lib/source"
+import { getMdxContent, getPageLocales } from "@/lib/source"
+import { Link } from "@/i18n/navigation"
+import { ChevronRightIcon, DownloadIcon } from "lucide-react"
 
 type Props = {
   params: Promise<{ locale: Locale; variant: string }>
@@ -34,9 +33,14 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       pathname: `/resume/${variant}`,
       locales: getPageLocales("blocks", slug),
     }),
-    robots: { index: false, follow: false },
+    ...(variant === publicResumeVariant
+      ? {}
+      : { robots: { index: false, follow: false } }),
   }
 }
+
+const linkClassnames =
+  "bg-surface-alpha/75 font-semibold hover:bg-surface-alpha px-4 py-3 pr-3 rounded-full flex items-center gap-2 border"
 
 const Page = async ({ params }: Props) => {
   const { locale, variant } = await params
@@ -46,33 +50,43 @@ const Page = async ({ params }: Props) => {
   if (!isResumeVariant(variant)) notFound()
 
   const slug = resumeVariants[variant]
-  const page = getMdxContent("blocks", slug, locale)
-  if (!page) notFound()
+  if (!getMdxContent("blocks", slug, locale)) notFound()
 
-  const toc = (await loadMdxCompiled(page)).toc ?? []
+  const t = await getTranslations({ locale, namespace: "resume" })
+  const currentPdfHref =
+    variant === "frontend" ? "/resume-frontend.pdf" : "/resume-full-stack.pdf"
+  const otherVariant =
+    variant === "frontend"
+      ? { href: "/resume/full-stack" as const, key: "full-stack" as const }
+      : { href: "/resume/frontend" as const, key: "frontend" as const }
 
   return (
-    <PageLayout className="grid lg:grid-cols-2 items-start content-start">
-      <Header.Root>
-        <Header.Column>
-          <BackLink href="/" />
-        </Header.Column>
-        <Header.Column className="mt-10 lg:mt-0 grid gap-5 space-y-1">
-          <h1 className="font-semibold tracking-tight text-content-ink">
-            {page.data.title}
-          </h1>
-          <Toc toc={toc} className="hidden lg:block" />
-        </Header.Column>
-      </Header.Root>
-      <article className="grid">
-        <RenderMdxBlockByPath
-          className="col-span-2 p-5 pb-24"
-          category="blocks"
-          slug={slug}
-          locale={locale}
-        />
-      </article>
-    </PageLayout>
+    <div>
+      <RenderMdxBlockByPath
+        className="col-span-2 p-5 pb-10"
+        category="blocks"
+        slug={slug}
+        locale={locale}
+      />
+      <div className="p-4 max-w-prose pb-40 grid gap-2">
+        <a href={currentPdfHref} target="_blank">
+          <div className={linkClassnames}>
+            {t("downloadPdf", { variant: t(`variants.${variant}`) })}
+            <div className="border ml-auto bg-surface-alpha rounded-full p-0.75 size-5.5 grid place-items-center">
+              <DownloadIcon size={12} strokeWidth={3} />
+            </div>
+          </div>
+        </a>
+        <Link href={otherVariant.href}>
+          <div className={linkClassnames}>
+            {t("view", { variant: t(`variants.${otherVariant.key}`) })}
+            <div className="border ml-auto bg-surface-alpha rounded-full p-0.75 size-5.5 grid place-items-center">
+              <ChevronRightIcon size={13} strokeWidth={3} />
+            </div>
+          </div>
+        </Link>
+      </div>
+    </div>
   )
 }
 

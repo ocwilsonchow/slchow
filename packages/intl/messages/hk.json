@@ -10,6 +10,7 @@
     "back": "返回",
     "works": "支線任務",
     "designs": "設計",
+    "components": "組件",
     "comingSoon": "即將推出",
     "notes": "筆記",
     "listAll": "顯示全部",
@@ -20,6 +21,7 @@
     "themeSystem": "系統",
     "themeLight": "淺色",
     "themeDark": "深色",
+    "themeMeta": "Meta",
     "location": "香港",
     "play": "播放",
     "pause": "暫停",
@@ -98,6 +100,10 @@
     "contact": {
       "title": "聯絡",
       "description": "歡迎聯絡 Wilson Chow。"
+    },
+    "components": {
+      "title": "組件",
+      "description": "Wilson Chow 的 UI 組件與模式。"
     }
   },
   "contact": {
@@ -154,6 +160,7 @@
     "readNext": "閱讀下一篇筆記",
     "categories": {
       "frontend": "前端",
+      "typescript": "TypeScript",
       "backend": "後端",
       "system-design": "系統設計",
       "ai": "AI",
@@ -168,6 +175,19 @@
     "intro": "我喜歡打造用戶介面。以前我花很多時間在 Figma 上。",
     "fullCollection": "全部作品 ({count})",
     "preview": "預覽"
+  },
+  "components": {
+    "intro": "我收藏的 UI 組件與模式。",
+    "comingSoon": "即將推出！"
+  },
+  "resume": {
+    "downloadPdf": "下載履歷 PDF（{variant}）",
+    "view": "查看履歷（{variant}）",
+    "variants": {
+      "frontend": "前端",
+      "full-stack": "全棧",
+      "ai": "AI"
+    }
   },
   "code": {
     "copy": "複製程式碼",

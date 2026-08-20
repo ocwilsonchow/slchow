@@ -311,7 +311,7 @@ Frontend regression testing 最好當成一套 **triage system**。
 
 - 在成本最低、仍然可靠的那一層保護高價值行為，從真實 failures 增長 coverage，並把 Cypress 保持夠薄，讓紅掉的 build 仍然有意義。
 - 當某件事壞過一次，確保 suite 第二次會抓住它——最好用幾個月後讀起來仍然像 **product promise** 的測試名稱。
-- 修 bug 時 **先寫會失敗的測試**，並確認它因正確原因失敗，再套上 fix。
+- 修 bug 時 **先寫會失敗的測試**，並確認它因正確原因失敗，再套上 fix。這個習慣背後的設計方式——對可觀察的 UI 行為做 Red, Green, Refactor——見 [Frontend Engineering 中的 Test-Driven Development](/notes/test-driven-development-in-frontend)。
 - 本地跑 focused tests，PRs 上跑 unit/component suite，merge 前跑 critical E2E journeys。
 - **Failure：** 把 flake 常態化。如果測試隨機失敗，先 quarantine，再修或刪。第三次才過的測試，仍然是 flaky test。略過 pixel-perfect visual diffs、窮盡的 E2E edge cases，以及對 framework internals 的 assertions。Manual exploratory testing 仍然重要。
 
