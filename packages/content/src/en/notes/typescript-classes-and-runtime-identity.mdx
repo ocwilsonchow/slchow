@@ -87,6 +87,7 @@ lookalike instanceof Bird // false
 - `instanceof` walks the instance chain and returns true when it finds the right `.prototype`. It is a **runtime** test, not a TypeScript one. The walk reaches `Object.prototype`, so `bird instanceof Object` is true.
 - `super()` runs the parent constructor before the child touches `this`. Forgetting it is a syntax error in a derived class.
 - Type-level `extends` — a constraint, a ternary, `infer` — is [TypeScript Infer, Extends, and Ternaries](/notes/typescript-infer-extends-and-ternaries). This section is the prototype chain.
+- `noImplicitOverride` forces the `override` keyword when a child method replaces a parent method. That flag is [TypeScript Beyond Strict](/notes/typescript-beyond-strict).
 - **Failure:** targeting older emit so the prototype chain is gone after compilation. Target ES2015 or later. A lookalike plain object with the same fields fails `instanceof`.
 
 ---
@@ -167,6 +168,7 @@ secret.reveal() // "hidden"
 
 - `implements` is a compile-time check that the instance shape matches. It does not change the runtime object.
 - TypeScript `private` and `protected` are the same kind of check: the compiler refuses `obj.secret`, then erases the keyword. `#` fields are JavaScript and stay private after emit.
+- Constructor parameter properties (`constructor(private name: string)`) and `enum` **emit values**. `erasableSyntaxOnly` forbids them so types strip clean. That flag is [TypeScript Beyond Strict](/notes/typescript-beyond-strict).
 - If a check must work in a `catch` block, after `JSON.parse`, or across a bundle boundary, it has to be a **value**: `instanceof`, a discriminant field (`type: "error"`), or a branded function.
 - **Failure:** `instanceof` against an interface that never existed at runtime.
 

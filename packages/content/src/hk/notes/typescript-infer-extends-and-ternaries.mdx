@@ -38,9 +38,9 @@ type NameOf<T extends { name: string }> = T["name"]
 <br />
 
 - Class `extends` 接上 prototype chains。那是一個 **value**。另外三種會被 erased。
-- Interface `extends` 把 fields 複製進新的 shape。可以有多個 parents：`interface B extends A, C`。
-- `type` alias 不能 `extend`。Intersection（`&`）是同一種 composition：`Named & { age: number }`。
+- Interface `extends` 把 fields 複製進新的 shape。可以有多個 parents：`interface B extends A, C`。`type` alias 不能 `extend`。Intersection（`&`）是同一種 composition：`Named & { age: number }`。
 - Generic constraint `T extends U` 是一道 **gate**。`T` 必須 assignable to `U`，否則 type argument 被拒。`NameOf<number>` 是 error。`NameOf<{ name: "Ada"; extra: true }>` 是 `"Ada"`。
+- Conditional `T extends U ? X : Y` 是一次 **branch**。任何 `T` 都接受；結果取決於 assignability。下一節就是這種形式。
 
 `T extends U` 的意思是 **assignable to `U`**，不是「T 和 U」，也不是「T 比較大」。Object types 多出來的 fields 仍然 assign：`{ name: string; age: number }` assignable to `{ name: string }`。Values 這邊，`"hi" extends string` —— value set **更小**，不是更大。String literal 是 `string` 的 subtype。
 
@@ -132,7 +132,7 @@ type C = Flatten<string> // never
 
 <br />
 
-False branch 回傳 `T` 是另一種常見形狀 —— 對不上就保留 input。`Awaited` 就是這樣。Standard library 裡的 `ReturnType` 與 `Awaited` 就是這個 pattern：
+False branch 回傳 `T` 是另一種常見形狀 —— 對不上就保留 input。那是下面的 `Unwrap`。`ReturnType` 是對 return slot 做 `infer`：
 
 <br />
 
@@ -208,9 +208,9 @@ Modifiers 加上或拿掉 `readonly` 與 optionality。`-` 是剝；bare keyword
 
 ```ts
 type Mutable<T> = { -readonly [P in keyof T]: T[P] }
-type Optional<T> = { [P in keyof T]?: T[P] }
-type RequiredKeys<T> = { [P in keyof T]-?: T[P] }
-type Frozen<T> = { readonly [P in keyof T]: T[P] }
+type Partial<T> = { [P in keyof T]?: T[P] }
+type Required<T> = { [P in keyof T]-?: T[P] }
+type Readonly<T> = { readonly [P in keyof T]: T[P] }
 ```
 
 <br />

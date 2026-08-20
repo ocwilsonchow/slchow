@@ -1,0 +1,237 @@
+---
+title: TypeScript Beyond Strict
+description: strict is eight flags. The bugs that still type-check live in the rest of tsconfig
+date: 2026-08-20
+category: typescript
+---
+
+`strict: true` is table stakes. It is **eight flags**, not the whole fence. `arr[i]` is still `T`. A missing `break` still falls through. An `enum` still emits a value.
+
+This note follows [Kyle's walkthrough](https://www.youtube.com/watch?v=35cESnxXH6o). The object model is [TypeScript Classes and Runtime Identity](/notes/typescript-classes-and-runtime-identity). The type-level half is [TypeScript Infer, Extends, and Ternaries](/notes/typescript-infer-extends-and-ternaries). This note is the compiler.
+
+<br />
+
+---
+
+## 1. Eight flags
+
+`strict` turns on a family. It does not turn on everything added after that family shipped.
+
+<br />
+
+- `strictNullChecks`, `noImplicitAny`, `strictFunctionTypes`, `strictBindCallApply`
+- `strictPropertyInitialization`, `noImplicitThis`, `useUnknownInCatchVariables`, `alwaysStrict`
+
+That set is assumed. New TypeScript made `strict` the default. This note is what still sits **outside** it.
+
+Shared packages in this repo (`ds`, `db`, `auth`, `intl`, `content`, `infra`) already add `noFallthroughCasesInSwitch`, `noUncheckedIndexedAccess`, `noImplicitOverride`, and `verbatimModuleSyntax`. `apps/web` and `apps/api` are mostly `strict` plus `paths`. Kyle skipped `verbatimModuleSyntax`. This stack already chose it: type-only imports are `import type`.
+
+<br />
+
+**Failure:** reading `strict: true` as "every useful check." The crash that still compiles is usually indexed access.
+
+---
+
+## 2. Hygiene
+
+These flags catch typos and dead code. They do not change the type of `arr[i]`.
+
+<br />
+
+```jsonc
+{
+  "compilerOptions": {
+    "paths": { "@/*": ["./src/*"] },
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "allowUnusedLabels": false,
+    "noUncheckedSideEffectImports": true,
+    "noFallthroughCasesInSwitch": true,
+    "allowUnreachableCode": false
+  }
+}
+```
+
+<br />
+
+- `paths` is DX, not a check. This repo already uses `@/*` in web and api. Relative `../../../` is what it replaces.
+- `noUnusedLocals` / `noUnusedParameters` underline a binding that is never read. This repo leaves them **off** in packages and does not set them on the apps. Unused code is a lint job here, not a `tsc` job.
+- `allowUnusedLabels: false` and `allowUnreachableCode: false` promote the default **suggestion** to an error. A `name:` sitting outside an object is a JavaScript label, not a missing property. A `return` then a `log` is dead.
+- `noUncheckedSideEffectImports` errors on `import "./analytic"` when the file is `analytics.ts`. A side-effect import with a typo otherwise fails silently.
+- `noFallthroughCasesInSwitch` is already on in packages. Adjacent `case` labels that share a body are still allowed. A body that runs into the next `case` is not.
+
+<br />
+
+**Failure:** flipping `noUnusedLocals` on in app code to "be strict." The unused `_` in a handler, the unused catch binding, the unused prop in a stub — lint with an ignore is cheaper than a compiler error on every WIP.
+
+---
+
+## 3. Runtime
+
+These three change what a type **means**, or what emit is allowed. `strict` does not include them.
+
+<br />
+
+```ts
+const numbers = [1, 2, 3]
+numbers[10].toString()
+// error with noUncheckedIndexedAccess — type is number | undefined
+numbers[10]?.toString()
+
+type Settings = {
+  darkMode: boolean
+  [key: string]: string | number | boolean
+}
+
+const settings: Settings = { darkMode: true, username: "wds" }
+settings.darkMode // ok — declared key
+settings.username
+// error with noPropertyAccessFromIndexSignature
+settings["username"] // ok — index signature, on purpose
+```
+
+<br />
+
+- `noUncheckedIndexedAccess` makes `arr[i]` and `record[key]` into `T | undefined`. TypeScript does not track length against the index. The default lies. This is the production crash `strict` misses: `Cannot read properties of undefined`. Packages in this repo already have it. The apps do not.
+- `noPropertyAccessFromIndexSignature` splits syntax. **Dot** is a declared key. **Brackets** are the index signature. A typo `settings.darkMod` stops compiling. This repo leaves it **off**.
+- `erasableSyntaxOnly` forbids syntax that **emits a value**. Constructor parameter properties (`constructor(private name: string)`) rewrite the constructor. `enum` becomes an object. Types must strip clean — Bun and Node's type stripper do not rewrite. [TypeScript Classes](/notes/typescript-classes-and-runtime-identity) prefers `#` over TypeScript `private` for the same reason: `#` is JavaScript.
+
+<br />
+
+**Failure:** `users[0].name` after `strict`, on an array that can be empty. Or an `enum` in a file that Bun only strips.
+
+---
+
+## 4. Preference
+
+Useful. Not free. Two of three are already decided in this repo's packages.
+
+<br />
+
+```ts
+class Box {
+  close(): void {}
+}
+
+class Modal extends Box {
+  override close(): void {}
+}
+
+type User = { name?: string }
+const omitted: User = {}
+const explicit: User = { name: undefined }
+// error with exactOptionalPropertyTypes — optional means missing, not T | undefined
+"name" in omitted // false
+"name" in explicit // true
+```
+
+<br />
+
+- `noImplicitOverride` requires the `override` keyword when a child method replaces a parent method. Accidental overwrite is a typo in a class hierarchy. Packages already have it. The object model is [TypeScript Classes](/notes/typescript-classes-and-runtime-identity).
+- `noErrorTruncation` prints the full type in an error hover. Leave it off. Turn it on to debug one nasty conditional, then turn it off. Hover is not a log.
+- `exactOptionalPropertyTypes` makes `name?: string` mean the key is **absent** or a `string`. `{ name: undefined }` is not a `User`. That is the `in` operator bug: a key set to `undefined` is still in the object. The most opinionated flag in the video. This repo does not set it.
+
+<br />
+
+**Failure:** `override` as decoration on a method that does not exist on the parent. The flag is the check that the name still matches.
+
+---
+
+## 5. JavaScript
+
+A TS repo that still has `.js` files needs two switches. They are not type safety for TypeScript.
+
+<br />
+
+```ts
+// analytics.js
+export const t = 10
+```
+
+<br />
+
+- `allowJs` lets a `.ts` file import that module. `apps/web` and `packages/ds` already have it.
+- `checkJs` type-checks every `.js` file. During a migration, that is a flood. Prefer `// @ts-check` at the top of one file at a time. Turn `checkJs` on when there is no `.js` left you are willing to ignore.
+
+<br />
+
+**Failure:** `checkJs: true` on day one of a conversion, then disabling the flag because the log is unreadable. The per-file comment is the migration.
+
+---
+
+## Takeaway
+
+`strict` is a family. Indexed access, fallthrough, emit, and override sit outside it.
+
+When the question is which flag to add:
+
+1. **Does `arr[i]` lie?** `noUncheckedIndexedAccess`. Add it on the apps. Packages already have it.
+2. **Does this syntax emit a value?** `enum`, constructor parameter properties. `erasableSyntaxOnly`, or just do not write them. `#` and string unions.
+3. **Is this unused code or a typo?** Lint for unused. `noFallthroughCasesInSwitch` and `noUncheckedSideEffectImports` for the rest. Do not promote unused-locals into `tsc` in this repo.
+
+---
+
+## Recap Q&A
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="ts-strict-family">
+    <AccordionTrigger>1. What does `strict: true` actually turn on?</AccordionTrigger>
+    <AccordionContent>
+
+      - Eight flags: `strictNullChecks`, `noImplicitAny`, `strictFunctionTypes`, `strictBindCallApply`, `strictPropertyInitialization`, `noImplicitThis`, `useUnknownInCatchVariables`, `alwaysStrict`.
+      - That family is table stakes. It is not `noUncheckedIndexedAccess`, not `noFallthroughCasesInSwitch`, not `erasableSyntaxOnly`, not `verbatimModuleSyntax`.
+      - Shared packages in this repo add fallthrough, indexed access, `noImplicitOverride`, and `verbatimModuleSyntax`. `apps/web` and `apps/api` are mostly `strict` plus `paths`.
+      - **Failure:** reading `strict` as the whole fence. The crash that still compiles is usually `arr[i]`.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="ts-hygiene">
+    <AccordionTrigger>2. Which flags are hygiene, and which does this repo leave to lint?</AccordionTrigger>
+    <AccordionContent>
+
+      - `paths` is DX. `@/*` already maps to `./src/*` in web and api.
+      - `noFallthroughCasesInSwitch` is on in packages. `noUncheckedSideEffectImports` catches a typo in a side-effect import. `allowUnusedLabels: false` and `allowUnreachableCode: false` promote suggestions to errors.
+      - `noUnusedLocals` and `noUnusedParameters` are **off** here. Unused bindings are a lint job, not a `tsc` job.
+      - **Failure:** turning unused-locals on in app code and fighting every unused `_` in a handler.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="ts-indexed-access">
+    <AccordionTrigger>3. What do noUncheckedIndexedAccess and noPropertyAccessFromIndexSignature catch?</AccordionTrigger>
+    <AccordionContent>
+
+      - `noUncheckedIndexedAccess` makes `arr[i]` and `record[key]` into `T | undefined`. TypeScript does not know the length. The default type is a lie. This is the runtime crash `strict` misses.
+      - Packages already have it. The apps do not. That is the next flag to add.
+      - `noPropertyAccessFromIndexSignature`: dot notation is a declared key; brackets are the index signature. `settings.darkMod` fails. `settings["username"]` is the escape. This repo leaves it off.
+      - **Failure:** `users[0].name` on an array that can be empty, compiling clean under `strict`.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="ts-erasable">
+    <AccordionTrigger>4. What does erasableSyntaxOnly forbid, and why does this stack care?</AccordionTrigger>
+    <AccordionContent>
+
+      - Syntax that **emits a value**: constructor parameter properties (`constructor(private name: string)`), `enum`, a few other TypeScript-only forms that rewrite the JS.
+      - Types must strip clean. Bun and Node's type stripper erase; they do not rewrite. `verbatimModuleSyntax` (already on in packages) is the import-side cousin: `import type` for types.
+      - [TypeScript Classes](/notes/typescript-classes-and-runtime-identity) prefers `#` over TypeScript `private` for the same reason. `#` is JavaScript. A string union replaces most enums.
+      - **Failure:** an `enum` in a file that the runtime only strips.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="ts-exact-optional-override">
+    <AccordionTrigger>5. When do you want noImplicitOverride or exactOptionalPropertyTypes?</AccordionTrigger>
+    <AccordionContent>
+
+      - `noImplicitOverride` requires `override` when a child method replaces a parent method. Packages already have it. Accidental overwrite is a typo in a class hierarchy.
+      - `exactOptionalPropertyTypes` makes `name?: string` mean absent or a `string`, not `string | undefined`. `{ name: undefined }` is then an error. `"name" in obj` finally matches the type.
+      - `noErrorTruncation` is debug-only. Full types in a hover, then turn it off.
+      - This repo does not set exact optional. `override` is already the package default. The object model is [TypeScript Classes](/notes/typescript-classes-and-runtime-identity).
+      - **Failure:** `override` on a method the parent no longer has — or treating `{ name: undefined }` as "optional" when `in` still returns true.
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>

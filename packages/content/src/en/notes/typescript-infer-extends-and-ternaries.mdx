@@ -38,9 +38,9 @@ type NameOf<T extends { name: string }> = T["name"]
 <br />
 
 - Class `extends` wires prototype chains. That is a **value**. The other three are erased.
-- Interface `extends` copies fields into a new shape. Multiple parents are allowed: `interface B extends A, C`.
-- A `type` alias cannot `extend`. Intersection (`&`) is the same composition: `Named & { age: number }`.
+- Interface `extends` copies fields into a new shape. Multiple parents are allowed: `interface B extends A, C`. A `type` alias cannot `extend`. Intersection (`&`) is the same composition: `Named & { age: number }`.
 - A generic constraint `T extends U` is a **gate**. `T` must be assignable to `U` or the type argument is rejected. `NameOf<number>` is an error. `NameOf<{ name: "Ada"; extra: true }>` is `"Ada"`.
+- A conditional `T extends U ? X : Y` is a **branch**. Any `T` is accepted; the result depends on assignability. That form is the next section.
 
 `T extends U` means **assignable to `U`**, not "T and U" and not "T is bigger." For object types, extra fields still assign: `{ name: string; age: number }` is assignable to `{ name: string }`. For values, `"hi" extends string` — the set of values is **smaller**, not larger. A string literal is a subtype of `string`.
 
@@ -132,7 +132,7 @@ type C = Flatten<string> // never
 
 <br />
 
-Returning `T` on the false branch is the other common shape — keep the input when it does not match. `Awaited` does that. `ReturnType` and `Awaited` in the standard library are this pattern:
+Returning `T` on the false branch is the other common shape — keep the input when it does not match. That is `Unwrap` below. `ReturnType` infers the return slot instead:
 
 <br />
 
@@ -208,9 +208,9 @@ Modifiers add or remove `readonly` and optionality. `-` strips; a bare keyword (
 
 ```ts
 type Mutable<T> = { -readonly [P in keyof T]: T[P] }
-type Optional<T> = { [P in keyof T]?: T[P] }
-type RequiredKeys<T> = { [P in keyof T]-?: T[P] }
-type Frozen<T> = { readonly [P in keyof T]: T[P] }
+type Partial<T> = { [P in keyof T]?: T[P] }
+type Required<T> = { [P in keyof T]-?: T[P] }
+type Readonly<T> = { readonly [P in keyof T]: T[P] }
 ```
 
 <br />

@@ -58,8 +58,8 @@
   --surface-alpha: #fafafa20;
   --content-accent: #58C4DC;
   --content-ink: #ffffff;
-  --content-body: #c1c1c1;
-  --content-subdued: #8a8a8a;
+  --content-body: #E1E2E5;
+  --content-subdued: #A7A9AC;
   --content-error: var(--color-red-500);
   --content-ink-inverse: #3f3d39;
   --content-ink-on-accent: #0f0f10;
