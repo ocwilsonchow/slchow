@@ -1,0 +1,471 @@
+---
+title: 以 TypeScript Developer 身份学 Go
+description: Go types、goroutines 与 net/http 如何对应 TypeScript、Node 与 Hono —— 以及 analogy 在哪里破裂
+date: 2026-08-21
+category: backend
+---
+
+TypeScript 会 erase types。**Go 把它们留下。** 一个 duck-typed、「有 `id` 与 `email`」的 object 是 TypeScript 习惯。在 Go 里 compiler 要一个 named struct 或 interface —— 而那个 interface 是 method set，不是一袋 fields。一支把 JSON decode 进 struct 的 **`net/http`** handler，跟 Zod-validated Hono route 是同一直觉 —— check 活在 binary 仍然认识的 type 里，而不是在 `tsc` 时消失的 schema。
+
+这篇 note 是以 **Hono** developer 身份读 **Go 1.22+** API 时用的 mapping。Samples 对准 standard library：method-aware `ServeMux`、`encoding/json`、`database/sql`。**sqlc** 与 **go-playground/validator** 各出现一次，作为 Drizzle 与 Zod 的表亲。**chi** 出现一次，作为 middleware-composition 表亲。不是把这个 site 重写成 Go，也不是 Gin。Typed Hono stack 见 [用 Hono、Drizzle、Zod OpenAPI 与 SST 打造 Backend APIs](/notes/backend-apis-hono-sst)。Types 是 annotations 直到 HTTP boundary 的 Python 兄弟篇是 [以 TypeScript Developer 身份学 Python](/notes/learning-python-as-a-typescript-developer)。Types 活过 compilation 但 interfaces 是 nominal 的 Java 兄弟篇是 [以 TypeScript Developer 身份学 Java](/notes/learning-java-as-a-typescript-developer)。你已有的 object model 见 [TypeScript Class 与 Runtime Identity](/notes/typescript-classes-and-runtime-identity)。
+
+<br />
+
+```text
+TS / Node:  .ts → tsc/bun erase types → V8, one event loop
+Go / gc:    .go → gc keep types → native binary, goroutines
+```
+
+<br />
+
+四种 statements：
+
+- 一份 **TypeScript contract**，例如 runtime 会消失的 interface，或没有 type 的 `throw`。
+- 一条 **Go language rule**，例如 implicit interface satisfaction，或 `(User, error)`。
+- 一个 **runtime observation**，例如 M:N scheduler，或 map 上的 race。Application code 不该依赖超出那个范围的 scheduler internals。
+- 一个 **`net/http` convention**，例如 `ServeMux` pattern 与带 `json` tags 的 struct。
+
+<br />
+
+---
+
+## 1. What This Note Is
+
+TypeScript engineer 已经有对的 abstractions：request 进、JSON 出、validated body、打 Postgres 的 query、一份 session。Go 把每一项 remap 到不同的 runtime。
+
+- **Types 活过 compilation。** Binary 仍然认识 struct。一个 interface value 是 type 加 value。TypeScript `interface` 已经没了。
+- **Code 的单位是 package。** Functions 是 first-class。没有 `class`、没有 `export`，也没有 one-type-per-file 规则。Capitalization 就是 visibility。
+- **Host 是 native process**，不是 V8，也不是 JVM。许多 goroutines 共享一份 heap。Blocking I/O 是正常的。没有 draining microtasks 的 event loop。
+- **`net/http` 是你组起来的 router。** Hono 是你用 Zod 组起来的 router。Spring 是替你构造 router 的 container。Go 是 Hono 直觉：你自己 wire mux。
+
+Throughline 是一个小的 **users** resource：依 id fetch、list、create。够用来读 handler、struct，与 query。
+
+<br />
+
+---
+
+## 2. Interfaces Are Structural and Survive
+
+TypeScript 在 compile time 是 structural，之后被 erase。Java 两边都是 nominal。Go 是第三种形状：**compile time 是 structural，runtime 是真的。** Method set 对上，它就 implements。你从不写 `implements`。
+
+<br />
+
+```ts
+interface UserLike {
+  id: string
+  email: string
+}
+
+function greet(u: UserLike): string {
+  return u.email
+}
+
+greet({ id: "1", email: "a@b.c" }) // fields are the contract
+```
+
+<br />
+
+```go
+type UserLike interface {
+	Email() string
+}
+
+func greet(u UserLike) string {
+	return u.Email()
+}
+
+type User struct {
+	ID    string
+	email string
+}
+
+func (u User) Email() string { return u.email }
+```
+
+<br />
+
+- Go interface 是 **method set**，不是一袋 fields。`{ id, email }` 不是一个 type。Methods 才是。TypeScript analogy 最先在这里破裂。
+- Satisfaction 是 implicit。`User` implements `UserLike`，因为 `Email()` 存在。没有 `implements UserLike`，也没有 `extends`。给 interface 加一个 method，每个 implementer 都得长出来，否则 build 失败。
+- Runtime 上一个 interface value 是 **type 与 value**。Type assertion（`u.(User)`）与 type switch 是事实。立场见 [TypeScript Class 与 Runtime Identity](/notes/typescript-classes-and-runtime-identity) —— TypeScript interface 上的 `instanceof` 是谎；`u.(User)` 不是。
+- **`any`** 是 `interface{}`。它是 escape，不是 default。一个收 `any` 的 function 没有给 compiler 任何东西。
+
+**Failure:** 把 Go interface 当成 TypeScript `interface { id: string }`。没有 field-shaped interface。在 type 上放 method，或直接传 struct。
+
+<br />
+
+---
+
+## 3. nil, Zero Values, Pointers
+
+TypeScript 有 `null` 与 `undefined`。Go 对 pointers、slices、maps、channels、functions、interfaces 有 **`nil`** —— 对其余一切有 **zero values**。`string` 是 `""`。`int` 是 `0`。`User` 是 `User{}`。没有你忘了 initialize 的洞。
+
+<br />
+
+```ts
+function emailOf(user: User | null): string | undefined {
+  return user?.email
+}
+```
+
+<br />
+
+```go
+func emailOf(user *User) *string {
+	if user == nil {
+		return nil
+	}
+	return &user.Email
+}
+```
+
+<br />
+
+- **`nil` 不是 `undefined`。** 未 initialize 的 `*User` 是 `nil`。未 initialize 的 `User` 是 zeros。在 nil pointer 上调 method 可能 panic；在 zero struct 上通常不会。
+- **Pointers 是 copy 规则**，不是 C。`func f(u User)` 复制 struct。`func f(u *User)` 共享它。要 mutate 用 pointer receiver；method 是 read 时用 value receiver。
+- JSON `omitempty` 在 `string` 上会藏 `""`。在 `*string` 上藏 `nil`、留下 `""`。Zero value 与「缺席」是不同事实。选对得上你要的 JSON 的 type。
+- 一个装着 typed nil 的 interface 不是 `nil`。`var p *User; var u UserLike = p` 然后 `u == nil` 是 false。Interface 有 type。
+
+**Failure:** 对一个 `User` value 写 `if user != nil`。它永远不是 nil。Check pointer，或 check 你真正在意的 field。
+
+<br />
+
+---
+
+## 4. Structs, Methods, No Classes
+
+在 TypeScript 里 class 是你通常避开的 constructor。在 Java 里 class 是组织 code 的方式。在 Go 里 **没有 class**。**Struct** 是 data。**Method** 是带 receiver 的 function。**Constructor** 是按 convention 名叫 `NewUser` 的 function。
+
+<br />
+
+```go
+type User struct {
+	ID    string
+	Email string
+}
+
+func NewUser(id, email string) User {
+	return User{ID: id, Email: email}
+}
+
+func (u User) Greet() string {
+	return u.Email
+}
+
+func (u *User) SetEmail(email string) {
+	u.Email = email
+}
+```
+
+<br />
+
+- Receiver 是 `(u User)` 或 `(u *User)`。那是你写下来的 `this`。同一 type 上混用可以；compiler 需要时会取 address。为你想暴露的 method set 选一个。
+- **Embedding** 是 composition。`type Admin struct { User }` 会 promote `User` 的 methods。不是 inheritance。没有 `super`，除了你已经写的 interface 之外没有 virtual dispatch。
+- 没有会跑 constructor 的 `new`。`User{}` 合法且为零。`NewUser` 存在是因为你想要一条规则，不是因为 language 要求。
+
+**Failure:** 一个只有一个 method、没有 state 的 `UserService` struct。那是多几道手续的 package-level function。Methods 得赚到它们的 receiver。
+
+<br />
+
+---
+
+## 5. Generics
+
+TypeScript generics 发明 types：`extends`、conditionals、`infer`。Go generics **parameterize** 一个 function 或 type。它们不按 type 分支。
+
+<br />
+
+```ts
+function idsOf<T extends { id: string }>(xs: T[]): string[] {
+  return xs.map((x) => x.id)
+}
+```
+
+<br />
+
+```go
+func Map[T, U any](xs []T, f func(T) U) []U {
+	out := make([]U, len(xs))
+	for i, x := range xs {
+		out[i] = f(x)
+	}
+	return out
+}
+```
+
+<br />
+
+- **作为 constraint 的 `any`** 意味着没有 constraint。真正的 constraint 是 interface：`func Sum[T int64 | float64](xs []T) T`。Approximate types（`~int`）包含 defined aliases。
+- 没有 field 上的 `extends { id: string }`。Constraint method set，或传一个读该 field 的 function。Compiler 不会替你走 struct。
+- 没有 variance、没有 conditional types、没有 mapped types。如果你在写 `T extends ... ? A : B`，你还在 TypeScript。在 Go 里写两个 functions，或一个 interface。
+
+**Failure:** 一个用 `any` 加 reflection 去 insert 一行的 generic `Repository[T]`。sqlc 已经生成了 typed function。用它。
+
+<br />
+
+---
+
+## 6. Slices, Maps, Arrays
+
+JavaScript 有 `Array` 与 `object`。Go 把它拆成 **slice**、**map**，以及少见的 **array**。JSON list 以 slice 抵达。JSON object 以你 decode 的 struct 抵达，或你不该 return 的 `map[string]any`。
+
+<br />
+
+```ts
+const ids = users.map((u) => u.id).filter(Boolean)
+```
+
+<br />
+
+```go
+ids := make([]string, 0, len(users))
+for _, u := range users {
+	if u.ID != "" {
+		ids = append(ids, u.ID)
+	}
+}
+```
+
+<br />
+
+- **Slice** 是 view：pointer、length、capacity。`append` 可能 allocate 新的 backing array。`var s []string` 是 nil。`s := []string{}` 是 empty。`json.Marshal` 对 nil 是 `null`；对 empty 是 `[]`。那是凌晨两点的 bug。
+- **Map** 是 `Record<string, V>`。它没有顺序。它对 concurrent write 不安全。`var m map[string]User` 是 nil；在 `make` 之前 assignment 会 panic。Lookup 返回 zero value 与一个 bool：`u, ok := m[id]`。
+- **Array** `[3]string` 是 value。它不是 slice。你几乎从不想在 API boundary 用它。
+
+**Failure:** 因为 `json.Marshal` 接受，就从 handler return `map[string]any`。那是 Python note 里 untyped 的 `dict`。Decode 进 struct。
+
+<br />
+
+---
+
+## 7. Errors, Not Exceptions
+
+TypeScript `throw` 没有 type。Java 有 checked exceptions。Go **return** `(T, error)`。缺 user 不会 unwind stack。`panic` 是给「这个 process 错了」，不是给 404。
+
+<br />
+
+```go
+var ErrNotFound = errors.New("user not found")
+
+func require(users Store, id string) (User, error) {
+	user, err := users.FindByID(id)
+	if err != nil {
+		return User{}, err
+	}
+	return user, nil
+}
+```
+
+<br />
+
+```go
+user, err := require(users, id)
+if err != nil {
+	if errors.Is(err, ErrNotFound) {
+		http.Error(w, "user not found", http.StatusNotFound)
+		return
+	}
+	http.Error(w, "internal error", http.StatusInternalServerError)
+	return
+}
+```
+
+<br />
+
+- Idiom 是 `if err != nil { return ..., err }`。吵是故意的。吞掉 `err` 就是 Java 的 `catch (Exception)`。
+- **`errors.Is` / `errors.As`** 会 unwrap。Sentinel（`ErrNotFound`）是你比较的 value。Typed error 是你 `As` 的 struct。用 `%w` wrap，让 sentinel 活下来。
+- 不要对同一次 miss 既 return 一个 zero `User` 加 `nil`，又 return `ErrNotFound`。一次 miss，一个信号。Handler 把那个信号 map 成 status。
+
+**Failure:** 在 handler 里 `panic(err)`，因为「看起来像 throw」。Process 死掉，或 `recover` middleware 把每个 bug 变成没有 type 的 500。Return the error。
+
+<br />
+
+---
+
+## 8. Packages, go.mod, Export
+
+一个 TypeScript file 是 module。一个 Go file 是 **package** 的成员。Directory 就是 package。Capitalization 就是 `export`。
+
+<br />
+
+```text
+module github.com/example/api
+
+go 1.22
+
+cmd/api/main.go          // package main
+internal/users/users.go  // package users
+go.mod
+go.sum
+```
+
+<br />
+
+- **`User` 是 exported。`user` 不是。** 没有 `export` keyword，也没有 `public`。Compiler 强制大小写。跨 package 的 tests 碰不到 `user`。
+- **`go.mod`** 是 `package.json`。Module path 是 import prefix。**`go.sum`** 是 lock。Module cache 不是 binary 旁边的 `node_modules`；它是 compiler 在 build 时读的共享 cache。
+- **`internal/`** 是 compiler 会遵守的 visibility 墙。只有它上面的 tree 能 import。这比 Python 的开头底线更硬。
+- `package main` 加 `func main` 是入口。其余都是 library package。没有你重新 export 的 `index.ts` barrel，除非你想要一个。
+
+**Failure:** 两个 directories 都写 `package users`，或 export `type user struct` 然后纳闷 handler 为什么叫不出它的名。Directory 就是 package。大小写就是 export。
+
+<br />
+
+---
+
+## 9. Goroutines vs Node
+
+Node 是一条 thread 跑 JavaScript，外加一个 I/O pool。模型见 [JavaScript 核心概念](/notes/core-javascript-concepts)。Go 是 **许多 goroutines、一个 process**，由 M:N scheduler 复用到 OS threads 上。
+
+<br />
+
+```text
+Node:  stack (JS) → microtasks → one macrotask → poll I/O
+Go:    M:N scheduler
+       goroutines multiplexed onto OS threads
+       blocking I/O blocks that goroutine, not the process
+```
+
+<br />
+
+- **`go f()`** 启动一条 goroutine。它不是 `void f()`，也不是 `Promise`。Caller 不等。在 handler 里，request 在 handler return 时就 return —— 一条乱跑的 `go` 可能活过 request，或丢掉 `context.Context` 的 cancel。传 `r.Context()` 并等待，或不要 spawn。
+- Blocking 的 `QueryRow` 没问题。那条 goroutine 等。别的在跑。你不对 database call 写 `async`/`await`。你传一个带 deadline 的 context。
+- **Shared mutable state** 是 crash。没有 mutex 就从两条 goroutines 写同一个 `map` 是 data race。`go test -race` 是工具。Channels 与 `select` 做协调；它们不是「不要共享 map」的替代品。
+
+**Failure:** 在 handler 里 `go users.Create(...)`，好让 response 感觉快。Client 拿到 201。Insert 失败了。Context 已经被 cancel。做完工作，再写 status。
+
+<br />
+
+---
+
+## 10. Build
+
+`package.json` 加 lockfile 是 TypeScript 习惯。Go 把 **module file** 与 **static binary** 分开。
+
+| | TypeScript / bun | Go |
+| --- | --- | --- |
+| Manifest | `package.json` | `go.mod` |
+| Lock | `bun.lock` | `go.sum` |
+| Install | `node_modules` | module cache (`$GOPATH/pkg/mod`) |
+| Ship | a server process, or a bundle | a **static binary** |
+| Entry | `src/index.ts` | `func main` in `package main` |
+
+<br />
+
+- **`go build`** 吐出一个 file。Production 运那个 file，通常放进 scratch 或 distroless image。没有 interpreter，container 里也没有 `node_modules`。`CGO_ENABLED=0` 让它保持 static。
+- Cross-compile 是一对 env vars：`GOOS=linux GOARCH=arm64 go build`。不必为此另装一套 "target" toolchain。
+- `cmd/api` 是 process。`internal/` 是 library。Tests 以 `*_test.go` 跟 code 住一起。没有 `src/main/java` 仪式。
+
+**Failure:** 把 module cache 拷进 image，因为「那就是 `node_modules`」。Binary 已经 link 了它需要的东西。运 binary。
+
+<br />
+
+---
+
+## 11. net/http as Hono
+
+Hono 是你用 request 调用的 function。`net/http` 是同一直觉：一份 patterns 的 **mux**，每一个都是 `ResponseWriter` 与 `*Request` 的 function。Go 1.22 给了 stdlib method-and-path patterns。你不需要 framework 才能拿到 `/users/{id}`。
+
+<br />
+
+```ts
+app.get("/users/:id", async (c) => {
+  const id = c.req.param("id")
+  const user = await users.require(id)
+  return c.json(user)
+})
+```
+
+<br />
+
+```go
+mux := http.NewServeMux()
+
+mux.HandleFunc("GET /users/{id}", func(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	user, err := users.Require(r.Context(), id)
+	if err != nil {
+		http.Error(w, "user not found", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(user)
+})
+
+http.ListenAndServe(":8080", mux)
+```
+
+<br />
+
+- **`"GET /users/{id}"`** 是 `app.get("/users/:id")`。`r.PathValue("id")` 是 `c.req.param("id")`。没有 decorator，也没有 bean。你注册了一个 function。
+- **Middleware** 是 `func(http.Handler) http.Handler`。Wrap mux。**chi** 是那个 wrapper，带更好的 `Use` 与 subrouters。它仍然是 `net/http`。它不是 container。从 mux 开始；nesting 变吵时再拿 chi。
+- `http.Error` 是你自己写的 typed exit。Language 里没有 `HTTPException` type。在 handler 把 `err` map 掉，或写一个 helper 复用。
+- `func main` 是 `index.ts`。`ListenAndServe` 是 process。没有 Spring scan，也没有 FastAPI `app` object 超出你组出来的 mux。
+
+**Failure:** 一个被 handlers mutate 的 global `users` map，或一个不 honor shutdown 的 `ListenAndServe`、没有 `Server`。Mux 没问题。Process 仍然需要 deadline。
+
+<br />
+
+---
+
+## 12. encoding/json and sqlc
+
+Zod 是你 parse 的 schema。Go 的 schema 是 **struct tag**。Drizzle 是 TypeScript 里的 SQL。**sqlc** 是 `.sql` file 里的 SQL，再生成 Go。`database/sql` 是 pool。
+
+<br />
+
+```ts
+const UserCreate = z.object({
+  email: z.string().email(),
+})
+
+await db.insert(users).values({ email }).returning()
+```
+
+<br />
+
+```go
+type UserCreate struct {
+	Email string `json:"email"`
+}
+
+if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	http.Error(w, "invalid body", http.StatusBadRequest)
+	return
+}
+```
+
+<br />
+
+```sql
+-- name: GetUser :one
+SELECT id, email FROM users WHERE id = $1;
+```
+
+<br />
+
+```go
+user, err := q.GetUser(ctx, id)
+```
+
+<br />
+
+- **`json` tags** 命名 wire fields。`Decode` 填进 struct。Unknown JSON keys 会被丢掉，除非你 `DisallowUnknownFields`。那不是 Zod：type 里没有 `.email()`。**go-playground/validator**（`validate:"required,email"`）是 decode 之后跑的表亲。用在 HTTP edge，不要用在 SQL row 上。
+- **sqlc** 是 Drizzle 最接近的表亲。你写 statement。它生成 `GetUser(ctx, id)`。Row type 是 generated。没有 ORM session，也没有 lazy graph。Postgres 仍然 evaluate statement：[SQL 核心概念](/notes/core-sql-concepts)。Tenant filters 仍然属于 query 与 RLS：[用 Hono、Better Auth、Drizzle 与 Postgres RLS 打造 Multi-Tenant 后端](/notes/multi-tenant-backend-drizzle-hono-better-auth)。
+- **`database/sql`**（或作为 driver 的 `pgx`）是 pool。传 `context.Context`。不要跨 requests 握着 `*sql.Tx`。如果 sqlc row 与 JSON struct 分道，在 handler 做 map。
+
+**Failure:** scan 进 `map[string]any`，或因为「已经有 json tags」就把带 `password_hash` column 的 sqlc row return 出去。在 boundary map，跟 Java note 里 entity → record 是同一直觉。
+
+<br />
+
+---
+
+## 13. Where It Sits
+
+Go 是 **这个 binary** 如何 type 一个 value。`net/http` 是 **这个 process** 如何接收 request。两者都不取代 authorization、SQL，或 session。
+
+- Interpreter 兄弟篇：[以 TypeScript Developer 身份学 Python](/notes/learning-python-as-a-typescript-developer)
+- JVM 兄弟篇：[以 TypeScript Developer 身份学 Java](/notes/learning-java-as-a-typescript-developer)
+- TypeScript 的 runtime identity：[TypeScript Class 与 Runtime Identity](/notes/typescript-classes-and-runtime-identity)
+- JS 何时执行：[JavaScript 核心概念](/notes/core-javascript-concepts)
+- Hono analog：[用 Hono、Drizzle、Zod OpenAPI 与 SST 打造 Backend APIs](/notes/backend-apis-hono-sst)
+- Statement：[SQL 核心概念](/notes/core-sql-concepts)
+- Identity、membership，以及那一行：[用 Hono、Better Auth、Drizzle 与 Postgres RLS 打造 Multi-Tenant 后端](/notes/multi-tenant-backend-drizzle-hono-better-auth)

@@ -7,7 +7,7 @@ category: backend
 
 TypeScript 会 erase types。**Python 从未要求过 types。** Duck typing 是 default：只要它有 `id` 与 `email`，它就走得通。Compiler 不在门口等。一支带 Pydantic body 的 **FastAPI** route，跟 Zod-validated Hono route 是同一直觉 —— check 搬到 HTTP boundary，而不是 language。
 
-这篇 note 是以 **Hono** developer 身份读 **FastAPI** API 时用的 mapping。Samples 对准 **Python 3.12+**：type parameter syntax、`match`、dataclasses。**Pydantic v2** 与 **SQLAlchemy 2** 各出现一次，作为 Zod 与 Drizzle 的表亲。不是把这个 site 重写成 Python。Typed Hono stack 见 [用 Hono、Drizzle、Zod OpenAPI 与 SST 打造 Backend APIs](/notes/backend-apis-hono-sst)。Types 真的活过 compilation 的 Java 兄弟篇是 [以 TypeScript Developer 身份学 Java](/notes/learning-java-as-a-typescript-developer)。你已有的 object model 见 [TypeScript Class 与 Runtime Identity](/notes/typescript-classes-and-runtime-identity)。
+这篇 note 是以 **Hono** developer 身份读 **FastAPI** API 时用的 mapping。Samples 对准 **Python 3.12+**：type parameter syntax、`match`、dataclasses。**Pydantic v2** 与 **SQLAlchemy 2** 各出现一次，作为 Zod 与 Drizzle 的表亲。不是把这个 site 重写成 Python。Typed Hono stack 见 [用 Hono、Drizzle、Zod OpenAPI 与 SST 打造 Backend APIs](/notes/backend-apis-hono-sst)。Types 真的活过 compilation 的 Java 兄弟篇是 [以 TypeScript Developer 身份学 Java](/notes/learning-java-as-a-typescript-developer)。Types 活过 compilation 且 interfaces 是 structural 的 Go 兄弟篇是 [以 TypeScript Developer 身份学 Go](/notes/learning-go-as-a-typescript-developer)。你已有的 object model 见 [TypeScript Class 与 Runtime Identity](/notes/typescript-classes-and-runtime-identity)。
 
 <br />
 
@@ -404,6 +404,7 @@ user = session.scalars(stmt).first()
 Python 是 **这个 interpreter** 如何把 value 传来传去。FastAPI 是 **这个 process** 如何接收 request。两者都不取代 authorization、SQL，或 session。
 
 - JVM 兄弟篇：[以 TypeScript Developer 身份学 Java](/notes/learning-java-as-a-typescript-developer)
+- Go 兄弟篇：[以 TypeScript Developer 身份学 Go](/notes/learning-go-as-a-typescript-developer)
 - TypeScript 的 runtime identity：[TypeScript Class 与 Runtime Identity](/notes/typescript-classes-and-runtime-identity)
 - JS 何时执行：[JavaScript 核心概念](/notes/core-javascript-concepts)
 - Hono analog：[用 Hono、Drizzle、Zod OpenAPI 与 SST 打造 Backend APIs](/notes/backend-apis-hono-sst)

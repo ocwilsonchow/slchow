@@ -7,7 +7,7 @@ category: backend
 
 TypeScript erases types. **Python never required them.** Duck typing is the default: if it has `id` and `email`, it walks. The compiler is not waiting at the door. A **FastAPI** route with a Pydantic body is the same instinct as a Zod-validated Hono route — the check moves to the HTTP boundary, not the language.
 
-This note is the mapping used when reading a **FastAPI** API as a **Hono** developer. Samples target **Python 3.12+**: type parameter syntax, `match`, dataclasses. **Pydantic v2** and **SQLAlchemy 2** appear once, as the Zod and Drizzle cousins. It is not a rewrite of this site in Python. The typed Hono stack is [Backend APIs with Hono, Drizzle, Zod OpenAPI, and SST](/notes/backend-apis-hono-sst). The Java sibling, where the types do survive compilation, is [Learning Java as a TypeScript Developer](/notes/learning-java-as-a-typescript-developer). The object model you already have is [TypeScript Classes and Runtime Identity](/notes/typescript-classes-and-runtime-identity).
+This note is the mapping used when reading a **FastAPI** API as a **Hono** developer. Samples target **Python 3.12+**: type parameter syntax, `match`, dataclasses. **Pydantic v2** and **SQLAlchemy 2** appear once, as the Zod and Drizzle cousins. It is not a rewrite of this site in Python. The typed Hono stack is [Backend APIs with Hono, Drizzle, Zod OpenAPI, and SST](/notes/backend-apis-hono-sst). The Java sibling, where the types do survive compilation, is [Learning Java as a TypeScript Developer](/notes/learning-java-as-a-typescript-developer). The Go sibling, where the types survive and interfaces are structural, is [Learning Go as a TypeScript Developer](/notes/learning-go-as-a-typescript-developer). The object model you already have is [TypeScript Classes and Runtime Identity](/notes/typescript-classes-and-runtime-identity).
 
 <br />
 
@@ -404,6 +404,7 @@ user = session.scalars(stmt).first()
 Python is how **this interpreter** passes a value around. FastAPI is how **this process** receives a request. Neither replaces authorization, SQL, or the session.
 
 - The JVM sibling: [Learning Java as a TypeScript Developer](/notes/learning-java-as-a-typescript-developer)
+- The Go sibling: [Learning Go as a TypeScript Developer](/notes/learning-go-as-a-typescript-developer)
 - Runtime identity in TypeScript: [TypeScript Classes and Runtime Identity](/notes/typescript-classes-and-runtime-identity)
 - When JS runs: [Core JavaScript Concepts](/notes/core-javascript-concepts)
 - The Hono analog: [Backend APIs with Hono, Drizzle, Zod OpenAPI, and SST](/notes/backend-apis-hono-sst)
