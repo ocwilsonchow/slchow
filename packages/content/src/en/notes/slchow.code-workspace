@@ -1,0 +1,22 @@
+{
+	"folders": [
+		{
+			"path": "../../../../.."
+		},
+		{
+			"path": "../../../../../../agent-luthen"
+		},
+		{
+			"path": "../../../../../../agent-jyn"
+		},
+		{
+			"path": "../../../../../../editor"
+		}
+	],
+	"settings": {
+		"js/ts.tsdk.path": "node_modules/typescript/lib",
+		"js/ts.tsdk.promptToUseWorkspaceVersion": true,
+		"js/ts.tsserver.automaticTypeAcquisition.enabled": false,
+		"js/ts.tsserver.maxMemory": 8192
+	}
+}

@@ -1,70 +1,43 @@
-import { getTranslations } from "next-intl/server"
-import { Link } from "@/i18n/navigation"
-import { getCategoryPages } from "@/lib/source"
+import { ArrowUpRightIcon } from "lucide-react"
 
-type ListWorksProps = {
-  locale: string
-  limit?: number
-  showHeading?: boolean
-}
+const works = [
+  {
+    title: "Mention Editor",
+    href: "https://editor.slchow.com",
+  },
+  {
+    title: "Agent Luthen",
+    href: "https://github.com/ocwilsonchow/agent-luthen",
+  },
+]
 
-const getPageDate = (date?: string | Date) => {
-  if (!date) return 0
-  return new Date(date).getTime()
-}
-
-export const ListWorks = async ({
-  locale,
-  limit = 5,
-  showHeading = true,
-}: ListWorksProps) => {
-  const t = await getTranslations("navigation")
-  const allWorks = getCategoryPages("works", locale).sort(
-    (a, b) => getPageDate(b.data.date) - getPageDate(a.data.date)
-  )
-  const hasMore = allWorks.length > limit
-  const works = allWorks.slice(0, limit)
-
+const ListWorks = () => {
   return (
     <div className="flex flex-col gap-2">
-      {showHeading && (
-        <h2>
-          <Link href="/works" className="font-semibold">
-            {t("works")}{" "}
-            <sup className="text-content-subdued">{allWorks.length}</sup>
-          </Link>
-        </h2>
-      )}
-      <ul className="flex flex-col list-disc list-inside">
-        {works.map((page) => {
-          const slug = page.slugs.slice(1).join("/")
-          return (
-            <li key={page.url}>
-              <Link
-                href={`/works/${slug}`}
-                className="inline-block py-px text-content-ink"
-              >
-                <span className="font-semibold">{page.data.title}</span>{" "}
-                {page.data.description && (
-                  <span className="text-content-subdued">
-                    - {page.data.description}
-                  </span>
-                )}
-              </Link>
-            </li>
-          )
-        })}
-        {hasMore ? (
-          <li>
-            <Link
-              href="/works"
-              className="inline-block py-px text-content-subdued hover:text-content-ink/75"
+      <h2 className="font-semibold">Recent Works</h2>
+      <ul className="list-disc list-outside ml-4 gap-0.5">
+        {works.map((work) => (
+          <li key={work.href}>
+            <a
+              href={work.href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={linkClassName}
             >
-              {t("listAll")}
-            </Link>
+              <span>{work.title}</span>
+              <ArrowUpRightIcon
+                className="inline-block text-content-subdued"
+                size={12}
+              />
+            </a>
           </li>
-        ) : null}
+        ))}
       </ul>
     </div>
   )
 }
+
+const linkClassName =
+  "block items-baseline space-x-1 text-content-ink py-0.5 px-1.5 font-semibold hover:bg-surface-alpha rounded-md"
+
+export default ListWorks
