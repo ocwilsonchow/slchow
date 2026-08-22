@@ -86,10 +86,10 @@ export const Links = async ({ className, ...props }: ComponentProps<"div">) => {
           {t("designs")}{" "}
           <sup className="text-content-subdued">{designsCount}</sup>
         </HeaderLink>
-        <HeaderLink href="/components" disabled>
+        {/* <HeaderLink href="/components" disabled>
           {t("components")}{" "}
           <sup className="text-content-subdued">({t("comingSoon")})</sup>
-        </HeaderLink>
+        </HeaderLink> */}
         <HeaderLink href="/contact">{t("contact")}</HeaderLink>
       </ul>
       <ul className="flex flex-col gap-px">
