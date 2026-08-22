@@ -11,10 +11,14 @@ const works = [
   },
 ]
 
-const ListWorks = () => {
+type ListWorksProps = {
+  showHeading?: boolean
+}
+
+export const ListWorks = ({ showHeading = true }: ListWorksProps) => {
   return (
     <div className="flex flex-col gap-2">
-      <h2 className="font-semibold">Recent Works</h2>
+      {showHeading ? <h2 className="font-semibold">Recent Works</h2> : null}
       <ul className="list-disc list-outside ml-4 gap-0.5">
         {works.map((work) => (
           <li key={work.href}>
@@ -39,5 +43,3 @@ const ListWorks = () => {
 
 const linkClassName =
   "block items-baseline space-x-1 text-content-ink py-0.5 px-1.5 font-semibold hover:bg-surface-alpha rounded-md"
-
-export default ListWorks
