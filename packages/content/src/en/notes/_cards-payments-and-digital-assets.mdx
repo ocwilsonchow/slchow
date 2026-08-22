@@ -1,0 +1,265 @@
+---
+title: Cards, Payments, and Digital Assets
+description: Why these are three different businesses — issuing vs acquiring, payment rails, stablecoins — and where Stripe actually sits
+date: 2026-08-22
+category: system-design
+---
+
+**Payments** move money you already have a claim on. **Cards** are a network product with an issuer and an acquirer. **Crypto** is a different settlement layer. Stripe Checkout is payments. It is not cards. It is not crypto.
+
+The on-chain primitives are [Blockchain Fundamentals](/notes/blockchain-fundamentals-wallets-contracts-tokens-dapps). Idempotency and retries are [API Design in System Design](/notes/api-design-in-system-design). Webhooks leave the request cycle in [Message Queues in System Design](/notes/message-queues-in-system-design). This note is the rails.
+
+<br />
+
+---
+
+## Pattern Map
+
+| Domain | What it is | The product | The screening lie |
+| --- | --- | --- | --- |
+| Payments | Move a claim on existing money | Checkout, payouts, refunds, ledgers | "I dropped in a Stripe button" |
+| Cards | A network product with an issuer | Issue, authorize, spend controls | "Customers paid with Visa" |
+| Crypto | A different settlement layer | Tokens, custody, on/off-ramps | "Stripe supported crypto once" |
+
+<br />
+
+---
+
+## 1. Three domains, not one stack
+
+Money is a **state machine** plus a **rail**. The job-post checkboxes are product domains, not "I touched a payment SDK."
+
+<br />
+
+- A **rail** is who moves the claim: a card network, an ACH file, a stablecoin transfer. The UI is not the rail.
+- A **ledger** is your record of who is owed what. The provider's dashboard is a side effect. Yours is the source of truth.
+- **Issuing** creates a card that can spend. **Acquiring** takes a card that already exists and turns it into a merchant payout. Same plastic word; opposite businesses.
+
+<br />
+
+**Failure:** treating "fintech" as one skill. A checkout integration, a card program, and a wallet are three different jobs.
+
+<br />
+
+---
+
+## 2. Payments
+
+A **payment** is an instruction to move value from one account to another and to keep both sides consistent when the instruction fails, retries, or reverses.
+
+<br />
+
+```text
+Intent → Authorize → Capture → Settle → (Refund | Dispute)
+              ↓
+         Failed / canceled
+```
+
+<br />
+
+- A **PSP** (Stripe, Adyen) is the API you call. An **acquirer** is the bank that takes the merchant into the card network. A **bank** holds the deposit account. Many products collapse these; the roles stay distinct when something breaks.
+- **Authorize** holds funds. **Capture** claims them. **Settle** is when money actually moves, often T+1 or T+2. **Refund** reverses a capture. A **dispute** / chargeback is the network arguing the capture was wrong.
+- Your **ledger** records the intent before the provider call. The provider is a side effect you reconcile. A timeout is not a negative acknowledgment — [API Design in System Design](/notes/api-design-in-system-design).
+- **Idempotency keys** on create-payment. Same key and body returns the stored result. Same key, different amount is a conflict. Pass the same key to the provider.
+- **Webhooks** are how the provider tells you the world changed. Verify the signature. Persist the event id. Drive state from the event, not from "the frontend said it succeeded." The HTTP handler authenticates, writes the intent, and returns; the worker reconciles — [Message Queues in System Design](/notes/message-queues-in-system-design).
+
+<br />
+
+Stripe **Payment Intents**, Checkout, Billing, and Connect live here. You accepted a card. You did not issue one.
+
+<br />
+
+**Failure:** trusting `redirect_status=succeeded` on the query string, or incrementing a balance on every webhook retry because there was no event-id unique constraint.
+
+<br />
+
+---
+
+## 3. Cards
+
+A card is not "Visa showed up on a checkout page." A card is a **network product**: a PAN that an **issuer** stands behind, that an **acquirer** accepts, that Visa or Mastercard routes.
+
+<br />
+
+```text
+Cardholder → Issuer → Network (Visa) → Acquirer → Merchant
+                ↑
+         issuing lives here
+```
+
+<br />
+
+- **Four-party model.** Cardholder spends. Issuer pays the network and bills the cardholder. Acquirer pays the merchant. The network is the switch. The fifth name people skip is the **processor** that speaks ISO 8583 on someone's behalf.
+- **Issuing** is creating PANs, cardholders, spend controls, and responding to authorization messages. **Acquiring** is accepting those PANs at a merchant. Stripe Elements is acquiring. Stripe Issuing is issuing.
+- An **authorization** is a real-time yes/no against limit, MCC, velocity, and available funds. **Clearing** is the later batch of what actually captured. **Settlement** is the money. They are not the same event.
+- **PAN** is the 16-digit secret. Network **tokens** replace it in wallets and on file so the raw number is not sitting in your database. PCI is why you never log it.
+- **Corporate cards** add employees, departments, spend limits, receipt capture, and a program BIN. That is why "cards" on an onboarding team means KYC, then a cardholder, then an authorization stream — not a checkout form.
+
+<br />
+
+**Failure:** checking the cards box because Stripe.js collected a Visa. That is acquiring. The issuer is someone else's bank.
+
+<br />
+
+---
+
+## 4. Crypto / digital assets
+
+A **token** is a claim recorded on a chain. A **stablecoin** is a token that is supposed to stay worth one unit of a fiat currency. **Custody** is who can sign. An **on/off-ramp** is the bridge back to a bank account.
+
+<br />
+
+```text
+Fiat bank  --on-ramp-->  Stablecoin  --transfer-->  Wallet / treasury
+               ↑                         ↓
+          KYC, rails              off-ramp, payout
+```
+
+<br />
+
+- The chain is a **programmable settlement layer**. Finality is "enough blocks," not T+2 from a card network. Chargebacks do not exist the same way; irreversible is the product and the risk.
+- **Self-custody** means the user holds the keys. **Custodial** means the company does. A corporate-card float in USDC is usually custodial. A "connect wallet" dApp is not. Wallets, contracts, and ERC-20 are [Blockchain Fundamentals](/notes/blockchain-fundamentals-wallets-contracts-tokens-dapps).
+- The hard product is the **bridge**: mint and redeem against reserves, travel-rule data, sanctions, and the moment fiat and token balances must agree. The transfer itself is the easy part.
+
+<br />
+
+Stripe is a fiat PSP. A historical crypto product on Stripe does not make this a crypto job.
+
+<br />
+
+**Failure:** calling a token balance a bank balance, or treating an on-chain transfer as a refundable card capture.
+
+<br />
+
+---
+
+## 5. How they compose
+
+A corporate card that settles in stablecoins is all three domains at once. That is why the screening question is a multi-select.
+
+<br />
+
+```text
+KYC / onboarding → Account → Issued card → Auth / spend
+                                      ↓
+                         Fiat rail  or  stablecoin settlement
+```
+
+<br />
+
+- **Onboarding** is the gate. You do not issue a card or move value until KYC, sanctions, and the account exist. The rest of the stack is downstream of that yes.
+- The **card** is how the employee spends at a merchant. The **payment** or the **token transfer** is how the company funds and settles that spend.
+- A company like Reap sits on this composition: issue Visa corporate cards, move money, settle in stablecoins. The checkboxes are the three legs, not three names for Stripe.
+
+<br />
+
+**Failure:** describing the whole product as "we use Stripe" when the hard parts are issuing, ledgering, and the on/off-ramp.
+
+<br />
+
+---
+
+## 6. What "direct experience" means
+
+The form is asking which **product domains** you have owned, not which logos you imported.
+
+<br />
+
+| What you built | Check |
+| --- | --- |
+| Payment Intents, Checkout, Billing, Connect, refunds, webhooks, a ledger | Payments |
+| Stripe Issuing, Marqeta, Galileo, Lithic, in-house Visa/Mastercard | Cards |
+| Wallets, stablecoins, custody, on/off-ramps, on-chain settlement | Crypto |
+| Stripe.js / Checkout only | Payments, and say how thin |
+| Membership "digital card," Shopify Payments you did not own | None of these |
+
+<br />
+
+- **Payments** if you owned the money flow: intents, failed states, refunds, disputes, idempotency, webhook reconciliation. A hosted Checkout drop-in is payments, but thin — say so.
+- **Cards** only if you issued. Accepting Visa through a PSP is acquiring. A loyalty QR is not a card program.
+- **Crypto** only if value moved on-chain or you owned the ramp. Reading a tutorial about ERC-20 is not the domain.
+
+<br />
+
+**Failure:** checking all three because a storefront charged a credit card. Screening questions are cheap to verify in the first interview.
+
+<br />
+
+---
+
+## Takeaways
+
+- **Payments** move a claim. The ledger is yours; the PSP is a side effect you reconcile.
+- **Cards** means issuing or acquiring, and they are opposite sides of the network. Checkout is acquiring.
+- **Crypto** is a different settlement layer. Custody and the fiat bridge are the product; the transfer is not.
+- The three compose. A stablecoin corporate card is not "Stripe plus a wallet."
+- Check the box you can defend in a screen. Stripe Checkout is payments. It is not cards. It is not crypto.
+
+<br />
+
+---
+
+## Recap Q&A
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="money-domains">
+    <AccordionTrigger>1. Why are cards, payments, and crypto three domains instead of one stack?</AccordionTrigger>
+    <AccordionContent>
+
+      - **Payments** move a claim on existing money. **Cards** are a network product with an issuer and an acquirer. **Crypto** settles on a different ledger.
+      - A rail is who moves the claim. A ledger is your record of who is owed what. The UI is neither.
+      - **Issuing** creates a card. **Acquiring** accepts one. Same word; opposite businesses.
+      - **Failure:** treating "fintech" or "I used Stripe" as one skill that covers all three.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="money-payments">
+    <AccordionTrigger>2. What is a payment, and where does Stripe Checkout sit?</AccordionTrigger>
+    <AccordionContent>
+
+      - A payment is an instruction to move value and to stay consistent when it fails, retries, or reverses: **authorize → capture → settle**, then refund or dispute.
+      - Your **ledger** records the intent first. The PSP is a side effect. Timeouts are not nacks. **Idempotency keys** and signed, de-duplicated **webhooks** are the write path.
+      - Stripe Payment Intents, Checkout, Billing, and Connect are **payments**. You accepted a card. You did not issue one.
+      - **Failure:** trusting the redirect query string, or incrementing a balance on every webhook retry.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="money-cards">
+    <AccordionTrigger>3. What does "cards" mean, and when does Stripe count?</AccordionTrigger>
+    <AccordionContent>
+
+      - A card is a **PAN** an **issuer** stands behind, that an **acquirer** accepts, that Visa or Mastercard routes. Authorization, clearing, and settlement are different events.
+      - **Issuing** is PANs, cardholders, spend controls, auth messages. **Acquiring** is taking those PANs at a merchant.
+      - Stripe **Issuing** counts. Stripe Elements and Checkout do not. A membership "digital card" does not.
+      - **Failure:** checking cards because a customer paid with Visa through Stripe.js. The issuer is someone else's bank.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="money-crypto">
+    <AccordionTrigger>4. What makes crypto a different domain from a card capture?</AccordionTrigger>
+    <AccordionContent>
+
+      - A **token** is a claim on a chain. A **stablecoin** is a token meant to stay worth one fiat unit. **Custody** is who can sign. The **on/off-ramp** is the bank bridge.
+      - Finality is confirmations, not card T+N. There is no chargeback in the card-network sense. Irreversible is the product and the risk.
+      - The transfer is easy. The hard part is mint/redeem, travel-rule data, and making fiat and token ledgers agree.
+      - Wallets and ERC-20 are [Blockchain Fundamentals](/notes/blockchain-fundamentals-wallets-contracts-tokens-dapps). Stripe is not this domain.
+      - **Failure:** treating a token balance as a bank balance, or an on-chain transfer as a refundable capture.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="money-screen">
+    <AccordionTrigger>5. How do the three compose, and what should you check on a screening form?</AccordionTrigger>
+    <AccordionContent>
+
+      - A corporate card that settles in stablecoins is **all three**: KYC as the gate, an issued card for spend, a payment rail or token transfer behind it.
+      - Check **payments** if you owned intents, refunds, webhooks, and a ledger. Check **cards** only if you issued. Check **crypto** only if value moved on-chain or you owned the ramp.
+      - Stripe Checkout alone is payments — and thin if you never owned webhooks. Shopify Payments you did not own is none of these.
+      - **Failure:** checking all three because a storefront charged a credit card. The first interview will ask which side of the network you were on.
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>
