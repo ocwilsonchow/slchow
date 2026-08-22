@@ -1,0 +1,352 @@
+---
+title: Vercel Eve
+description: 關於 eve 的筆記：Vercel 以 filesystem 為先的 durable backend agent framework — tools、skills、sandboxes，以及它與 Mastra 的取捨
+date: 2026-08-13
+---
+
+**eve** 是一套 open-source、filesystem-first 的 framework，用來寫 durable backend AI agents。你用一個 directory 的 files 來 author agent。Markdown 是 always-on prompt 與 on-demand playbooks。TypeScript 是 typed actions。framework 會發現這些 files、compile 它們，然後跑一個能撐過 crashes、deploys 與 long pauses 的 session。
+
+這不是 [Vercel Agent](https://vercel.com/docs/agent)，那個用來 review pull requests 與 investigate incidents 的 platform product。eve 是你自己寫、自己 deploy 的 framework。Vercel Agent 是看你 repo 與 runtime 的 service。
+
+我的簡短結論：
+
+- 當 agent _本身_ 就是產品時，選 **eve**：durable session，帶 files、tools、sandbox 與 channels。
+- 當 agent 只是更廣 TypeScript application 裡的一個 primitive，旁邊還有 workflows、RAG 與 Studio 時，選 **Mastra**。
+- 投入之前，先驗證 **durability、sandbox isolation 與 host**。這些是事後補最貴的部分。
+
+<br />
+
+---
+
+## 1. What Eve Is
+
+如果你用過 Next.js，這個 pitch 會很熟：convention over registration。把 file 放到對的 folder，runtime 就知道它是什麼。一個 `instructions.md` 就夠跑起 agent。其他 slot 在 agent 真正需要時再加。
+
+```bash
+npx eve@latest init my-agent
+```
+
+scaffold 需要 Node.js 24 或更新。預設 model 走 [AI Gateway](https://vercel.com/docs/ai-gateway)。設 `AI_GATEWAY_API_KEY`，或 link 一個 Vercel project 用 OIDC。你也可以裝 AI SDK provider package，直接打那個 provider。
+
+同一棵 authored tree 可以跑在三個地方：
+
+| Host | 誰跑 loop | session 存在哪 |
+| ---- | ------------------ | ------------------------- |
+| Local `eve` / `npm run dev` | Nitro-hosted workflow routes | Disk，路徑 `.eve/.workflow-data` |
+| Vercel | [Vercel Functions](https://vercel.com/docs/functions) 搭配 Fluid Compute | [Vercel Workflows](https://vercel.com/docs/workflows) |
+| Self-hosted Node | `.output/` 底下的 Nitro server | Workflow world，例如 `@workflow/world-postgres` |
+
+agent loop 住在 app runtime。Model calls、authored tools、hooks 與 connection clients 都在那裡跑，有完整 Node.js access，包括 `process.env`。Isolated filesystem 與 process 工作，只在 loop 需要時才打開 sandbox。
+
+這道 split 是我在意的部分。Credentials 留在 trusted code。model 拿到真正的 filesystem 與 shell，但兩者都不歸它擁有。
+
+<br />
+
+---
+
+## 2. The Filesystem as the API
+
+Identity 來自 path。你不會在 `define*` call 上寫 `name` 或 `id`。`agent/tools/get_weather.ts` 就是 tool `get_weather`。subagent 的 directory name 就是 subagent name。root agent 的名字來自 `package.json`。
+
+```text
+my-agent/
+├── package.json
+├── agent/
+│   ├── agent.ts              # optional: model and runtime config
+│   ├── instructions.md       # required: always-on system prompt
+│   ├── tools/                # typed actions the model can call
+│   ├── skills/               # procedures loaded on demand
+│   ├── sandbox/              # isolated compute and seeded files
+│   ├── channels/             # HTTP, Slack, Discord, …
+│   ├── connections/          # MCP and OpenAPI services
+│   ├── schedules/            # cron jobs
+│   └── subagents/            # child agents with their own slots
+└── evals/                    # beside agent/, not inside it
+```
+
+一個最小的 agent：
+
+```md
+# Identity
+
+You are an expert weather assistant.
+You can fetch the weather for any city in the world.
+```
+
+Runtime config 是 optional。要選 model，或改 compaction、build、experimental settings 時，再加 `agent/agent.ts`：
+
+```ts
+import { defineAgent } from "eve"
+
+export default defineAgent({
+  model: "anthropic/claude-sonnet-5",
+})
+```
+
+字串 model ID 走 AI Gateway。provider-authored model 用那個 provider 的 package 與 API key。
+
+file 沒被發現時跑 `eve info`。它會印 compiled surface，以及 root-versus-subagent boundary。可檢查的 artifacts 也會落到 `.eve/`。
+
+<br />
+
+---
+
+## 3. Durable Sessions
+
+工作分成三層：
+
+1. **session** 是 durable conversation 或 task。可以活好幾天。
+2. **turn** 是一則 user message，以及它觸發的所有工作，直到 agent 回覆。
+3. **step** 是 turn 裡的 checkpoint：一次 model call 與它發出的 tool calls。
+
+每個 turn 都是 durable workflow，建立在 open-source [Workflow SDK](https://workflow-sdk.dev/) 上。在 Vercel 就是 Vercel Workflows。進度是 event log。已完成的 steps 不會重跑；eve 重播 recorded result。執行到一半被打斷的 step 會重跑，所以 charges、emails 與其他 side effects 必須 idempotent，或用 approval 閘住。
+
+你不用自己寫 workflow code。Channels、tools 與 hooks 從不呼叫 `start()` 或 `resumeHook()`。Tools 透過 `ctx.session` 讀 session metadata。authored durable memory 走 `defineState`。
+
+有些工作必須等：人批准一個 tool、OAuth sign-in、跑很久的 subagent。turn 會 **park**。workflow suspend，在 input 到達之前不佔 compute，然後從那個 boundary resume。session 在等的時候，sandbox 可以釋放。
+
+production deployment 變更會在下一次 model turn 被撿起來。Conversation history 與 authored state 留在 session 上，所以 Telegram chat 或電話號碼不必開新 session 才能看到更新後的 instructions 與 tools。
+
+self-hosted persistence 在 `agent.ts` 選 Workflow world：
+
+```ts
+import { defineAgent } from "eve"
+
+export default defineAgent({
+  model: "anthropic/claude-opus-4.8",
+  experimental: {
+    workflow: {
+      world: "@workflow/world-postgres",
+    },
+  },
+})
+```
+
+secrets 放在那個 package 讀的 environment variables，不要寫進 `agent.ts`。
+
+<br />
+
+---
+
+## 4. Skills, Tools, and the Sandbox
+
+這三個 slots 在口頭上很容易混在一起，在 production 裡搞混卻很貴。
+
+### Tools
+
+tool 是 **app runtime** 裡的 typed action。它可以打 API、讀 `process.env`、import `lib/`，並參與 pause 與 resume。它不在 sandbox 裡跑。
+
+filename 就是 tool name。不用 registration。
+
+```ts
+import { defineTool } from "eve/tools"
+import { z } from "zod"
+
+export default defineTool({
+  description: "Get the current weather for a city.",
+  inputSchema: z.object({ city: z.string().min(1) }),
+  async execute({ city }) {
+    return { city, condition: "Sunny", temperatureF: 72 }
+  },
+})
+```
+
+敏感 tool 用 approval 閘住，turn 會 park 到有人簽字：
+
+```ts
+import { defineTool } from "eve/tools"
+import { always } from "eve/tools/approval"
+import { z } from "zod"
+
+export default defineTool({
+  description: "Refund a charge.",
+  inputSchema: z.object({ chargeId: z.string(), amount: z.number() }),
+  approval: always(),
+  async execute(input) {
+    return refund(input)
+  },
+})
+```
+
+`toModelOutput` 可以縮小 model 看到的內容，channels 仍然拿到完整 result。Tool outputs 必須 JSON-serializable。不要 return secrets。
+
+### Skills
+
+skill 是 model 在 turn 需要時用 `load_skill` 載入的 procedure。description 是 routing hint。body 不會出現在每個 prompt。
+
+```md
+---
+description: Research unfamiliar topics before answering with confidence.
+---
+
+When the task is novel or ambiguous, gather evidence first, then answer with the
+key facts and the remaining uncertainty.
+```
+
+載入 skill 加的是 instructions，不是新的 execution surface。無論 skill 有沒有載入，tools 都還在。typed runtime behavior 屬於 tool。
+
+### Sandbox
+
+每個 agent 都有一個 sandbox：isolated、bash-style 的環境，有自己的 filesystem。Framework tools 如 `bash`、`read_file`、`write_file`、`glob`、`grep` 打的是它。authored tools 透過 `ctx.getSandbox()` 碰到它。
+
+在 Vercel，backend 是 [Vercel Sandbox](https://vercel.com/docs/sandbox)。本地預設是 Docker。`agent/sandbox/workspace/**` 在 session 開始時 seed 到 `/workspace`。需要 supporting files 的 skills 會落到 `$HOME/.agents/skills/`。
+
+sandbox path 本身不是 security boundary。Isolation 保護的是 host。它防不了 prompt injection、secret exfiltration、runaway cost，或 cross-user leakage。Provider keys 與 connection credentials 留在 app runtime。當 sandbox code 需要 authenticated network access 時，應該用 credential brokering 處理 request，不要把 secret 暴露給 process。
+
+<br />
+
+---
+
+## 5. Channels and Next.js
+
+**channel** 是工作進入 session 的方式：HTTP、Slack、Discord、cron、CLI，或 custom app。Channels 只屬於 root。Subagents 不能 author 它們。
+
+同一份 agent codebase 可以掛在多個 surfaces 後面。schedule 是 `defineSchedule` module，或帶 `cron` frontmatter 的 markdown prompt。在 Vercel，authored schedules 會變成 Cron Jobs。
+
+對 Next.js app，wrap config，讓 agent 與 UI 共用同一個 origin：
+
+```ts
+import type { NextConfig } from "next"
+import { withEve } from "eve/next"
+
+const nextConfig: NextConfig = {}
+
+export default withEve(nextConfig)
+```
+
+`useEveAgent()` 自己會找到 `/eve/v1/*`。不用設 CORS，也不用維護 URL env var。
+
+```tsx
+"use client"
+
+import { useEveAgent } from "eve/react"
+
+export function Chat() {
+  const agent = useEveAgent()
+  const isBusy = agent.status === "submitted" || agent.status === "streaming"
+
+  return (
+    <form
+      onSubmit={(event) => {
+        event.preventDefault()
+        const form = new FormData(event.currentTarget)
+        const message = String(form.get("message") ?? "").trim()
+        if (message.length > 0) {
+          void agent.send(message)
+        }
+      }}
+    >
+      {agent.data.messages.map((message) => (
+        <article key={message.id}>
+          <header>{message.role}</header>
+          {message.parts.map((part, index) =>
+            part.type === "text" ? <p key={index}>{part.text}</p> : null
+          )}
+        </article>
+      ))}
+      <input name="message" disabled={isBusy} />
+      <button disabled={isBusy} type="submit">
+        Send
+      </button>
+    </form>
+  )
+}
+```
+
+預設 eve channel 是 fail closed。沒有 authored `agent/channels/eve.ts` 時，production browser traffic 會拿到 `401`。加一個驗證 application session 的 `AuthFn`。`none()` 只適合 public demo。
+
+`stop()` 中止的是 client stream。server-side turn 繼續跑。取消 turn 是另一條 session route。若 UI 要在 reload 後 resume，persist `session` cursor（`sessionId`、`streamIndex`）。
+
+<br />
+
+---
+
+## 6. Production on Vercel vs Self-Host
+
+eve 在 authored-tree 這一層是 portable 的。host 仍然決定 workflow storage、sandbox backend 與 routing。
+
+| Requirement | Vercel | Self-host |
+| ----------- | ------ | --------- |
+| Build output | `.vercel/output` | `.output/` 底下的 Nitro server |
+| Workflows | Vercel Workflow | Local world 或 `@workflow/world-postgres` |
+| Sandbox | Vercel Sandbox | Docker、microsandbox，或 custom |
+| Models | AI Gateway，搭配 OIDC 或 `AI_GATEWAY_API_KEY` | Gateway key 或 provider packages |
+| Observability | Vercel dashboard 的 Agent Runs | `instrumentation.ts` 的 OTel |
+| Connections | [Vercel Connect](https://vercel.com/docs/connect) 加上 authored MCP/OpenAPI | 你自己 operate 的 authored connections |
+
+每次 production deploy 仍然要：
+
+1. 跑 `eve build`。
+2. 提供 model credentials 與 tool secrets。
+3. 接受 browser traffic 之前換掉 `placeholderAuth()`。
+4. 選與 host 匹配的 workflow 與 sandbox implementations。
+5. 打 `/eve/v1/health`，並完成一次真正的 turn。
+
+```bash
+curl https://your_agent.example.com/eve/v1/health
+eve dev https://your_agent.example.com
+```
+
+在 Vercel，Fluid Compute 是長、streaming turns 的正確預設。像 `openai/gpt-5.4-mini` 這種 model strings 會經 AI Gateway resolve，OIDC 連好之後就不必在 project 裡管 provider keys。
+
+Self-hosting 是真的，不是註腳。換 workflow world 與 sandbox backend，就可以用 Postgres-backed durability 與 Docker 跑，不必依賴 managed Vercel services。那之後 queues、credentials，以及這些 adapters 的健康，都是你的。
+
+<br />
+
+---
+
+## 7. How I Would Choose
+
+這個 site 已經用 [Mastra](/notes/mastra-vs-langchain-deep-agents) 跑 agents、workflows 與 local Studio。eve 的重心不同：agent 是一個可 deploy 的 directory，預設就 durable，sandbox 與 channels 是 first-class slots。
+
+<Accordion type="multiple">
+  <AccordionItem value="eve">
+    <AccordionTrigger>Choose eve when</AccordionTrigger>
+    <AccordionContent>
+      - 主要 artifact 是 durable agent，而不是裡面塞了一個 agent 的
+      application - Markdown instructions 與 skills 應該能當 files 來檢查 -
+      sessions 必須能為 approval 或 OAuth park，稍後再 resume - agent 需要真正的
+      sandbox、多個 channels，或 Vercel-native Workflow / Sandbox / Gateway -
+      你希望 Next.js、Nuxt 或 SvelteKit 把 agent mount 在同一個 origin
+    </AccordionContent>
+  </AccordionItem>
+  <AccordionItem value="mastra">
+    <AccordionTrigger>Choose Mastra when</AccordionTrigger>
+    <AccordionContent>
+      - agents 旁邊是 deterministic workflows、RAG、scorers 與 API routes -
+      team 想要一套 TypeScript programming model 與 local Studio -
+      tenant-aware memory、vector stores 與 application deployment adapters
+      比 filesystem-authored agent tree 更重要
+    </AccordionContent>
+  </AccordionItem>
+  <AccordionItem value="deep-agents">
+    <AccordionTrigger>Choose Deep Agents when</AccordionTrigger>
+    <AccordionContent>
+      - team 已經在用 LangChain、LangGraph 或 LangSmith - graph state、
+      middleware 與 hybrid LangSmith topologies 需要深度 customization -
+      agent 是應該插進那個 ecosystem 的 autonomous harness
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>
+
+<br />
+
+| Need | Default |
+| ---- | ------- |
+| Filesystem-authored durable agent | eve |
+| Vercel Workflow、Sandbox 與 AI Gateway 當 host | eve |
+| 同一個 origin 上、走 `/eve/v1` 的 Next.js chat | eve |
+| Deterministic business workflows | Mastra |
+| Conventional application memory 與 RAG | Mastra |
+| LangGraph checkpointers 與 LangSmith operations | Deep Agents |
+| 帶 virtual filesystem 的 coding 或 research agent | eve 或 Deep Agents；先比 sandbox 與 host |
+
+沒有 universal winner。eve 優化的是 **agent as a directory**。Mastra 優化的是 **AI application**。Deep Agents 優化的是 **LangChain harness**。
+
+先 prototype 之後會痛的需求：approval 的 park 與 resume、deploy 中途重連、sandbox 一條不該看到 production secrets 的 command，以及給 HTTP channel 上真正的 auth policy。用最少 hidden assumptions 通過這項測試的 framework，才是比較好的選擇。
+
+<br />
+
+---
+
+最新細節見 [eve.dev](https://eve.dev/)、[Getting Started](https://eve.dev/docs)、[Execution Model and Durability](https://eve.dev/docs/concepts/execution-model-and-durability)、[Tools](https://eve.dev/docs/tools)、[Skills](https://eve.dev/docs/skills)、[Next.js](https://eve.dev/docs/guides/frontend/nextjs)，以及 [Deployment](https://eve.dev/docs/guides/deployment/overview)。Vercel 的 host-specific 說明在 [vercel.com/docs/eve](https://vercel.com/docs/eve)。原始碼在 [github.com/vercel/eve](https://github.com/vercel/eve)。

@@ -1,0 +1,353 @@
+---
+title: Vercel Eve
+description: Notes on eve, Vercel’s filesystem-first framework for durable backend agents — tools, skills, sandboxes, and how it compares to Mastra
+date: 2026-08-13
+---
+
+**eve** is an open-source, filesystem-first framework for durable backend AI agents. You author an agent as a directory of files. Markdown is the always-on prompt and the on-demand playbooks. TypeScript is the typed actions. The framework discovers those files, compiles them, and runs a session that can survive crashes, deploys, and long pauses.
+
+This is not [Vercel Agent](https://vercel.com/docs/agent), the platform product that reviews pull requests and investigates incidents. eve is a framework you write and deploy. Vercel Agent is a service that looks at your repo and runtime.
+
+My short conclusion:
+
+- Choose **eve** when the agent _is_ the product: a durable session with files, tools, a sandbox, and channels.
+- Choose **Mastra** when the agent is one primitive inside a wider TypeScript application with workflows, RAG, and Studio.
+- Validate **durability, sandbox isolation, and the host** before committing. Those are the parts that are expensive to retrofit.
+
+<br />
+
+---
+
+## 1. What Eve Is
+
+The pitch is familiar if you have used Next.js: convention over registration. Drop a file in the right folder and the runtime knows what it is. An `instructions.md` file is enough to run an agent. Everything else is optional until the agent needs it.
+
+```bash
+npx eve@latest init my-agent
+```
+
+The scaffold needs Node.js 24 or newer. The default model routes through [AI Gateway](https://vercel.com/docs/ai-gateway). Set `AI_GATEWAY_API_KEY`, or link a Vercel project and use OIDC. You can also install an AI SDK provider package and call that provider directly.
+
+eve runs in three places with the same authored tree:
+
+| Host | What runs the loop | What persists the session |
+| ---- | ------------------ | ------------------------- |
+| Local `eve` / `npm run dev` | Nitro-hosted workflow routes | Disk under `.eve/.workflow-data` |
+| Vercel | [Vercel Functions](https://vercel.com/docs/functions) with Fluid Compute | [Vercel Workflows](https://vercel.com/docs/workflows) |
+| Self-hosted Node | Nitro server under `.output/` | A Workflow world such as `@workflow/world-postgres` |
+
+The agent loop lives in the app runtime. Model calls, authored tools, hooks, and connection clients run there with full Node.js access, including `process.env`. Isolated filesystem and process work happens in a sandbox the loop opens only when it needs it.
+
+That split is the part I care about. Credentials stay in trusted code. The model gets a real filesystem and shell without owning either.
+
+<br />
+
+---
+
+## 2. The Filesystem as the API
+
+Identity comes from the path. You do not write a `name` or `id` on a `define*` call. `agent/tools/get_weather.ts` is the tool `get_weather`. A subagent’s directory name is the subagent name. The root agent takes its name from `package.json`.
+
+```text
+my-agent/
+├── package.json
+├── agent/
+│   ├── agent.ts              # optional: model and runtime config
+│   ├── instructions.md       # required: always-on system prompt
+│   ├── tools/                # typed actions the model can call
+│   ├── skills/               # procedures loaded on demand
+│   ├── sandbox/              # isolated compute and seeded files
+│   ├── channels/             # HTTP, Slack, Discord, …
+│   ├── connections/          # MCP and OpenAPI services
+│   ├── schedules/            # cron jobs
+│   └── subagents/            # child agents with their own slots
+└── evals/                    # beside agent/, not inside it
+```
+
+A minimal agent:
+
+```md
+# Identity
+
+You are an expert weather assistant.
+You can fetch the weather for any city in the world.
+```
+
+Runtime config is optional. Add `agent/agent.ts` when you want to choose a model or change compaction, build, or experimental settings:
+
+```ts
+import { defineAgent } from "eve"
+
+export default defineAgent({
+  model: "anthropic/claude-sonnet-5",
+})
+```
+
+A string model ID goes through AI Gateway. A provider-authored model uses that provider’s package and API key.
+
+Run `eve info` when a file is not discovered. It prints the compiled surface and the root-versus-subagent boundary. Inspectable artifacts also land under `.eve/`.
+
+<br />
+
+---
+
+## 3. Durable Sessions
+
+Work nests in three levels:
+
+1. A **session** is the durable conversation or task. It can last days.
+2. A **turn** is one user message and everything it triggers until the agent replies.
+3. A **step** is a checkpoint inside a turn: one model call and the tool calls it makes.
+
+Every turn runs as a durable workflow, built on the open-source [Workflow SDK](https://workflow-sdk.dev/). On Vercel that is Vercel Workflows. Progress is an event log. Completed steps never re-run; eve replays the recorded result. A step interrupted mid-execution re-runs, so charges, emails, and other side effects need to be idempotent or gated with approval.
+
+You do not write workflow code. Channels, tools, and hooks never call `start()` or `resumeHook()`. Tools read session metadata through `ctx.session`. Authored durable memory goes through `defineState`.
+
+Some work has to wait: a human approving a tool, an OAuth sign-in, a long-running subagent. The turn **parks**. The workflow suspends and holds no compute until the input arrives, then resumes from that boundary. The sandbox can be released while the session waits.
+
+A production deployment change is picked up on the next model turn. Conversation history and authored state stay on the session, so a Telegram chat or a phone number does not need a new session to see updated instructions and tools.
+
+For self-hosted persistence, select a Workflow world in `agent.ts`:
+
+```ts
+import { defineAgent } from "eve"
+
+export default defineAgent({
+  model: "anthropic/claude-opus-4.8",
+  experimental: {
+    workflow: {
+      world: "@workflow/world-postgres",
+    },
+  },
+})
+```
+
+Keep secrets in environment variables read by that package, not in `agent.ts`.
+
+<br />
+
+---
+
+## 4. Skills, Tools, and the Sandbox
+
+These three slots are easy to collapse in conversation and expensive to confuse in production.
+
+### Tools
+
+A tool is a typed action in the **app runtime**. It can hit an API, read `process.env`, import `lib/`, and take part in pause and resume. It does not run in the sandbox.
+
+The filename is the tool name. No registration.
+
+```ts
+import { defineTool } from "eve/tools"
+import { z } from "zod"
+
+export default defineTool({
+  description: "Get the current weather for a city.",
+  inputSchema: z.object({ city: z.string().min(1) }),
+  async execute({ city }) {
+    return { city, condition: "Sunny", temperatureF: 72 }
+  },
+})
+```
+
+Gate a sensitive tool with approval so the turn parks until a person signs off:
+
+```ts
+import { defineTool } from "eve/tools"
+import { always } from "eve/tools/approval"
+import { z } from "zod"
+
+export default defineTool({
+  description: "Refund a charge.",
+  inputSchema: z.object({ chargeId: z.string(), amount: z.number() }),
+  approval: always(),
+  async execute(input) {
+    return refund(input)
+  },
+})
+```
+
+`toModelOutput` can shrink what the model sees while channels still receive the full result. Tool outputs must be JSON-serializable. Do not return secrets.
+
+### Skills
+
+A skill is a procedure the model loads with `load_skill` when the turn needs it. The description is a routing hint. The body is not in every prompt.
+
+```md
+---
+description: Research unfamiliar topics before answering with confidence.
+---
+
+When the task is novel or ambiguous, gather evidence first, then answer with the
+key facts and the remaining uncertainty.
+```
+
+Loading a skill adds instructions, not a new execution surface. Tools stay visible whether a skill is loaded or not. Typed runtime behavior belongs in a tool.
+
+### Sandbox
+
+Every agent has one sandbox: an isolated, bash-style environment with its own filesystem. Framework tools such as `bash`, `read_file`, `write_file`, `glob`, and `grep` target it. Authored tools reach it through `ctx.getSandbox()`.
+
+On Vercel the backend is [Vercel Sandbox](https://vercel.com/docs/sandbox). Locally it is Docker by default. `agent/sandbox/workspace/**` seeds `/workspace` when a session starts. Skills that need supporting files materialize under `$HOME/.agents/skills/`.
+
+A sandbox path is not a security boundary by itself. Isolation protects the host. It does not prevent prompt injection, secret exfiltration, runaway cost, or cross-user leakage. Provider keys and connection credentials stay in the app runtime. When sandbox code needs authenticated network access, credential brokering should handle the request without exposing the secret to the process.
+
+<br />
+
+---
+
+## 5. Channels and Next.js
+
+A **channel** is how work enters a session: HTTP, Slack, Discord, cron, the CLI, or a custom app. Channels are root-only. Subagents do not author them.
+
+The same agent codebase can sit behind several surfaces. A schedule is a `defineSchedule` module or a markdown prompt with `cron` frontmatter. On Vercel, authored schedules become Cron Jobs.
+
+For a Next.js app, wrap the config so the agent and the UI share one origin:
+
+```ts
+import type { NextConfig } from "next"
+import { withEve } from "eve/next"
+
+const nextConfig: NextConfig = {}
+
+export default withEve(nextConfig)
+```
+
+`useEveAgent()` finds `/eve/v1/*` on its own. There is no CORS setup and no URL env var to keep in sync.
+
+```tsx
+"use client"
+
+import { useEveAgent } from "eve/react"
+
+export function Chat() {
+  const agent = useEveAgent()
+  const isBusy = agent.status === "submitted" || agent.status === "streaming"
+
+  return (
+    <form
+      onSubmit={(event) => {
+        event.preventDefault()
+        const form = new FormData(event.currentTarget)
+        const message = String(form.get("message") ?? "").trim()
+        if (message.length > 0) {
+          void agent.send(message)
+        }
+      }}
+    >
+      {agent.data.messages.map((message) => (
+        <article key={message.id}>
+          <header>{message.role}</header>
+          {message.parts.map((part, index) =>
+            part.type === "text" ? <p key={index}>{part.text}</p> : null
+          )}
+        </article>
+      ))}
+      <input name="message" disabled={isBusy} />
+      <button disabled={isBusy} type="submit">
+        Send
+      </button>
+    </form>
+  )
+}
+```
+
+The default eve channel fails closed. Without an authored `agent/channels/eve.ts`, production browser traffic gets `401`. Add an `AuthFn` that verifies the application session. `none()` is only for a public demo.
+
+`stop()` aborts the client stream. The server-side turn keeps running. Cancelling the turn is a separate session route. Persist the `session` cursor (`sessionId`, `streamIndex`) if the UI should resume after a reload.
+
+<br />
+
+---
+
+## 6. Production on Vercel vs Self-Host
+
+eve is portable at the authored-tree level. The host still decides workflow storage, sandbox backend, and routing.
+
+| Requirement | Vercel | Self-host |
+| ----------- | ------ | --------- |
+| Build output | `.vercel/output` | Nitro server under `.output/` |
+| Workflows | Vercel Workflow | Local world or `@workflow/world-postgres` |
+| Sandbox | Vercel Sandbox | Docker, microsandbox, or custom |
+| Models | AI Gateway with OIDC or `AI_GATEWAY_API_KEY` | Gateway key or provider packages |
+| Observability | Agent Runs in the Vercel dashboard | OTel via `instrumentation.ts` |
+| Connections | [Vercel Connect](https://vercel.com/docs/connect) plus authored MCP/OpenAPI | Authored connections you operate |
+
+Every production deploy still has to:
+
+1. Run `eve build`.
+2. Provide model credentials and tool secrets.
+3. Replace `placeholderAuth()` before accepting browser traffic.
+4. Choose workflow and sandbox implementations that match the host.
+5. Hit `/eve/v1/health` and complete a real turn.
+
+```bash
+curl https://your_agent.example.com/eve/v1/health
+eve dev https://your_agent.example.com
+```
+
+On Vercel, Fluid Compute is the right default for long, streaming turns. Model strings such as `openai/gpt-5.4-mini` resolve through AI Gateway, so you do not manage provider keys in the project when OIDC is linked.
+
+Self-hosting is real, not a footnote. Swap the workflow world and the sandbox backend and you can run with Postgres-backed durability and Docker, with no managed Vercel services. You then own queues, credentials, and the health of those adapters.
+
+<br />
+
+---
+
+## 7. How I Would Choose
+
+This site already runs [Mastra](/notes/mastra-vs-langchain-deep-agents) for agents, workflows, and a local Studio. eve occupies a different center of gravity: the agent as a deployable directory, durable by default, with a sandbox and channels as first-class slots.
+
+<Accordion type="multiple">
+  <AccordionItem value="eve">
+    <AccordionTrigger>Choose eve when</AccordionTrigger>
+    <AccordionContent>
+      - the main artifact is a durable agent, not an application with an agent
+      inside it - Markdown instructions and skills should be inspectable as
+      files - sessions must park for approval or OAuth and resume later - the
+      agent needs a real sandbox, several channels, or Vercel-native Workflow /
+      Sandbox / Gateway - you want Next.js, Nuxt, or SvelteKit to mount the
+      agent on the same origin
+    </AccordionContent>
+  </AccordionItem>
+  <AccordionItem value="mastra">
+    <AccordionTrigger>Choose Mastra when</AccordionTrigger>
+    <AccordionContent>
+      - agents sit next to deterministic workflows, RAG, scorers, and API routes
+      - the team wants one TypeScript programming model and local Studio -
+      tenant-aware memory, vector stores, and application deployment adapters
+      matter more than a filesystem-authored agent tree
+    </AccordionContent>
+  </AccordionItem>
+  <AccordionItem value="deep-agents">
+    <AccordionTrigger>Choose Deep Agents when</AccordionTrigger>
+    <AccordionContent>
+      - the team already uses LangChain, LangGraph, or LangSmith - graph state,
+      middleware, and hybrid LangSmith topologies need deep customization - the
+      agent is an autonomous harness that should plug into that ecosystem
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>
+
+<br />
+
+| Need | Default |
+| ---- | ------- |
+| Filesystem-authored durable agent | eve |
+| Vercel Workflow, Sandbox, and AI Gateway as the host | eve |
+| Same-origin Next.js chat on `/eve/v1` | eve |
+| Deterministic business workflows | Mastra |
+| Conventional application memory and RAG | Mastra |
+| LangGraph checkpointers and LangSmith operations | Deep Agents |
+| Coding or research agent with a virtual filesystem | eve or Deep Agents; compare sandbox and host first |
+
+There is no universal winner. eve optimizes the **agent as a directory**. Mastra optimizes the **AI application**. Deep Agents optimizes the **LangChain harness**.
+
+Prototype the requirement that will hurt later: park and resume for approval, reconnect after a deploy mid-turn, sandbox a command that should not see production secrets, and put a real auth policy on the HTTP channel. The framework that passes that test with the fewest hidden assumptions is the better choice.
+
+<br />
+
+---
+
+For current details, see [eve.dev](https://eve.dev/), the [Getting Started](https://eve.dev/docs) guide, [Execution Model and Durability](https://eve.dev/docs/concepts/execution-model-and-durability), [Tools](https://eve.dev/docs/tools), [Skills](https://eve.dev/docs/skills), [Next.js](https://eve.dev/docs/guides/frontend/nextjs), and [Deployment](https://eve.dev/docs/guides/deployment/overview). Vercel’s host-specific notes are at [vercel.com/docs/eve](https://vercel.com/docs/eve). The source is [github.com/vercel/eve](https://github.com/vercel/eve).

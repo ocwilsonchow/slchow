@@ -1,0 +1,353 @@
+---
+title: Vercel Eve
+description: eve のノート。Vercel の filesystem-first な durable backend agent framework — tools、skills、sandboxes、そして Mastra との比較
+date: 2026-08-13
+---
+
+**eve** は durable backend AI agents を書くための open-source、filesystem-first framework。agent は directory の files として author する。Markdown が always-on prompt と on-demand playbooks。TypeScript が typed actions。framework がそれらの files を discover し、compile し、crashes、deploys、long pauses を生き延びる session を走らせる。
+
+これは pull requests を review し incidents を investigate する platform product の [Vercel Agent](https://vercel.com/docs/agent) ではない。eve は自分で書いて deploy する framework。Vercel Agent は repo と runtime を見る service。
+
+短い結論：
+
+- agent _そのもの_ が product のとき **eve**。durable session に files、tools、sandbox、channels が付く。
+- agent が workflows、RAG、Studio を持つ wider TypeScript application の 1 primitive なら **Mastra**。
+- commit する前に **durability、sandbox isolation、host** を validate。後から足すと高い部分である。
+
+<br />
+
+---
+
+## 1. What Eve Is
+
+Next.js を使ったことがあれば pitch は見慣れている：convention over registration。正しい folder に file を置けば runtime が何かを知る。`instructions.md` 1 枚で agent は走る。残りは agent が必要になるまで optional。
+
+```bash
+npx eve@latest init my-agent
+```
+
+scaffold は Node.js 24 以上。default model は [AI Gateway](https://vercel.com/docs/ai-gateway) を通る。`AI_GATEWAY_API_KEY` を置くか、Vercel project を link して OIDC を使う。AI SDK provider package を入れて provider を直接呼ぶこともできる。
+
+同じ authored tree は 3 箇所で走る：
+
+| Host | loop を走らせるもの | session の persistence |
+| ---- | ------------------ | ------------------------- |
+| Local `eve` / `npm run dev` | Nitro-hosted workflow routes | Disk、`.eve/.workflow-data` |
+| Vercel | Fluid Compute 付き [Vercel Functions](https://vercel.com/docs/functions) | [Vercel Workflows](https://vercel.com/docs/workflows) |
+| Self-hosted Node | `.output/` の Nitro server | `@workflow/world-postgres` などの Workflow world |
+
+agent loop は app runtime に住む。Model calls、authored tools、hooks、connection clients はそこで走り、`process.env` を含む full Node.js access を持つ。Isolated filesystem と process の仕事は、loop が必要になったときだけ sandbox を開く。
+
+この split が大事な点。Credentials は trusted code に残る。model は本物の filesystem と shell を得るが、どちらも所有しない。
+
+<br />
+
+---
+
+## 2. The Filesystem as the API
+
+Identity は path から来る。`define*` call に `name` や `id` は書かない。`agent/tools/get_weather.ts` は tool `get_weather`。subagent の directory name が subagent name。root agent の名前は `package.json` から来る。
+
+```text
+my-agent/
+├── package.json
+├── agent/
+│   ├── agent.ts              # optional: model and runtime config
+│   ├── instructions.md       # required: always-on system prompt
+│   ├── tools/                # typed actions the model can call
+│   ├── skills/               # procedures loaded on demand
+│   ├── sandbox/              # isolated compute and seeded files
+│   ├── channels/             # HTTP, Slack, Discord, …
+│   ├── connections/          # MCP and OpenAPI services
+│   ├── schedules/            # cron jobs
+│   └── subagents/            # child agents with their own slots
+└── evals/                    # beside agent/, not inside it
+```
+
+最小の agent：
+
+```md
+# Identity
+
+You are an expert weather assistant.
+You can fetch the weather for any city in the world.
+```
+
+Runtime config は optional。model を選ぶ、compaction、build、experimental settings を変えるときに `agent/agent.ts` を足す：
+
+```ts
+import { defineAgent } from "eve"
+
+export default defineAgent({
+  model: "anthropic/claude-sonnet-5",
+})
+```
+
+string model ID は AI Gateway を通る。provider-authored model はその provider の package と API key を使う。
+
+file が discover されないときは `eve info` を走る。compiled surface と root-versus-subagent boundary を出す。inspectable artifacts も `.eve/` に落ちる。
+
+<br />
+
+---
+
+## 3. Durable Sessions
+
+仕事は 3 層にネストする：
+
+1. **session** は durable conversation または task。数日続き得る。
+2. **turn** は 1 つの user message と、agent が返事するまでにそれが起こすすべての仕事。
+3. **step** は turn 内の checkpoint：1 回の model call とそれが出す tool calls。
+
+各 turn は durable workflow として走り、open-source [Workflow SDK](https://workflow-sdk.dev/) の上に乗る。Vercel 上では Vercel Workflows。進捗は event log。完了した steps は再実行されない。eve は recorded result を replay する。実行途中で中断された step は再実行されるので、charges、emails、その他の side effects は idempotent にするか approval で gate する。
+
+workflow code は自分で書かない。Channels、tools、hooks は `start()` や `resumeHook()` を呼ばない。Tools は `ctx.session` で session metadata を読む。authored durable memory は `defineState`。
+
+待つ仕事がある：tool の human approval、OAuth sign-in、長い subagent。turn は **park** する。workflow は suspend し、input が来るまで compute を持たず、その boundary から resume する。session が待っているあいだ sandbox は解放できる。
+
+production deployment の変更は次の model turn で拾われる。Conversation history と authored state は session に残るので、Telegram chat や電話番号は新しい session なしで更新された instructions と tools を見る。
+
+self-hosted persistence は `agent.ts` で Workflow world を選ぶ：
+
+```ts
+import { defineAgent } from "eve"
+
+export default defineAgent({
+  model: "anthropic/claude-opus-4.8",
+  experimental: {
+    workflow: {
+      world: "@workflow/world-postgres",
+    },
+  },
+})
+```
+
+secrets はその package が読む environment variables に置き、`agent.ts` には書かない。
+
+<br />
+
+---
+
+## 4. Skills, Tools, and the Sandbox
+
+この 3 つの slots は会話では混ざりやすく、production で混同すると高い。
+
+### Tools
+
+tool は **app runtime** の typed action。API を叩き、`process.env` を読み、`lib/` を import し、pause と resume に参加できる。sandbox では走らない。
+
+filename が tool name。registration は不要。
+
+```ts
+import { defineTool } from "eve/tools"
+import { z } from "zod"
+
+export default defineTool({
+  description: "Get the current weather for a city.",
+  inputSchema: z.object({ city: z.string().min(1) }),
+  async execute({ city }) {
+    return { city, condition: "Sunny", temperatureF: 72 }
+  },
+})
+```
+
+sensitive な tool は approval で gate し、人が承認するまで turn を park する：
+
+```ts
+import { defineTool } from "eve/tools"
+import { always } from "eve/tools/approval"
+import { z } from "zod"
+
+export default defineTool({
+  description: "Refund a charge.",
+  inputSchema: z.object({ chargeId: z.string(), amount: z.number() }),
+  approval: always(),
+  async execute(input) {
+    return refund(input)
+  },
+})
+```
+
+`toModelOutput` は model が見る内容を小さくでき、channels は full result を受け取る。Tool outputs は JSON-serializable でなければならない。secrets を return しない。
+
+### Skills
+
+skill は turn が必要としたときに model が `load_skill` で載せる procedure。description は routing hint。body はすべての prompt には入らない。
+
+```md
+---
+description: Research unfamiliar topics before answering with confidence.
+---
+
+When the task is novel or ambiguous, gather evidence first, then answer with the
+key facts and the remaining uncertainty.
+```
+
+skill の load は instructions を足すだけで、新しい execution surface は足さない。skill の有無に関係なく tools は見える。typed runtime behavior は tool に置く。
+
+### Sandbox
+
+各 agent は 1 つの sandbox を持つ：isolated、bash-style の環境で独自 filesystem がある。`bash`、`read_file`、`write_file`、`glob`、`grep` などの framework tools はそれを対象にする。authored tools は `ctx.getSandbox()` で到達する。
+
+Vercel 上の backend は [Vercel Sandbox](https://vercel.com/docs/sandbox)。local の default は Docker。`agent/sandbox/workspace/**` は session 開始時に `/workspace` へ seed される。supporting files が必要な skills は `$HOME/.agents/skills/` に実体化する。
+
+sandbox path 自体は security boundary ではない。Isolation が守るのは host。prompt injection、secret exfiltration、runaway cost、cross-user leakage は防げない。Provider keys と connection credentials は app runtime に残す。sandbox code が authenticated network access を必要とするときは、credential brokering が request を扱い、secret を process に晒さない。
+
+<br />
+
+---
+
+## 5. Channels and Next.js
+
+**channel** は仕事が session に入る経路：HTTP、Slack、Discord、cron、CLI、または custom app。Channels は root-only。Subagents は author できない。
+
+同じ agent codebase を複数の surfaces の後ろに置ける。schedule は `defineSchedule` module、または `cron` frontmatter 付き markdown prompt。Vercel では authored schedules が Cron Jobs になる。
+
+Next.js app では config を wrap し、agent と UI が同じ origin を共有する：
+
+```ts
+import type { NextConfig } from "next"
+import { withEve } from "eve/next"
+
+const nextConfig: NextConfig = {}
+
+export default withEve(nextConfig)
+```
+
+`useEveAgent()` は `/eve/v1/*` を自分で見つける。CORS の設定も、同期し続ける URL env var もない。
+
+```tsx
+"use client"
+
+import { useEveAgent } from "eve/react"
+
+export function Chat() {
+  const agent = useEveAgent()
+  const isBusy = agent.status === "submitted" || agent.status === "streaming"
+
+  return (
+    <form
+      onSubmit={(event) => {
+        event.preventDefault()
+        const form = new FormData(event.currentTarget)
+        const message = String(form.get("message") ?? "").trim()
+        if (message.length > 0) {
+          void agent.send(message)
+        }
+      }}
+    >
+      {agent.data.messages.map((message) => (
+        <article key={message.id}>
+          <header>{message.role}</header>
+          {message.parts.map((part, index) =>
+            part.type === "text" ? <p key={index}>{part.text}</p> : null
+          )}
+        </article>
+      ))}
+      <input name="message" disabled={isBusy} />
+      <button disabled={isBusy} type="submit">
+        Send
+      </button>
+    </form>
+  )
+}
+```
+
+default eve channel は fail closed。authored `agent/channels/eve.ts` が無いと、production browser traffic は `401` を受ける。application session を検証する `AuthFn` を足す。`none()` は public demo 専用。
+
+`stop()` は client stream を abort する。server-side turn は走り続ける。turn の cancel は別の session route。reload 後に UI を resume するなら `session` cursor（`sessionId`、`streamIndex`）を persist する。
+
+<br />
+
+---
+
+## 6. Production on Vercel vs Self-Host
+
+eve は authored-tree の層では portable。host が workflow storage、sandbox backend、routing を決める。
+
+| Requirement | Vercel | Self-host |
+| ----------- | ------ | --------- |
+| Build output | `.vercel/output` | `.output/` の Nitro server |
+| Workflows | Vercel Workflow | Local world または `@workflow/world-postgres` |
+| Sandbox | Vercel Sandbox | Docker、microsandbox、または custom |
+| Models | OIDC または `AI_GATEWAY_API_KEY` 付き AI Gateway | Gateway key または provider packages |
+| Observability | Vercel dashboard の Agent Runs | `instrumentation.ts` 経由の OTel |
+| Connections | [Vercel Connect](https://vercel.com/docs/connect) と authored MCP/OpenAPI | 自分で operate する authored connections |
+
+すべての production deploy は次を満たす：
+
+1. `eve build` を走る。
+2. model credentials と tool secrets を用意する。
+3. browser traffic を受ける前に `placeholderAuth()` を置き換える。
+4. host に合う workflow と sandbox implementations を選ぶ。
+5. `/eve/v1/health` を叩き、本物の turn を完了する。
+
+```bash
+curl https://your_agent.example.com/eve/v1/health
+eve dev https://your_agent.example.com
+```
+
+Vercel では Fluid Compute が長く streaming する turns の正しい default。`openai/gpt-5.4-mini` のような model strings は AI Gateway で resolve されるので、OIDC が link されていれば project で provider keys を管理しない。
+
+Self-hosting は脚注ではない。workflow world と sandbox backend を差し替えれば、Postgres-backed durability と Docker で、managed Vercel services なしに走らせられる。そのあと queues、credentials、それらの adapters の健康は自分の責任になる。
+
+<br />
+
+---
+
+## 7. How I Would Choose
+
+この site はすでに [Mastra](/notes/mastra-vs-langchain-deep-agents) で agents、workflows、local Studio を走らせている。eve の重心は違う：agent は deploy できる directory であり、default で durable、sandbox と channels は first-class slots。
+
+<Accordion type="multiple">
+  <AccordionItem value="eve">
+    <AccordionTrigger>eve を選ぶとき</AccordionTrigger>
+    <AccordionContent>
+      - 主な artifact が durable agent であり、中に agent を入れた
+      application ではない - Markdown instructions と skills を files として
+      inspect したい - sessions が approval や OAuth のために park し、後で
+      resume する必要がある - agent が本物の sandbox、複数 channels、または
+      Vercel-native の Workflow / Sandbox / Gateway を必要とする - Next.js、
+      Nuxt、SvelteKit で agent を同じ origin に mount したい
+    </AccordionContent>
+  </AccordionItem>
+  <AccordionItem value="mastra">
+    <AccordionTrigger>Mastra を選ぶとき</AccordionTrigger>
+    <AccordionContent>
+      - agents の隣に deterministic workflows、RAG、scorers、API routes がある
+      - team が 1 つの TypeScript programming model と local Studio を欲しい -
+      tenant-aware memory、vector stores、application deployment adapters が
+      filesystem-authored agent tree より重要
+    </AccordionContent>
+  </AccordionItem>
+  <AccordionItem value="deep-agents">
+    <AccordionTrigger>Deep Agents を選ぶとき</AccordionTrigger>
+    <AccordionContent>
+      - team がすでに LangChain、LangGraph、LangSmith を使っている - graph
+      state、middleware、hybrid LangSmith topologies に深い customization が
+      要る - agent がその ecosystem に挿さる autonomous harness である
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>
+
+<br />
+
+| Need | Default |
+| ---- | ------- |
+| Filesystem-authored durable agent | eve |
+| Vercel Workflow、Sandbox、AI Gateway を host にする | eve |
+| 同じ origin の `/eve/v1` Next.js chat | eve |
+| Deterministic business workflows | Mastra |
+| Conventional application memory と RAG | Mastra |
+| LangGraph checkpointers と LangSmith operations | Deep Agents |
+| virtual filesystem 付き coding または research agent | eve または Deep Agents。先に sandbox と host を比較 |
+
+universal winner はない。eve が最適化するのは **agent as a directory**。Mastra が最適化するのは **AI application**。Deep Agents が最適化するのは **LangChain harness**。
+
+後で痛む要件を先に prototype する：approval の park と resume、deploy 途中の reconnect、production secrets を見るべきでない command の sandbox、HTTP channel 上の本物の auth policy。最も少ない hidden assumptions でそのテストを通る framework が良い選択である。
+
+<br />
+
+---
+
+最新の詳細は [eve.dev](https://eve.dev/)、[Getting Started](https://eve.dev/docs)、[Execution Model and Durability](https://eve.dev/docs/concepts/execution-model-and-durability)、[Tools](https://eve.dev/docs/tools)、[Skills](https://eve.dev/docs/skills)、[Next.js](https://eve.dev/docs/guides/frontend/nextjs)、[Deployment](https://eve.dev/docs/guides/deployment/overview) を参照。Vercel の host-specific な注記は [vercel.com/docs/eve](https://vercel.com/docs/eve)。ソースは [github.com/vercel/eve](https://github.com/vercel/eve)。
