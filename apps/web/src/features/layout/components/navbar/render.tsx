@@ -24,7 +24,13 @@ const PATH_TITLE_KEYS = {
 } as const
 
 type NavItem = {
-  href: "/" | typeof publicResumePath | "/notes" | "/works" | "/design" | "/contact"
+  href:
+    | "/"
+    | typeof publicResumePath
+    | "/notes"
+    | "/works"
+    | "/design"
+    | "/contact"
   labelKey: "home" | "resume" | "notes" | "works" | "designs" | "contact"
   countKey?: "notesCount" | "designsCount"
 }

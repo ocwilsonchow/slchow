@@ -136,7 +136,7 @@ export function ThemeSettings({ className, ...props }: ThemeSettingsProps) {
     <Settings.Root className={className} {...props}>
       <Settings.Label>{t("theme")}</Settings.Label>
       <Settings.List aria-label={t("theme")}>
-        {themeOptions.map((option, index) => (
+        {themeOptions.map((option) => (
           <Fragment key={option.id}>
             <Settings.Option
               selected={theme === option.id}
@@ -195,7 +195,7 @@ export function LanguageSettings({
     <Settings.Root className={className} {...props}>
       <Settings.Label>{t("language")}</Settings.Label>
       <Settings.List aria-label={t("language")}>
-        {localeOptions.map((option, index) => (
+        {localeOptions.map((option) => (
           <Fragment key={option.id}>
             <Settings.Option
               selected={currentLocale === option.id}
