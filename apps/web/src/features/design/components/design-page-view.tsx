@@ -118,7 +118,7 @@ function DesignPageInner({
       shouldReduceMotion
         ? 0
         : Math.round(
-            (sharedLayout ? 0.4 + lastDelay : CHEAP_MOTION_DURATION) * 1000
+            (sharedLayout ? 0.3 + lastDelay : CHEAP_MOTION_DURATION) * 1000
           )
     )
     return () => window.clearTimeout(timeout)
@@ -225,7 +225,7 @@ function DesignPageInner({
             shouldReduceMotion
               ? { duration: 0 }
               : sharedLayout
-                ? { ...layoutTransition, delay: isExpanded ? 0 : 0.1 }
+                ? { ...layoutTransition, delay: isExpanded ? 0 : 0.05 }
                 : { duration: CHEAP_MOTION_DURATION }
           }
           className="lg:grid lg:grid-cols-2 sm:space-y-4 lg:relative p-5"
