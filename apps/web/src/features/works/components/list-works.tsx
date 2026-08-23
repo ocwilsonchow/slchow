@@ -3,12 +3,16 @@ import { useTranslations } from "next-intl"
 
 const works = [
   {
-    title: "@mention-editor (npm package)",
+    title: "📋 @mention-editor",
     href: "https://editor.slchow.com",
   },
   {
-    title: "Agent Luthen",
+    title: "🤖 Agent Luthen",
     href: "https://github.com/ocwilsonchow/agent-luthen",
+  },
+  {
+    title: "💊 Drugs API",
+    href: "https://github.com/ocwilsonchow/drug-api",
   },
 ]
 
