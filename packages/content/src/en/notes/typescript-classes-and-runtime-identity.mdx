@@ -210,7 +210,7 @@ try {
 <br />
 
 - Extra fields — a `code`, an HTTP status, a `cause` — ride on the instance. A plain object `{ message, code }` cannot do that test after it has been thrown.
-- A string union on a result type is often better when the failure is a **return** value.
+- A string union on a result type is often better when the failure is a **return** value. That half is [TypeScript Error Handling](/notes/typescript-error-handling).
 - **Failure:** throwing a plain object. Once something is `throw`n, the prototype chain is the test that survives.
 
 ---
@@ -352,7 +352,7 @@ When the question is whether to write one:
 
       - `catch` yields `unknown`. `instanceof` distinguishes a domain failure from a programmer error, and one domain failure from another.
       - Extra fields — a `code`, a status, a `cause` — ride on the instance. A plain `{ message, code }` cannot do that test after it has been thrown.
-      - A string union on a result type is often better when the failure is a **return** value. Once something is `throw`n, the prototype chain is the test that survives.
+      - A string union on a result type is often better when the failure is a **return** value. That half is [TypeScript Error Handling](/notes/typescript-error-handling). Once something is `throw`n, the prototype chain is the test that survives.
       - Most classes in a TypeScript program were not written there: `SyntaxError`, `Map`, `Response`, DOM nodes. Application code inherits that choice at the boundary.
 
     </AccordionContent>

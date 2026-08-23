@@ -210,7 +210,7 @@ try {
 <br />
 
 - 額外 fields —— `code`、HTTP status、`cause` —— 騎在 instance 上。Plain object `{ message, code }` 被 throw 之後做不了那個測試。
-- Failure 是 **return** value 時，result type 上的 string union 往往更好。
+- Failure 是 **return** value 時，result type 上的 string union 往往更好。那一半見 [TypeScript Error Handling](/notes/typescript-error-handling)。
 - **Failure:** throw 一個 plain object。一旦被 `throw`，能活下來的測試是 prototype chain。
 
 ---
@@ -352,7 +352,7 @@ TypeScript `class` 是 constructor 加上 prototype。Instance fields 活在 obj
 
       - `catch` 得到的是 `unknown`。`instanceof` 把 domain failure 與 programmer error 分開，也把一種 domain failure 與另一種分開。
       - 額外 fields —— `code`、status、`cause` —— 騎在 instance 上。Plain `{ message, code }` 被 throw 之後做不了那個測試。
-      - Failure 是 **return** value 時，result type 上的 string union 往往更好。一旦被 `throw`，能活下來的測試是 prototype chain。
+      - Failure 是 **return** value 時，result type 上的 string union 往往更好。那一半見 [TypeScript Error Handling](/notes/typescript-error-handling)。一旦被 `throw`，能活下來的測試是 prototype chain。
       - TypeScript 程式裡的大多數 classes 並不是在那裡寫的：`SyntaxError`、`Map`、`Response`、DOM nodes。Application code 在邊界繼承這個選擇。
 
     </AccordionContent>

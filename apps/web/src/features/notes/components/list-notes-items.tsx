@@ -31,7 +31,7 @@ type ListNotesItemsProps = {
   notesLabel: string
 }
 
-const NOTES_PREVIEW_MOBILE = 3
+const NOTES_PREVIEW_MOBILE = 5
 const NOTES_PREVIEW_DESKTOP = 5
 
 export function ListNotesItems({

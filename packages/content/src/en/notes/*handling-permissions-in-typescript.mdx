@@ -1,0 +1,414 @@
+---
+title: Handling Permissions in TypeScript
+description: Role checks scatter. RBAC centralizes action:resource. ABAC types the subject, action, and resource so ownership and status live in one file
+date: 2026-08-23
+category: typescript
+---
+
+`if (user.role === "admin")` is not a permission system. It is a check that will be copied into every button, every Server Action, and every query. Adding a moderator means hunting the codebase.
+
+This note follows [Kyle's walkthrough](https://www.youtube.com/watch?v=5GG-VUvruzE). Authn is who; authz is what they may do — [Web Security and the OWASP Top 10](/notes/web-security-owasp-top-10). Org membership and the row are [Building a Multi-Tenant Backend with Hono, Better Auth, Drizzle, and Postgres RLS](/notes/multi-tenant-backend-drizzle-hono-better-auth). The UI is not authorization: [Security in Next.js](/notes/security-in-next-js). The type-level maps that make the permission table compile are [TypeScript Infer, Extends, and Ternaries](/notes/typescript-infer-extends-and-ternaries). This note is the engine.
+
+<br />
+
+---
+
+## 1. The scattered `if`
+
+A comment on a page. An admin can delete it. Then a moderator should too. Then the author should delete their own. The check grows in every place that can delete.
+
+<br />
+
+```ts
+const canDelete =
+  user.role === "admin" ||
+  user.role === "moderator" ||
+  user.id === comment.authorId
+```
+
+<br />
+
+- Authentication answers **who**. Authorization answers **what they may do**. A login is not permission to delete someone else's comment.
+- The same `||` lands in the UI, in the Server Action, and in the query. Change what a moderator can do and you walk every site.
+- Roles live in the code, not in a config. There is no one file to read.
+
+<br />
+
+**Failure:** a new role, then a search for `=== "admin"`. The miss is a button that still shows, or a handler that still deletes.
+
+---
+
+## 2. RBAC
+
+Role-based access control switches the question. A role is a **set of permissions**. A permission is an **action** on a **resource**: `view`, `create`, `update`, `delete` on `comment`, `todo`, `article`. The usual spelling is `resource:action`.
+
+<br />
+
+```ts
+type Role = "admin" | "moderator" | "user"
+
+type Permission =
+  | "comment:view"
+  | "comment:create"
+  | "comment:update"
+  | "comment:delete"
+
+const rolePermissions: Record<Role, Permission[]> = {
+  admin: ["comment:view", "comment:create", "comment:update", "comment:delete"],
+  moderator: [
+    "comment:view",
+    "comment:create",
+    "comment:update",
+    "comment:delete",
+  ],
+  user: ["comment:view", "comment:create"],
+}
+
+type User = {
+  id: string
+  role: Role
+}
+
+function hasPermission(user: User, permission: Permission): boolean {
+  return rolePermissions[user.role].includes(permission)
+}
+
+if (hasPermission(user, "comment:delete")) {
+  // show the button — the same check runs on the server
+}
+```
+
+<br />
+
+- The union is the fence. `"comment:explode"` does not compile. A stringly-typed `"comment:delet"` is a silent deny at runtime.
+- Take delete off the moderator list in **one** object. Every `hasPermission(user, "comment:delete")` follows.
+- Store the table in code, in a database, wherever. The call site stays one function.
+
+<br />
+
+**Failure:** `hasPermission(user, "delete comments")` as a `string`. The typo is a permission that never matches.
+
+---
+
+## 3. Many roles, then orgs
+
+A user should be `roles: Role[]` even if you never assign two. The extra code is `.some`. The flexibility is cheap.
+
+<br />
+
+```ts
+type User = {
+  id: string
+  roles: Role[]
+}
+
+function hasPermission(user: User, permission: Permission): boolean {
+  return user.roles.some((role) => rolePermissions[role].includes(permission))
+}
+```
+
+<br />
+
+A second axis is the **organization**. Admin in workspace A, member in workspace B, one account. The role is no longer global; it is a join of user, org, and role.
+
+Kyle wires that through Clerk session claims. This stack already has the membership table: Better Auth organizations, `activeOrganizationId`, and a verified `organizationId` on the Hono context. Do not copy a session-token recipe. The identity path is [Building a Multi-Tenant Backend with Hono, Better Auth, Drizzle, and Postgres RLS](/notes/multi-tenant-backend-drizzle-hono-better-auth).
+
+<br />
+
+```text
+user ──< member >── organization
+              │
+              └── role ──< role_permission >── permission
+```
+
+<br />
+
+- One role per user is a special case of many. Model many.
+- One role per product is a special case of one role per org. Model the org when users can be in more than one workspace.
+- The permission list can stay in TypeScript. The membership cannot. Membership is a row.
+
+<br />
+
+**Failure:** a global `role` on the user, then a second product that needs a different role in a different org. The column was the wrong shape.
+
+---
+
+## 4. Where RBAC dies
+
+RBAC answers "does this role include this permission?" It does not answer "is this **their** comment?" or "is this todo **completed**?"
+
+The first patch is a new permission: `comment:delete:own`. The call site grows again.
+
+<br />
+
+```ts
+const canDelete =
+  hasPermission(user, "comment:delete") ||
+  (hasPermission(user, "comment:delete:own") &&
+    user.id === comment.authorId)
+```
+
+<br />
+
+Then published articles cannot be edited. Then a block list hides comments. Each attribute becomes another permission string **and** another `&&` next to `hasPermission`. The config is no longer the whole story. The call site is back to the scattered `if`.
+
+<br />
+
+**Failure:** a `Permission` union that encodes every attribute as a suffix — `:own`, `:completed`, `:unlocked`. The check that still lives at the button is the one you will forget.
+
+---
+
+## 5. Resource-level roles
+
+Some products need a role on the **row**, not only on the org. Google Drive: viewer on this file, editor on that folder, owner on another. The org role still exists. The share is a second join.
+
+<br />
+
+```text
+user ──< user_resource_role >── resource
+              │                    │
+              └── role             └── type + id
+```
+
+<br />
+
+- One shareable type — blogs, say — can hard-code a join table. That is fine.
+- Many types — files, folders, images — want a generic `(userId, resourceType, resourceId, role)` rather than a join per table.
+- The name for a graph of "who relates to what" is **ReBAC**. This note does not build Zanzibar. It names the shape so you know when RBAC-on-the-org is the wrong model.
+
+<br />
+
+**Failure:** copying the org-role join once per resource table, then adding a third shareable type. The generic tuple was cheaper on day two.
+
+---
+
+## 6. ABAC, typed
+
+Attribute-based access control asks four things: the **subject** (almost always the user), the **action**, the **resource**, and any extra attributes — org, environment, device. Every one of those has fields. A rule can read `user.id`, `comment.authorId`, `todo.completed`, `user.blockedBy`.
+
+The TypeScript job is to make an illegal check unrepresentable. Comments have `view | create | update`. They do not have `delete`. A todo rule receives a `Todo`, not a `Comment`.
+
+<br />
+
+```ts
+type Role = "admin" | "moderator" | "user"
+
+type User = {
+  id: string
+  roles: Role[]
+  blockedBy: string[]
+}
+
+type Comment = {
+  id: string
+  authorId: string
+}
+
+type Todo = {
+  id: string
+  userId: string
+  completed: boolean
+  invitedUsers: string[]
+}
+
+type Permissions = {
+  comments: {
+    dataType: Comment
+    action: "view" | "create" | "update"
+  }
+  todos: {
+    dataType: Todo
+    action: "view" | "create" | "update" | "delete"
+  }
+}
+
+type PermissionCheck<Key extends keyof Permissions> =
+  | boolean
+  | ((user: User, data: Permissions[Key]["dataType"]) => boolean)
+
+type RolesWithPermissions = {
+  [R in Role]: {
+    [Key in keyof Permissions]: {
+      [Action in Permissions[Key]["action"]]: PermissionCheck<Key>
+    }
+  }
+}
+```
+
+<br />
+
+`Permissions` is a mapped type over resources. `PermissionCheck` is `true` for "always" or a function for "this row." The mapped `RolesWithPermissions` is the same three keywords as [TypeScript Infer, Extends, and Ternaries](/notes/typescript-infer-extends-and-ternaries): `extends`, a key remap, a ternary you do not need here because every action must be present.
+
+<br />
+
+```ts
+const ROLES = {
+  admin: {
+    comments: { view: true, create: true, update: true },
+    todos: { view: true, create: true, update: true, delete: true },
+  },
+  moderator: {
+    comments: { view: true, create: true, update: true },
+    todos: {
+      view: true,
+      create: true,
+      update: true,
+      delete: (_user, todo) => todo.completed,
+    },
+  },
+  user: {
+    comments: {
+      view: (user, comment) => !user.blockedBy.includes(comment.authorId),
+      create: true,
+      update: (user, comment) => comment.authorId === user.id,
+    },
+    todos: {
+      view: (user, todo) => !user.blockedBy.includes(todo.userId),
+      create: true,
+      update: (user, todo) =>
+        todo.userId === user.id || todo.invitedUsers.includes(user.id),
+      delete: (user, todo) =>
+        todo.completed &&
+        (todo.userId === user.id || todo.invitedUsers.includes(user.id)),
+    },
+  },
+} as const satisfies RolesWithPermissions
+
+function hasPermission<Resource extends keyof Permissions>(
+  user: User,
+  resource: Resource,
+  action: Permissions[Resource]["action"],
+  data?: Permissions[Resource]["dataType"]
+): boolean {
+  return user.roles.some((role) => {
+    const permission = (ROLES as RolesWithPermissions)[role][resource][action]
+    if (typeof permission === "boolean") return permission
+    if (data == null) return false
+    return permission(user, data)
+  })
+}
+
+hasPermission(user, "todos", "delete", todo)
+hasPermission(user, "todos", "create")
+// hasPermission(user, "comments", "delete")
+// error — comments have no delete action
+```
+
+<br />
+
+- `true` means every row. A function means this row. Omit `data` and a function rule returns `false` — "all comments" is not the same as "this comment."
+- Ownership, completed, invited, blocked: those attributes live in the rule, not next to the button.
+- `satisfies RolesWithPermissions` checks the table without widening `true` to `boolean` in a way that erases the point. The call site never names a role.
+
+<br />
+
+**Failure:** `hasPermission(user, "comments", "delete")` as a `string` overload. The missing action should be a type error, not a runtime `undefined`.
+
+---
+
+## 7. Where it runs
+
+The same function can hide a button and reject a mutation. Only the server check is authorization.
+
+<br />
+
+```ts
+app.delete("/todos/:id", async (c) => {
+  const user = c.get("user")
+  const todo = await findTodo(c.req.param("id"))
+  if (!hasPermission(user, "todos", "delete", todo)) {
+    return c.json({ error: "forbidden" }, 403)
+  }
+  await deleteTodo(todo.id)
+  return c.body(null, 204)
+})
+```
+
+<br />
+
+- The Client Component that hides Delete is UX. A crafted `DELETE` still hits Hono. [Security in Next.js](/notes/security-in-next-js).
+- Tenant is not an attribute you pass in from the client. Membership is already on the context. RLS still denies the other org's row if the handler forgets a filter — [Building a Multi-Tenant Backend with Hono, Better Auth, Drizzle, and Postgres RLS](/notes/multi-tenant-backend-drizzle-hono-better-auth).
+- A cached decision is a value. The key is `perm:${orgId}:${userId}:${resource}:${action}:${id}`. A key that omits user or tenant is a leak.
+
+<br />
+
+**Failure:** checking `hasPermission` only in the React tree, then trusting the Server Action because the button was hidden.
+
+---
+
+## Takeaway
+
+A role is a set of permissions. A permission is an action on a resource. An attribute of **this row** does not belong in the role table.
+
+When the question is which engine to write:
+
+1. **Is this a role?** `Record<Role, Permission[]>` and `hasPermission(user, "comment:delete")`. A string-literal union, not a `string`.
+2. **Is this an attribute of this row?** Ownership, status, block lists. ABAC: `true` or `(user, data) => boolean`, one file, typed `resource` and `action`.
+3. **Is this a relationship to another object?** Shared files, parent folders. Resource-level roles — ReBAC — not another `:own` suffix.
+
+---
+
+## Recap Q&A
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="perm-scattered-if">
+    <AccordionTrigger>1. Why is `if (user.role === "admin")` not a permission system?</AccordionTrigger>
+    <AccordionContent>
+
+      - The same `||` is copied into the UI, the Server Action, and the query. Adding a moderator means hunting every site.
+      - Authentication is who. Authorization is what they may do. A login is not permission to delete someone else's comment.
+      - Roles live in the code, not in a config. There is no one file to read.
+      - **Failure:** a new role, then a search for `=== "admin"`. The miss is a button that still shows, or a handler that still deletes.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="perm-rbac-union">
+    <AccordionTrigger>2. What does RBAC change, and why is Permission a union?</AccordionTrigger>
+    <AccordionContent>
+
+      - A role is a set of permissions. A permission is an action on a resource, spelled `comment:delete`.
+      - One `Record<Role, Permission[]>` is the config. `hasPermission(user, permission)` is the only check at the call site. Take delete off the moderator list once; every site follows.
+      - `Permission` is a string-literal union. `"comment:explode"` does not compile. A `string` argument is a typo that fails closed at runtime and never tells you.
+      - **Failure:** `hasPermission(user, "delete comments")` as a `string`.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="perm-roles-orgs">
+    <AccordionTrigger>3. Why `roles: Role[]`, and where do organizations fit?</AccordionTrigger>
+    <AccordionContent>
+
+      - A user should be `roles: Role[]` even if you never assign two. The extra code is `.some`.
+      - Admin in workspace A, member in workspace B, one account. The role is a join of user, org, and role — not a global column on the user.
+      - This stack already has that membership: Better Auth organizations and a verified `organizationId` on the Hono context. Kyle's Clerk session claims are the same idea, not the recipe to copy. [Building a Multi-Tenant Backend with Hono, Better Auth, Drizzle, and Postgres RLS](/notes/multi-tenant-backend-drizzle-hono-better-auth).
+      - **Failure:** a global `role` on the user, then a second product that needs a different role in a different org.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="perm-rbac-dies">
+    <AccordionTrigger>4. When does RBAC stop being enough?</AccordionTrigger>
+    <AccordionContent>
+
+      - RBAC answers "does this role include this permission?" It does not answer "is this their comment?" or "is this todo completed?"
+      - `comment:delete:own` is a patch. The attribute check (`user.id === authorId`) still lives at the call site. Published, blocked, invited — each one is another suffix and another `&&`.
+      - A role on the **row** — viewer on this file, editor on that folder — is a second join, not another permission string. That graph is ReBAC. Do not build Zanzibar in application code until the product is Drive-shaped.
+      - **Failure:** a `Permission` union that encodes every attribute as a suffix. The check that still lives at the button is the one you will forget.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="perm-abac-typed">
+    <AccordionTrigger>5. What does typed ABAC make unrepresentable?</AccordionTrigger>
+    <AccordionContent>
+
+      - Four parts: subject, action, resource, extra attributes. Rules read `user.id`, `comment.authorId`, `todo.completed`.
+      - `hasPermission<Resource>(user, resource, action, data?)` — `action` is `Permissions[Resource]["action"]`. `hasPermission(user, "comments", "delete")` is a type error if comments have no delete.
+      - A rule is `true` (every row) or `(user, data) => boolean` (this row). Omit `data` and a function rule is not "all of this resource."
+      - The same function hides a button and rejects a Hono `DELETE`. Only the server check is authorization. [Security in Next.js](/notes/security-in-next-js).
+      - **Failure:** a `string` overload so the missing action is `undefined` at runtime.
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>

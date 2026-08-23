@@ -1,0 +1,414 @@
+---
+title: 用 TypeScript 处理 Permissions
+description: Role checks 会散落各处。RBAC 把 action:resource 集中。ABAC 给 subject、action、resource 标 type，ownership 与 status 住在同一个文件
+date: 2026-08-23
+category: typescript
+---
+
+`if (user.role === "admin")` 不是一套 permission system。它是一道会被复制到每个 button、每个 Server Action、每条 query 的 check。加一个 moderator 等于搜整个 codebase。
+
+这篇 note 依 [Kyle 的 walkthrough](https://www.youtube.com/watch?v=5GG-VUvruzE)。Authn 是谁；authz 是他们可以做什么 —— [Web Security and the OWASP Top 10](/notes/web-security-owasp-top-10)。Org membership 与那一行见 [用 Hono、Better Auth、Drizzle 与 Postgres RLS 打造 Multi-Tenant 后端](/notes/multi-tenant-backend-drizzle-hono-better-auth)。UI 不是 authorization：[Next.js 里的 Security](/notes/security-in-next-js)。让 permission table compile 的 type-level maps 见 [TypeScript Infer、Extends 与 Ternaries](/notes/typescript-infer-extends-and-ternaries)。这篇讲的是 engine。
+
+<br />
+
+---
+
+## 1. 散落的 `if`
+
+页面上有一则 comment。Admin 可以删。然后 moderator 也应该可以。然后作者应该能删自己的。每个能删的地方，这道 check 都会变长。
+
+<br />
+
+```ts
+const canDelete =
+  user.role === "admin" ||
+  user.role === "moderator" ||
+  user.id === comment.authorId
+```
+
+<br />
+
+- Authentication 回答 **谁**。Authorization 回答 **他们可以做什么**。Login 不是删别人 comment 的 permission。
+- 同一串 `||` 会落到 UI、Server Action、还有 query。改 moderator 能做什么，你就要走遍每一处。
+- Roles 住在 code 里，不是 config。没有一个文件可以一次读完。
+
+<br />
+
+**Failure:** 一个新 role，然后搜 `=== "admin"`。漏掉的是仍然显示的 button，或仍然会删的 handler。
+
+---
+
+## 2. RBAC
+
+Role-based access control 换了问题。一个 role 是一组 **permissions**。一个 permission 是对某个 **resource** 的 **action**：`view`、`create`、`update`、`delete` 作用在 `comment`、`todo`、`article`。常见写法是 `resource:action`。
+
+<br />
+
+```ts
+type Role = "admin" | "moderator" | "user"
+
+type Permission =
+  | "comment:view"
+  | "comment:create"
+  | "comment:update"
+  | "comment:delete"
+
+const rolePermissions: Record<Role, Permission[]> = {
+  admin: ["comment:view", "comment:create", "comment:update", "comment:delete"],
+  moderator: [
+    "comment:view",
+    "comment:create",
+    "comment:update",
+    "comment:delete",
+  ],
+  user: ["comment:view", "comment:create"],
+}
+
+type User = {
+  id: string
+  role: Role
+}
+
+function hasPermission(user: User, permission: Permission): boolean {
+  return rolePermissions[user.role].includes(permission)
+}
+
+if (hasPermission(user, "comment:delete")) {
+  // show the button — the same check runs on the server
+}
+```
+
+<br />
+
+- Union 就是围栏。`"comment:explode"` compile 不过。一个当 `string` 的 `"comment:delet"` 是 runtime 上无声的 deny。
+- 从 moderator 的 list **一个** object 拿掉 delete。每个 `hasPermission(user, "comment:delete")` 都会跟着变。
+- Table 存在 code、存在 database，随你。Call site 仍然是一个 function。
+
+<br />
+
+**Failure:** `hasPermission(user, "delete comments")` 当 `string`。Typo 是一个永远对不上的 permission。
+
+---
+
+## 3. 多个 roles，然后 orgs
+
+User 应该是 `roles: Role[]`，即使你从来只 assign 一个。多出来的 code 是 `.some`。这份弹性很便宜。
+
+<br />
+
+```ts
+type User = {
+  id: string
+  roles: Role[]
+}
+
+function hasPermission(user: User, permission: Permission): boolean {
+  return user.roles.some((role) => rolePermissions[role].includes(permission))
+}
+```
+
+<br />
+
+第二条轴是 **organization**。Workspace A 的 admin、workspace B 的 member，同一个 account。Role 不再是 global；它是 user、org、role 的 join。
+
+Kyle 用 Clerk session claims 接这件事。这个 stack 已经有 membership table：Better Auth organizations、`activeOrganizationId`，以及 Hono context 上验证过的 `organizationId`。不要抄一份 session-token recipe。Identity path 见 [用 Hono、Better Auth、Drizzle 与 Postgres RLS 打造 Multi-Tenant 后端](/notes/multi-tenant-backend-drizzle-hono-better-auth)。
+
+<br />
+
+```text
+user ──< member >── organization
+              │
+              └── role ──< role_permission >── permission
+```
+
+<br />
+
+- 一人一个 role 是多人多 role 的特例。先 model 多个。
+- 整个产品一个 role 是每个 org 一个 role 的特例。User 能进多个 workspace 时，就 model org。
+- Permission list 可以留在 TypeScript。Membership 不行。Membership 是一行。
+
+<br />
+
+**Failure:** user 上一个 global `role`，然后第二个产品在另一个 org 需要不同的 role。那一栏从一开始形状就错。
+
+---
+
+## 4. RBAC 死掉的地方
+
+RBAC 回答「这个 role 包不包含这个 permission？」它不回答「这是 **他的** comment 吗？」或「这个 todo **completed** 了吗？」
+
+第一个补丁是新 permission：`comment:delete:own`。Call site 又变长。
+
+<br />
+
+```ts
+const canDelete =
+  hasPermission(user, "comment:delete") ||
+  (hasPermission(user, "comment:delete:own") &&
+    user.id === comment.authorId)
+```
+
+<br />
+
+然后已 published 的 article 不能改。然后 block list 藏起 comments。每个 attribute 都变成另一条 permission string，**外加** `hasPermission` 旁边另一个 `&&`。Config 不再是全部故事。Call site 又回到散落的 `if`。
+
+<br />
+
+**Failure:** 一个用 suffix 编码每个 attribute 的 `Permission` union —— `:own`、`:completed`、`:unlocked`。仍然住在 button 旁边的那道 check，就是你会忘的那道。
+
+---
+
+## 5. Resource-level roles
+
+有些产品需要的是 **那一行** 上的 role，不只是 org 上的。Google Drive：这个 file 的 viewer、那个 folder 的 editor、另一个的 owner。Org role 仍然在。Share 是第二次 join。
+
+<br />
+
+```text
+user ──< user_resource_role >── resource
+              │                    │
+              └── role             └── type + id
+```
+
+<br />
+
+- 只有一种可分享的 type —— 比方 blogs —— 可以 hard-code 一张 join table。这样没问题。
+- 很多 types —— files、folders、images —— 要的是 generic `(userId, resourceType, resourceId, role)`，不是每张表一张 join。
+- 「谁跟什么有关系」这张 graph 的名字是 **ReBAC**。这篇不实现 Zanzibar。它只命名这个形状，好让你知道何时 org 上的 RBAC 是错的 model。
+
+<br />
+
+**Failure:** 每张 resource table 复制一次 org-role join，然后再加第三种可分享的 type。Generic tuple 在第二天就比较便宜。
+
+---
+
+## 6. ABAC，typed
+
+Attribute-based access control 问四件事：**subject**（几乎永远是 user）、**action**、**resource**，以及任何额外 attributes —— org、environment、device。每一个都有 fields。Rule 可以读 `user.id`、`comment.authorId`、`todo.completed`、`user.blockedBy`。
+
+TypeScript 的工作是让不合法的 check 无法被写出来。Comments 有 `view | create | update`。它们没有 `delete`。Todo rule 收到的是 `Todo`，不是 `Comment`。
+
+<br />
+
+```ts
+type Role = "admin" | "moderator" | "user"
+
+type User = {
+  id: string
+  roles: Role[]
+  blockedBy: string[]
+}
+
+type Comment = {
+  id: string
+  authorId: string
+}
+
+type Todo = {
+  id: string
+  userId: string
+  completed: boolean
+  invitedUsers: string[]
+}
+
+type Permissions = {
+  comments: {
+    dataType: Comment
+    action: "view" | "create" | "update"
+  }
+  todos: {
+    dataType: Todo
+    action: "view" | "create" | "update" | "delete"
+  }
+}
+
+type PermissionCheck<Key extends keyof Permissions> =
+  | boolean
+  | ((user: User, data: Permissions[Key]["dataType"]) => boolean)
+
+type RolesWithPermissions = {
+  [R in Role]: {
+    [Key in keyof Permissions]: {
+      [Action in Permissions[Key]["action"]]: PermissionCheck<Key>
+    }
+  }
+}
+```
+
+<br />
+
+`Permissions` 是对 resources 的 mapped type。`PermissionCheck` 是「永远可以」的 `true`，或「这一行」的 function。Mapped `RolesWithPermissions` 用的是 [TypeScript Infer、Extends 与 Ternaries](/notes/typescript-infer-extends-and-ternaries) 那三个关键字：`extends`、key remap，以及这里用不到的 ternary —— 因为每个 action 都必须在场。
+
+<br />
+
+```ts
+const ROLES = {
+  admin: {
+    comments: { view: true, create: true, update: true },
+    todos: { view: true, create: true, update: true, delete: true },
+  },
+  moderator: {
+    comments: { view: true, create: true, update: true },
+    todos: {
+      view: true,
+      create: true,
+      update: true,
+      delete: (_user, todo) => todo.completed,
+    },
+  },
+  user: {
+    comments: {
+      view: (user, comment) => !user.blockedBy.includes(comment.authorId),
+      create: true,
+      update: (user, comment) => comment.authorId === user.id,
+    },
+    todos: {
+      view: (user, todo) => !user.blockedBy.includes(todo.userId),
+      create: true,
+      update: (user, todo) =>
+        todo.userId === user.id || todo.invitedUsers.includes(user.id),
+      delete: (user, todo) =>
+        todo.completed &&
+        (todo.userId === user.id || todo.invitedUsers.includes(user.id)),
+    },
+  },
+} as const satisfies RolesWithPermissions
+
+function hasPermission<Resource extends keyof Permissions>(
+  user: User,
+  resource: Resource,
+  action: Permissions[Resource]["action"],
+  data?: Permissions[Resource]["dataType"]
+): boolean {
+  return user.roles.some((role) => {
+    const permission = (ROLES as RolesWithPermissions)[role][resource][action]
+    if (typeof permission === "boolean") return permission
+    if (data == null) return false
+    return permission(user, data)
+  })
+}
+
+hasPermission(user, "todos", "delete", todo)
+hasPermission(user, "todos", "create")
+// hasPermission(user, "comments", "delete")
+// error — comments have no delete action
+```
+
+<br />
+
+- `true` 代表每一行。Function 代表这一行。省略 `data` 时，function rule 回 `false` —— 「所有 comments」不是「这一则 comment」。
+- Ownership、completed、invited、blocked：那些 attributes 住在 rule 里，不是 button 旁边。
+- `satisfies RolesWithPermissions` 检查 table，又不会把 `true` widen 成 `boolean` 以至于抹掉重点。Call site 从不点名一个 role。
+
+<br />
+
+**Failure:** `hasPermission(user, "comments", "delete")` 当 `string` overload。缺的 action 应该是 type error，不是 runtime 的 `undefined`。
+
+---
+
+## 7. 它跑在哪
+
+同一个 function 可以藏一个 button，也可以拒绝一次 mutation。只有 server 上的 check 才是 authorization。
+
+<br />
+
+```ts
+app.delete("/todos/:id", async (c) => {
+  const user = c.get("user")
+  const todo = await findTodo(c.req.param("id"))
+  if (!hasPermission(user, "todos", "delete", todo)) {
+    return c.json({ error: "forbidden" }, 403)
+  }
+  await deleteTodo(todo.id)
+  return c.body(null, 204)
+})
+```
+
+<br />
+
+- Client Component 藏掉 Delete 是 UX。一发 crafted `DELETE` 仍然打到 Hono。[Next.js 里的 Security](/notes/security-in-next-js)。
+- Tenant 不是你从 client 传进来的 attribute。Membership 已经在 context 上。Handler 忘了 filter 时，RLS 仍然拒绝另一个 org 的那一行 —— [用 Hono、Better Auth、Drizzle 与 Postgres RLS 打造 Multi-Tenant 后端](/notes/multi-tenant-backend-drizzle-hono-better-auth)。
+- Cached decision 是一个 value。Key 是 `perm:${orgId}:${userId}:${resource}:${action}:${id}`。省略 user 或 tenant 的 key 是一次 leak。
+
+<br />
+
+**Failure:** 只在 React tree 里 check `hasPermission`，然后因为 button 被藏起来就相信 Server Action。
+
+---
+
+## Takeaway
+
+一个 role 是一组 permissions。一个 permission 是对某个 resource 的 action。**这一行** 的 attribute 不属于 role table。
+
+当问题是该写哪一种 engine：
+
+1. **这是一个 role 吗？** `Record<Role, Permission[]>` 加上 `hasPermission(user, "comment:delete")`。String-literal union，不是 `string`。
+2. **这是这一行的 attribute 吗？** Ownership、status、block lists。ABAC：`true` 或 `(user, data) => boolean`，一个文件，typed 的 `resource` 与 `action`。
+3. **这是跟另一个 object 的 relationship 吗？** Shared files、parent folders。Resource-level roles —— ReBAC —— 不是再一个 `:own` suffix。
+
+---
+
+## Recap Q&A
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="perm-scattered-if">
+    <AccordionTrigger>1. 为什么 `if (user.role === "admin")` 不是一套 permission system？</AccordionTrigger>
+    <AccordionContent>
+
+      - 同一串 `||` 会被复制到 UI、Server Action、还有 query。加一个 moderator 等于搜遍每一处。
+      - Authentication 是谁。Authorization 是他们可以做什么。Login 不是删别人 comment 的 permission。
+      - Roles 住在 code 里，不是 config。没有一个文件可以一次读完。
+      - **Failure:** 一个新 role，然后搜 `=== "admin"`。漏掉的是仍然显示的 button，或仍然会删的 handler。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="perm-rbac-union">
+    <AccordionTrigger>2. RBAC 改了什么，为什么 Permission 是 union？</AccordionTrigger>
+    <AccordionContent>
+
+      - 一个 role 是一组 permissions。一个 permission 是对某个 resource 的 action，写成 `comment:delete`。
+      - 一个 `Record<Role, Permission[]>` 是 config。`hasPermission(user, permission)` 是 call site 唯一的 check。从 moderator list 拿掉 delete 一次；每一处都跟着变。
+      - `Permission` 是 string-literal union。`"comment:explode"` compile 不过。`string` argument 是 typo，runtime 会 fail closed，而且永远不告诉你。
+      - **Failure:** `hasPermission(user, "delete comments")` 当 `string`。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="perm-roles-orgs">
+    <AccordionTrigger>3. 为什么是 `roles: Role[]`，organizations 放在哪？</AccordionTrigger>
+    <AccordionContent>
+
+      - User 应该是 `roles: Role[]`，即使你从来只 assign 一个。多出来的 code 是 `.some`。
+      - Workspace A 的 admin、workspace B 的 member，同一个 account。Role 是 user、org、role 的 join —— 不是 user 上的 global column。
+      - 这个 stack 已经有那份 membership：Better Auth organizations，以及 Hono context 上验证过的 `organizationId`。Kyle 的 Clerk session claims 是同一个 idea，不是要抄的 recipe。[用 Hono、Better Auth、Drizzle 与 Postgres RLS 打造 Multi-Tenant 后端](/notes/multi-tenant-backend-drizzle-hono-better-auth)。
+      - **Failure:** user 上一个 global `role`，然后第二个产品在另一个 org 需要不同的 role。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="perm-rbac-dies">
+    <AccordionTrigger>4. RBAC 何时不再够用？</AccordionTrigger>
+    <AccordionContent>
+
+      - RBAC 回答「这个 role 包不包含这个 permission？」它不回答「这是他的 comment 吗？」或「这个 todo completed 了吗？」
+      - `comment:delete:own` 是补丁。Attribute check（`user.id === authorId`）仍然住在 call site。Published、blocked、invited —— 每一个都是另一个 suffix 加另一个 `&&`。
+      - **那一行** 上的 role —— 这个 file 的 viewer、那个 folder 的 editor —— 是第二次 join，不是另一条 permission string。那张 graph 是 ReBAC。产品还没长成 Drive 之前，不要在 application code 里造 Zanzibar。
+      - **Failure:** 一个用 suffix 编码每个 attribute 的 `Permission` union。仍然住在 button 旁边的那道 check，就是你会忘的那道。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="perm-abac-typed">
+    <AccordionTrigger>5. Typed ABAC 让什么无法被写出来？</AccordionTrigger>
+    <AccordionContent>
+
+      - 四个部分：subject、action、resource、额外 attributes。Rules 读 `user.id`、`comment.authorId`、`todo.completed`。
+      - `hasPermission<Resource>(user, resource, action, data?)` —— `action` 是 `Permissions[Resource]["action"]`。如果 comments 没有 delete，`hasPermission(user, "comments", "delete")` 是 type error。
+      - Rule 是 `true`（每一行）或 `(user, data) => boolean`（这一行）。省略 `data` 时，function rule 不是「这个 resource 的全部」。
+      - 同一个 function 藏一个 button，也拒绝 Hono 的 `DELETE`。只有 server check 才是 authorization。[Next.js 里的 Security](/notes/security-in-next-js)。
+      - **Failure:** 一个 `string` overload，让缺的 action 在 runtime 变成 `undefined`。
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>
