@@ -3,7 +3,7 @@ import { useTranslations } from "next-intl"
 
 const works = [
   {
-    title: "Mention Editor",
+    title: "@mention-editor (npm package)",
     href: "https://editor.slchow.com",
   },
   {
