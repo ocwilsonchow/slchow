@@ -1,4 +1,5 @@
 import { ArrowUpRightIcon } from "lucide-react"
+import { useTranslations } from "next-intl"
 
 const works = [
   {
@@ -16,9 +17,10 @@ type ListWorksProps = {
 }
 
 export const ListWorks = ({ showHeading = true }: ListWorksProps) => {
+  const t = useTranslations("navigation")
   return (
-    <div className="flex flex-col gap-2">
-      {showHeading ? <h2 className="font-semibold">Recent Works</h2> : null}
+    <div className="mt-8 flex flex-col gap-2">
+      {showHeading ? <h2 className="font-semibold">{t("works")}</h2> : null}
       <ul className="list-disc list-outside ml-4 gap-0.5">
         {works.map((work) => (
           <li key={work.href}>

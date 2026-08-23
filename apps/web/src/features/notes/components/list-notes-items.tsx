@@ -45,7 +45,7 @@ export function ListNotesItems({
   const visibleNotes = preview ? notes.slice(0, NOTES_PREVIEW_DESKTOP) : notes
 
   return (
-    <div className="mt-8 flex flex-col gap-2 leading-tight">
+    <div className="flex flex-col gap-2 leading-tight">
       {showHeading && (
         <Link href="/notes" className="font-semibold py-1">
           <h2 className="flex items-center gap-2 group">

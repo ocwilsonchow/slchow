@@ -59,8 +59,8 @@ const Page = async ({ params }: Props) => {
               />
             </section>
             <section id="works-and-notes" className="flex flex-col pb-40">
-              <ListWorks />
               <ListNotes locale={locale} preview />
+              <ListWorks />
               <FeaturedStack />
             </section>
           </div>
