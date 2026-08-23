@@ -12,7 +12,7 @@ export const ThemeProvider = ({
 }: ThemeProviderProps): ReactElement => (
   <NextThemeProvider
     attribute="class"
-    defaultTheme="dark"
+    defaultTheme="meta"
     disableTransitionOnChange
     enableSystem
     themes={["light", "dark", "meta"]}

@@ -5,6 +5,7 @@ import { type Locale, useLocale, useTranslations } from "next-intl"
 import { type ComponentProps, Fragment } from "react"
 import { usePathname, useRouter } from "@/i18n/navigation"
 import { localeOptions } from "@/i18n/routing"
+import { HTMLMotionProps, motion } from "motion/react"
 
 const themeOptions = [
   {
@@ -49,7 +50,7 @@ function List({ className, ...props }: ComponentProps<"fieldset">) {
   return (
     <fieldset
       className={cn(
-        "m-0 grid grid-cols-4 min-w-0 gap-2 border-0 p-0",
+        "m-0 flex items-center flex-wrap min-w-0 gap-5 border-0 p-0",
         className
       )}
       {...props}
@@ -67,7 +68,7 @@ function Option({
       type="button"
       aria-pressed={selected}
       className={cn(
-        "flex flex-col items-start gap-1",
+        "group relative flex flex-col items-start gap-1",
         selected
           ? "text-content-ink-on-popover"
           : "text-content-body-on-popover",
@@ -89,30 +90,49 @@ function Separator({ className, ...props }: ComponentProps<"div">) {
 function Swatch({
   colors,
   selected = false,
+  label,
   className,
   ...props
-}: ComponentProps<"span"> & {
+}: HTMLMotionProps<"span"> & {
   colors: readonly string[]
   selected?: boolean
+  label?: string
 }) {
   return (
-    <span
-      aria-hidden
-      className={cn(
-        "h-8 w-full flex overflow-hidden rounded border-2 border-content-ink",
-        selected &&
-          "ring-2 ring-content-accent ring-offset-2 ring-offset-surface-popover",
-        className
-      )}
-      {...props}
-    >
-      {colors.map((color) => (
+    <span className="relative">
+      <motion.span
+        whileTap={{ scale: 0.9 }}
+        aria-hidden
+        className={cn(
+          "flex h-8 w-8 overflow-hidden rounded-full border-2 border-content-ink",
+          selected &&
+            "ring-2 ring-content-accent ring-offset-2 ring-offset-surface-popover",
+          className
+        )}
+        {...props}
+      >
+        {colors.map((color) => (
+          <span
+            key={color}
+            className="h-full w-full flex-1"
+            style={{ backgroundColor: color }}
+          />
+        ))}
+      </motion.span>
+      {label ? (
         <span
-          key={color}
-          className="h-full w-full flex-1"
-          style={{ backgroundColor: color }}
-        />
-      ))}
+          aria-hidden
+          className={cn(
+            "pointer-events-none absolute bottom-full left-1/2 z-10 mb-2 -translate-x-1/2",
+            "whitespace-nowrap rounded-full bg-content-ink-on-popover px-2 py-1",
+            "text-xs leading-none text-surface-popover",
+            "opacity-0 transition-opacity duration-150",
+            "group-hover:opacity-100 group-focus-visible:opacity-100"
+          )}
+        >
+          {label}
+        </span>
+      ) : null}
     </span>
   )
 }
@@ -140,13 +160,14 @@ export function ThemeSettings({ className, ...props }: ThemeSettingsProps) {
           <Fragment key={option.id}>
             <Settings.Option
               selected={theme === option.id}
+              aria-label={t(option.labelKey)}
               onClick={() => setTheme(option.id)}
             >
               <Settings.Swatch
                 colors={option.color}
                 selected={theme === option.id}
+                label={t(option.labelKey)}
               />
-              <span>{t(option.labelKey)}</span>
             </Settings.Option>
             {/* {index < themeOptions.length - 1 ? <Settings.Separator /> : null} */}
           </Fragment>
