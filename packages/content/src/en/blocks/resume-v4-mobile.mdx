@@ -1,0 +1,97 @@
+---
+title: Resume — Mobile
+---
+
+## Wilson, Chow Sin Long
+
+**Mobile software engineer** with **5 years of experience** shipping React Native and Flutter apps to the Apple App Store and Google Play — from Figma through release. Owns product flows, native-thread performance, and crash-free sessions. Shipped **15+** production apps.
+
+---
+
+## Experience
+
+### Frontend Developer, Vioo Company Limited, May 2022 – Present
+
+Primary engineer for concurrent client products, scoping UX with designers and stakeholders, and owning iOS and Android flows from Figma through store release.
+
+- Shipped React Native and Flutter apps to the Apple App Store and Google Play; partnered with design and product on each flow through release.
+- Profiled JS-thread stalls from long lists and full-resolution images; migrated lists to **FlashList** with row memoization, ran **Reanimated** transitions and gesture handlers on the native thread, and froze inactive tabs — held **55+ / 60 FPS** in RN Perf Monitor.
+- Instrumented mobile apps and their APIs with **Sentry**; diagnosed crashes, device compatibility issues, and API bottlenecks after release, maintaining **99%** crash-free sessions.
+- Stored refresh tokens in **SecureStore** (iOS Keychain / Android Keystore) — not AsyncStorage — with Face ID / fingerprint to unlock the session; consumed typed **OpenAPI** REST clients on device.
+- Established **Vitest** and **Playwright** / **Cypress** as quality gates; GitHub Actions runs lint, typecheck, tests, and build before release.
+- Uses **Cursor** and **Claude Code** as a core shipping workflow — not only for generation, but for reviewing diffs, tracing production issues, and documenting repeatable steps.
+- Mentored summer interns and junior developers through pair programming, code reviews, and guidance as they shipped production UI.
+
+## Selected Projects
+
+### React Native Skia App, 2024
+
+- Owned the photobooth app from design and development through release on the Apple App Store and Google Play.
+- Users take a selfie, load it onto the canvas, edit with stickers and pen tools, then upload and share.
+- Built the canvas with **React Native Skia**, **React Native Reanimated**, and gesture handlers; captured images with **react-native-vision-camera**.
+- Converted SVG stickers into Skia SVG React components, enabling **resize, rotate, pan, and scale** on the canvas.
+- Managed state with **Zustand**; kept selections atomic and debounced high-frequency updates.
+- Optimized with **memoization** and context isolation; held **55+ FPS** in RN Perf Monitor with over 100 stickers and strokes on the canvas.
+
+### React Native Student App, 2023
+
+- Owned student flows (course catalog, booking, announcements) from Figma through release on the Apple App Store and Google Play.
+- Maintained **99%** crash-free sessions after launch by diagnosing crashes, device compatibility issues, and API bottlenecks with **Sentry**.
+- Data fetched with **Tanstack Query**, cut duplicate fetches with cache and staleTime; client state managed with **Redux Toolkit**.
+- Reduced feed scroll jank after profiling identified JS-thread stalls from long lists and full-resolution images; migrated lists to **FlashList** with row memoization, cached and downscaled feed images, and ran **Reanimated** transitions and gesture handlers on the native thread.
+- Froze inactive tabs and blurred screens, and deferred mounts, to prevent unnecessary re-renders.
+- Routed promo and milestone notifications to the matching screen via Firebase Cloud Messaging deep links.
+
+### React Native Membership Platform, 2024
+
+- Owned membership flows (digital card, points, offers) from Figma through release on the Apple App Store and Google Play.
+- Refresh tokens in **SecureStore** / Keychain; Face ID / fingerprint to unlock the session; typed **REST** clients from **OpenAPI**.
+- Maintained **99%** crash-free sessions after launch by diagnosing crashes, device compatibility issues, and API bottlenecks with **Sentry**.
+- Cut list jank with **FlashList** and row memoization; cached and downscaled feed images; **Reanimated** / **Moti** transitions on the native thread; froze inactive tabs and deferred mounts. Held **60fps** in RN Perf Monitor.
+- Routed promo and milestone notifications to the matching screen via Firebase Cloud Messaging deep links.
+
+<br />
+
+---
+
+## Other Work
+
+Also shipped restaurant loyalty apps (React Native), a homebound elderly care app (Flutter), campaign / e-commerce storefronts (Next.js, Shopify **GraphQL**), CMS content sites, and a healthcare AI chat / admin (Next.js).
+
+<br />
+
+---
+
+## Skills
+
+- **Mobile**: TypeScript, React Native, Expo, Flutter, FlashList, Reanimated, Moti, Skia, Gesture Handler, Unistyles, SecureStore, FCM
+- **UI**: React, Next.js, Tailwind CSS, Figma, Zustand, Redux, TanStack Query
+- **Architecture**: state modeling (server / local), React composition, component APIs, OpenAPI clients, Storybook
+- **Quality**: Vitest, Playwright, Cypress, Sentry, GitHub Actions
+- **Workflow**: Cursor, Claude Code
+
+<br />
+
+---
+
+## Qualifications
+
+- AWS Certified Solutions Architect – Associate, 2026
+- AWS Certified Cloud Practitioner, 2025
+
+<br />
+
+---
+
+## Education
+
+### University College London
+
+- Master of Pharmacy (MPharm, undergraduate), 2016 – 2020 — First Class Honours
+- Transitioned from pharmacy to software development after finding passion in building applications.
+
+<br />
+
+---
+
+You can also download my resume [here](/resume-mobile.pdf).

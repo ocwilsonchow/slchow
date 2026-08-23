@@ -186,7 +186,8 @@
     "variants": {
       "frontend": "Frontend",
       "full-stack": "Full Stack",
-      "ai": "AI"
+      "ai": "AI",
+      "mobile": "Mobile"
     }
   },
   "code": {

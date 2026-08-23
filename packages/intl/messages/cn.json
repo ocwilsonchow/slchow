@@ -186,7 +186,8 @@
     "variants": {
       "frontend": "前端",
       "full-stack": "全栈",
-      "ai": "AI"
+      "ai": "AI",
+      "mobile": "移动"
     }
   },
   "code": {

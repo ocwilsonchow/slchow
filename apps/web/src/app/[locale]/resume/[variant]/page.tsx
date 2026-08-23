@@ -7,6 +7,7 @@ import { RenderMdxBlockByPath } from "@/features/mdx/components/render-mdx-block
 import {
   isResumeVariant,
   publicResumeVariant,
+  type ResumeVariant,
   resumeVariantParams,
   resumeVariants,
 } from "@/features/resume/variants"
@@ -53,8 +54,13 @@ const Page = async ({ params }: Props) => {
   if (!getMdxContent("blocks", slug, locale)) notFound()
 
   const t = await getTranslations({ locale, namespace: "resume" })
-  const currentPdfHref =
-    variant === "frontend" ? "/resume-frontend.pdf" : "/resume-full-stack.pdf"
+  const resumePdfHrefs = {
+    frontend: "/resume-frontend.pdf",
+    "full-stack": "/resume-full-stack.pdf",
+    ai: "/resume-ai.pdf",
+    mobile: "/resume-mobile.pdf",
+  } satisfies Record<ResumeVariant, string>
+  const currentPdfHref = resumePdfHrefs[variant]
   const otherVariant =
     variant === "frontend"
       ? { href: "/resume/full-stack" as const, key: "full-stack" as const }
