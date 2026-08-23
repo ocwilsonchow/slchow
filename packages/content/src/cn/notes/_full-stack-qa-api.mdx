@@ -1,0 +1,265 @@
+---
+title: "Full-Stack Q&A: API Design"
+description: Spoken-length answers to API design questions
+category: full-stack
+---
+
+## API Design
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="api-restful">
+    <AccordionTrigger>1. What makes an API "RESTful"? Which REST constraints do teams most often violate in practice?</AccordionTrigger>
+    <AccordionContent>
+
+      - REST is Fielding's constraints — **client-server**, **stateless**, **cacheable**, **layered**, optional **code-on-demand**, and a **uniform interface** — not JSON over HTTP with noun-shaped URLs.
+      - Uniform interface is the one that bites: identify resources, manipulate them through representations, send self-descriptive messages, and drive application state with hypermedia.
+      - Teams most often violate **statelessness** (conversational server state), **cacheability** (uncacheable GET, or GET with side effects), and method semantics — verbs in paths, RPC bodies, GET that writes (a **safety** violation).
+      - **HATEOAS** is skipped on purpose for internal product APIs; that is the honest statement.
+      - The production default is a resource-oriented HTTP API that is stateless, uses cache headers where GET is safe, and keeps a consistent error envelope. Full hypermedia is not worth it unless the client is a generic agent.
+      - **Failure:** labeling a POST-everything RPC "REST" and then being surprised when retries, caches, and gateways behave badly. Full map: [API Design in System Design](/notes/api-design-in-system-design).
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="api-idempotent-methods">
+    <AccordionTrigger>2. Which HTTP methods are idempotent, and why does idempotency matter for retry-safe clients?</AccordionTrigger>
+    <AccordionContent>
+
+      - **Idempotency** is a property of the method's effect on server state: repeating the same request N times leaves the resource in the same state as doing it once. The body can still differ — a second DELETE may return 404 after 204.
+      - **Safe** methods are a stricter subset: the client is not requesting a resource change. Incidental logging is allowed; a GET that creates an order is not.
+      - By spec, GET, HEAD, PUT, DELETE, OPTIONS, and TRACE are idempotent. POST is not. PATCH is not required to be — a JSON Merge Patch of the same document can be; a JSON Patch `add` to `/-` is not.
+      - Clients, proxies, and meshes retry. A timed-out create-payment retried without idempotency is a double-charge.
+      - The production default is GET cacheable and side-effect free, PUT and DELETE as true replacements and removals, and never assuming POST is retry-safe without an idempotency key.
+      - **Failure:** a PUT that appends to a collection or a DELETE that decrements a counter — same method name, not idempotent. Full map: [API Design in System Design](/notes/api-design-in-system-design).
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="api-idempotency-keys">
+    <AccordionTrigger>3. How would you implement idempotency keys for a POST endpoint that creates a payment or order?</AccordionTrigger>
+    <AccordionContent>
+
+      - The **idempotency key** is a first-class part of the write path. The client generates a UUID per user intent and sends it on `Idempotency-Key`. The server persists that key with a hash of the canonical body, status, and payload, scoped to tenant and endpoint.
+      - Same key and same body returns the stored response, including the original 201. Same key, different body is a **409**. Keys expire after something like twenty-four hours.
+      - **Concurrency** is the hard part: insert a pending row under a unique constraint on tenant plus key; the loser waits or gets 409. Do not process the payment before the row exists. Pass the **same key to the provider**, persist their operation id, and reconcile pending rows.
+      - The production default is to hash the body so a retried request cannot silently change amount.
+      - **Failure:** a global key namespace — two tenants reuse a UUID and one receives the other's receipt. Partition uniqueness by tenant.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="api-status-codes">
+    <AccordionTrigger>4. When would you return 200 vs 201 vs 204? What about 400 vs 401 vs 403 vs 404 vs 409 vs 422?</AccordionTrigger>
+    <AccordionContent>
+
+      - Pick the code that tells the client what to do next. **200** is a successful GET, PUT, or PATCH that returns a representation. **201** means a resource was created — usually POST, also PUT to a new URL — and send `Location`. **204** is success with no body.
+      - **400** is malformed (bad JSON, missing header). **415** is an unsupported media type, not a generic 400. **401** means the server does not know who the client is. **403** means it knows and the client is not allowed.
+      - **404** is unknown resource; for private objects still 404 so existence is not leaked. **409** is conflict with current state. **422** is well-formed JSON that fails business validation.
+      - The production default is a slightly boring 400/422 split rather than a 200 with an error flag in the JSON.
+      - **Failure:** using 401 for authorization failures; clients then wipe the session and bounce the user to login when they simply lack a permission.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="api-pagination">
+    <AccordionTrigger>5. Compare offset pagination and cursor-based pagination. Why does offset degrade on large, frequently-written tables?</AccordionTrigger>
+    <AccordionContent>
+
+      - **Offset** is page number plus page size, usually `OFFSET`/`LIMIT`. Easy to jump to page fifty; fine when the table is small and mostly static.
+      - **Cursor** returns an opaque token for the last seen row and seeks past that key on an indexed sort tuple such as `created_at` plus `id`. Each page is a range scan, not a discarded prefix.
+      - Offset degrades on **cost** — Postgres still walks the skipped rows — and **correctness**: inserts and deletes shift the window, so the client sees duplicates or skips.
+      - The production default is keyset cursors for feeds, search, and audit logs, and offset only for small admin screens where a page number is the product.
+      - **Failure:** stuffing an offset inside a cursor string and calling it cursor pagination — the skip cost and skipped rows remain. Full map: [API Design in System Design](/notes/api-design-in-system-design).
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="api-error-format">
+    <AccordionTrigger>6. Design a consistent error response format. Have you seen RFC 7807 (Problem Details), and would you adopt it?</AccordionTrigger>
+    <AccordionContent>
+
+      - Ship **RFC 9457 Problem Details** (it obsoletes RFC 7807): `type` as a stable URI, `title`, `status` matching the HTTP code, `detail` as a human-readable instance message, `instance` as a URI for this occurrence — often a request id. Content type is `application/problem+json`.
+      - For validation add an `errors` array of field, code, and message. A custom `code` such as `order.already_paid` belongs in an extension member.
+      - Adopt 9457 for any public or partner API. Internally the same shape still applies even if the `type` URIs are never registered on the public web.
+      - The production default is to generate `instance` from a request id, log the same id, and never put stack traces or SQL in `detail`.
+      - **Failure:** endpoints that sometimes return Problem Details and sometimes return `{ error: string }` — clients then special-case every route.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="api-versioning">
+    <AccordionTrigger>7. Compare API versioning strategies (URL path, header, query param). When is versioning actually necessary vs. avoidable with additive changes?</AccordionTrigger>
+    <AccordionContent>
+
+      - Version only when a contract must **break**. **Additive** changes — new optional fields, new endpoints, new error codes — avoid a version if clients already ignore unknown members.
+      - **Path** versioning (`/v1/orders`) is what teams ship most often: visible in logs, trivial to route, cache-friendly because the URI is the cache key. The cost is URL clutter and a long tail of `/v1`.
+      - **Header** versioning via `Accept` is closer to HTTP semantics and keeps paths stable; caches mix versions unless you send `Vary`. A **query parameter** is easy to omit and looks optional when it is not.
+      - The production default is path versions for public HTTP APIs, keep v1 running until traffic dies, and put compatibility tests on the old contract.
+      - **Failure:** minting `/v2` for additive fields and then maintaining two stacks that only differ by a key the old client would have ignored.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="api-rate-limiting">
+    <AccordionTrigger>8. How do rate-limiting algorithms differ (fixed window, sliding window, token bucket)? What should the 429 response include?</AccordionTrigger>
+    <AccordionContent>
+
+      - **Fixed window** counts requests in a calendar bucket. Cheap in Redis — INCR plus EXPIRE — but it allows a double burst at the boundary.
+      - **Sliding window** smooths that by weighting the previous bucket or storing timestamps; accuracy costs memory. **Token bucket** replenishes tokens at a steady rate up to a cap and **allows a bounded burst**. **Leaky bucket** drains queued work at a fixed rate and smooths bursts instead of permitting them.
+      - The production default for APIs is the token-bucket shape: a sustained rate plus a small burst for legitimate retries.
+      - A **429** should send `Retry-After`, expose `X-RateLimit-Limit` / `Remaining` / `Reset` (or IETF `RateLimit` fields), and use Problem Details. Scope the counter by API key or tenant, not only IP.
+      - **Failure:** a global per-IP limit on a B2B API — one corporate proxy exhausts the quota for every user behind it, and nobody gets a useful `Retry-After`.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="api-rest-graphql-trpc">
+    <AccordionTrigger>9. REST vs GraphQL vs tRPC/RPC: give a concrete scenario where each is the right choice.</AccordionTrigger>
+    <AccordionContent>
+
+      - **REST** is the right default when the API is a public HTTP contract: many languages, CDNs, partners, resources that map to URLs. A payments API — `GET /invoices/id` is cacheable, and a Java client should not need a GraphQL runtime.
+      - **GraphQL** is the right choice when one product BFF serves web and mobile that need different slices of a nested graph. A dashboard that loads a project, members, and avatars in one query is the case to defend — then own query cost, persisted queries, and authz per field.
+      - **tRPC** (or any typed RPC) is the right choice when client and server are TypeScript in the same repo, the API is not a public product, and the win is shared types. An internal admin app talking to a Node API is that case.
+      - The production default is not to expose tRPC to third parties, and not to start a partner API in GraphQL unless the query shape is the product.
+      - **Failure:** GraphQL as a public surface with unbounded queries and no persisted-query allowlist — one nested request becomes the N-plus-one and the outage. Full map: [API Design in System Design](/notes/api-design-in-system-design).
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="api-n-plus-one">
+    <AccordionTrigger>10. How do you avoid N+1 queries when an endpoint returns nested resources? Embed vs. link related resources — tradeoffs?</AccordionTrigger>
+    <AccordionContent>
+
+      - **N-plus-one** is one query for the parent list and then one query per row for nested data. Avoid it by loading children in one query: `WHERE order_id IN (...)`, a join when cardinality is safe, or a DataLoader-style batch so loop-in-code still collapses to one SQL statement per resource type.
+      - **Embed** related resources to minimize client round trips — the default for small, always-needed relations. **Link** (`customer_url` or `relationships`) when the child is large, optional, or has a different cache lifetime. JSON:API-style `include` lets the caller choose.
+      - The production default is to cap what can be embedded and never embed an unbounded collection such as all events for an order.
+      - **Failure:** a join that multiplies rows — one order with 200 line items duplicated across a customer join — then mapping in memory and calling it one query while allocating a huge result set.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="api-auth-s2s">
+    <AccordionTrigger>11. Compare API keys, OAuth 2.0 client credentials, and JWT bearer tokens for server-to-server APIs.</AccordionTrigger>
+    <AccordionContent>
+
+      - **API keys** are a shared secret on every call. Easy to issue and easy to get wrong: long-lived, often logged, painful to rotate, no standard scopes. Appropriate for a simple partner integration or webhook receiver. Store only a hash, bind to a tenant, support two active keys.
+      - **OAuth 2.0 client credentials** is a **grant**, not a token format. The client authenticates with `client_id` and `client_secret`, gets a short-lived access token — often a JWT — and the server enforces scopes. That is the production default when the caller is another company.
+      - A **JWT bearer** token is the **format**: signed claims the resource server validates locally with JWKS — signature, issuer, audience, expiry, explicit algorithm allowlist. Revocation is the weakness unless tokens are short or a denylist is kept. A static JWT in a config file is a different, worse pattern.
+      - **Failure:** a static API key in a query string — it lands in access logs and browser history — or a 24-hour JWT with no revoke path after a service account leaks.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="api-webhooks">
+    <AccordionTrigger>12. Design a webhook delivery system: signing, retries with backoff, ordering guarantees, and idempotent receivers.</AccordionTrigger>
+    <AccordionContent>
+
+      - Design webhooks as **at-least-once** delivery of signed events. Each event gets a stable `event_id`. Sign `timestamp + body` with HMAC-SHA256. A stale timestamp only **narrows the replay window**; durable `event_id` dedup handles a replayed delivery.
+      - Retries use **exponential backoff** with jitter. Retry timeouts, **408**, **429** (honoring `Retry-After`), and retryable 5xx, then stop after a budget and land in a dead-letter queue. Global ordering is not promised; partition by resource id if order matters.
+      - The receiver should upsert on `event_id` and treat duplicates as success. The production default also defends the outbound worker: user-supplied URLs are SSRF risks, so block private CIDRs and require HTTPS.
+      - **Failure:** retrying a handler that already returned 200 because the worker timed out reading the response — without idempotent receivers the result is double-provision.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="api-long-running">
+    <AccordionTrigger>13. How do you expose a long-running operation over HTTP (e.g., a report generation)? Compare 202 + status polling vs. webhooks vs. WebSockets.</AccordionTrigger>
+    <AccordionContent>
+
+      - A report that takes minutes should not occupy the HTTP socket. Accept the job, persist an operation record, and return **202** with `Location` pointing at `/operations/id`. GET returns `pending`, `running`, `succeeded`, or `failed`, plus a result URL when done.
+      - A **webhook** is better when the caller is another server that can expose an HTTPS endpoint. **WebSockets** (or SSE) are for a human UI that wants progress percent — they add connection state and should not be the only completion path.
+      - The production default is 202 plus polling as the source of truth, an optional webhook, and SSE for the dashboard.
+      - **Failure:** a synchronous POST that sits on a 60-second gateway timeout — the client retries, the server enqueues twice, and nobody has an operation id to look up.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="api-put-patch">
+    <AccordionTrigger>14. PUT vs PATCH: what's the semantic difference, and how do JSON Patch and JSON Merge Patch differ?</AccordionTrigger>
+    <AccordionContent>
+
+      - **PUT** replaces the resource. The body is the new complete representation; omitted fields are gone. That is why PUT is idempotent. **PATCH** applies a delta and is not required to be idempotent.
+      - **JSON Patch** (RFC 6902) is an array of operations aimed at a JSON pointer — powerful and easy to `remove` the wrong path. **JSON Merge Patch** (RFC 7396) is a partial object: present keys overwrite, `null` deletes, omitted keys stay; arrays are replaced as a whole. Merge Patch is the production default for simple resource APIs because humans can read it.
+      - The production default is to require `If-Match` with an ETag on both PUT and PATCH so two tabs do not last-write-win.
+      - **Failure:** documenting merge semantics while implementing PUT replacement — a partial body then silently **clears** omitted fields.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="api-conditional">
+    <AccordionTrigger>15. How do ETag, Last-Modified, and Cache-Control enable conditional requests and bandwidth savings?</AccordionTrigger>
+    <AccordionContent>
+
+      - An **ETag** is an opaque version of the representation. On GET the client sends `If-None-Match` and may get **304** with no body. On writes `If-Match` that does not match returns **412**. That is optimistic concurrency and bandwidth saving from the same header pair.
+      - **Last-Modified** plus `If-Modified-Since` is weaker: timestamp granularity can miss two updates in the same second, and clock skew makes it brittle. ETag is the real validator.
+      - **Cache-Control** tells intermediaries what they may store: `max-age`, `private` so a CDN does not serve one user's data to another, `no-store` for secrets. `must-revalidate` means a stale response must be successfully revalidated before reuse — not specifically "issue a conditional GET."
+      - The production default is a **strong** ETag only when equal tags mean byte-identical representations. A row version alone is not enough if the JSON shape can change. Otherwise send a weak validator.
+      - **Failure:** a weak ETag on a PUT path, or sending `Cache-Control: public` on a tenant-scoped response — the CDN then leaks data across tenants.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="api-file-transfer">
+    <AccordionTrigger>16. How would you design file upload/download in an API — multipart uploads vs. presigned S3 URLs? What changes at 5MB vs 5GB?</AccordionTrigger>
+    <AccordionContent>
+
+      - At about **5MB**, a `multipart/form-data` upload to the API is acceptable if the bytes need inspection — virus scan, EXIF strip, image transcode — and the app server can stream to object storage without buffering the whole file. A single presigned PUT is the preference when the API does not need the bytes.
+      - At **5GB**, the app server must not proxy the object. Use S3 multipart upload with presigned part URLs and S3's **full-object checksums**, then verify size and checksum **server-side**. A client "complete" callback is not proof of integrity. `Content-MD5` is not a full-object checksum for multipart.
+      - Download is a short-lived presigned GET, or a signed CDN URL, never a public bucket. The API authorizes, then hands out a URL that expires in minutes.
+      - **Failure:** `fs.readFile` or buffering `req` into memory on a 5GB upload — the process OOMs. Stream or presign; allowlist content types; scan asynchronously after the object lands.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="api-multi-tenant">
+    <AccordionTrigger>17. In a multi-tenant API, where should tenant identity come from (subdomain, header, JWT claim), and how do you guarantee cross-tenant requests are rejected?</AccordionTrigger>
+    <AccordionContent>
+
+      - Tenant identity must come from something the client cannot forge: a JWT claim such as `tenant_id`, or a session already bound to a tenant. A **subdomain** is a routing hint — still resolve it to an internal tenant id and check it against the token.
+      - A client-supplied **header** such as `X-Tenant-Id` is acceptable only as a selector for platform admins who already passed a stronger check; for ordinary users it is spoofable.
+      - The handler reads tenant from the auth context, never from the body. Every query includes that predicate. Postgres **RLS** is the backstop so a missing `WHERE` still returns zero rows — but only if the runtime role is **not** the table owner, does not have `BYPASSRLS`, and `FORCE ROW LEVEL SECURITY` is set. Tenant context is `SET LOCAL`. Cross-tenant path ids return 404. Isolation: [Building a Multi-Tenant Backend with Hono, Better Auth, Drizzle, and Postgres RLS](/notes/multi-tenant-backend-drizzle-hono-better-auth).
+      - **Failure:** an endpoint that accepts `tenant_id` in JSON for convenience and a header that overrides the JWT. One crafted request and the result is a cross-tenant read.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="api-design-first">
+    <AccordionTrigger>18. Design-first (OpenAPI spec) vs code-first: tradeoffs, and how does contract testing fit in?</AccordionTrigger>
+    <AccordionContent>
+
+      - **Design-first** means the OpenAPI document is the contract teams review before writing handlers. Right when the API has multiple consumer teams, generated SDKs, or a partner program. The cost is ceremony and drift if CI does not fail when the server disagrees with the spec.
+      - **Code-first** means the implementation is the source and OpenAPI is emitted from types. Faster for an internal API in one repo; consumers see the contract after the code exists, and it is easy to leak internals.
+      - **Contract testing** sits between them: schema-validate real responses against the spec in CI, and for mobile clients consumer-driven contracts (Pact) so the provider verifies what the app will actually send.
+      - The production default is design-first for public HTTP, code-first for tRPC-style internal apps, and never generating a spec that is not tested.
+      - **Failure:** a beautiful OpenAPI site and a server that returned a different JSON last Tuesday.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="api-evolve-clients">
+    <AccordionTrigger>19. How do you evolve an API without breaking existing mobile clients that may never update?</AccordionTrigger>
+    <AccordionContent>
+
+      - Assume a fraction of mobile clients will never update. The rule is **additive change**: new optional fields, new endpoints, new error codes the old client ignores. Never reuse a field name for a new meaning, never change a type, and never make a previously optional field required.
+      - Enums are a footgun — old clients crash or drop unknown values — so treat unknown members as ignore in the app and add new variants only when old builds can survive them.
+      - When a break is required, add a new resource or a path version and keep the old one until traffic is gone. Advertise deprecation with `Sunset` and `Deprecation` headers. Feature flags can hide new behavior from old `app-version` headers.
+      - The production default is a contract test suite that replays fixtures from old app versions.
+      - **Failure:** tightening validation — rejecting extra fields or requiring a new header — which turns a never-update install into an instant outage even though the change looked like being strict.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="api-design-audit-log">
+    <AccordionTrigger>20. Design exercise: a paginated, filterable audit-log API for a multi-tenant healthcare SaaS where auditors must only see their own tenant's data.</AccordionTrigger>
+    <AccordionContent>
+
+      - This is an append-only, tenant-scoped read API. Every event is immutable, every row has `tenant_id`, auditors authenticate as users in that tenant with an `auditor` role, and the API never accepts tenant as a filter the client chooses. Access to the log is itself logged.
+      - Shape: `GET /v1/audit-events` with a keyset cursor on `(occurred_at, id)`, page size cap of 100, and indexed filters: `actor_id`, `action`, `resource_type`, `resource_id`, `from`, `to`. Offset pages are not offered. A single-event GET still enforces tenant.
+      - Authz: tenant from the JWT claim, role check, then RLS as the backstop so a missing predicate still returns empty. Cross-tenant ids return 404. Isolation: [Building a Multi-Tenant Backend with Hono, Better Auth, Drizzle, and Postgres RLS](/notes/multi-tenant-backend-drizzle-hono-better-auth).
+      - **Failure:** using offset on a hot events table; filtering in memory after a wide select; writing request logs that duplicate the audit payload; an export endpoint that streams another tenant because `tenant_id` was taken from query. Refuse that parameter even for super-admin unless it is a separate break-glass service with its own audit trail.
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>
+
+<br />

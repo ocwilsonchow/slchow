@@ -1,0 +1,652 @@
+---
+title: How to Improve User Experience in Mobile Development
+description: A senior React Native engineer's guide to building fast, accessible, resilient experiences that feel at home on iOS and Android
+date: 2026-08-23
+category: frontend
+---
+
+Mobile user experience is not the layer added after the features work. It is the behavior of the product while a thumb is moving, the keyboard is open, the network is slow, a permission is denied, text is enlarged, or the process has just returned from the background.
+
+React Native gives iOS and Android one product surface, not one identical host. The product intent should be shared. The interaction should respect each platform. A screen can use the same domain model and design tokens while still preserving iOS navigation expectations, Android back behavior, native accessibility, and the constraints of the device in the user's hand.
+
+This note treats UX as an engineering contract:
+
+```text
+useful task
+  + clear state
+  + immediate feedback
+  + recoverable failure
+  + native conventions
+  + accessible interaction
+  + performance on a real device
+  = mobile user experience
+```
+
+The React Native runtime behind that contract is [Understanding React Native in Depth](/notes/understanding-react-native-in-depth). This note starts where the renderer ends: what the person can understand and successfully do.
+
+---
+
+## 1. Design One Product, Not One Screenshot
+
+The wrong cross-platform goal is pixel equality. iOS and Android do not use the same navigation model, system controls, typography metrics, permission surfaces, or back behavior. Forcing both platforms into one screenshot usually makes both feel foreign.
+
+Share the parts that express the product:
+
+- Content hierarchy, domain language, brand, color roles, spacing scale, and task flow.
+- Validation rules, loading and error states, analytics events, and accessibility intent.
+- Business components such as a membership card, order summary, or transfer form.
+
+Adapt the parts owned by the host:
+
+- Back navigation, system sheets, date and time selection, share surfaces, and permissions.
+- Haptics, keyboard behavior, status and navigation bars, and platform typography.
+- Gesture competition at screen edges and hardware back on Android.
+
+Platform differences should sit at deliberate seams, not leak through every component.
+
+```tsx
+import { Platform } from "react-native"
+
+const presentation = Platform.select({
+  ios: "formSheet",
+  android: "modal",
+  default: "modal",
+})
+
+<Stack.Screen
+  name="edit-profile"
+  options={{ presentation }}
+/>
+```
+
+`Platform.select` is useful when the behavior has a platform reason. It is not a substitute for a design system. If every margin branches on `Platform.OS`, the shared abstraction is missing.
+
+**Failure:** matching the Figma frame while breaking the Android system back button or replacing an iOS sheet with a custom full-screen imitation.
+
+---
+
+## 2. Make the Primary Action Easy to Hit
+
+A control is not usable because it looks large. Its interactive bounds must be large, separated from competing targets, and reachable with one hand.
+
+A practical shared floor is **48 × 48 logical pixels**. That covers Android's 48 dp recommendation and exceeds the common 44 pt iOS target. The visible icon can remain 20–24 points; the pressable around it owns the target.
+
+```tsx
+import { Pressable, StyleSheet, Text } from "react-native"
+
+type IconButtonProps = {
+  label: string
+  disabled?: boolean
+  onPress: () => void
+}
+
+export function IconButton({
+  label,
+  disabled = false,
+  onPress,
+}: IconButtonProps) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ disabled }}
+      disabled={disabled}
+      hitSlop={8}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.button,
+        pressed && styles.pressed,
+        disabled && styles.disabled,
+      ]}
+    >
+      <Text aria-hidden>⋯</Text>
+    </Pressable>
+  )
+}
+
+const styles = StyleSheet.create({
+  button: {
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 48,
+    minWidth: 48,
+  },
+  pressed: { opacity: 0.6 },
+  disabled: { opacity: 0.35 },
+})
+```
+
+`hitSlop` extends the touch area, but it does not create visual spacing. Two icons eight points apart can still have overlapping or ambiguous targets. Layout must separate them.
+
+The rest is hierarchy:
+
+- Put the frequent action in the thumb's comfortable region. Do not hide the main task in a top-right icon because it looked balanced on a desktop canvas.
+- Keep destructive actions away from the primary action and require confirmation only when the operation is costly or irreversible.
+- Give a press immediate visual feedback. A request may take seconds; the pressed state should take one frame.
+- Disable accidental duplicate submission, not the person's ability to leave the screen.
+
+**Failure:** a 16-point icon with `onPress`, no pressed state, and a second icon beside it. It is technically interactive and practically hostile.
+
+---
+
+## 3. Treat Insets, Keyboards, and Text as Dynamic Inputs
+
+A mobile viewport changes while the screen is alive. The device can rotate. A call indicator can change the top inset. The keyboard can cover half the screen. The user can enlarge text. A foldable can resize the window without relaunching the app.
+
+Use runtime layout information. Do not encode one device's status bar or screen height.
+
+```tsx
+import { ScrollView, StyleSheet, View } from "react-native"
+import { useSafeAreaInsets } from "react-native-safe-area-context"
+
+export function ProfileForm() {
+  const insets = useSafeAreaInsets()
+
+  return (
+    <View style={styles.screen}>
+      <ScrollView
+        automaticallyAdjustKeyboardInsets
+        contentContainerStyle={[
+          styles.content,
+          { paddingBottom: insets.bottom + 24 },
+        ]}
+        keyboardDismissMode="on-drag"
+        keyboardShouldPersistTaps="handled"
+      >
+        {/* Fields and submit action */}
+      </ScrollView>
+    </View>
+  )
+}
+
+const styles = StyleSheet.create({
+  screen: { flex: 1 },
+  content: { flexGrow: 1, paddingHorizontal: 20 },
+})
+```
+
+`automaticallyAdjustKeyboardInsets` lets iOS update the scroll insets as the keyboard changes. On Android, configure and test the activity's resize behavior. Older targets may need `KeyboardAvoidingView`; do not stack multiple avoidance strategies and accidentally double the inset. If a screen does require `keyboardVerticalOffset`, derive it from its actual header and accessory layout—there is no universal number.
+
+Text is dynamic too:
+
+- Let body copy and controls follow the system font scale. Fix the layout, not the user's preference.
+- Use `numberOfLines` only when truncation is part of the content contract. A legal warning or validation error is not decorative overflow.
+- Avoid fixed-height containers around text. Prefer `minHeight`, padding, and flexible rows.
+- Test long German labels, mixed scripts, right-to-left layout, and the largest supported accessibility size.
+
+**Failure:** `height: 48` around a label that becomes three lines at 200% text size. The button meets the touch-target rule and still hides its name.
+
+---
+
+## 4. Navigation Must Preserve Place
+
+Navigation is more than changing the visible component. It answers four questions:
+
+1. Where am I?
+2. How did I get here?
+3. How do I go back?
+4. What state survives when I return?
+
+Use a native stack for screen transitions. Preserve the Android hardware and predictive back path. Keep the iOS edge-swipe gesture unless the screen has a strong reason to intercept it. A custom gesture that starts at the left edge competes with navigation even when it works perfectly in isolation.
+
+State ownership decides whether a return feels continuous:
+
+- **Navigation state** owns the route and serializable parameters such as an item id.
+- **Server state** owns data that can be refetched and cached.
+- **Screen state** owns temporary filters, scroll position, and draft input that should survive a detail push.
+- **Ephemeral state** owns a pressed highlight or an open tooltip and may disappear.
+
+Pass ids through routes, not entire mutable records. A deep link and an in-app tap should resolve the same route through the same validation.
+
+```ts
+type OrderRoute = {
+  pathname: "/orders/[orderId]"
+  params: { orderId: string }
+}
+
+function orderRoute(orderId: string): OrderRoute {
+  return {
+    pathname: "/orders/[orderId]",
+    params: { orderId },
+  }
+}
+```
+
+A tab switch should usually preserve each tab's stack and scroll position. A successful creation may intentionally replace the form so Back does not reopen a submitted draft. Those are product decisions, not router defaults.
+
+**Failure:** calling `router.push` after every successful login, save, and redirect. The stack grows, Back revisits stale transactional screens, and the user loses trust in navigation.
+
+---
+
+## 5. Every Screen Is a State Machine
+
+The happy path is one state. Production has more:
+
+```text
+idle → loading → content
+             ├→ empty
+             ├→ recoverable error → retrying
+             └→ blocking error
+
+content → refreshing
+        → mutating
+        → stale or offline
+```
+
+Model states so impossible combinations are hard to render. Three unrelated booleans—`isLoading`, `hasError`, and `data`—can produce a loading spinner, an error, and old content at once.
+
+```tsx
+type ScreenState<T> =
+  | { status: "loading" }
+  | { status: "empty" }
+  | { status: "content"; data: T; refreshing: boolean }
+  | { status: "error"; message: string; canRetry: boolean }
+
+function OrdersScreen({ state }: { state: ScreenState<Order[]> }) {
+  switch (state.status) {
+    case "loading":
+      return <OrdersSkeleton />
+    case "empty":
+      return <EmptyOrders />
+    case "content":
+      return (
+        <OrderList
+          orders={state.data}
+          refreshing={state.refreshing}
+        />
+      )
+    case "error":
+      return (
+        <ErrorState
+          message={state.message}
+          canRetry={state.canRetry}
+        />
+      )
+  }
+}
+```
+
+Each state should help the person decide what happens next:
+
+- **Loading:** preserve the shape of the destination when a skeleton reduces layout movement. Use a spinner when there is no useful shape.
+- **Empty:** explain whether there is no data yet, no search result, or no connection. These have different next actions.
+- **Refreshing:** keep existing content visible. Pull-to-refresh should not replace a useful list with a blank screen.
+- **Error:** say what failed and provide a local recovery action. “Something went wrong” without Retry is a dead end.
+- **Offline:** distinguish work that is unavailable from work that can be queued. Do not show a generic server error for airplane mode.
+
+Avoid full-screen loaders for small mutations. Saving one favorite should update that row, not block the whole tab.
+
+**Failure:** a global `isLoading` that turns every network request into a white screen and a spinner.
+
+---
+
+## 6. Use Optimism Only When It Is Reversible
+
+Optimistic UI shortens perceived latency by showing the expected result before the server confirms it. It works well for low-risk, reversible actions such as favoriting, following, or reordering. It is dangerous for payments, destructive operations, and any response whose outcome the client cannot predict.
+
+```tsx
+async function toggleFavorite() {
+  if (saving) return
+
+  const previous = favorite
+  const next = !previous
+
+  setFavorite(next)
+  setSaving(true)
+
+  try {
+    await api.setFavorite({
+      itemId,
+      favorite: next,
+    })
+  } catch {
+    setFavorite(previous)
+    setMessage("Could not update favorite. Try again.")
+  } finally {
+    setSaving(false)
+  }
+}
+```
+
+The production contract includes more than the state flip:
+
+- The mutation is idempotent or carries an idempotency key.
+- A failed request rolls the UI back and leaves a visible retry path.
+- Repeated taps cannot reorder acknowledgements and produce the wrong final state.
+- The app decides what happens if it backgrounds or loses connectivity during the request.
+- Assistive technology is told when a silent visual rollback occurs.
+
+For offline-capable work, expose the truth: “Saved on this device” and “Synced” are different states. Queue durable operations only when conflict and authentication expiry have defined behavior.
+
+**Failure:** showing “Payment complete” optimistically because the button felt slow.
+
+---
+
+## 7. Performance Is Interaction Quality
+
+A technically correct frame that arrives late is a UX bug. React Native has separate JS and UI-thread failure modes: a long React render delays JavaScript work; expensive native layout or drawing delays the UI thread. The distinction is explained in [Understanding React Native in Depth](/notes/understanding-react-native-in-depth).
+
+Start with user-visible budgets:
+
+- A press gets feedback in the next frame.
+- Navigation begins immediately and does not wait for nonessential data.
+- Scrolling stays responsive on a representative low-end Android device.
+- Returning to a warm screen restores useful content without a blocking refetch.
+- Images reserve their layout space and use appropriately sized sources.
+
+Lists are where these rules become visible.
+
+```tsx
+import { memo, useCallback } from "react"
+import { FlatList } from "react-native"
+
+const OrderRow = memo(function OrderRow({
+  order,
+  onOpen,
+}: {
+  order: Order
+  onOpen: (id: string) => void
+}) {
+  return (
+    <Pressable onPress={() => onOpen(order.id)}>
+      <OrderSummary order={order} />
+    </Pressable>
+  )
+})
+
+export function OrderList({ orders }: { orders: Order[] }) {
+  const openOrder = useCallback((id: string) => {
+    router.push(`/orders/${id}`)
+  }, [])
+
+  const renderOrder = useCallback(
+    ({ item }: { item: Order }) => (
+      <OrderRow order={item} onOpen={openOrder} />
+    ),
+    [openOrder]
+  )
+
+  return (
+    <FlatList
+      data={orders}
+      keyExtractor={(order) => order.id}
+      renderItem={renderOrder}
+    />
+  )
+}
+```
+
+Stable keys protect row identity. Memoization helps only when props are stable and the row is expensive enough to matter. `getItemLayout` helps when row dimensions are genuinely fixed. Virtualization knobs should be measured, not copied from a blog post.
+
+The senior workflow is evidence first:
+
+1. Reproduce on a release build; development instrumentation changes timing.
+2. Decide whether the delay is JS, UI, network, image decode, or startup.
+3. Profile the slow interaction, not the entire app.
+4. Fix the largest blocking unit of work.
+5. Measure again on the device class that exposed it.
+
+**Failure:** adding `useMemo` everywhere while a full-resolution image is decoded for every row.
+
+---
+
+## 8. Motion and Haptics Explain Cause and Effect
+
+Animation should answer a question: what changed, where did it go, or what will happen if I continue? Motion that delays the next task is decoration charged to the user.
+
+Use motion for continuity:
+
+- Keep a selected object spatially connected to its detail view.
+- Animate insertion and removal so list changes can be followed.
+- Let a gesture track the finger and settle with a physically coherent end state.
+- Keep durations short for frequent operations.
+
+Respect the system's reduced-motion preference. The state change must still be understandable when movement is removed.
+
+```tsx
+import { AccessibilityInfo } from "react-native"
+import { useEffect, useState } from "react"
+
+export function useReduceMotion() {
+  const [reduceMotion, setReduceMotion] = useState(false)
+
+  useEffect(() => {
+    void AccessibilityInfo.isReduceMotionEnabled().then(setReduceMotion)
+
+    const subscription = AccessibilityInfo.addEventListener(
+      "reduceMotionChanged",
+      setReduceMotion
+    )
+
+    return () => subscription.remove()
+  }, [])
+
+  return reduceMotion
+}
+```
+
+Haptics are confirmation, not information. Use them sparingly for a successful commit, selection boundary, or warning that benefits from tactile reinforcement. They must not be the only signal, and they should follow the completed action rather than claim success before the server does.
+
+Run gesture-driven work on the UI thread with the appropriate animation and gesture tooling. Updating React state for every drag event makes the visual response wait for the JS thread.
+
+**Failure:** a 600 ms spring on every tab press and a success haptic before the mutation returns.
+
+---
+
+## 9. Accessibility Is a Different Way to Operate the Same Product
+
+Accessibility is not a label pass before release. VoiceOver and TalkBack users need the same task, state, and recovery path without depending on spatial position, color, or an animation.
+
+A control needs a semantic role, an accessible name, and its current state.
+
+```tsx
+<Pressable
+  accessibilityRole="switch"
+  accessibilityLabel="Order notifications"
+  accessibilityHint="Notifies you when the order status changes"
+  accessibilityState={{ checked: notificationsEnabled }}
+  onPress={toggleNotifications}
+>
+  <SwitchVisual enabled={notificationsEnabled} />
+</Pressable>
+```
+
+Build the semantics with the interaction:
+
+- Use roles that describe behavior: button, link, switch, header, image.
+- Prefer a visible label that can also be the accessible name. Add a custom label when an icon has no text.
+- Expose selected, checked, disabled, busy, and expanded state.
+- Keep focus order aligned with reading order. Absolute positioning can make a screen look correct while its accessibility order is nonsense.
+- Move focus deliberately after navigation or a major content replacement. Announce asynchronous failures that would otherwise be visual only.
+- Do not encode status with color alone. Pair color with text, icon shape, or state.
+- Test screen-reader operation, large text, bold text, increased contrast, reduced motion, and switch or keyboard navigation where the platform supports it.
+
+Automated checks can find missing properties and low contrast. They cannot tell whether the checkout flow makes sense when read aloud. A human must complete the task with VoiceOver and TalkBack.
+
+**Failure:** adding `accessibilityLabel="button"` to an unlabeled icon. The role was repeated; the purpose is still unknown.
+
+---
+
+## 10. Permissions and Security Are Trust UX
+
+A permission dialog is an interruption controlled by the operating system. Ask when the value is visible, explain why the capability is needed, and keep a usable path when the person says no.
+
+Good timing is contextual:
+
+```text
+User taps "Scan receipt"
+  → explain camera use in product language
+  → request camera permission
+  → granted: open scanner
+  → denied: offer manual upload or Settings path
+```
+
+Bad timing is a launch sequence of camera, notifications, contacts, and tracking prompts before the product has shown any value.
+
+Permission states are durable product states:
+
+- **Not determined:** the app may request.
+- **Granted:** continue to the capability.
+- **Denied but requestable:** explain and let the person choose whether to ask again.
+- **Blocked:** the OS will not prompt; offer a Settings path.
+- **Limited:** use the subset the OS granted, such as selected photos.
+
+Trust also depends on honest data handling. Do not log private form fields, put session material in AsyncStorage, or imply that a local UI check is authorization. The device threat model and storage boundaries are covered in [Security in React Native](/notes/security-in-react-native).
+
+**Failure:** requesting notifications on first launch and then showing a custom pre-prompt that pressures the person after they decline.
+
+---
+
+## 11. Error Messages Belong Beside the Action
+
+An error message should identify the failed action, preserve the person's work, and offer a next step.
+
+Compare:
+
+```text
+Something went wrong.
+```
+
+with:
+
+```text
+Your comment was not posted. The draft is still here.
+[Try again]
+```
+
+The second message answers what failed, what happened to the input, and how to recover.
+
+Choose the presentation by scope:
+
+- **Field error:** beside the field, linked semantically to it.
+- **Row mutation error:** on that row or in a nearby retry surface.
+- **Screen load error:** in the screen body, with Retry.
+- **Background sync issue:** a persistent but nonblocking status.
+- **Destructive or account-wide failure:** a modal only when the person must decide before continuing.
+
+Toasts are useful confirmations for actions whose result is already visible. They are poor homes for long errors, recovery controls, or information that must survive a screen-reader announcement.
+
+Preserve drafts across recoverable failures. If the process can be killed during a long form, decide whether the draft belongs in local storage and how sensitive fields are excluded.
+
+**Failure:** clearing the form before the request succeeds, then reporting the failure in a toast that disappears.
+
+---
+
+## 12. Test the Conditions, Not Only the Screens
+
+A simulator with fast Wi-Fi, default text, and a warm development bundle is the easiest environment the app will ever see. Release confidence needs a matrix built from real risk.
+
+| Dimension | Minimum useful coverage |
+| --- | --- |
+| Device | Small iPhone, current iPhone, low-end Android, current Android |
+| Input | Touch, keyboard open, screen reader, large text |
+| Network | Fast, high latency, packet loss, offline, reconnect |
+| Lifecycle | Cold start, warm start, background and resume, process death |
+| Account | New, active, expired session, restricted permission |
+| Content | Empty, one item, hundreds of items, long localized strings |
+
+Use each layer for what it can prove:
+
+- Unit tests protect formatting, validation, and state transitions.
+- Component tests protect semantics and local interaction.
+- Device tests protect navigation, keyboard, permissions, deep links, and native integration.
+- Manual exploratory testing finds awkward timing and gesture conflicts.
+- Production telemetry shows what escaped.
+
+The delivery path should produce installable iOS and Android test builds, not only run Jest against JavaScript. [Frontend CI/CD for React and React Native](/notes/frontend-ci-cd-for-react-and-react-native) covers that pipeline.
+
+Measure outcomes, not vanity:
+
+- Task completion and abandonment by step.
+- Time from intent to useful content, not only process startup.
+- Input latency and slow screen transitions by device class.
+- Crash-free sessions and app-not-responding rate.
+- Retry success, offline recovery, and permission conversion after contextual education.
+- Accessibility defects found before release and by users after it.
+
+Analytics should answer a product question and avoid collecting sensitive content. A funnel can show where people leave. It cannot explain why. Pair telemetry with support reports, usability sessions, and direct observation.
+
+**Failure:** declaring the screen fast because it renders at 60 fps on the newest iPhone while the API keeps a low-end Android user on a blocking spinner for four seconds.
+
+---
+
+## Takeaway
+
+A strong React Native experience shares product intent and adapts host behavior.
+
+1. **Can the main task be reached and hit with one hand?** Use real touch targets, visible pressed states, and clear hierarchy.
+2. **Does the layout survive the device changing underneath it?** Treat safe areas, keyboards, orientation, and text scale as inputs.
+3. **Does every asynchronous state explain what happens next?** Preserve useful content, distinguish empty from error, and make failure recoverable.
+4. **Does navigation behave like the platform?** Preserve Back, gestures, stack history, and screen state.
+5. **Is performance measured as interaction latency?** Profile release builds on representative devices.
+6. **Can the same task be completed with VoiceOver and TalkBack?** Semantics, focus, state, and recovery are part of the component.
+7. **Does the app earn trust?** Ask permissions in context, protect data, and never claim success early.
+8. **Did the team test hostile conditions?** Slow networks, process death, denied permissions, long content, and low-end hardware are normal production states.
+
+The senior engineering move is not adding more polish. It is removing uncertainty between intent and result.
+
+---
+
+## Recap Q&A
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="mobile-ux-shared-vs-native">
+    <AccordionTrigger>1. Should iOS and Android look and behave identically?</AccordionTrigger>
+    <AccordionContent>
+
+      - Share the product's hierarchy, language, design tokens, domain rules, and state model.
+      - Adapt navigation, back behavior, sheets, system controls, permissions, keyboards, and haptics to the host.
+      - Pixel equality is not consistency. Consistency means the same intent and outcome through behavior each platform's users understand.
+      - **Failure:** scattering `Platform.OS` through every component instead of defining a small platform seam.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="mobile-ux-async-state">
+    <AccordionTrigger>2. What makes loading and error states good UX?</AccordionTrigger>
+    <AccordionContent>
+
+      - Model loading, empty, content, refreshing, offline, and error as explicit states rather than unrelated booleans.
+      - Preserve useful content during refresh and small mutations. Do not replace the whole screen with a spinner.
+      - An error says what failed, preserves the person's work, and offers a local recovery action.
+      - **Failure:** “Something went wrong” in a disappearing toast with no Retry.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="mobile-ux-performance">
+    <AccordionTrigger>3. How should a React Native team approach performance?</AccordionTrigger>
+    <AccordionContent>
+
+      - Start from a slow user interaction in a release build, then identify JS, UI, network, image, or startup work.
+      - Measure on representative hardware, especially a low-end Android device. Fix the largest blocking unit and profile again.
+      - Stable list keys, appropriately sized images, cached server state, and immediate press feedback usually matter more than blanket memoization.
+      - **Failure:** optimizing component renders without measuring the image decode or API wait that dominates the experience.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="mobile-ux-accessibility">
+    <AccordionTrigger>4. What does accessible mobile interaction require?</AccordionTrigger>
+    <AccordionContent>
+
+      - Controls need a role, name, current state, sufficient target, and logical focus order.
+      - Layout must survive large text, and state must not depend only on color, motion, or haptics.
+      - Complete the real task with VoiceOver and TalkBack. Automated checks cannot validate whether the flow makes sense when read aloud.
+      - **Failure:** adding generic labels after implementation while focus order and recovery remain unusable.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="mobile-ux-release-confidence">
+    <AccordionTrigger>5. What should be tested before release?</AccordionTrigger>
+    <AccordionContent>
+
+      - Test small and large devices, a low-end Android, keyboard states, large text, screen readers, slow and offline networks, denied permissions, backgrounding, and process death.
+      - Cover empty, long, localized, stale, and high-volume content—not only fixture data sized for the screenshot.
+      - Ship installable test builds through CI, then use production telemetry to measure task completion, latency, recovery, crashes, and ANRs.
+      - **Failure:** treating a simulator, default accessibility settings, and fast local Wi-Fi as a production test matrix.
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>

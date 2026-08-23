@@ -1,0 +1,275 @@
+---
+title: "Full-Stack Q&A: JavaScript"
+description: Spoken-length answers to JavaScript and TypeScript questions
+category: full-stack
+---
+
+## JavaScript (TypeScript)
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="js-scope-tdz">
+    <AccordionTrigger>1. var vs let vs const: hoisting, the temporal dead zone, and why const is not deep immutability.</AccordionTrigger>
+    <AccordionContent>
+
+      - All three declarations are **hoisted**. `var` is function-scoped and initialized to `undefined` at the top of that function. `let` and `const` are **block-scoped** and hoisted into a **temporal dead zone**: the binding exists, but reading or writing it before the declaration throws.
+      - `const` only freezes the **binding**. The variable cannot be reassigned. The value can still mutate: a `const` object or array accepts property writes and `push`. Deep immutability needs `Object.freeze` (shallow), structured copies, or a library.
+      - The production default is `const` until reassignment is required, then `let`. `var` has no place in new modules: it leaks through `for` blocks and shares one binding across loop iterations.
+      - **Failure:** treating `const user = fetchUser()` as a frozen record, then wondering why a shared reference mutates two screens.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="js-closures">
+    <AccordionTrigger>2. What is a closure? Give a production use and a leak.</AccordionTrigger>
+    <AccordionContent>
+
+      - A **closure** is a function plus the lexical environment it was created in. After the outer function returns, the inner function can still read and write those bindings. It is not a copy of values; it is a live reference to the scope.
+      - Production uses: **partial application** (`fetchWithAuth(baseUrl)`), **private state** (a module-level cache), **event handlers** that still see the `roomId` from the render that subscribed.
+      - The leak is the same mechanism. A listener, timer, or subscription that closes over a large tree, a 10 MB JSON payload, or a growing `Map` keeps that graph alive after the UI is gone.
+      - The production default is: close over the **smallest** values needed (`id`, not the whole row), unsubscribe in the same lifetime that subscribed, and give caches a max size or TTL.
+      - **Failure:** a `setInterval` that captures `this` and a store, then never `clearInterval` on unmount — the interval is the root, the closure is the retained heap.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="js-this">
+    <AccordionTrigger>3. How is this determined? Function vs arrow, call/apply/bind, and class fields vs prototype methods.</AccordionTrigger>
+    <AccordionContent>
+
+      - For a **function** (including a class method on the prototype), `this` is set by the **call site**. `obj.method()` — `this` is `obj`. `fn()` — `undefined` in strict mode. `call` / `apply` / `bind` set `this` explicitly. `new Fn()` — `this` is the new instance.
+      - An **arrow function** has no `this` binding of its own. It reads `this` from the enclosing lexical scope. `call` and `bind` cannot rebind it. Arrows work as React callbacks and fail as prototype methods that expect `this` to be the instance.
+      - Class **prototype methods** are ordinary functions: extract `const { save } = instance` and `this` is lost unless the method was bound. **Instance fields** that are arrows close over the instance; each object gets its own function, which costs memory and breaks `super.save`.
+      - The production default is prototype methods plus an explicit `bind` or an arrow at the call site. [TypeScript Classes and Runtime Identity](/notes/typescript-classes-and-runtime-identity) is the object model.
+      - **Failure:** passing `obj.handler` to `addEventListener` or `setTimeout` and debugging `this` as `undefined`.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="js-prototype">
+    <AccordionTrigger>4. Prototype chain vs class syntax. When does instanceof fail?</AccordionTrigger>
+    <AccordionContent>
+
+      - A JavaScript `class` is syntax over a **constructor** and a **prototype** object. Methods live on `Class.prototype`. `new` creates an ordinary object, sets `[[Prototype]]` to `Class.prototype`, runs the constructor. There is no separate "class object" at runtime. Model: [TypeScript Classes and Runtime Identity](/notes/typescript-classes-and-runtime-identity).
+      - `instanceof` walks the prototype chain and asks whether `Ctor.prototype` appears on it.
+      - It **fails** for **`Object.create(null)`** (no `Object.prototype`), **cross-realm** values (iframe / vm `Array.prototype` — use `Array.isArray`), a **replaced prototype** after instances exist, and **primitives** (`"hi" instanceof String` is false; boxed `new String("hi")` is true).
+      - Production code treats `class` as a **runtime identity** when `instanceof` or a shared mutable lifetime is required. Otherwise types and functions.
+      - **Failure:** a `data instanceof Map` check that breaks after `structuredClone` across a worker boundary, or trusting `instanceof Error` on a thrown value from another bundle's copy of a library.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="js-equality">
+    <AccordionTrigger>5. == vs === vs Object.is. How do NaN, -0, and boxed primitives behave?</AccordionTrigger>
+    <AccordionContent>
+
+      - **`===`** is SameValueX: no coercion. Different types are unequal. `NaN === NaN` is **false**. `+0 === -0` is **true**.
+      - **`==`** coerces. `null == undefined` is true. `"1" == 1` and `[] == false` are the interview traps. Production code does not use `==` except the deliberate `== null` check for `null` or `undefined`.
+      - **`Object.is`** is SameValue: `Object.is(NaN, NaN)` is **true** and `Object.is(+0, -0)` is **false**. That is the comparison `Map`/`Set` keying for `NaN` uses.
+      - Boxed primitives (`new Number(1)`, `new Boolean(false)`) are **objects**. `new Number(1) === 1` is false. `new Boolean(false)` is truthy because every object is.
+      - The production default is `===` or `Object.is` when `NaN` and signed zero matter. **Failure:** `if (error.score === NaN)` — that condition is never true — or using `==` on a query param that arrived as `""` and treating it as `0`.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="js-coercion">
+    <AccordionTrigger>6. How do ToBoolean and ToPrimitive hide bugs in APIs — plus, if (value), and query params?</AccordionTrigger>
+    <AccordionContent>
+
+      - **ToBoolean** decides `if`, `&&`, `||`, and ternary. Falsy values are `false`, `0`, `-0`, `0n`, `""`, `null`, `undefined`, and `NaN`. Everything else is truthy, including `[]`, `{}`, `"0"`, and `new Boolean(false)`. **ToPrimitive** is how `+`, `>`, and template concatenation turn objects into scalars.
+      - **`if (value)`** treats a legitimate `0` dose, `""` empty note, or `false` flag as missing. Optional fields need `value == null` or an explicit `=== undefined`.
+      - **`+`** is add or concat. `+req.query.page` on a missing param is `NaN`. `"2" + 1` is `"21"`. **Query params and form fields are strings.** `"false"` is truthy. `"0"` is truthy. **`||` defaults** replace `0` and `""`. `??` only replaces `null` and `undefined`.
+      - The production default is parse at the boundary, then work in typed values.
+      - **Failure:** `limit = req.query.limit || 20` so a client that sends `0` (show nothing) gets 20, or `if (patient.mrn)` skipping a valid zero-padded id that arrived as a number and became `0`.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="js-tasks-microtasks">
+    <AccordionTrigger>7. Task vs microtask in the language. Where do queueMicrotask, Promise jobs, and setTimeout run?</AccordionTrigger>
+    <AccordionContent>
+
+      - This is the **language and HTML** model, not Node's libuv phases. One **task** runs to completion, then the engine drains **all microtasks**, then the host may render, then the next task. Node placement of `nextTick` and `setImmediate` is in the Backend Engineering event-loop answer and in [The JavaScript Event Loop in Depth](/notes/javascript-event-loop-in-depth).
+      - **Tasks** (macrotasks): `setTimeout`, `setInterval`, I/O callbacks, UI events, `postMessage`. A delay of `0` is a lower bound, not "now." **Microtasks**: Promise `.then` / `.catch` / `.finally`, `queueMicrotask`, `MutationObserver`. `await` continuation is a microtask. Nested microtasks scheduled during the drain still run before the next task.
+      - Order to say out loud: sync work, then every microtask, then a timer. That is the `5 1 3 4 2` puzzle in [The JavaScript Event Loop in Depth](/notes/javascript-event-loop-in-depth). A microtask loop starves rendering and input.
+      - The production default is: use Promises for "after this stack, before paint"; use `setTimeout` or `scheduler.yield` when the page must get a turn.
+      - **Failure:** `await` in a tight loop and calling it concurrency — those are still microtasks on one thread — or assuming `setTimeout(fn, 0)` runs before `Promise.resolve().then(fn)`.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="js-promises">
+    <AccordionTrigger>8. Promise.all vs allSettled vs race vs any. What happens on unhandled rejection?</AccordionTrigger>
+    <AccordionContent>
+
+      - **`Promise.all`** fulfills with an array of values in input order when every input fulfills. **Rejects on the first rejection.** Remaining work still runs unless cancelled. Use when any failure should fail the batch.
+      - **`Promise.allSettled`** always fulfills with `{ status, value | reason }` per input. Use when the UI must show partial success. **`Promise.race`** settles with **whichever settles first**. **`Promise.any`** fulfills on the **first fulfillment**; rejects with `AggregateError` only if every input rejects.
+      - An **unhandled rejection** is a rejected Promise with no `catch` (and no `await` in a try) by the end of the microtask turn. Browsers and Node emit `unhandledrejection` / `unhandledRejection`. In recent Node, that can crash the process.
+      - The production default is `all` for required sets, `allSettled` for dashboards, and an abort on race timeouts.
+      - **Failure:** `all` on a list of independent optional calls, so one 404 blanks the whole page, or firing `all` without a `.catch` on the combined promise.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="js-async-await">
+    <AccordionTrigger>9. Sequential await vs Promise.all. Error handling, waterfalls, and AbortSignal.</AccordionTrigger>
+    <AccordionContent>
+
+      - `async` functions return a Promise. `await` pauses the function and schedules the rest as a **microtask** when the thenable settles. `try/catch` around `await` is the readable form of `.catch`. Forgetting `await` is a silent fire-and-forget — errors become unhandled rejections.
+      - **Sequential `await`** is a waterfall: each request starts after the previous finishes. That is correct when step two needs step one's id. It is a latency bug when the calls are independent. Start the work first, then `await Promise.all`.
+      - **`await` in a `for` loop** is sequential by design. Mapping to an array of promises and `all` / `allSettled` is the parallel form. Cap concurrency with a pool when the loop would open 10,000 sockets.
+      - **Cancellation** is not built into `await`. `AbortSignal` on `fetch` is the production handle. Abort rejects with `AbortError`; treat that as a non-error in UI.
+      - **Failure:** a sequential waterfall in a Server Component or a client effect, or ignoring abort so a stale response overwrites a newer one.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="js-iterables">
+    <AccordionTrigger>10. Iterables, for...of vs for...in, generators, and when an async generator is the right shape.</AccordionTrigger>
+    <AccordionContent>
+
+      - An **iterable** implements `Symbol.iterator` and returns an iterator `{ next() }` that yields `{ value, done }`. Arrays, Maps, Sets, strings, and most typed collections are iterable. Plain objects are not, unless given an iterator.
+      - **`for...of`** walks values through that protocol. **`for...in`** walks **enumerable string keys** on the object and its prototype. It is the wrong tool for arrays and the wrong tool for `Map`. Production loops over objects use `Object.keys` / `Object.entries` or `for...of` on a `Map`.
+      - A **generator** (`function*`) is a factory for iterators. Use it for lazy sequences, custom `Symbol.iterator`, or a state machine that should not allocate the whole list. An **async generator** (`async function*`, `for await...of`) yields Promises: paginated APIs, file streams, event batches. It is the right shape when the consumer should pull the next page, not when a single `all` of known URLs is enough.
+      - **Failure:** `for...in` on an array of ids, or spreading a huge generator into an array and destroying laziness. [Core JavaScript Concepts](/notes/core-javascript-concepts) covers generators next to promises as two ways to pause work.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="js-modules">
+    <AccordionTrigger>11. ESM vs CommonJS: live bindings, default export interop, circular imports, and tree-shaking.</AccordionTrigger>
+    <AccordionContent>
+
+      - **ESM** (`import` / `export`) is static and has **live bindings**: the importer sees the current value of the export, not a snapshot. Evaluation is hoisted and cycle-aware: bindings exist in TDZ until the exporting module finishes initializing.
+      - **CommonJS** (`require` / `module.exports`) is a runtime function call. The export is a **value** copied at `require` time. Cycles get a partial `exports` object. `require` is synchronous and cannot be tree-shaken the same way.
+      - **Default export interop** is the messy middle. CJS `module.exports = fn` often appears to ESM as `import foo from` or `import * as foo` depending on the bundler and `esModuleInterop`. TypeScript `nodenext` plus an explicit `exports` field is the production shape.
+      - **Tree-shaking** needs ESM, side-effect-free modules (`sideEffects` in `package.json`), and static import paths. `require(variable)` and `export default { manyFns }` as one object defeat shaking.
+      - **Failure:** a circular ESM import that reads a binding in the module body before the exporter finishes — `undefined` or a TDZ throw — or a CJS default that is `mod.default.default` after two interop wrappers.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="js-copy">
+    <AccordionTrigger>12. Shallow vs deep copy: spread, structuredClone, and JSON.parse(JSON.stringify) failure modes.</AccordionTrigger>
+    <AccordionContent>
+
+      - **Shallow copy** (`{ ...obj }`, `Object.assign`, `[...arr]`) duplicates one level. Nested objects and arrays are still shared references. Mutating `copy.address.city` mutates `original`. That is enough when the next layer is replaced wholesale.
+      - **`structuredClone`** is the platform deep copy: Dates, Maps, Sets, ArrayBuffers, cyclic graphs survive. It throws on functions, DOM nodes, and some host objects. It is the default when a real clone is required in modern runtimes.
+      - **`JSON.parse(JSON.stringify(x))`** is not a deep clone. It **drops** `undefined`, functions, and symbols; **collapses** `NaN` / `Infinity` to `null`; turns `Date` into an ISO **string**; rejects cycles. It is a serialization round-trip, useful for JSON-shaped data, dangerous for domain objects.
+      - The production default is shallow updates for immutable state, `structuredClone` for isolation (web workers, undo stacks), and JSON only at a JSON boundary.
+      - **Failure:** spreading a Redux row and mutating a nested `items` array, or `JSON` cloning a `Date` then wondering why `instanceof Date` is false.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="js-memory">
+    <AccordionTrigger>13. Common JavaScript memory leaks: closures, timers, listeners, and unbounded Maps.</AccordionTrigger>
+    <AccordionContent>
+
+      - JavaScript is garbage-collected. A leak is a **retained path** from a GC root (window, a running timer, a module singleton, a worker) to memory the product no longer needs.
+      - Common roots: **closures** that capture a whole props object or a 5 MB response when only an id was required; **timers** without `clear`; **listeners** on `window` or a long-lived bus without `removeEventListener` (same function reference); **unbounded `Map` / object caches** with no LRU or TTL; **detached DOM** still referenced from a handler.
+      - WeakMap and WeakSet do not keep keys alive; they are the right store when the lifetime should follow the object. They are not a general cache: non-object keys are illegal, and there is no iteration.
+      - The production default is pair subscribe with unsubscribe, cap caches, and take a heap snapshot when retained size grows after navigation.
+      - **Failure:** a global event bus that accumulates handlers per mount, or a `Map` of abort controllers that is never deleted on settle.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="ts-structural">
+    <AccordionTrigger>14. Structural typing vs nominal typing. Excess property checks, and why a variable assignment accepts extra fields.</AccordionTrigger>
+    <AccordionContent>
+
+      - TypeScript is **structural**. If value `x` has at least the required properties of type `T`, `x` is a `T`. Names of types do not matter. Java, C#, and Rust classes are closer to **nominal**.
+      - **Excess property checks** are a special case on **fresh object literals**. `const u: User = { id: "1", extra: true }` errors. Assign through a variable and the extra field is allowed: `u` is a `User`; `extra` is still on the object at runtime.
+      - A function `fn(user: User)` will accept an `Admin` that happens to have `id`. Distinguishing brands needs a **nominal trick** — a unique `readonly __brand: "UserId"` field, or a class that is actually constructed. Excess property checks do not run on JSON from `fetch`.
+      - The production default is structural types for props and DTOs, brands for ids that must not mix (`UserId` vs `OrderId`), and runtime parse at the boundary.
+      - **Failure:** treating a type annotation as a strip of extra keys — the compiler does not delete `passwordHash` from an object passed where `PublicUser` is expected.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="ts-unknown-any-never">
+    <AccordionTrigger>15. unknown vs any vs never vs void.</AccordionTrigger>
+    <AccordionContent>
+
+      - **`any`** turns the type system off for that value. Every property access is allowed. `any` flows into other variables and poisons inference. It is an escape hatch, not a type.
+      - **`unknown`** is the type-safe top. Anything may be assigned **to** `unknown`. Almost nothing may be done **with** it until a narrowing. JSON, `catch` bindings, and user input should start as `unknown`.
+      - **`never`** is the empty type: no value exists. A function that always throws returns `never`. Exhaustive `switch` uses `const _x: never = x` in the default so a new variant is a compile error. **`void`** means "the caller must ignore the return." `() => void` is assignable from a function that returns a value. `void` is not `undefined` as a value type.
+      - The production default is `unknown` at IO, `never` for exhaustiveness, `void` for callbacks, and `any` only behind a tracked comment.
+      - **Failure:** `catch (e: any)` plus `e.message`, or annotating a function `Promise<void>` and then returning a useful value that callers cannot see.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="ts-narrowing">
+    <AccordionTrigger>16. How does TypeScript narrow: typeof, in, discriminated unions, type predicates, and asserts?</AccordionTrigger>
+    <AccordionContent>
+
+      - Narrowing is control flow: after a check, the type of a binding **shrinks**. It is not runtime validation unless the check is real JavaScript.
+      - **`typeof`** works for primitive tags. It does not distinguish arrays from objects (`typeof [] === "object"`) and it does not see `null` (`typeof null === "object"`). **`in`** narrows object unions by property name. **Discriminated unions** share a literal tag; a `switch (shape.kind)` narrows the rest of the fields.
+      - **Type predicates** — `function isCat(x: Animal): x is Cat` — tell the checker what a boolean return means. The function body must actually prove it. **`asserts x is T`** throws if the value is not `T`. After `assertUser(x)`, `x` is `User`. Use at boundaries; do not `as` silently.
+      - The production default is a discriminant on every event and error union, predicates for arrays (`Array.isArray` plus an element guard), and Zod when the data crossed the network.
+      - **Failure:** `as User` after `typeof x === "object"`, or a predicate that only checks `"id" in x`.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="ts-generics">
+    <AccordionTrigger>17. Generics, constraints, infer — and when a generic adds no safety.</AccordionTrigger>
+    <AccordionContent>
+
+      - A **generic** is a type parameter the caller (or inference) fills in. `function first<T>(xs: T[]): T | undefined` ties the output to the input. Without `T`, the relationship is lost.
+      - **Constraints** (`T extends { id: string }`) name the minimum shape. `keyof T` and indexed access (`T[K]`) then stay accurate. **`infer`** appears in conditional types: `T extends Promise<infer U> ? U : T` unwraps a Promise. `ReturnType` and `Awaited` are that pattern in the standard library. Full map: [TypeScript Infer, Extends, and Ternaries](/notes/typescript-infer-extends-and-ternaries).
+      - A generic **adds no safety** when it is unused, immediately widened, or unconstrained: `function wrap<T>(x: T): T { return x as T }`; `function log<T>(x: T): void` — `unknown` would be honest; `T extends any`; a component prop `T extends string = string` that is never inferred from usage.
+      - The production default is: add `T` when two positions must stay in sync (input key and output value, action and payload). Infer at the call site; do not make callers write `<HugeDto>`.
+      - **Failure:** a generic repository `get<T>(id: string): Promise<T>` that casts the JSON — the generic is a fiction, and Zod plus a named type is the honest API.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="ts-type-vs-interface">
+    <AccordionTrigger>18. type vs interface, declaration merging, and mapped or conditional types.</AccordionTrigger>
+    <AccordionContent>
+
+      - **`interface`** names an object shape and can **declaration-merge**: two `interface User` blocks in the same scope become one. That is how `@types` packages grow, and how a library lets apps augment `Window`.
+      - **`type`** aliases any type: unions, tuples, mapped types, primitives, `typeof` values. Types do not merge; a second `type User` is a conflict. Unions and intersections are the composition tools (`A | B`, `A & B`).
+      - The production default is `interface` for public object contracts that may be augmented; `type` for unions, function types, and computed types. The difference is small for a closed app repo — consistency matters more than dogma.
+      - Interview hooks that only `type` expresses cleanly: **mapped types** (`Pick`, `Readonly`, `Record`), **conditional types** (`T extends Foo ? A : B`, often with `infer`), **template literal types** (`` `org:${string}` ``). Full map: [TypeScript Infer, Extends, and Ternaries](/notes/typescript-infer-extends-and-ternaries).
+      - **Failure:** declaration merging as an accident — a second `interface` in a `.d.ts` silently adds fields — or using `interface` for a union of events. Prefer a discriminated `type` union for events.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="ts-erasure">
+    <AccordionTrigger>19. What does TypeScript erase at compile time, and why is Zod required at the HTTP boundary?</AccordionTrigger>
+    <AccordionContent>
+
+      - TypeScript **erases** types. After `tsc` or a bundler, there are no interfaces, no generics, no parameter types. What remains is JavaScript. `as User`, a return type, and a generic `T` do not run. `instanceof` and `typeof` are leftover JS.
+      - A type is a **compile-time contract** among modules that share a build. The network, `localStorage`, query strings, and `JSON.parse` are untyped. A handler that writes `const body: CreateOrder = await req.json()` has asserted, not validated.
+      - **Zod** (or Valibot, ArkType, a JSON Schema validator) is the runtime twin of the type. `safeParse` produces a typed value **or** a structured failure. The same schema can emit the TypeScript type (`z.infer<typeof schema>`).
+      - The production default is schemas at the edge, inferred types inward, no `as` on `fetch` JSON.
+      - **Failure:** a shared `interface` in a mobile client and a server that drifted — both compile, production 500s — or enabling `strict` but still casting the request body.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="ts-design-result">
+    <AccordionTrigger>20. Design exercise: a typed Result / Either for a fallible parse-and-save path, with exhaustive switch and no any.</AccordionTrigger>
+    <AccordionContent>
+
+      - The path is: parse an unknown payload, then persist. Two failures must not collapse into `throw new Error(string)` if the UI and the log need different handling. A **discriminated `Result`** keeps success and failure in the type, with `E` itself a discriminant (`parse` vs `save`).
+
+      ```ts
+      type Result<T, E> =
+        | { ok: true; value: T }
+        | { ok: false; error: E }
+      ```
+
+      - Composition: if `parse` is not `ok`, return it. If `save` is not `ok`, return it. Callers `switch` on `ok`, then on `error.type` / `error.code`. A `never` default makes a new error variant a compile error. No `any`, no optional `value` on the error branch.
+      - `input` starts as `unknown`. Zod produces `RxDraft` or `ParseErr`. The database maps unique violations to `conflict`, connection faults to `unavailable`. HTTP mapping is a separate function: parse → 422, conflict → 409, unavailable → 503, success → 201. Throws stay for truly unexpected bugs.
+      - **Failure:** `Result<T>` with `error?: string`, which lets callers read `value` on failure, or throwing from `save` after parse already used `Result` — two error channels, none exhaustive.
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>
+
+<br />
