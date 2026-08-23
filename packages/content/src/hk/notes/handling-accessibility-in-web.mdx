@@ -1,0 +1,570 @@
+---
+title: 處理 Web 裡的 Accessibility
+description: 一份 React 與 Next.js 實戰指南：accessible forms、live regions、overlays、controls、reading order 與 testing
+date: 2026-08-23
+category: frontend
+---
+
+Accessibility 是一個人能否用他們手上的裝置與設定完成同一項任務。Alt text 與 semantic HTML 是 baseline。大多數網站仍然漏掉的是：欄位變成 invalid、toast 出現、drawer 移到螢幕外、DOM 與 layout 不一致，或滑鼠不可用的時候會發生什麼。
+
+這篇 note 依 [Kyle 的 walkthrough](https://www.youtube.com/watch?v=Y7nhXvJ7yH8)。用 role 與 name 操作 controls 的 tests 見 [Frontend Engineering 中的 Test-Driven Development](/notes/test-driven-development-in-frontend)。Preview gate 的 automated checks 見 [React 與 React Native 的 Frontend CI/CD](/notes/frontend-ci-cd-for-react-and-react-native)。Native host 上的 VoiceOver 與 TalkBack 屬於 [如何改善 Mobile Development 的 User Experience](/notes/how-to-improve-user-experience-in-mobile-development)。這篇是 web surface。
+
+<br />
+
+---
+
+## 1. 把錯誤綁到欄位上
+
+可見的鄰近不等於 programmatic relationship。輸入框下方一條紅色訊息看起來有關聯，但 screen reader 需要 input 去 reference 那條訊息。
+
+`aria-describedby` 把 supporting text 加進欄位的 accessible description。可見的 `<label>` 繼續擔任 accessible name。用 `aria-invalid` 暴露 state，並且只在 error 存在時才 reference 它。
+
+<br />
+
+```tsx title="profile-name-field.tsx"
+"use client"
+
+import { useId, useState } from "react"
+
+export function ProfileNameField() {
+  const inputId = useId()
+  const errorId = useId()
+  const [name, setName] = useState("")
+
+  const error =
+    name.length > 0 && !name.startsWith("Ky")
+      ? "Name must start with Ky."
+      : undefined
+
+  return (
+    <div>
+      <label htmlFor={inputId}>First name</label>
+      <input
+        id={inputId}
+        name="givenName"
+        value={name}
+        aria-describedby={error ? errorId : undefined}
+        aria-invalid={error ? true : undefined}
+        onChange={(event) => setName(event.target.value)}
+      />
+      {error ? <p id={errorId}>{error}</p> : null}
+    </div>
+  )
+}
+```
+
+<br />
+
+Error 應該說明發生了什麼，以及如何恢復。`"Invalid input"` 技術上已經 attach 了，仍然沒用。如果表單帶著多個 invalid fields 提交，把 focus 移到 error summary 或第一個 invalid field；`aria-describedby` 不會替你決定 focus。
+
+**Failure:** 在 input 旁邊渲染紅色文字卻沒有 relationship，然後假設 screen reader 會推斷 layout。
+
+---
+
+## 2. 宣告發生了什麼變化
+
+Browser 會 announce focus 變化。它不會 announce 每一次 DOM 變化。Validation message、saved status、cart update 或 toast 可以視覺上出現，卻對 screen-reader 使用者什麼都不說。
+
+Live region 讓內容 announce，而不搶走 focus：
+
+- `polite` 會等到當前 announcement 結束。幾乎所有 status update 都應該預設選它。
+- `assertive` 會打斷。留給不能等的資訊，不要用在常規 validation 或 success。
+- `aria-atomic="false"` 只 announce 變化的 node。`true` 會 announce 整個 region，讓 update 保留 context。
+- `aria-relevant` 選擇 additions、removals 或 text changes。預設是 `additions text`。
+
+在 update 之前先 mount 空的 region。如果 live region 和第一條 message 出現在同一次 render，有些 browser 與 screen-reader 組合永遠觀察不到變化。
+
+<br />
+
+```tsx title="notification-region.tsx"
+"use client"
+
+import { useEffect, useRef, useState } from "react"
+
+export function NotificationRegion() {
+  const regionRef = useRef<HTMLDivElement>(null)
+  const [message, setMessage] = useState("")
+
+  useEffect(() => {
+    function focusNotifications(event: KeyboardEvent) {
+      if (event.altKey && event.key.toLowerCase() === "t") {
+        event.preventDefault()
+        regionRef.current?.focus()
+      }
+    }
+
+    window.addEventListener("keydown", focusNotifications)
+    return () => window.removeEventListener("keydown", focusNotifications)
+  }, [])
+
+  return (
+    <>
+      <button type="button" onClick={() => setMessage("Profile saved.")}>
+        Save profile
+      </button>
+
+      <div
+        ref={regionRef}
+        tabIndex={-1}
+        aria-label="Notifications. Press Alt+T to focus."
+        aria-live="polite"
+        aria-atomic="true"
+        aria-relevant="additions text"
+      >
+        {message}
+      </div>
+    </>
+  )
+}
+```
+
+<br />
+
+不要 announce 每一次 keystroke 和每一次 state transition。Chat log、search result count、upload progress 與 form error 的 urgency 不同。從最小有用的 message 開始，用 screen reader 測，再刪掉重複的 announcement。
+
+Shortcut 可以讓 notification region 在被 announce 之後仍然夠得到。把它寫進 region 的 name，避免與產品和 assistive-technology shortcuts 衝突，並把 `Alt+T` 當成 application convention——不是可移植的 browser standard。
+
+**Failure:** 在 toast container 上放 `aria-live="assertive"`，然後因為 `"Added to cart"` 和 `"Preferences saved"` 反覆打斷使用者。
+
+---
+
+## 3. 告訴瀏覽器欄位是什麼
+
+Label 告訴人欄位是什麼意思。`autocomplete` 告訴 browser 它接受哪類 data。這樣 password managers、address completion 與 mobile keyboards 才能少打很多字就填完表單。
+
+用描述 value 的標準 token，不要憑 field name 猜。`name` 表示 full name；`given-name` 表示 first 或 given name。
+
+<br />
+
+```tsx title="contact-fields.tsx"
+export function ContactFields() {
+  return (
+    <>
+      <label htmlFor="given-name">First name</label>
+      <input id="given-name" name="givenName" autoComplete="given-name" />
+
+      <label htmlFor="email">Work email</label>
+      <input
+        id="email"
+        name="email"
+        type="email"
+        inputMode="email"
+        autoComplete="email"
+      />
+
+      <label htmlFor="password">Current password</label>
+      <input
+        id="password"
+        name="password"
+        type="password"
+        autoComplete="current-password"
+      />
+    </>
+  )
+}
+```
+
+<br />
+
+`autocomplete`、`type` 與 `inputMode` 解決 interaction 的不同部分：
+
+- `autocomplete` 標識 data。
+- `type` 給 browser validation 與 control semantics。
+- `inputMode` 提示 on-screen keyboard。
+
+不要為了表單看起來乾淨就關掉 autocomplete。Authentication 用 `current-password`、`new-password` 與 `one-time-code`，讓 browser 與 password managers 幫忙，而不必 parse 頁面。
+
+**Failure:** 每個欄位都設 `autoComplete="off"`，然後讓人重打 browser 已經知道的 names、addresses 與 credentials。
+
+---
+
+## 4. 把隱藏 UI 移出 tree
+
+把 drawer 移到 viewport 外，並不會把它從 keyboard 或 accessibility tree 裡藏起來。它的 links 仍在 DOM order 裡，所以 focus 看起來會消失，其實是在走過沒人看見的 controls。
+
+`inert` 會把 subtree 從 sequential focus、hit testing、text selection 與 accessibility tree 裡移除。關閉的 drawer 應該是 inert。打開時，頁面其餘部分變成 inert，focus 才不會逃到 overlay 後面。
+
+<br />
+
+```tsx title="navigation-drawer.tsx"
+"use client"
+
+import { useState } from "react"
+
+export function NavigationDrawer() {
+  const [open, setOpen] = useState(false)
+
+  return (
+    <>
+      <div inert={open}>
+        <button
+          type="button"
+          aria-expanded={open}
+          aria-controls="navigation-drawer"
+          onClick={() => setOpen(true)}
+        >
+          Open menu
+        </button>
+        <main>{/* Page content */}</main>
+      </div>
+
+      <aside
+        id="navigation-drawer"
+        aria-label="Site navigation"
+        inert={!open}
+        data-open={open}
+      >
+        <button type="button" onClick={() => setOpen(false)}>
+          Close menu
+        </button>
+        <nav>{/* Navigation links */}</nav>
+      </aside>
+    </>
+  )
+}
+```
+
+<br />
+
+CSS 可以把 `[data-open="false"]` 動畫到螢幕外；`inert` 才是讓 visual state 對其他 input methods 誠實的部分。Drawer 關閉時把 focus 還給 opener，打開時把 initial focus 放到有用的 control 上。
+
+Modal 優先用 native `<dialog>` 並呼叫 `showModal()`。Browser 會把它放進 top layer，讓 outside document 變成 inert，支援 <kbd>Escape</kbd>，並提供 modal semantics。Component 仍然擁有 accessible name、initial focus、close controls 與 focus-return test。
+
+`aria-hidden="true"` 不能替代 `inert`。它會把 subtree 從 assistive technology 藏起來，卻不能阻止 keyboard focus 進入。
+
+**Failure:** 把 drawer 平移到 `left: -100%`，它的 links 卻仍然夾在 menu button 與頁面第一個 control 的 tab order 之間。
+
+---
+
+## 5. 按到真正存在的 control
+
+Control 需要 usable target，也需要 native behavior。Target 至少應該是 24 × 24 CSS pixels。Touch-heavy 的 interface 可以瞄準 44 × 44，讓可見 icon 保持小，而包住它的 button 仍然好按。
+
+Action 用真正的 `<button>`。它已經參與 tab order，回應 <kbd>Enter</kbd> 與 <kbd>Space</kbd>，暴露 button semantics，並支援 `disabled`。`div` 加 `role="button"` 只改變 assistive technology 怎麼稱呼它；團隊必須重做每一種 interaction。
+
+<br />
+
+```tsx title="close-button.tsx"
+type CloseButtonProps = {
+  onClose: () => void
+}
+
+export function CloseButton({ onClose }: CloseButtonProps) {
+  return (
+    <button
+      type="button"
+      className="icon-button"
+      aria-label="Close navigation"
+      onClick={onClose}
+    >
+      <svg aria-hidden="true" viewBox="0 0 24 24">
+        <path d="M6 6 18 18M18 6 6 18" />
+      </svg>
+    </button>
+  )
+}
+```
+
+```css title="close-button.css"
+.icon-button {
+  display: inline-grid;
+  min-width: 44px;
+  min-height: 44px;
+  place-items: center;
+}
+
+.icon-button svg {
+  width: 20px;
+  height: 20px;
+}
+
+.icon-button:focus-visible {
+  outline: 3px solid currentColor;
+  outline-offset: 3px;
+}
+```
+
+<br />
+
+Accessible name 應該說明 button 做什麼，不是 icon 長什麼樣。`"Close navigation"` 在 icon 改版後仍然成立。`"X button"` 暴露 implementation，還重複 role。
+
+**Failure:** 給 `div` 加 `role="button"` 與 `tabIndex={0}`，只支援 mouse click，卻沒有 <kbd>Space</kbd>、disabled state 或 form behavior。
+
+---
+
+## 6. 跳過殼層，直達工作區
+
+重複 page shell 上的第一個 keyboard stop 應該是 bypass header 與 navigation 的 link。沒有它，keyboard 或 switch 使用者得先 tab 過每個 navigation item，才能到達他們要的頁面。
+
+Link 留在 DOM 裡，focus 之前 visually hide，並指向頁面的 `<main>`。
+
+<br />
+
+```tsx title="app-layout.tsx"
+export function AppLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <>
+      <a className="skip-link" href="#main-content">
+        Skip to main content
+      </a>
+      <header>{/* Brand and repeated navigation */}</header>
+      <main id="main-content" tabIndex={-1}>
+        {children}
+      </main>
+    </>
+  )
+}
+```
+
+```css title="skip-link.css"
+.skip-link {
+  position: fixed;
+  inset-block-start: 1rem;
+  inset-inline-start: 1rem;
+  z-index: 100;
+  transform: translateY(-200%);
+}
+
+.skip-link:focus {
+  transform: translateY(0);
+}
+```
+
+<br />
+
+`tabIndex={-1}` 讓 script 或 browser focus 能到達 `<main>`，而不把它加進正常 tab sequence。測試真實的 route transition：client-side navigation、sticky headers 與 scroll restoration 都會改變 focus 與 viewport 落點。
+
+**Failure:** 在 focus 之前用 `display: none` 藏 skip link。被移出 layout 與 accessibility tree 的元素接不到 reveal 它所需的 focus。
+
+---
+
+## 7. 用人讀得懂的字體
+
+Typography 是 input constraint，不是 decoration。Readable default 要有 distinct characters、足夠 spacing，並在產品實際使用的 size 下保持穩定形狀。Atkinson Hyperlegible 與 Lexend 是合理的 default，因為 legibility 就是它們的設計目標。
+
+沒有一種 font 對 dyslexia 是 universal 最佳解。受眾受益時提供 OpenDyslexic 這類 preference，但不要悄悄替換使用者選擇，也不要把一種 typeface 說成 cure。
+
+<br />
+
+```css title="typography.css"
+:root {
+  --font-readable:
+    "Atkinson Hyperlegible Next", "Atkinson Hyperlegible", system-ui, sans-serif;
+}
+
+html {
+  font-family: var(--font-readable);
+  line-height: 1.5;
+  text-size-adjust: 100%;
+}
+
+html[data-readable-font="dyslexic"] {
+  --font-readable: "OpenDyslexic", system-ui, sans-serif;
+}
+
+p {
+  max-inline-size: 70ch;
+}
+```
+
+<br />
+
+Font choice 修不了 12-pixel body copy、low contrast、clipped text、justified rivers，或 200% zoom 就崩掉的 layout。把 type system 當成整體測試：size、line height、line length、weight、fallback、localization 與 reflow。
+
+**Failure:** 加了 font toggle，fixed-height cards 在使用者 zoom 或增大 default font size 時仍然 clip text。
+
+---
+
+## 8. 保持 DOM 順序誠實
+
+Keyboard order 與 screen-reader reading order 跟著 DOM，不跟著 pixels。CSS Grid 與 Flexbox 可以把 item 放到與 source position 矛盾的位置。
+
+先從 single column 也說得通的 logical order 開始。在 relationship 仍然可理解的 wide breakpoint 再做 visual variation。不要用大於 zero 的 `tabIndex` 去 patch 不誠實的 DOM；那會製造第二套 focus order 讓團隊維護。
+
+<br />
+
+```tsx title="feature-list.tsx"
+export function FeatureList() {
+  return (
+    <div className="feature-list">
+      <article className="feature">
+        <div>
+          <h2>Review changes</h2>
+          <p>Compare the proposed result before publishing it.</p>
+          <a href="/review">Review now</a>
+        </div>
+        <img src="/review.webp" alt="" />
+      </article>
+
+      <article className="feature feature--flipped">
+        <div>
+          <h2>Publish safely</h2>
+          <p>Release the approved version with a recovery path.</p>
+          <a href="/publish">Publish now</a>
+        </div>
+        <img src="/publish.webp" alt="" />
+      </article>
+    </div>
+  )
+}
+```
+
+```css title="feature-list.css"
+.feature {
+  display: flex;
+  flex-direction: column;
+}
+
+@media (min-width: 48rem) {
+  .feature {
+    flex-direction: row;
+  }
+
+  .feature--flipped {
+    flex-direction: row-reverse;
+  }
+}
+```
+
+<br />
+
+Mobile 的兩段 article 在 DOM 裡都保持 heading、explanation、action，然後才是 decorative image。Wide layout 可以左右交替，但不改變哪個 action 跟著哪個 heading。
+
+Absolute positioning、CSS `order` 與 `*-reverse` 不是自動 inaccessible。Defect 是 visual sequence 與 programmatic sequence 表達了不同的 relationship。在每個 layout 會變化的 breakpoint tab 一遍 responsive layout。
+
+**Failure:** 為了 desktop row 寫 image-first markup，在 mobile 再 reverse，讓 focus 先跳下去、再跳回來、再跳下去。
+
+---
+
+## 9. 測試鍵盤與工具能看見什麼
+
+Accessibility 是 behavior，所以 verification 從操作產品開始——不是讀 JSX。
+
+先把 mouse 放下：
+
+1. 從 address bar 開始按 <kbd>Tab</kbd>。
+2. 確認 skip link 出現。
+3. 用預期的 keys 到達並操作每個 control。
+4. 打開並關閉 overlays；打開時 focus 留在裡面，關閉後 focus 回來。
+5. 提交 invalid 與 valid forms；focus、descriptions 與 announcements 都說得通。
+6. 在每個 visual order 會變化的 responsive layout 重複一遍。
+
+然後用 browser tooling 暴露容易忘的狀態。Chrome 的 Rendering panel 可以 emulate color scheme、forced colors、increased contrast、reduced motion、reduced transparency 與 vision deficiencies。把 text 與 page zoom 到 200%。Content 必須 reflow，不能丟 controls 或 meaning。
+
+<br />
+
+```css title="user-preferences.css"
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@media (forced-colors: active) {
+  .icon-button {
+    border: 1px solid ButtonText;
+  }
+}
+```
+
+<br />
+
+跑 Lighthouse 的 accessibility audit，用 color picker 檢查 contrast。在 CI 裡對 representative rendered states 加 axe。這些工具很快能找到 missing names、invalid ARIA、contrast failures 與 structural mistakes。
+
+Automated score 滿分不能證明 task 能完成。Automation 決定不了 focus 是否移到正確位置、announcement 是否有用而不是 noisy、reading order 是否合理，或每個 workflow 能否不用 mouse 完成。在產品支援的 browser 上用 screen reader 跑完 critical journeys。
+
+**Failure:** Lighthouse 說 100 就 ship，但 closed drawer 仍然 tabbable，save confirmation 也從未 announce。
+
+---
+
+## Takeaway
+
+Accessibility tree、focus order、visual layout 與 dynamic state 應該描述同一個產品。
+
+1. 用 `aria-describedby` attach supporting errors；用 `aria-invalid` 暴露 invalid state。
+2. 把 dynamic status 放進 persistent 的 `aria-live="polite"` region；只有等待會造成傷害時才 interrupt。
+3. 給適用的 fields 正確的 `autocomplete`、`type` 與 `inputMode`。
+4. 讓 off-screen UI 變成 `inert`；合適時用 native `<dialog>` 做 modal behavior。
+5. 用 native controls，target 至少 24 × 24 CSS pixels，touch 上瞄準 44 × 44。
+6. 讓 skip link 成為第一個 keyboard stop，並指向 `<main>`。
+7. 選擇 legible type，保留 user preferences，並在 200% 驗證 reflow。
+8. 在 wide layout 重排之前，先把 DOM 保持在 logical reading order。
+9. 把 keyboard 與 screen-reader journeys 和 Rendering tools、Lighthouse、contrast checks、axe 結合起來。
+
+Kyle 的 [accessibility checklist](https://webdevsimplified.com/accessibility-checklist.html) 把這次 pass 擴展到 80 多項 checks。把它當 review coverage，不要當成用 assistive technology 完成真實 task 的替代品。
+
+---
+
+## Recap Q&A
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="web-a11y-errors-live">
+    <AccordionTrigger>1. 表單 error 什麼時候需要 `aria-describedby`、`aria-live`，或兩者都要？</AccordionTrigger>
+    <AccordionContent>
+
+      - `aria-describedby` 把 supporting text 關聯到一個 field。它讓 message 成為該 field accessible description 的一部分。
+      - `aria-live` 會 announce 在 focus 仍留在別處時出現的資訊。普通 validation 與 status 用 `polite`。
+      - Dynamic inline error 可能需要兩者：description 供之後查看，live announcement 在它第一次出現時播報。
+      - **Failure:** 每次 keystroke 都用 `assertive`，在使用者還沒填完 field 前就反覆打斷。
+
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="web-a11y-inert-dialog">
+    <AccordionTrigger>2. `inert` 與 native `dialog` 解決什麼？</AccordionTrigger>
+    <AccordionContent>
+
+      - `inert` 把 off-screen 或被擋住的 subtree 從 focus、pointer interaction、selection 與 accessibility tree 裡移除。
+      - `showModal()` 把 native `<dialog>` 放進 top layer，並讓 outside document 變成 inert。
+      - Component 仍然擁有有用的 accessible name、initial focus、明顯的 close control 與 focus return。
+      - **Failure:** 用 `aria-hidden` 替換 `inert`，keyboard focus 仍能進入 hidden subtree。
+
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="web-a11y-native-control">
+    <AccordionTrigger>3. 為什麼真正的 button 不只是 `role="button"`？</AccordionTrigger>
+    <AccordionContent>
+
+      - Native button 會接收 focus，回應 Enter 與 Space，暴露 disabled state，並參與 forms。
+      - `role="button"` 只改 semantics。Custom element 必須重做 keyboard 與 state contract。
+      - Target 至少 24 × 24 CSS pixels；touch 上瞄準 44 × 44，可見 icon 可以更小。
+      - **Failure:** 可點擊的 `div` 只支援 pointer，沒有 Space-key behavior。
+
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="web-a11y-dom-order">
+    <AccordionTrigger>4. CSS reordering 什麼時候變成 accessibility defect？</AccordionTrigger>
+    <AccordionContent>
+
+      - Focus 與 reading order 跟著 DOM。Visual order 跟著 CSS。
+      - 當兩套 sequence 表達不同 relationship，或讓 focus 看起來亂跳，reordering 就變成 defect。
+      - 從 logical single-column markup 開始，再在 wide breakpoint 交替 presentation。
+      - **Failure:** 用 positive `tabIndex` 修 visual order，製造第二套要維護的 sequence。
+
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="web-a11y-testing">
+    <AccordionTrigger>5. Lighthouse 與 axe 證明不了什麼？</AccordionTrigger>
+    <AccordionContent>
+
+      - 它們很快能找到許多 structural、naming、ARIA 與 contrast violations。
+      - 它們決定不了 focus 是否移到有用位置、announcement timing 是否正確、reading order 是否合理，或 workflow 是否可理解。
+      - 只用 keyboard 與支援的 screen reader 驗證 critical journeys。重複 responsive layouts 與 user-preference states。
+      - **Failure:** 把 automated score 當成一個人能完成 task 的證據。
+
+    </AccordionContent>
+
+  </AccordionItem>
+</Accordion>
