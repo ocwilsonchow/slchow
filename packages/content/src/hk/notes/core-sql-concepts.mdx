@@ -259,7 +259,7 @@ WHERE customer_id = '11111111-1111-1111-1111-111111111111';
 
 <br />
 
-- 強制 `customers.email` 的 unique index 既是 constraint 也是 access path。`orders.customer_id` 上的 plain index 只是 access path。
+- 強制 `customers.email` 的 unique index 既是 constraint 也是 access path。`orders.customer_id` 上的 plain index 只是 access path。種類 map —— B-tree、hash、LSM、geospatial、inverted —— 見 [System Design 裡的 DB Indexing](/notes/db-indexing-in-system-design)。
 - 沒有那條 path，`WHERE customer_id = $1` 就是 sequential scan：筆電上瞬間完成，production 裡隨資料線性變慢。
 - 同一個 composite index 也能覆蓋 keyset seek：`customer_id` 上等值，再走 `created_at DESC, id DESC`。
 - **Failure:** 憑本地資料猜測，然後把 seq scan 送上線。`EXPLAIN` 檢查你想要的 access path。`EXPLAIN (ANALYZE)` 對照真實 row counts。

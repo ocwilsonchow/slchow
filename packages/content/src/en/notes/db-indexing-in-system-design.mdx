@@ -1,0 +1,353 @@
+---
+title: DB Indexing in System Design
+description: Why lookups leave the heap — pages, B-trees, hash, LSM, geospatial, inverted indexes, covering keys, and the failure modes that follow
+date: 2026-08-24
+category: system-design
+---
+
+An **index** is a structure beside the heap that maps a key to the pages that hold matching rows. The table stores rows in insert order. The index stores a cheaper path to them. A lookup that would have read every page now reads a handful.
+
+This note follows [Evan's walkthrough](https://www.youtube.com/watch?v=BHCSL_ZifI0). The planner and `EXPLAIN` are [Core SQL Concepts](/notes/core-sql-concepts). Which columns to index comes from [Data Modeling in System Design](/notes/data-modeling-in-system-design). When an index is not enough, reads leave the database in [Caching in System Design](/notes/caching-in-system-design). Spoken Postgres answers are [Full-Stack Q&A](/notes/full-stack-qa). This note is the access path.
+
+<br />
+
+---
+
+## Pattern Map
+
+| Pattern | Query it answers | Reach for it when |
+| --- | --- | --- |
+| B-tree | Equality, range, sort | Default. Almost every OLTP filter |
+| Hash | Exact match only | In-memory stores; never a range |
+| LSM | Point lookup after sequential ingest | Writes dominate — metrics, logs |
+| Geospatial | Near a point / in a shape | Proximity, delivery zones |
+| Inverted | Contains this token | Search, tags, arrays, JSON containment |
+
+<br />
+
+A B-tree is the production default on Postgres. The others earn their keep when the query is no longer a sortable scalar.
+
+<br />
+
+---
+
+## 1. Why an index exists
+
+The heap is insert order. `WHERE email = 'ada@example.com'` without an index reads every page until it finds the row — or proves it is not there.
+
+<br />
+
+```text
+no index                         with index
+SELECT WHERE age = 51            SELECT WHERE age = 51
+  page 0 → page 1 → … → page N     root → leaf → heap page 3
+  every page                       a handful of pages
+```
+
+<br />
+
+- Name the **query** first. `GET /users/{id}/posts` is an index on `posts.user_id`. A column that exists is not a reason.
+- The trade is real. Each index is extra disk and extra work on every `INSERT`, `UPDATE`, and `DELETE`. Five indexes on a hot write table are six writes per row.
+- A 500-row config table does not need one. A logging table that is 99% writes does not either. Index the read patterns you can name. Leave the rest until `EXPLAIN` asks.
+
+<br />
+
+**Failure:** indexing every column "just in case." Writes slow down. Disk grows. The planner still seq-scans the predicates you never named.
+
+<br />
+
+---
+
+## 2. Pages
+
+Databases do not read rows. They read **pages** — 8 KB in Postgres, 16 KB in InnoDB. An index node is sized to a page so one I/O brings hundreds of keys, not two.
+
+<br />
+
+```text
+heap page (8 KB)          index page (8 KB)
+[row][row][row]…          [key → child / heap pointer]…
+insert order              sorted keys, high fan-out
+```
+
+<br />
+
+- Disk is slower than RAM even on NVMe. Random I/O is the expensive one. Indexes exist to turn "read the table" into a few targeted page fetches, then a sequential walk of matching leaves.
+- The heap does not know where `age = 51` lives. The index does: key → page pointer. The row still sits in the heap unless the index **covers** the query.
+- Fan-out is why a billion-row B-tree is three or four levels. Each internal page holds hundreds of separators. Height stays almost constant as the table grows.
+
+<br />
+
+**Failure:** reasoning about indexes as if they compared one row at a time. Cost is pages. A lookup that touches three pages beats a scan that touches three million.
+
+<br />
+
+---
+
+## 3. B-tree
+
+The default. Postgres `CREATE INDEX` is a B-tree unless you say otherwise. InnoDB stores the table itself as a clustered B-tree on the primary key.
+
+A B-tree keeps keys sorted, stays balanced, and packs many children per node. Leaves sit at one depth. In the usual B+ layout those leaves are linked, so a range walks sideways instead of climbing back to the root.
+
+<br />
+
+```text
+                root  [50 | 90]
+               /       |        \
+         [<50]      [50–90]      [>90]
+        [20, 40]    [55, 70]     [100]
+            |           |
+        heap page    heap page 3
+                     age = 51
+```
+
+<br />
+
+Evan's walk, index on `users.age`:
+
+- **`WHERE age = 51`.** Load the root page. 51 is greater than 50 and less than 90, so load that child. 51 is less than 55, so follow the pointer to heap page 3. Three pages. Not the table.
+- **`WHERE age > 51`.** Load the root. Both children that can hold values above 50 come in. Follow every leaf pointer in that slice and load those heap pages. The walk is still ordered. It is not a full scan unless most rows match.
+
+<br />
+
+Why it is the default:
+
+- Equality and range. `=`, `>`, `BETWEEN`, `LIKE 'Ada%'`, `ORDER BY` on the indexed column.
+- Predictable depth. Random inserts do not unbalance it.
+- The same structure serves a point lookup and a keyset page. [Core SQL Concepts](/notes/core-sql-concepts).
+
+<br />
+
+**Failure:** calling it a binary tree (fan-out of two would be tall and slow on disk), or putting a B-tree on `lat` and another on `lon` and expecting "within 5 km." Two 1D indexes are not a 2D index.
+
+<br />
+
+---
+
+## 4. Hash
+
+A hash index is a map: `hash(email) → bucket → row`. Equality is O(1). Range, sort, and prefix are impossible — nearby keys land in different buckets on purpose.
+
+<br />
+
+```text
+hash("ada@example.com")  →  bucket 42  →  page 7
+hash("bob@example.com")  →  bucket 17  →  page 12
+
+WHERE email = 'ada@example.com'     yes
+WHERE email > 'ada@example.com'     no
+WHERE created_at BETWEEN …          no
+```
+
+<br />
+
+- Redis keys are a hash table. That is the production home. Postgres `USING hash` exists; a B-tree already does equality and keeps range, so it is rarely the right extra.
+- Mention it in an interview when the access is **only** exact match and in memory. Do not default to it on disk.
+
+<br />
+
+**Failure:** a hash index, then `WHERE created_at BETWEEN …`. The structure cannot walk a range. You built the wrong map.
+
+<br />
+
+---
+
+## 5. LSM
+
+B-trees update a page in place. A metrics pipeline at 100k writes per second is 100k random page writes. That saturates the disk.
+
+An **LSM tree** (log-structured merge) never updates in place. Writes append. Reads pay for that later.
+
+<br />
+
+```text
+INSERT / UPDATE
+    → WAL (sequential)
+    → memtable (sorted, in RAM)
+         ↓ flush
+    SSTable L0 (immutable)
+         ↓ compact
+    SSTable L1, L2, …
+```
+
+<br />
+
+- The memtable absorbs writes in memory. A WAL makes the append crash-safe. When the memtable fills, it flushes to an immutable sorted file — one sequential write instead of many random 8 KB writes.
+- A point read may check the memtable and several SSTables. Bloom filters answer "this key is definitely not in that file" without a disk read.
+- Compaction merges files in the background, drops tombstones, and keeps reads from scanning forever. Compaction stalls are the tail-latency cost.
+- Cassandra, RocksDB, Dynamo-style engines. Reach for the **store** when writes dominate — metrics, logs, event ingest. Not as a Postgres `USING` clause. The moment a user-facing p99 read is the product, a B-tree usually wins.
+
+<br />
+
+**Failure:** picking Cassandra for a read-heavy feed because "LSM is faster." Writes were never the bottleneck. Compaction and multi-file reads now are.
+
+<br />
+
+---
+
+## 6. Geospatial
+
+Proximity — "restaurants within 5 km" — is two dimensions. A B-tree on `lat` plus a B-tree on `lon` filters a rectangle far larger than the circle. At Uber / Yelp / Tinder scale that is not a rounding error.
+
+<br />
+
+```text
+two 1D indexes                 geohash + B-tree
+lat BETWEEN …                  37.77, -122.41
+lon BETWEEN …                       ↓
+  huge rectangle               9q8yyk
+  then filter the circle       prefix scan 9q8yy*
+```
+
+<br />
+
+- **Geohash** (or S2 / H3) flattens lat/lon into a prefix-sortable cell. Nearby points share a long prefix. A plain B-tree range scan on that string is the proximity filter. Redis `GEOADD` / `GEOSEARCH` are this. Cheap writes; you query a ring of neighbor cells, not one exact cell. Points that move constantly — drivers, live users — belong here.
+- **R-tree / PostGIS GiST** when the data is shapes: polygons, roads, delivery zones, containment. The index understands geometry. Rebalancing rectangles is real write work. Reach for it when "does this zone cover this address" is the query, not "who is nearby."
+- In an interview: B-tree cannot serve 2D proximity. Geohash if you can stay on a string column. PostGIS if you need polygons.
+
+<br />
+
+**Failure:** `WHERE lat BETWEEN … AND lon BETWEEN …` on two B-trees and calling it proximity search. You scanned a rectangle and hoped the extra rows were cheap.
+
+<br />
+
+---
+
+## 7. Inverted
+
+A B-tree finds an email, a timestamp range, a prefix. It cannot find the word `database` inside a TEXT column. `WHERE content LIKE '%database%'` is a full scan. The leading wildcard cannot walk sorted keys.
+
+An inverted index flips the map: token → the documents that contain it.
+
+<br />
+
+```text
+doc1: "B-trees are fast"
+doc2: "Hash tables are fast"
+
+b-trees → [doc1]
+fast    → [doc1, doc2]
+hash    → [doc2]
+```
+
+<br />
+
+- Analyzers tokenize, lowercase, drop stop words, stem. `Databases` and `database` collapse to one term and share a postings list. Elasticsearch / Lucene layer BM25 on top.
+- Writes touch every term in the document. The index is often large. Refresh is measured in seconds, not in the same transaction as the heap write. That is why search is usually a consumer of the write, not a column on the OLTP table. [Message Queues in System Design](/notes/message-queues-in-system-design).
+- In this stack: Postgres `GIN` + `to_tsvector` for small search, arrays, JSONB containment. A search cluster when search **is** the product. Vector / hybrid retrieval is a different index: [How to build a RAG system](/notes/how-to-build-a-rag-system).
+
+<br />
+
+**Failure:** a leading-wildcard `LIKE` on a TEXT column and expecting the B-tree on that column to save you. Sorted keys do not help "contains."
+
+<br />
+
+---
+
+## 8. Composite and covering
+
+Work backwards from the APIs. [Data Modeling in System Design](/notes/data-modeling-in-system-design).
+
+`GET /users/{id}/posts` sorted by recency is not two single-column indexes. It is one composite B-tree.
+
+<br />
+
+```sql
+CREATE INDEX posts_user_id_created_at_idx
+  ON posts (user_id, created_at DESC);
+
+-- covering: likes travels with the index; no heap fetch
+CREATE INDEX posts_user_id_created_at_likes_idx
+  ON posts (user_id, created_at DESC) INCLUDE (likes);
+```
+
+<br />
+
+```text
+(user_id, created_at)
+
+(1, 2026-01-01)
+(1, 2026-01-02)
+(1, 2026-01-03)   ← user_id = 1 AND created_at > '2026-01-01'
+(2, 2026-01-01)      walks this slice only
+```
+
+<br />
+
+- **Equality first, range and sort last.** `(user_id, created_at)` serves `WHERE user_id = ? ORDER BY created_at DESC`. `(created_at, user_id)` does not — the slice is not contiguous by user.
+- **Leftmost prefix.** `(a, b, c)` helps `WHERE a = ?`, `WHERE a = ? AND b = ?`, and all three. It does not help `WHERE b = ?`. A composite is an ordered commitment, not three indexes in a trench coat.
+- **Covering / `INCLUDE`.** The query reads only columns the index already holds, so Postgres can skip the heap. Bigger index, faster hot read — feeds, unread counts, leaderboards. Do not `INCLUDE` every column. Prove heap fetches are the bottleneck.
+- Prove it with `EXPLAIN`. Keyset pagination rides the same composite. [Core SQL Concepts](/notes/core-sql-concepts).
+
+<br />
+
+**Failure:** two single-column indexes and hoping the planner invents the feed order, or `INCLUDE` on every query so every write maintains a second copy of the table.
+
+<br />
+
+---
+
+## Recap Q&A
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="idx-why">
+    <AccordionTrigger>1. Why does an index exist, and what does it cost?</AccordionTrigger>
+    <AccordionContent>
+
+      - The heap is insert order. Without an index, a lookup is a sequential page scan — fine at hundreds of rows, fatal at millions.
+      - An index maps a key to the pages that hold matching rows. You trade disk and write amplification for fewer reads. Name the query first.
+      - Skip tiny tables and write-only logs. Index the access paths the APIs actually run.
+      - **Failure:** indexing every column "just in case," then wondering why `INSERT` is slow.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="idx-btree">
+    <AccordionTrigger>2. Why is a B-tree the default, and when do hash or LSM win?</AccordionTrigger>
+    <AccordionContent>
+
+      - A B-tree is sorted, balanced, and page-sized. Equality, range, prefix, and `ORDER BY` ride the same structure. Postgres `CREATE INDEX` is this unless you say otherwise.
+      - **Hash** is exact match only — Redis keys, not a disk default. A B-tree already does equality and keeps range.
+      - **LSM** is a storage engine for write-heavy ingest: memtable, SSTables, compaction. Cassandra / RocksDB. User-facing p99 reads usually stay on a B-tree.
+      - **Failure:** a hash index then a range query, or Cassandra for a read-heavy feed.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="idx-geo">
+    <AccordionTrigger>3. How do you index "within 5 km"?</AccordionTrigger>
+    <AccordionContent>
+
+      - Two B-trees on `lat` and `lon` filter a rectangle, not a circle. That is not proximity search.
+      - **Geohash** (S2, H3) flattens a point into a prefix-sortable cell. A plain B-tree range scan, plus neighbor cells. Redis `GEO*`. Best for moving points.
+      - **R-tree / PostGIS GiST** for polygons, containment, delivery zones. Geometry is the query; writes cost more.
+      - **Failure:** `WHERE lat BETWEEN … AND lon BETWEEN …` and calling it done.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="idx-inverted">
+    <AccordionTrigger>4. When is an inverted index the right structure?</AccordionTrigger>
+    <AccordionContent>
+
+      - A B-tree cannot answer "contains this token." `LIKE '%database%'` is a full scan; a leading wildcard cannot walk sorted keys.
+      - Inverted: token → postings list. Analyzers stem so `database` and `Databases` share one entry. Elasticsearch / Lucene; Postgres `GIN` for small search, arrays, JSONB.
+      - Writes touch every term. Search is often a queue consumer, not a column on the OLTP table. Vectors are a different index.
+      - **Failure:** a B-tree on the TEXT column and expecting contains-search to use it.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="idx-composite">
+    <AccordionTrigger>5. How do you order a composite index, and what does covering buy?</AccordionTrigger>
+    <AccordionContent>
+
+      - Work backwards from the API. `GET /users/{id}/posts` by recency is `(user_id, created_at)` — equality first, range and sort last.
+      - Leftmost prefix: `(a, b, c)` helps filters that start at `a`. It does not help `WHERE b = ?`.
+      - Covering / `INCLUDE` answers the query from the index without a heap fetch. Bigger index, faster hot read. Prove heap I/O is the bottleneck.
+      - **Failure:** two single-column indexes and hoping the planner invents the feed, or covering every query.
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>

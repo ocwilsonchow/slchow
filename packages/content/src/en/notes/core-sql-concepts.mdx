@@ -259,7 +259,7 @@ WHERE customer_id = '11111111-1111-1111-1111-111111111111';
 
 <br />
 
-- The unique index that enforces `customers.email` is both constraint and access path. A plain index on `orders.customer_id` is only an access path.
+- The unique index that enforces `customers.email` is both constraint and access path. A plain index on `orders.customer_id` is only an access path. The type map — B-tree, hash, LSM, geospatial, inverted — is [DB Indexing in System Design](/notes/db-indexing-in-system-design).
 - Without that path, `WHERE customer_id = $1` is a sequential scan: instant on a laptop, linear in production.
 - The same composite index covers a keyset seek: equality on `customer_id`, walk `created_at DESC, id DESC`.
 - **Failure:** guessing from local data and shipping a seq scan. `EXPLAIN` checks the access path you meant. `EXPLAIN (ANALYZE)` checks it against real row counts.
