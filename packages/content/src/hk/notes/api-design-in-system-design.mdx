@@ -7,7 +7,7 @@ category: system-design
 
 **API** 是 clients 給工作起名的方式。選 protocol，給 resources 起名，說清 data 怎麼進去、怎麼回來。Gateways、caches 與 retries 都相信這些名字。先畫 contract，再畫 boxes。
 
-這篇 note 依 [Evan 的 walkthrough](https://www.youtube.com/watch?v=DQ57zYedMdQ)。Typed Hono 路徑見 [用 Hono、Drizzle、Zod OpenAPI 與 SST 打造 Backend APIs](/notes/backend-apis-hono-sst)。這篇 note 講的是 contract。
+這篇 note 依 [Evan 的 walkthrough](https://www.youtube.com/watch?v=DQ57zYedMdQ)。Typed Hono 路徑見 [用 Hono、Drizzle、Zod OpenAPI 與 SST 打造 Backend APIs](/notes/_backend-apis-hono-sst)。這篇 note 講的是 contract。
 
 <br />
 
@@ -205,7 +205,7 @@ APIs 會變。Clients 不會按你的時間表變 —— 尤其是 mobile。
 - 優先 **additive** 變更：新的 optional fields、新 endpoints。一次 version cut 是你接下來要跑兩套的產品。
 - 真要 cut 時，**URL versioning**（`/v1/events`）是明確的預設。好 route、好解釋、好在 browser 裡測。
 - Header versioning 讓 URLs 更乾淨，也更不明顯。除非 interviewer 或平台已經活在那裡，否則跳過。
-- 這套 stack 真正 ship 的 version 是 OpenAPI contract —— [用 Hono、Drizzle、Zod OpenAPI 與 SST 打造 Backend APIs](/notes/backend-apis-hono-sst)。
+- 這套 stack 真正 ship 的 version 是 OpenAPI contract —— [用 Hono、Drizzle、Zod OpenAPI 與 SST 打造 Backend APIs](/notes/_backend-apis-hono-sst)。
 
 <br />
 

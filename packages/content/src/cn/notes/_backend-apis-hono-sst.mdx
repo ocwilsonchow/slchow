@@ -7,7 +7,7 @@ category: backend
 
 Backend API 需要一条从 request 到 database 的短路径，validation、documentation 与 infrastructure 来自同一份代码。这套 stack 是 **Hono**、**Better Auth**、**Drizzle**、**PostgreSQL**、**Zod OpenAPI**、**Scalar**，以及跑在 **AWS Lambda** 或 **ECS Fargate** 上的 **SST**。
 
-Stages 与 deploy loop 见 [用 SST 管理 AWS 基础设施与 DevOps](/notes/using-sst-for-aws-infra-and-devops)。Tenant isolation 见 [用 Hono、Better Auth、Drizzle 与 Postgres RLS 打造 Multi-Tenant 后端](/notes/multi-tenant-backend-drizzle-hono-better-auth)。这篇笔记涵盖 typed API，一路到 production 的 protect、monitor 与 recover。
+Stages 与 deploy loop 见 [用 SST 管理 AWS 基础设施与 DevOps](/notes/using-sst-for-aws-infra-and-devops)。Tenant isolation 见 [用 Hono、Better Auth、Drizzle 与 Postgres RLS 打造 Multi-Tenant 后端](/notes/multi-tenant-backend-drizzle-hono-better-auth)。Event-driven Fargate 路径见 [打造 Event-Driven 票务 Backend](/notes/building-an-event-driven-ticketing-backend)。这篇笔记涵盖 typed API，一路到 production 的 protect、monitor 与 recover。
 
 <br />
 

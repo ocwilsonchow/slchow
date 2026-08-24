@@ -7,7 +7,7 @@ category: backend
 
 TypeScript 會 erase types。**Go 把它們留下。** 一個 duck-typed、「有 `id` 與 `email`」的 object 是 TypeScript 習慣。在 Go 裡 compiler 要一個 named struct 或 interface —— 而那個 interface 是 method set，不是一袋 fields。一支把 JSON decode 進 struct 的 **`net/http`** handler，跟 Zod-validated Hono route 是同一直覺 —— check 活在 binary 仍然認識的 type 裡，而不是在 `tsc` 時消失的 schema。
 
-這篇 note 是以 **Hono** developer 身分讀 **Go 1.22+** API 時用的 mapping。Samples 對準 standard library：method-aware `ServeMux`、`encoding/json`、`database/sql`。**sqlc** 與 **go-playground/validator** 各出現一次，作為 Drizzle 與 Zod 的表親。**chi** 出現一次，作為 middleware-composition 表親。不是把這個 site 重寫成 Go，也不是 Gin。Typed Hono stack 見 [用 Hono、Drizzle、Zod OpenAPI 與 SST 打造 Backend APIs](/notes/backend-apis-hono-sst)。Types 是 annotations 直到 HTTP boundary 的 Python 兄弟篇是 [以 TypeScript Developer 身分學 Python](/notes/learning-python-as-a-typescript-developer)。Types 活過 compilation 但 interfaces 是 nominal 的 Java 兄弟篇是 [以 TypeScript Developer 身分學 Java](/notes/learning-java-as-a-typescript-developer)。你已有的 object model 見 [TypeScript Class 與 Runtime Identity](/notes/typescript-classes-and-runtime-identity)。
+這篇 note 是以 **Hono** developer 身分讀 **Go 1.22+** API 時用的 mapping。Samples 對準 standard library：method-aware `ServeMux`、`encoding/json`、`database/sql`。**sqlc** 與 **go-playground/validator** 各出現一次，作為 Drizzle 與 Zod 的表親。**chi** 出現一次，作為 middleware-composition 表親。不是把這個 site 重寫成 Go，也不是 Gin。Typed Hono stack 見 [用 Hono、Drizzle、Zod OpenAPI 與 SST 打造 Backend APIs](/notes/_backend-apis-hono-sst)。Types 是 annotations 直到 HTTP boundary 的 Python 兄弟篇是 [以 TypeScript Developer 身分學 Python](/notes/learning-python-as-a-typescript-developer)。Types 活過 compilation 但 interfaces 是 nominal 的 Java 兄弟篇是 [以 TypeScript Developer 身分學 Java](/notes/learning-java-as-a-typescript-developer)。你已有的 object model 見 [TypeScript Class 與 Runtime Identity](/notes/typescript-classes-and-runtime-identity)。
 
 <br />
 
@@ -466,6 +466,6 @@ Go 是 **這個 binary** 如何 type 一個 value。`net/http` 是 **這個 proc
 - JVM 兄弟篇：[以 TypeScript Developer 身分學 Java](/notes/learning-java-as-a-typescript-developer)
 - TypeScript 的 runtime identity：[TypeScript Class 與 Runtime Identity](/notes/typescript-classes-and-runtime-identity)
 - JS 何時執行：[JavaScript 核心概念](/notes/core-javascript-concepts)
-- Hono analog：[用 Hono、Drizzle、Zod OpenAPI 與 SST 打造 Backend APIs](/notes/backend-apis-hono-sst)
+- Hono analog：[用 Hono、Drizzle、Zod OpenAPI 與 SST 打造 Backend APIs](/notes/_backend-apis-hono-sst)
 - Statement：[SQL 核心概念](/notes/core-sql-concepts)
 - Identity、membership，以及那一行：[用 Hono、Better Auth、Drizzle 與 Postgres RLS 打造 Multi-Tenant 後端](/notes/multi-tenant-backend-drizzle-hono-better-auth)

@@ -5,7 +5,7 @@ date: 2026-08-15
 category: backend
 ---
 
-The ORM types the query. Postgres still evaluates a **relation**: rows in, rows out, in a fixed logical order. Schema, RLS, and migrations are the wiring — [Backend APIs with Hono, Drizzle, Zod OpenAPI, and SST](/notes/backend-apis-hono-sst) and [Building a Multi-Tenant Backend with Hono, Better Auth, Drizzle, and Postgres RLS](/notes/multi-tenant-backend-drizzle-hono-better-auth). This note is the statement.
+The ORM types the query. Postgres still evaluates a **relation**: rows in, rows out, in a fixed logical order. Schema, RLS, and migrations are the wiring — [Backend APIs with Hono, Drizzle, Zod OpenAPI, and SST](/notes/_backend-apis-hono-sst) and [Building a Multi-Tenant Backend with Hono, Better Auth, Drizzle, and Postgres RLS](/notes/multi-tenant-backend-drizzle-hono-better-auth). This note is the statement.
 
 <br />
 
@@ -284,7 +284,7 @@ WHERE id = :id;
 - A forgotten unique constraint is a data bug that no amount of careful `WHERE` will fix after the fact.
 - Check-then-act is a **lost update**. Use `UPDATE … SET qty = qty + 1`, or a `UNIQUE` that rejects the duplicate insert. Check-then-insert races; `ON CONFLICT` is one statement.
 - The schema is the API. Application filters are a habit.
-- Isolation, RLS, and tenant context: [Building a Multi-Tenant Backend with Hono, Better Auth, Drizzle, and Postgres RLS](/notes/multi-tenant-backend-drizzle-hono-better-auth). Typed schema, pool, and migrations: [Backend APIs with Hono, Drizzle, Zod OpenAPI, and SST](/notes/backend-apis-hono-sst).
+- Isolation, RLS, and tenant context: [Building a Multi-Tenant Backend with Hono, Better Auth, Drizzle, and Postgres RLS](/notes/multi-tenant-backend-drizzle-hono-better-auth). Typed schema, pool, and migrations: [Backend APIs with Hono, Drizzle, Zod OpenAPI, and SST](/notes/_backend-apis-hono-sst).
 
 ---
 

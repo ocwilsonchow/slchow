@@ -7,7 +7,7 @@ category: system-design
 
 Apache Kafka 是一個**分散式、可 replay 的 log**。Producers append records。Consumers 按 offset pull。Partitions 把 log 分到多個 brokers，並保住一把 key 的順序。
 
-這篇 note 依 [Evan 的 walkthrough](https://www.youtube.com/watch?v=DU8o-OTeoCc)。通用 queue pattern —— outbox、idempotent consumers、backpressure 與 broker choice —— 見 [System Design 裡的 Message Queues](/notes/message-queues-in-system-design)。這篇 note 講的是 log。
+這篇 note 依 [Evan 的 walkthrough](https://www.youtube.com/watch?v=DU8o-OTeoCc)。通用 queue pattern —— outbox、idempotent consumers、backpressure 與 broker choice —— 見 [System Design 裡的 Message Queues](/notes/message-queues-in-system-design)。Production 的 Hono/MSK 購票路徑見 [打造 Event-Driven 票務 Backend](/notes/building-an-event-driven-ticketing-backend)。這篇 note 講的是 log。
 
 <br />
 

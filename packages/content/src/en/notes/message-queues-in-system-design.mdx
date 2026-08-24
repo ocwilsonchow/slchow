@@ -7,7 +7,7 @@ category: system-design
 
 A request cycle is the wrong place for work that is slow, bursty, or must survive this process dying. A **message queue** is a durable buffer between a producer and a consumer. The HTTP handler authenticates, persists the intent, enqueues, and returns **202**.
 
-The typed API through production protect, monitor, and recover is [Backend APIs with Hono, Drizzle, Zod OpenAPI, and SST](/notes/backend-apis-hono-sst). Stages and the deploy loop are [Using SST to Manage AWS Infrastructure and DevOps](/notes/using-sst-for-aws-infra-and-devops). This note is the queue.
+The typed API through production protect, monitor, and recover is [Backend APIs with Hono, Drizzle, Zod OpenAPI, and SST](/notes/_backend-apis-hono-sst). Stages and the deploy loop are [Using SST to Manage AWS Infrastructure and DevOps](/notes/using-sst-for-aws-infra-and-devops). A concrete outbox, inbox, and compensation flow is [Building an Event-Driven Ticketing Backend](/notes/building-an-event-driven-ticketing-backend). This note is the queue.
 
 <br />
 

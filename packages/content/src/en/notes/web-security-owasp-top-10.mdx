@@ -133,7 +133,7 @@ cors: {
 <br />
 
 - Starting headers: `Content-Security-Policy: default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, `Set-Cookie: … HttpOnly; Secure; SameSite=Lax`.
-- **CSP** is a backup for XSS, not a substitute for not rendering untrusted HTML. The SST API Gateway example in [Backend APIs with Hono, Drizzle, Zod OpenAPI, and SST](/notes/backend-apis-hono-sst) already names the app origin.
+- **CSP** is a backup for XSS, not a substitute for not rendering untrusted HTML. The SST API Gateway example in [Backend APIs with Hono, Drizzle, Zod OpenAPI, and SST](/notes/_backend-apis-hono-sst) already names the app origin.
 
 **Failure:** `allowCredentials: true` with a wildcard origin. OpenAPI and Scalar in production are free reconnaissance. If a bucket, security group, or `/debug` route is reachable and not required, it is open.
 

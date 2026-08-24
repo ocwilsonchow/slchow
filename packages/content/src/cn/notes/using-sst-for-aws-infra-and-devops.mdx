@@ -13,7 +13,7 @@ category: devops
 
 1. **目前已部署** — `sst.config.ts` 只 import Next.js / OpenNext stack。
 2. **已在 repo 里定义，但尚未 import** — container API infra（`Vpc` → `Cluster` → `Service` + `Router`）放在 `packages/infra`，并在 `run()` 里保持注释，直到该 stack 需要部署。
-3. **其他地方的相关模式** — 用 Lambda + API Gateway 做 Hono API 见 [用 Hono、Drizzle、Zod OpenAPI 与 SST 打造 Backend APIs](/notes/backend-apis-hono-sst)。那篇笔记并不是本站 `sst.config.ts` 正在跑的内容。
+3. **其他地方的相关模式** — 用 Lambda + API Gateway 做 Hono API 见 [用 Hono、Drizzle、Zod OpenAPI 与 SST 打造 Backend APIs](/notes/_backend-apis-hono-sst)。那篇笔记并不是本站 `sst.config.ts` 正在跑的内容。
 
 <br />
 
@@ -144,7 +144,7 @@ export const nextjs = new sst.aws.Nextjs("Web", {
 - Production 保留一个 warm server instance；非 prod 用 `warm: 0`。`edge` prop 接上非 prod Basic Auth。`dev` block 告诉 `sst dev` 如何启动本地 Next process。
 - Secrets 是 first-class resources，不是松散的 `.env` 文件：`sst.Secret("Username")`、`Password`、`DatabaseUrl`、`BetterAuthSecret`、`AiGatewayApiKey`。
 - 当 API module 被 import 时，路径是 `Vpc` → `Cluster` → `Service`，再用 `Router` 做 `api.example.com` 或 `{stage}.api.example.com`。在启用 `await import("./infra/api")` 之前，那个 stack 不会部署。
-- 另一种形状——Lambda 在 API Gateway 后面，加上 Lambda authorizer——是 [用 Hono、Drizzle、Zod OpenAPI 与 SST 打造 Backend APIs](/notes/backend-apis-hono-sst) 里的模式。那用 `sst.aws.Function` 与 `sst.aws.ApiGatewayV2`。它不是本站 config 目前加载的基础设施。
+- 另一种形状——Lambda 在 API Gateway 后面，加上 Lambda authorizer——是 [用 Hono、Drizzle、Zod OpenAPI 与 SST 打造 Backend APIs](/notes/_backend-apis-hono-sst) 里的模式。那用 `sst.aws.Function` 与 `sst.aws.ApiGatewayV2`。它不是本站 config 目前加载的基础设施。
 
 <br />
 
@@ -258,7 +258,7 @@ ci: checks → tests → build → sst deploy --stage …
 
 <br />
 
-SST 让 AWS infrastructure 成为可 review 的 TypeScript，并放在应用旁边。当问题是组织级 platform ownership 时，Terraform、CDK 或 Pulumi 仍然更合适。目前的 component 与 CLI 细节，从 [SST docs](https://sst.dev/docs/) 开始。关于 Lambda 或 Fargate 上的 Hono API，继续看 [用 Hono、Drizzle、Zod OpenAPI 与 SST 打造 Backend APIs](/notes/backend-apis-hono-sst)。
+SST 让 AWS infrastructure 成为可 review 的 TypeScript，并放在应用旁边。当问题是组织级 platform ownership 时，Terraform、CDK 或 Pulumi 仍然更合适。目前的 component 与 CLI 细节，从 [SST docs](https://sst.dev/docs/) 开始。关于 Lambda 或 Fargate 上的 Hono API，继续看 [用 Hono、Drizzle、Zod OpenAPI 与 SST 打造 Backend APIs](/notes/_backend-apis-hono-sst)。
 
 ---
 

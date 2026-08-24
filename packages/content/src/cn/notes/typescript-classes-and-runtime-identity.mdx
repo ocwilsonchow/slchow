@@ -287,7 +287,7 @@ displayName(user) // "Ada"
 
 - React class components 把 state 存在 `this` 上，并亲手 rebind event handlers。Hooks 把那份 state 挪到 Fiber。这个 stack 里的新 UI 是 function。Rendering model 见 [深入理解 React](/notes/understanding-react-in-depth)。
 - 跨网络的 DTO 是 type。`JSON.parse` 返回 plain object。挂在 `class User` 上的 methods 不会在，`instanceof User` 会是 false。
-- Hono handler 是从 context 到 response 的 function。Nest 风格的 controller classes 属于另一套 stack。[用 Hono 打造 Backend APIs](/notes/backend-apis-hono-sst) 把 routes 保持为 functions。
+- Hono handler 是从 context 到 response 的 function。Nest 风格的 controller classes 属于另一套 stack。[用 Hono 打造 Backend APIs](/notes/_backend-apis-hono-sst) 把 routes 保持为 functions。
 - **Failure:** 为明天就会变成 JSON 的 data 发明一套 class hierarchy。
 
 ---

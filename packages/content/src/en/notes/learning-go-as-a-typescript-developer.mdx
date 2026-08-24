@@ -7,7 +7,7 @@ category: backend
 
 TypeScript erases types. **Go keeps them.** A duck-typed object that "has `id` and `email`" is a TypeScript habit. In Go the compiler wants a named struct or an interface — and that interface is a method set, not a bag of fields. A **`net/http`** handler that decodes JSON into a struct is the same instinct as a Zod-validated Hono route — the check lives in a type the binary still knows, not in a schema that vanished at `tsc`.
 
-This note is the mapping used when reading a **Go 1.22+** API as a **Hono** developer. Samples target the standard library: method-aware `ServeMux`, `encoding/json`, `database/sql`. **sqlc** and **go-playground/validator** appear once, as the Drizzle and Zod cousins. **chi** appears once, as the middleware-composition cousin. It is not a rewrite of this site in Go, and it is not Gin. The typed Hono stack is [Backend APIs with Hono, Drizzle, Zod OpenAPI, and SST](/notes/backend-apis-hono-sst). The Python sibling, where the types are annotations until the HTTP boundary, is [Learning Python as a TypeScript Developer](/notes/learning-python-as-a-typescript-developer). The Java sibling, where the types survive but interfaces are nominal, is [Learning Java as a TypeScript Developer](/notes/learning-java-as-a-typescript-developer). The object model you already have is [TypeScript Classes and Runtime Identity](/notes/typescript-classes-and-runtime-identity).
+This note is the mapping used when reading a **Go 1.22+** API as a **Hono** developer. Samples target the standard library: method-aware `ServeMux`, `encoding/json`, `database/sql`. **sqlc** and **go-playground/validator** appear once, as the Drizzle and Zod cousins. **chi** appears once, as the middleware-composition cousin. It is not a rewrite of this site in Go, and it is not Gin. The typed Hono stack is [Backend APIs with Hono, Drizzle, Zod OpenAPI, and SST](/notes/_backend-apis-hono-sst). The Python sibling, where the types are annotations until the HTTP boundary, is [Learning Python as a TypeScript Developer](/notes/learning-python-as-a-typescript-developer). The Java sibling, where the types survive but interfaces are nominal, is [Learning Java as a TypeScript Developer](/notes/learning-java-as-a-typescript-developer). The object model you already have is [TypeScript Classes and Runtime Identity](/notes/typescript-classes-and-runtime-identity).
 
 <br />
 
@@ -466,6 +466,6 @@ Go is how **this binary** types a value. `net/http` is how **this process** rece
 - The JVM sibling: [Learning Java as a TypeScript Developer](/notes/learning-java-as-a-typescript-developer)
 - Runtime identity in TypeScript: [TypeScript Classes and Runtime Identity](/notes/typescript-classes-and-runtime-identity)
 - When JS runs: [Core JavaScript Concepts](/notes/core-javascript-concepts)
-- The Hono analog: [Backend APIs with Hono, Drizzle, Zod OpenAPI, and SST](/notes/backend-apis-hono-sst)
+- The Hono analog: [Backend APIs with Hono, Drizzle, Zod OpenAPI, and SST](/notes/_backend-apis-hono-sst)
 - The statement: [Core SQL Concepts](/notes/core-sql-concepts)
 - Identity, membership, and the row: [Building a Multi-Tenant Backend with Hono, Better Auth, Drizzle, and Postgres RLS](/notes/multi-tenant-backend-drizzle-hono-better-auth)

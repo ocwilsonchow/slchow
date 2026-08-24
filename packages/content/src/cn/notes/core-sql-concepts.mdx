@@ -5,7 +5,7 @@ date: 2026-08-15
 category: backend
 ---
 
-ORM 给 query 加上类型。Postgres 求值的仍然是一个 **relation**：rows 进去，rows 出来，逻辑顺序固定。Schema、RLS 与 migrations 是接线 —— [用 Hono、Drizzle、Zod OpenAPI 与 SST 打造 Backend APIs](/notes/backend-apis-hono-sst) 和 [用 Hono、Better Auth、Drizzle 与 Postgres RLS 打造 Multi-Tenant 后端](/notes/multi-tenant-backend-drizzle-hono-better-auth)。这篇 note 讲的是 statement。
+ORM 给 query 加上类型。Postgres 求值的仍然是一个 **relation**：rows 进去，rows 出来，逻辑顺序固定。Schema、RLS 与 migrations 是接线 —— [用 Hono、Drizzle、Zod OpenAPI 与 SST 打造 Backend APIs](/notes/_backend-apis-hono-sst) 和 [用 Hono、Better Auth、Drizzle 与 Postgres RLS 打造 Multi-Tenant 后端](/notes/multi-tenant-backend-drizzle-hono-better-auth)。这篇 note 讲的是 statement。
 
 <br />
 
@@ -284,7 +284,7 @@ WHERE id = :id;
 - 忘了 unique constraint 是 data bug，事后再仔细写 `WHERE` 也修不回来。
 - Check-then-act 是 **lost update**。用 `UPDATE … SET qty = qty + 1`，或用拒绝 duplicate insert 的 `UNIQUE`。Check-then-insert 会 race；`ON CONFLICT` 是一条 statement。
 - Schema 才是 API。Application filters 是习惯。
-- Isolation、RLS 与 tenant context：[用 Hono、Better Auth、Drizzle 与 Postgres RLS 打造 Multi-Tenant 后端](/notes/multi-tenant-backend-drizzle-hono-better-auth)。Typed schema、pool 与 migrations：[用 Hono、Drizzle、Zod OpenAPI 与 SST 打造 Backend APIs](/notes/backend-apis-hono-sst)。
+- Isolation、RLS 与 tenant context：[用 Hono、Better Auth、Drizzle 与 Postgres RLS 打造 Multi-Tenant 后端](/notes/multi-tenant-backend-drizzle-hono-better-auth)。Typed schema、pool 与 migrations：[用 Hono、Drizzle、Zod OpenAPI 与 SST 打造 Backend APIs](/notes/_backend-apis-hono-sst)。
 
 ---
 
