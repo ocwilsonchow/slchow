@@ -1,0 +1,439 @@
+---
+title: Kafka in System Design
+description: Why the log is not a queue — brokers, partitions, keys, replication, acks, consumer groups, and the failure modes that follow
+date: 2026-08-24
+category: system-design
+---
+
+Apache Kafka is a **distributed, replayable log**. Producers append records. Consumers pull them by offset. Partitions spread the log across brokers and preserve order for one key.
+
+This note follows [Evan's walkthrough](https://www.youtube.com/watch?v=DU8o-OTeoCc). The general queue pattern — outbox, idempotent consumers, backpressure, and broker choice — is [Message Queues in System Design](/notes/message-queues-in-system-design). This note is the log.
+
+<br />
+
+---
+
+## Pattern Map
+
+| Pattern | Kafka shape | Reach for it when |
+| --- | --- | --- |
+| Work queue | One consumer group; one member owns each partition | Jobs need buffering and per-key order; retries are yours |
+| Event stream | Retained log + offsets | Continuous processing, replay, and ordered history matter |
+| Pub/sub | One consumer group per subscriber | Several independent services must each read the same event |
+
+<br />
+
+Kafka can express all three. That does not make it the default for all three. If the requirement is only "run this job and retry it," SQS gives delayed retries and a DLQ with less machinery. Kafka earns its cost when **retention, replay, high throughput, or multiple independent readers** are part of the product.
+
+<br />
+
+---
+
+## 1. Why Kafka exists
+
+Imagine a World Cup site publishing goals, bookings, and substitutions. One producer writes events. One consumer updates the live page.
+
+<br />
+
+```text
+Match feed → Producer → Queue → Consumer → Live site
+```
+
+<br />
+
+Now run a thousand matches at once. One queue and one consumer are the bottlenecks. Randomly spreading events across queues adds capacity but loses causality: a goal can appear before kickoff.
+
+Kafka's answer is to partition by **game ID**. Every event for one game hashes to one partition, so that game's order survives. A **consumer group** adds workers without letting two workers in that group own the same partition. **Topics** separate soccer from basketball.
+
+<br />
+
+```text
+topic: match-events
+
+partition 0  game-17: kickoff → goal → booking
+partition 1  game-42: kickoff → substitution
+partition 2  game-91: kickoff → goal
+```
+
+<br />
+
+The guarantee is deliberately narrow: **order within a partition**. There is no useful global order across partition 0 and partition 1.
+
+<br />
+
+**Failure:** saying "Kafka preserves order," then keying every event randomly. Kafka preserves append order only inside one partition. The records that must stay ordered must share a key.
+
+<br />
+
+---
+
+## 2. Brokers, topics, and partitions
+
+A Kafka **cluster** contains brokers. A broker is a server that stores partition replicas and serves producer and consumer requests.
+
+<br />
+
+```text
+Topic: match-events
+
+Broker A              Broker B              Broker C
+P0 leader             P1 leader             P2 leader
+P1 follower           P2 follower           P0 follower
+```
+
+<br />
+
+- A **topic** is the logical stream clients publish to and subscribe to.
+- A **partition** is one ordered, immutable, append-only log. It is the unit of storage, ordering, replication, and consumer parallelism.
+- A **record** is an entry in that log. Kafka retains it after consumption; reading does not delete it.
+- An **offset** is a record's position inside one partition. It is not global and it is not a timestamp.
+
+One consumer can own several partitions. One partition can be owned by only one consumer in a consumer group at a time. A group with twelve consumers and six partitions has at most six active consumers.
+
+<br />
+
+**Failure:** adding consumers while leaving the topic with one partition. Eleven workers sit idle. Partitions set the ceiling for parallelism inside a consumer group.
+
+<br />
+
+---
+
+## 3. Record shape and the write path
+
+A record has four useful fields: **key**, **value**, **timestamp**, and **headers**. The value is the payload. Headers carry metadata such as schema version, correlation ID, and `traceparent`. The key usually decides the partition.
+
+<br />
+
+```ts
+await producer.send({
+  topic: "match-events",
+  messages: [
+    {
+      key: matchId,
+      value: JSON.stringify({ type: "goal", playerId }),
+      headers: { "schema-version": "2", traceparent },
+    },
+  ],
+})
+```
+
+<br />
+
+The common mental model is:
+
+<br />
+
+```text
+partition = hash(key) % partitionCount
+
+producer
+  → fetch cluster metadata
+  → choose partition from key
+  → send to that partition's leader
+  → leader appends
+  → followers replicate
+  → consumer polls and advances its offset
+```
+
+<br />
+
+With no key, modern producers spread batches across partitions. Distribution improves; related-record ordering disappears. A custom partitioner can encode another policy, but then every producer must agree on it.
+
+Changing the partition count also changes `hash(key) % partitionCount`. New records for an existing key may move to another partition, so increasing partitions can break per-key order across the change boundary.
+
+<br />
+
+**Failure:** treating the timestamp as the ordering guarantee, or increasing partitions on a live ordered topic without planning for key remapping. The authoritative order is the offset in one partition.
+
+<br />
+
+---
+
+## 4. When to reach for Kafka
+
+Kafka is useful when the log itself solves a requirement.
+
+<br />
+
+| Requirement | Example | Why Kafka fits |
+| --- | --- | --- |
+| Async processing | Transcode an uploaded video | Ingest and workers scale independently |
+| Per-key order | Admit users from a waiting room | One key stays on one partition |
+| Stream processing | Aggregate ad clicks with Flink | Consumers process a continuous retained flow |
+| Pub/sub | Deliver live comments to several services | Each consumer group gets its own copy |
+| Replay | Rebuild a projection after a bug fix | Reset offsets and read retained history again |
+
+<br />
+
+For video transcoding, Kafka carries a small event containing `videoId` and an S3 URL. S3 carries the video. The worker downloads it after polling the event.
+
+<br />
+
+```text
+Upload → S3
+       → Kafka { videoId, s3Url } → Transcoder → renditions
+```
+
+<br />
+
+Kafka is not the source of truth for a business row and not blob storage. If an HTTP write and its event must agree, persist the business row and an outbox row in one database transaction, then relay the event. The outbox is covered in [Message Queues in System Design](/notes/message-queues-in-system-design).
+
+<br />
+
+**Failure:** putting a 1 GB video in Kafka because the transcoder is asynchronous. Put the blob in object storage and a pointer in the log. Also do not pick Kafka for a disposable email job merely because replay sounds useful.
+
+<br />
+
+---
+
+## 5. Scale starts with the partition key
+
+Before scaling, estimate **records per second**, average record size, retention, replication factor, and consumer work. Evan's interview baselines are deliberately hand-wavy: keep records under roughly **1 MB**, and think of one well-provisioned broker as roughly **1 TB** and **10k messages per second**. Real capacity varies enormously with hardware, record size, replication, acknowledgements, compression, and workload.
+
+<br />
+
+```text
+ingress bytes/day
+  = records/sec × average bytes × 86,400
+
+stored bytes
+  ≈ ingress bytes/day × retention days × replication factor
+```
+
+<br />
+
+Adding brokers adds possible storage and network capacity. It does not split an existing topic by magic. The topic needs enough partitions, and replicas must be reassigned, before new brokers can carry its load.
+
+The partition key is the main design decision:
+
+- It must preserve the order the product actually needs: `matchId`, `orderId`, or `accountId`.
+- It should have high cardinality and an even traffic distribution.
+- It must not be broader than the ordering boundary. `tenantId` can put a large tenant on one partition when only each `invoiceId` needs order.
+- It becomes part of the data contract. Changing it changes ordering and stateful consumer behavior.
+
+<br />
+
+**Failure:** saying "we will add brokers" without naming the key, partition count, throughput, or retention. More machines do nothing for one hot partition.
+
+<br />
+
+---
+
+## 6. Hot partitions
+
+A **hot partition** receives much more traffic than its peers. An ad-click topic keyed by `adId` looks balanced until one campaign goes viral. One leader saturates while the cluster average looks healthy.
+
+<br />
+
+| Strategy | What it buys | What it costs |
+| --- | --- | --- |
+| No key | Even distribution over time | No per-entity order |
+| Random salt | One hot key becomes N keys | Consumers must merge N partial streams |
+| Compound key | Spreads by a real dimension such as region | Order is now per compound key |
+| Backpressure | Protects brokers and downstream systems | Higher producer latency or rejected work |
+
+<br />
+
+If exact order for one celebrity account is non-negotiable, that account is a serial workload. No partitioning trick makes one ordered sequence infinitely parallel. Reduce work per record, batch, or change the requirement.
+
+Monitor **per-partition** bytes, requests, and consumer lag. Cluster averages hide skew.
+
+<br />
+
+**Failure:** salting the key and still promising total order for the unsalted entity. The load spread because the order boundary changed.
+
+<br />
+
+---
+
+## 7. Durability is a configuration
+
+Each partition has a **leader** and follower replicas on other brokers. Producers write to the leader. Followers fetch its log. The controller tracks broker health and elects a new leader from the **in-sync replicas (ISR)** after failure.
+
+A replication factor of **3** means three total copies: one leader and two followers.
+
+<br />
+
+| Producer `acks` | Success means | Trade-off |
+| --- | --- | --- |
+| `0` | The producer sent the request | Lowest latency; loss can be silent |
+| `1` | The leader appended it | Leader failure can lose an unreplicated record |
+| `all` | Every required in-sync replica acknowledged | Strongest durability; more latency |
+
+<br />
+
+`acks=all` does not mean every configured replica, healthy or not. It waits for the ISR requirement. Pair it with a meaningful `min.insync.replicas`; otherwise "all" may still be only one live replica. Disable unclean leader election when durability matters, or an out-of-date replica can become leader and lose acknowledged data.
+
+Kafka is not magically always available. The useful interview answer is the failure domain: a broker can fail while replicated partitions continue. A whole cluster, region, bad configuration, or operator can still fail.
+
+<br />
+
+**Failure:** saying replication factor 3 means any two broker failures are safe without checking ISR, replica placement, `acks`, and `min.insync.replicas`. Copies are not a guarantee unless the write waited for them.
+
+<br />
+
+---
+
+## 8. Consumer failure, offsets, and rebalancing
+
+Consumers **pull** records. Each consumer group stores its own committed offsets, so two groups can read the same topic independently and at different speeds.
+
+<br />
+
+```text
+poll record
+  → perform durable side effect
+  → commit offset
+```
+
+<br />
+
+Commit before the side effect and a crash loses work. Commit after it and a crash between effect and commit reprocesses the record. Kafka is therefore **at-least-once by default**. The consumer must make duplicates safe with an event ID, unique inbox record, and idempotent business write.
+
+When a consumer joins, leaves, or stops polling, the group **rebalances** and moves partitions between members. Processing pauses for affected partitions. Cooperative rebalancing reduces disruption, but it does not remove the need to keep poll loops healthy and handlers bounded.
+
+- Watch consumer lag per partition, not only average lag.
+- Keep the consumer's unit of work small.
+- Set poll and session timeouts around real processing time.
+- Stop polling before shutdown, finish or abandon in-flight work, then commit only completed records.
+
+<br />
+
+**Failure:** auto-committing offsets before a database write finishes. The dashboard says caught up; the business event is gone. The opposite failure is a non-idempotent side effect after commit, where recovery cannot replay it safely.
+
+<br />
+
+---
+
+## 9. Retries belong to the design
+
+Producer requests fail ambiguously: Kafka may have appended a record even though the acknowledgment never reached the producer. Enable idempotence with retries so the broker can deduplicate retransmissions from that producer session.
+
+<br />
+
+```ts
+const producer = kafka.producer({
+  idempotent: true,
+  retry: { retries: 5, initialRetryTime: 100 },
+})
+```
+
+<br />
+
+Producer idempotence does not make a whole business workflow exactly once. It does not deduplicate two application requests or make a database side effect atomic with an offset commit.
+
+Kafka does not provide queue-native delayed consumer retries like SQS. A common design is:
+
+<br />
+
+```text
+main topic
+  → consumer fails
+  → retry topic(s) with attempt and next-at metadata
+  → retry consumer
+  → dead-letter topic after the ceiling
+```
+
+<br />
+
+Use bounded attempts, exponential backoff with jitter, and observability on the dead-letter topic. Preserve the original event ID and error context. A poison record must not block its partition forever.
+
+<br />
+
+**Failure:** catching an exception, committing the offset, and logging "will retry" when no retry event exists. The other is retrying a permanent schema error forever at the head of one ordered partition.
+
+<br />
+
+---
+
+## 10. Throughput and retention
+
+Kafka gets throughput from sequential appends, batching, compression, and parallel partitions.
+
+- **Batch** records so one network request and disk append carries many events. Larger batches improve throughput but add waiting latency.
+- **Compress** the batch with LZ4, Snappy, Zstd, or Gzip. Smaller network and disk usage costs CPU.
+- **Partition evenly.** Batching cannot rescue one hot leader.
+- **Keep payloads small.** Large records consume broker memory, network, replication bandwidth, and consumer fetch capacity together.
+
+Kafka retains records by time and/or partition size through `retention.ms` and `retention.bytes`. The common broker default is seven days. Retention applies whether or not consumers have read the records.
+
+Longer retention enables replay farther back, but multiplies storage, recovery time, and cost. **Log compaction** is a different policy: retain the latest value per key, plus tombstones, rather than every event forever. It fits rebuildable current state, not an immutable audit history.
+
+<br />
+
+```text
+retention answers:   how much history can be replayed?
+compaction answers:  what is the latest value for each key?
+```
+
+<br />
+
+**Failure:** promising a 90-day replay while sizing disk for one day, or turning on compaction for an audit stream and assuming every intermediate event remains.
+
+<br />
+
+---
+
+## Recap Q&A
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="kafka-key">
+    <AccordionTrigger>1. What does the partition key decide?</AccordionTrigger>
+    <AccordionContent>
+
+      - The key usually hashes to a partition. Records with the same key reach the same partition and preserve their append order.
+      - The key also decides load distribution. A low-cardinality or skewed key creates hot partitions.
+      - Choose the smallest boundary that needs order — `orderId`, not automatically `tenantId`.
+      - **Failure:** adding partitions later without accounting for `hash(key) % partitionCount` remapping existing keys.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="kafka-parallelism">
+    <AccordionTrigger>2. Why do more consumers sometimes add no throughput?</AccordionTrigger>
+    <AccordionContent>
+
+      - Inside one consumer group, one partition has one active owner. Six partitions allow at most six active consumers.
+      - Consumers beyond the partition count are idle. One consumer may own several partitions.
+      - Add partitions for parallelism, but remember that partition count affects key mapping, ordering, files, replication, and rebalances.
+      - **Failure:** scaling workers while a single hot partition remains the bottleneck.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="kafka-durability">
+    <AccordionTrigger>3. What makes an acknowledged Kafka write durable?</AccordionTrigger>
+    <AccordionContent>
+
+      - Replicate each partition across brokers; RF=3 means one leader and two followers.
+      - Use `acks=all` with an appropriate `min.insync.replicas` so success waits for more than the leader.
+      - Elect a replacement leader from ISR and avoid unclean election when losing acknowledged records is unacceptable.
+      - **Failure:** configuring three replicas but acknowledging after only the leader append.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="kafka-consumer">
+    <AccordionTrigger>4. When should a consumer commit its offset?</AccordionTrigger>
+    <AccordionContent>
+
+      - Commit after the durable side effect. Commit before it and a crash loses work.
+      - A crash after the effect but before commit causes replay, so consumers need stable event IDs and idempotent writes.
+      - Keep work bounded so polling stays healthy and rebalances do not repeatedly interrupt long handlers.
+      - **Failure:** treating a committed offset as proof that an external side effect happened exactly once.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="kafka-vs-queue">
+    <AccordionTrigger>5. When is Kafka the wrong queue?</AccordionTrigger>
+    <AccordionContent>
+
+      - Kafka earns its cost for retained history, replay, high-throughput streams, per-key order, or multiple independent consumer groups.
+      - A plain background job that needs delayed retries and a DLQ is usually simpler on SQS.
+      - Store blobs in S3 and pointers in Kafka. Keep records small.
+      - **Failure:** choosing Kafka for one disposable worker because it is scalable, then rebuilding queue-native retries and operations around it.
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>

@@ -275,7 +275,7 @@ The broker is a durability and delivery contract, not a brand. On this stack the
 | --- | --- | --- |
 | **SQS** | Queue, at-least-once, optional FIFO | Default work queue on AWS. Lambda or a worker fleet consumes. |
 | **RabbitMQ** | Queue + routing | Complex routing keys, existing AMQP ops, not already on AWS. |
-| **Kafka / Kinesis** | Replayable log | Multiple independent readers, ordered history, replay. |
+| [**Kafka / Kinesis**](/notes/kafka-in-system-design) | Replayable log | Multiple independent readers, ordered history, replay. |
 | **Redis lists / streams** | Fast, weaker durability | Ephemeral jobs, caches, fan-out. Not money. |
 
 <br />

@@ -275,7 +275,7 @@ Broker 是 durability 与 delivery 的合同，不是品牌。这套 stack 上 A
 | --- | --- | --- |
 | **SQS** | Queue，at-least-once，optional FIFO | AWS 上的默认 work queue。Lambda 或 worker fleet 来 consume。 |
 | **RabbitMQ** | Queue + routing | 复杂 routing keys、已有 AMQP ops、还不在 AWS 上。 |
-| **Kafka / Kinesis** | Replayable log | 多个独立 readers、有序 history、replay。 |
+| [**Kafka / Kinesis**](/notes/kafka-in-system-design) | Replayable log | 多个独立 readers、有序 history、replay。 |
 | **Redis lists / streams** | Fast，更弱的 durability | Ephemeral jobs、caches、fan-out。不是钱。 |
 
 <br />

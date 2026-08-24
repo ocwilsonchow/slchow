@@ -1,0 +1,439 @@
+---
+title: System Design 里的 Kafka
+description: 为什么 log 不是 queue —— brokers、partitions、keys、replication、acks、consumer groups，以及随之而来的 failure modes
+date: 2026-08-24
+category: system-design
+---
+
+Apache Kafka 是一个**分布式、可 replay 的 log**。Producers append records。Consumers 按 offset pull。Partitions 把 log 分到多个 brokers，并保住一把 key 的顺序。
+
+这篇 note 依 [Evan 的 walkthrough](https://www.youtube.com/watch?v=DU8o-OTeoCc)。通用 queue pattern —— outbox、idempotent consumers、backpressure 与 broker choice —— 见 [System Design 里的 Message Queues](/notes/message-queues-in-system-design)。这篇 note 讲的是 log。
+
+<br />
+
+---
+
+## Pattern Map
+
+| Pattern | Kafka shape | Reach for it when |
+| --- | --- | --- |
+| Work queue | 一个 consumer group；每个 partition 由一个 member 持有 | Jobs 需要 buffering 与 per-key order；retry 由你负责 |
+| Event stream | Retained log + offsets | Continuous processing、replay 与 ordered history 很重要 |
+| Pub/sub | 每个 subscriber 一个 consumer group | 多个独立 services 都要读到同一个 event |
+
+<br />
+
+Kafka 三种都能表达，不代表三种都该默认用它。如果需求只有「执行这份 job 并 retry」，SQS 用更少 machinery 就给 delayed retries 与 DLQ。只有 **retention、replay、high throughput 或多个独立 readers** 是产品要求时，Kafka 的成本才值得。
+
+<br />
+
+---
+
+## 1. Kafka 为什么存在
+
+想象一个 World Cup 网站发布 goals、bookings 与 substitutions。一个 producer 写 events。一个 consumer 更新 live page。
+
+<br />
+
+```text
+Match feed → Producer → Queue → Consumer → Live site
+```
+
+<br />
+
+现在让一千场比赛同时进行。一个 queue 与一个 consumer 成了 bottleneck。把 events 随机分到多个 queues 虽然加了 capacity，却丢了 causality：goal 可能出现在 kickoff 之前。
+
+Kafka 的答案是按 **game ID** partition。一个 game 的每个 event 都 hash 到同一个 partition，所以比赛内的顺序保住了。**Consumer group** 可以加 workers，又不会让 group 内两个 workers 同时持有同一个 partition。**Topics** 把 soccer 与 basketball 分开。
+
+<br />
+
+```text
+topic: match-events
+
+partition 0  game-17: kickoff → goal → booking
+partition 1  game-42: kickoff → substitution
+partition 2  game-91: kickoff → goal
+```
+
+<br />
+
+Guarantee 刻意很窄：**partition 内有序**。Partition 0 与 partition 1 之间没有有用的 global order。
+
+<br />
+
+**Failure:** 说「Kafka 保证顺序」，却随机给每个 event 选 key。Kafka 只保住一个 partition 内的 append order。必须有序的 records 必须共用一把 key。
+
+<br />
+
+---
+
+## 2. Brokers、topics 与 partitions
+
+Kafka **cluster** 由 brokers 组成。Broker 是存 partition replicas、响应 producer 与 consumer requests 的 server。
+
+<br />
+
+```text
+Topic: match-events
+
+Broker A              Broker B              Broker C
+P0 leader             P1 leader             P2 leader
+P1 follower           P2 follower           P0 follower
+```
+
+<br />
+
+- **Topic** 是 clients publish 与 subscribe 的 logical stream。
+- **Partition** 是一条有序、immutable、append-only 的 log。它是 storage、ordering、replication 与 consumer parallelism 的单位。
+- **Record** 是 log 里的一项。Kafka 在 consume 后仍保留它；read 不会 delete。
+- **Offset** 是 record 在一个 partition 内的位置。它不是 global，也不是 timestamp。
+
+一个 consumer 可以持有多个 partitions。同一 consumer group 里，一个 partition 同一时间只能由一个 consumer 持有。十二个 consumers 配六个 partitions，最多只有六个 active consumers。
+
+<br />
+
+**Failure:** Topic 仍只有一个 partition，却一直加 consumers。十一个 workers 都在 idle。Partitions 决定 consumer group 内 parallelism 的上限。
+
+<br />
+
+---
+
+## 3. Record shape 与 write path
+
+一条 record 有四个实用 fields：**key**、**value**、**timestamp** 与 **headers**。Value 是 payload。Headers 放 schema version、correlation ID 与 `traceparent` 等 metadata。Key 通常决定 partition。
+
+<br />
+
+```ts
+await producer.send({
+  topic: "match-events",
+  messages: [
+    {
+      key: matchId,
+      value: JSON.stringify({ type: "goal", playerId }),
+      headers: { "schema-version": "2", traceparent },
+    },
+  ],
+})
+```
+
+<br />
+
+常用的 mental model：
+
+<br />
+
+```text
+partition = hash(key) % partitionCount
+
+producer
+  → fetch cluster metadata
+  → choose partition from key
+  → send to that partition's leader
+  → leader appends
+  → followers replicate
+  → consumer polls and advances its offset
+```
+
+<br />
+
+没有 key 时，现代 producers 会把 batches 分散到多个 partitions。Distribution 变好；related-record ordering 消失。Custom partitioner 可以编码另一套 policy，但所有 producers 都必须同意它。
+
+改变 partition count 也会改变 `hash(key) % partitionCount`。旧 key 的新 records 可能移到另一个 partition，所以加 partitions 会打破变更前后的 per-key order。
+
+<br />
+
+**Failure:** 把 timestamp 当 ordering guarantee，或在 live ordered topic 上加 partitions 却没有规划 key remapping。权威顺序是一个 partition 内的 offset。
+
+<br />
+
+---
+
+## 4. 什么时候用 Kafka
+
+当 log 本身解决一项 requirement 时，Kafka 才有价值。
+
+<br />
+
+| Requirement | Example | Why Kafka fits |
+| --- | --- | --- |
+| Async processing | Transcode uploaded video | Ingest 与 workers 独立 scale |
+| Per-key order | 从 waiting room 放用户进入 | 一把 key 留在一个 partition |
+| Stream processing | 用 Flink aggregate ad clicks | Consumers 处理 continuous retained flow |
+| Pub/sub | 把 live comments 送给多个 services | 每个 consumer group 都拿到自己的 copy |
+| Replay | 修 bug 后重建 projection | Reset offsets，再读一次 retained history |
+
+<br />
+
+做 video transcoding 时，Kafka 带一条小 event，里面只有 `videoId` 与 S3 URL。S3 才装 video。Worker poll 到 event 后再下载。
+
+<br />
+
+```text
+Upload → S3
+       → Kafka { videoId, s3Url } → Transcoder → renditions
+```
+
+<br />
+
+Kafka 不是 business row 的 source of truth，也不是 blob storage。如果 HTTP write 与 event 必须一致，就在一个 database transaction 里 persist business row 与 outbox row，再 relay event。Outbox 见 [System Design 里的 Message Queues](/notes/message-queues-in-system-design)。
+
+<br />
+
+**Failure:** 因为 transcoder 是 async，就把 1 GB video 放进 Kafka。Blob 放 object storage，log 里只放 pointer。也不要只因为 replay 听起来有用，就给一次性 email job 选 Kafka。
+
+<br />
+
+---
+
+## 5. Scale 从 partition key 开始
+
+Scale 前先估 **records per second**、average record size、retention、replication factor 与 consumer work。Evan 给的 interview baselines 刻意很粗：records 尽量低于约 **1 MB**，一台配置不错的 broker 大致按 **1 TB** 与 **10k messages per second** 想。真实 capacity 会随 hardware、record size、replication、acknowledgements、compression 与 workload 巨幅变化。
+
+<br />
+
+```text
+ingress bytes/day
+  = records/sec × average bytes × 86,400
+
+stored bytes
+  ≈ ingress bytes/day × retention days × replication factor
+```
+
+<br />
+
+加 brokers 只增加潜在 storage 与 network capacity，不会神奇地拆开现有 topic。Topic 要有足够 partitions，replicas 也要 reassign，新 brokers 才能接住它的 load。
+
+Partition key 是最主要的 design decision：
+
+- 它必须保住产品真正需要的 order：`matchId`、`orderId` 或 `accountId`。
+- 它应该 high-cardinality，而且 traffic distribution 均匀。
+- 它不能比 ordering boundary 更宽。如果只有每个 `invoiceId` 需要有序，用 `tenantId` 会把一个大 tenant 压在一个 partition 上。
+- 它是 data contract 的一部分。改 key 就会改 ordering 与 stateful consumer behavior。
+
+<br />
+
+**Failure:** 只说「我们会加 brokers」，却说不出 key、partition count、throughput 或 retention。再多机器也救不了一个 hot partition。
+
+<br />
+
+---
+
+## 6. Hot partitions
+
+**Hot partition** 收到远多于 peers 的 traffic。Ad-click topic 按 `adId` key 看似均匀，直到一个 campaign viral。一个 leader saturated，cluster average 却仍健康。
+
+<br />
+
+| Strategy | What it buys | What it costs |
+| --- | --- | --- |
+| No key | 一段时间后分布均匀 | 没有 per-entity order |
+| Random salt | 一把 hot key 变 N 把 keys | Consumers 要 merge N 条 partial streams |
+| Compound key | 按 region 等真实 dimension 分散 | Order 变成 per compound key |
+| Backpressure | 保护 brokers 与 downstream systems | Producer latency 更高，或拒绝 work |
+
+<br />
+
+如果一个 celebrity account 的 exact order 不能退让，它就是 serial workload。没有 partitioning trick 能让一条 ordered sequence 无限 parallel。减少每条 record 的工作、batch，或改变 requirement。
+
+监控 **per-partition** bytes、requests 与 consumer lag。Cluster averages 会藏住 skew。
+
+<br />
+
+**Failure:** Salt key 后仍承诺 unsalted entity 的 total order。Load 之所以散开，是因为 order boundary 已经变了。
+
+<br />
+
+---
+
+## 7. Durability 是 configuration
+
+每个 partition 有一个 **leader** 与位于其他 brokers 的 follower replicas。Producers 写 leader。Followers fetch 它的 log。Controller 追踪 broker health，在 failure 后从 **in-sync replicas (ISR)** 里 elect 新 leader。
+
+Replication factor 为 **3**，意思是三份总 copies：一个 leader、两个 followers。
+
+<br />
+
+| Producer `acks` | Success means | Trade-off |
+| --- | --- | --- |
+| `0` | Producer 发出了 request | Latency 最低；loss 可能 silent |
+| `1` | Leader append 完成 | Leader failure 可能丢 unreplicated record |
+| `all` | 每个 required in-sync replica 都 ack | Durability 最强；latency 更高 |
+
+<br />
+
+`acks=all` 不是等待每个 configured replica，无论它健不健康。它等的是 ISR requirement。要配一个有意义的 `min.insync.replicas`；否则「all」仍可能只有一个 live replica。Durability 重要时要 disable unclean leader election，否则 out-of-date replica 可能成为 leader，丢掉已 acknowledged data。
+
+Kafka 不是魔法般 always available。Interview 里有用的回答是 failure domain：一个 broker 可以 fail，而 replicated partitions 继续工作。整个 cluster、region、坏 configuration 或 operator 仍可能让它 fail。
+
+<br />
+
+**Failure:** 说 replication factor 3 就一定安全承受任意两台 broker failures，却不看 ISR、replica placement、`acks` 与 `min.insync.replicas`。Write 没有等 copies，copies 就不是 guarantee。
+
+<br />
+
+---
+
+## 8. Consumer failure、offsets 与 rebalancing
+
+Consumers **pull** records。每个 consumer group 存自己的 committed offsets，所以两个 groups 能独立、以不同速度读同一个 topic。
+
+<br />
+
+```text
+poll record
+  → perform durable side effect
+  → commit offset
+```
+
+<br />
+
+Side effect 前 commit，crash 就会丢 work。Side effect 后 commit，effect 与 commit 之间 crash 就会 reprocess record。因此 Kafka default 是 **at-least-once**。Consumer 必须用 event ID、unique inbox record 与 idempotent business write 让 duplicate 安全。
+
+Consumer join、leave 或停止 polling 时，group 会 **rebalance**，在 members 之间移动 partitions。受影响 partitions 会暂停 processing。Cooperative rebalancing 减少 disruption，但没有消除保持 poll loop healthy 与 handler bounded 的要求。
+
+- 看每个 partition 的 consumer lag，不只看 average lag。
+- 保持 consumer unit of work 小。
+- 按真实 processing time 设置 poll 与 session timeouts。
+- Shutdown 前先停止 polling，finish 或 abandon in-flight work，只 commit 完成的 records。
+
+<br />
+
+**Failure:** Database write 还没完成就 auto-commit offsets。Dashboard 说 caught up；business event 已经消失。相反的 failure 是 commit 后做 non-idempotent side effect，recovery 时无法安全 replay。
+
+<br />
+
+---
+
+## 9. Retry 是 design 的一部分
+
+Producer request 会 ambiguously fail：Kafka 可能已经 append record，只是 acknowledgment 没回到 producer。启用 idempotence 与 retries，让 broker 能 deduplicate 同一 producer session 的 retransmissions。
+
+<br />
+
+```ts
+const producer = kafka.producer({
+  idempotent: true,
+  retry: { retries: 5, initialRetryTime: 100 },
+})
+```
+
+<br />
+
+Producer idempotence 不会让整个 business workflow exactly once。它不会 deduplicate 两个 application requests，也不会让 database side effect 与 offset commit atomic。
+
+Kafka 没有 SQS 那种 queue-native delayed consumer retries。常见 design：
+
+<br />
+
+```text
+main topic
+  → consumer fails
+  → retry topic(s) with attempt and next-at metadata
+  → retry consumer
+  → dead-letter topic after the ceiling
+```
+
+<br />
+
+使用 bounded attempts、带 jitter 的 exponential backoff，并观测 dead-letter topic。保留 original event ID 与 error context。Poison record 不能永远堵住 partition。
+
+<br />
+
+**Failure:** Catch exception 后 commit offset，再 log「will retry」，但根本没有 retry event。另一个是把 permanent schema error 永远 retry 在一个 ordered partition 的头部。
+
+<br />
+
+---
+
+## 10. Throughput 与 retention
+
+Kafka 靠 sequential appends、batching、compression 与 parallel partitions 拿 throughput。
+
+- **Batch** records，让一次 network request 与 disk append 带多个 events。更大 batches 提升 throughput，却增加 waiting latency。
+- **Compress** batch，可选 LZ4、Snappy、Zstd 或 Gzip。更少 network 与 disk，代价是 CPU。
+- **Partition evenly.** Batching 救不了一个 hot leader。
+- **Keep payloads small.** Large records 会同时吃 broker memory、network、replication bandwidth 与 consumer fetch capacity。
+
+Kafka 通过 `retention.ms` 与 `retention.bytes` 按时间和／或 partition size 保留 records。常见 broker default 是七天。无论 consumers 有没有读过，retention 都照样执行。
+
+更长 retention 能 replay 更久之前的 history，却会放大 storage、recovery time 与 cost。**Log compaction** 是另一种 policy：保留每把 key 的 latest value 与 tombstones，而不是永远保留每个 event。它适合 rebuildable current state，不适合 immutable audit history。
+
+<br />
+
+```text
+retention answers:   how much history can be replayed?
+compaction answers:  what is the latest value for each key?
+```
+
+<br />
+
+**Failure:** 承诺 90-day replay，disk 却只按一天来 size；或者给 audit stream 开 compaction，还以为每个 intermediate event 都会留下。
+
+<br />
+
+---
+
+## Recap Q&A
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="kafka-key">
+    <AccordionTrigger>1. Partition key 决定什么？</AccordionTrigger>
+    <AccordionContent>
+
+      - Key 通常 hash 到一个 partition。同 key records 去同一 partition，保住 append order。
+      - Key 也决定 load distribution。Low-cardinality 或 skewed key 会制造 hot partitions。
+      - 选需要 order 的最小 boundary —— `orderId`，不自动选 `tenantId`。
+      - **Failure:** 加 partitions 时没有考虑 `hash(key) % partitionCount` 会 remap 旧 keys。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="kafka-parallelism">
+    <AccordionTrigger>2. 为什么加 consumers 有时完全不加 throughput？</AccordionTrigger>
+    <AccordionContent>
+
+      - 一个 consumer group 里，一个 partition 只有一个 active owner。六个 partitions 最多允许六个 active consumers。
+      - 超出 partition count 的 consumers 会 idle。一个 consumer 可以持有多个 partitions。
+      - 要 parallelism 可以加 partitions，但 partition count 会影响 key mapping、ordering、files、replication 与 rebalances。
+      - **Failure:** 一直 scale workers，而 bottleneck 仍是一个 hot partition。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="kafka-durability">
+    <AccordionTrigger>3. 什么让 acknowledged Kafka write durable？</AccordionTrigger>
+    <AccordionContent>
+
+      - 把每个 partition replicate 到多个 brokers；RF=3 是一个 leader 与两个 followers。
+      - 用 `acks=all` 配合合适的 `min.insync.replicas`，让 success 等的不只 leader。
+      - 从 ISR elect replacement leader；不能接受丢 acknowledged records 时，避免 unclean election。
+      - **Failure:** 配了三份 replicas，却在只有 leader append 后就 acknowledge。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="kafka-consumer">
+    <AccordionTrigger>4. Consumer 应该什么时候 commit offset？</AccordionTrigger>
+    <AccordionContent>
+
+      - Durable side effect 后才 commit。之前 commit，crash 就丢 work。
+      - Effect 后、commit 前 crash 会 replay，所以 consumers 要有 stable event IDs 与 idempotent writes。
+      - Work 保持 bounded，让 polling healthy，也避免 rebalances 重复打断 long handlers。
+      - **Failure:** 把 committed offset 当成 external side effect exactly once 的证明。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="kafka-vs-queue">
+    <AccordionTrigger>5. 什么时候 Kafka 是错误的 queue？</AccordionTrigger>
+    <AccordionContent>
+
+      - Kafka 的成本用在 retained history、replay、high-throughput streams、per-key order 或多个独立 consumer groups 上。
+      - 只需要 delayed retries 与 DLQ 的普通 background job，通常用 SQS 更简单。
+      - Blobs 放 S3，Kafka 放 pointers。Records 保持小。
+      - **Failure:** 因为 Kafka scalable 就给一个 disposable worker 选它，然后自己重建 queue-native retries 与 operations。
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>
