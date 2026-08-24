@@ -187,6 +187,8 @@ retry for Suspense        ─┘
 
 <br />
 
+一次 click 通常佔的是 **SyncLane**——urgent-input 這類工作在實作裡的名字，不是應用程式碼會 import 的東西。
+
 一次很長的 **blocking** render 會佔住 main thread：React 結束之前，browser 不能 paint、處理 click，或捲動。那正是 Fiber 與 lanes 要避免的凍結——但只對 opt-in 的 renders 成立。
 
 Concurrent rendering 是 **按 feature opt-in**。預設的 `setState` 仍是一次不中斷的 transaction。`startTransition`、`useTransition`、`useDeferredValue`，以及相關的 Suspense 行為，才標記 React 可以中斷的工作。
@@ -213,6 +215,10 @@ function handleChange(value: string) {
   })
 }
 ```
+
+<br />
+
+同一套 urgent/transition 拆分就是 counter 與 heavy chart demo：increment 保持 urgent；把 `setSeed` 包進 `startTransition`，chart 就可以 yield。
 
 <br />
 
