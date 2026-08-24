@@ -428,6 +428,8 @@ A Fiber can bail out when props, state, context, and lanes show that neither it 
 - These are performance tools, not semantic guarantees. The calculation must still be correct if React recomputes it.
 - A parent can render while a child does not. A component can render without its DOM changing.
 
+The runtime decides whether a Fiber can bail out. [React Compiler Internals](/notes/react-compiler-internals) is the build-time half: how HIR, effects, and reactive scopes automatically produce finer cache boundaries.
+
 When investigating performance, keep three questions separate:
 
 1. Was an update scheduled?

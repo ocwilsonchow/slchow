@@ -1,0 +1,537 @@
+---
+title: 深入理解 React Compiler Internals
+description: HIR、SSA、effect analysis、reactive scopes 與 cache slots 如何把普通 React code 轉成自動 memoize 的 code
+date: 2026-08-24
+category: frontend
+---
+
+React Compiler 是 build-time optimizer。它讀取 components 與 Hooks，證明哪些 values 可以重用，再 emit React 在 runtime 執行的 cache checks。
+
+它不會改變 React 的 rendering model。State update 仍會 schedule render，rendering 仍會計算 candidate tree，commit 仍會發佈結果。Compiler 只是讓一部分 render work 可以重用。
+
+<br />
+
+```text
+source component
+  → analyze data flow and effects
+  → discover reactive scopes
+  → emit dependency checks and cache slots
+  → run the transformed component in React
+```
+
+<br />
+
+這篇 note 依 Lydia Hallie 的 [React Compiler Internals](https://www.youtube.com/watch?v=Pw8w2O5Y0no)。Talk 很清楚地解釋 pipeline，但它的 release status 與 setup slides 來自 2025。React Compiler 現在已經 **stable**，仍是 optional；最新的 [React Compiler 文件](https://react.dev/learn/react-compiler) 才是 source of truth。
+
+Runtime 那一半——Fibers、lanes、rendering、commits 與 bailouts——見 [深入理解 React](/notes/understanding-react-in-depth)。
+
+---
+
+## 1. 問題是重複的 Render Work
+
+Component state 改變時，React 會 render 該 component，預設也會 render 它的 children。因此 child 可能在 calculation 輸入沒有改變時，仍重複計算。
+
+<br />
+
+```tsx
+function UserStats({ users }: { users: User[] }) {
+  const activeUsers = users.filter((user) => user.active)
+  return <p>{activeUsers.length} active users</p>
+}
+
+function App({ users }: { users: User[] }) {
+  const [sort, setSort] = useState<"asc" | "desc">("asc")
+
+  return (
+    <>
+      <SortButton value={sort} onChange={setSort} />
+      <UserStats users={users} />
+    </>
+  )
+}
+```
+
+<br />
+
+改變 `sort` 會再次 render `App`。沒有 bailout 時，`UserStats` 也再次執行並 filter `users`，即使 `users` prop 還是同一 reference。
+
+Manual memoization 可以加上這個 bailout：
+
+<br />
+
+```tsx
+const UserStats = memo(function UserStats({ users }: { users: User[] }) {
+  const activeUsers = useMemo(
+    () => users.filter((user) => user.active),
+    [users]
+  )
+
+  return <p>{activeUsers.length} active users</p>
+})
+```
+
+<br />
+
+這樣有效，但 developer 現在要維護兩個 boundaries 與一份 dependency list。如果 filter 加了 `department`，卻沒有把它加進 `[users]`，cache 就會回傳 stale data。
+
+React Compiler 解決的是 maintenance 問題：從 program 推斷 dependencies、建立 cache boundaries，並保留 component 的原意。
+
+**Failure:** 把 compilation 當成 semantic repair。Compiler 不能把 impure component 變 pure，也不能讓漏掉的 state update 自動正確。Memoization 只能跳過那些結果本來就相同的 work。
+
+---
+
+## 2. Compiler 實際 Memoize 甚麼
+
+Compiler 主要從兩個方向改善 **update performance**：
+
+1. 重用 JSX，讓 unchanged children 不會收到 cascading re-renders。
+2. 當 reactive inputs 沒變時，重用 components 與 Hooks 內執行的 calculations。
+
+這些 boundaries 可以比手寫 `useMemo` 更細。
+
+<br />
+
+```tsx
+function UserStats({ users }: { users: User[] }) {
+  const activeUsers = users.filter((user) => user.active)
+  const count = activeUsers.length
+  return <p>{count} active users</p>
+}
+```
+
+<br />
+
+Compiler 可以為依賴 `users` 的 filter 找到一個 scope，再為依賴 `count` 的 JSX 找到另一個 scope。如果 `users` 改變但 active count 沒變，filter scope 會執行，JSX scope 仍可重用 output。
+
+這些 boundaries 是 local 的：
+
+- 它分析 React components 與 Hooks，不是 program 裡的每一個 JavaScript function。
+- Cache 屬於一個 component 或 Hook instance。兩個 component instances 不共享一份 result cache。
+- 如果 costly helper 被多個 components 呼叫，而且結果應該共享，可能仍需在 React 外面建立 cache。
+- 它優化 updates，不能跳過產生 initial UI 時第一次必要的計算。
+
+這個結果常被稱為 **fine-grained reactivity**，但 React 並沒有變成 signal runtime。React 仍會 render components；compiler-generated checks 讓 render 的部分 values 可以重用。
+
+---
+
+## 3. Compilation Pipeline
+
+Source 會經過很多 compiler stages。實用的 mental model 是：
+
+<br />
+
+```text
+JavaScript / TypeScript source
+  → HIR                 atomic instructions and control flow
+  → SSA                 one assignment per variable version
+  → type inference      what kind of value is this?
+  → effect analysis     how can this operation touch data?
+  → reactive analysis   can this value change between renders?
+  → scope discovery     which instructions cache together?
+  → code generation     dependency checks and cache slots
+```
+
+<br />
+
+**HIR**、**SSA**、effect kinds 與 pass names 都是 implementation details。Application code 應依賴 Rules of React，而不是某個 compiler pass。
+
+[React Compiler Playground](https://playground.react.dev/) 是查看當前 pipeline 最直接的地方。它會顯示 function 是否成功 compile，以及 transformed output，而 application 的 build artifacts 並不是 API。
+
+---
+
+## 4. HIR 讓 Data Flow 變明確
+
+JavaScript syntax 對人方便，但整個 block 太大、太靈活，compiler 無法直接推理。Compiler 會把它 lower 成 **High-level Intermediate Representation**。
+
+概念上，這段：
+
+<br />
+
+```tsx
+const activeUsers = users.filter((user) => user.active)
+const count = activeUsers.length
+return <p>{count}</p>
+```
+
+<br />
+
+會變成更接近：
+
+<br />
+
+```text
+load users
+load users.filter
+create filter callback
+call filter(users, callback) → activeUsers
+load activeUsers.length      → count
+create JSX("p", count)       → result
+return result
+```
+
+<br />
+
+每個 instruction 都有 inputs、output 與 control flow 位置。後續 passes 因此能回答：
+
+- 哪個 instruction 產生 `count`？
+- 哪些 source values 可以 flow 到 returned JSX？
+- Operation 只 read value，還是可能 mutate 它？
+- `users` 改變時，哪些 instructions 需要重跑？
+
+HIR 仍然足夠 high-level，可以保留 React meaning。Compiler 不是在優化 machine instructions；它是在證明 JavaScript 與 JSX values 何時能安全重用。
+
+---
+
+## 5. SSA 把 Reassignments 分開
+
+Reassignment 會讓 data flow 不明確，因為一個 source name 沿著不同 path 可以代表不同 value。
+
+<br />
+
+```tsx
+let activeUsers = users.filter((user) => user.active)
+
+if (filters.limitResults) {
+  activeUsers = activeUsers.slice(0, 10)
+}
+
+return <UserList users={activeUsers} />
+```
+
+<br />
+
+哪次 assignment 到達 `UserList`，取決於 runtime control flow。**Static Single Assignment** 為每次 assignment 建立獨立 version：
+
+<br />
+
+```text
+activeUsers_1 = filter(users)
+
+if filters.limitResults:
+  activeUsers_2 = slice(activeUsers_1, 0, 10)
+
+activeUsers_3 = φ(activeUsers_2, activeUsers_1)
+return UserList(activeUsers_3)
+```
+
+<br />
+
+`φ` notation 是概念上的 join：選擇實際執行 path 產生的 version。Source variable 並沒有變 immutable；compiler 只是建立了一份 internal form，讓每個 version 只有一個 definition。
+
+後續 passes 現在可以追蹤每個 value，不必再問這一行指的是哪一個 `activeUsers`。
+
+---
+
+## 6. Effects 與 Reactivity 回答不同問題
+
+Data flow 明確後，compiler 還需要兩種不同 analysis。
+
+**Effect analysis** 問 operation 如何與 data 互動。Talk 用這些類型說明：
+
+- **read:** 查看 property，例如 `users.length`；
+- **store:** assign 新產生的 value；
+- **capture:** 使用 parameter 或 outer scope 的 value；
+- **mutate:** 可能改變 existing value；
+- **freeze:** 確立 value 之後不會再被修改。
+
+這些 labels 是 compiler reasoning 的摘要，不是 JavaScript effects 或 APIs。Read 比 unknown mutation 更容易 cache；capture 會引入 cache 必須追蹤的 dependency。
+
+**Reactive analysis** 問 value 在 renders 之間會不會不同。
+
+<br />
+
+```text
+props and Hook results begin reactive
+             ↓
+users → users.filter → activeUsers → count → JSX
+```
+
+<br />
+
+Function parameters 是 reactive，因為 props 可以改變。`useState`、`useContext` 等 Hooks 回傳的 values 也是 reactive。Reactive value flow 進 operation 時，output 也可能變 reactive。
+
+這項區別很重要：
+
+- Operation 可以是 pure，卻仍依賴 reactive input。
+- Operation 可以 read stable input，不需要 reactive cache boundary。
+- Unknown mutation 可能讓看似有用的 cache 不安全。
+
+Compiler 兩個答案都需要：**重用是否安全**，以及**甚麼變化會 invalidate 它**？
+
+**Failure:** 在 render 期間 mutate `users`。Reference equality 無法再表示 contents 是否改變，而且 component 已違反 React 的 immutable snapshot model。
+
+---
+
+## 7. Reactive Scopes 變成 Cache Slots
+
+Scope discovery 會依照 invalidate instructions 的 reactive values 來分組。
+
+<br />
+
+```text
+scope A
+  dependency: users
+  output: activeUsers
+
+scope B
+  dependency: count
+  output: <p>{count}</p>
+```
+
+<br />
+
+一起改變的 operations 放在一起。有獨立 dependencies 的 operations 獲得獨立 scopes。Code generation 接著為 dependencies 與 outputs 分配 slots。
+
+當前 generated output 使用 compiler runtime。簡化後的形狀是：
+
+<br />
+
+```tsx
+import { c as _c } from "react/compiler-runtime"
+
+function UserStats({ users }: { users: User[] }) {
+  const $ = _c(4)
+  let activeUsers
+
+  if ($[0] !== users) {
+    activeUsers = users.filter((user) => user.active)
+    $[0] = users
+    $[1] = activeUsers
+  } else {
+    activeUsers = $[1]
+  }
+
+  const count = activeUsers.length
+  let result
+
+  if ($[2] !== count) {
+    result = <p>{count} active users</p>
+    $[2] = count
+    $[3] = result
+  } else {
+    result = $[3]
+  }
+
+  return result
+}
+```
+
+<br />
+
+真正的 output 與 sentinel checks 可以改變。耐用的 model 是：
+
+```text
+compare dependencies
+  → changed: calculate and store dependency + output
+  → unchanged: reuse cached output
+```
+
+Compiler 並不是直接塞入一大片 source-level `useMemo` calls。Talk 把 primitive 稱為 `useMemoCache`；minified output 常以 `_c` 出現。當前 docs 顯示從 `react/compiler-runtime` import 的 `c`。
+
+---
+
+## 8. Compiler 是 Conservative 的
+
+只有 components 與 Hooks 遵守 [Rules of React](https://react.dev/reference/rules)，automatic memoization 才成立：
+
+- Components 與 Hooks 在 render 期間 pure、idempotent。
+- Props、state、Hook arguments，以及傳給 JSX 的 values 都是 immutable snapshots。
+- React 呼叫 components；application code 不直接呼叫 component functions。
+- Hooks 在 top level 執行，而且只從 React functions 呼叫。
+
+Conditional Hooks、render-time side effects、mutated props、class components，以及 compiler 無法證明安全的 JavaScript patterns，都可能無法 optimize。
+
+這是 **local skip**，通常不是 all-or-nothing verdict。Compiler 可以跳過一個 component 或 Hook，繼續 optimize 其他部分。沒有 compile 的 function 保留普通 React behavior。
+
+<br />
+
+```tsx
+function LegacyGrid() {
+  "use no memo" // TODO: remove after upgrading the incompatible grid library
+
+  return <ThirdPartyGrid />
+}
+```
+
+<br />
+
+`"use no memo"` 是 temporary escape hatch，不是 performance strategy。記錄它存在的原因、修復 underlying incompatibility，再移除它。
+
+**Failure:** 為每個 compiler diagnostic 加 `"use no memo"`。這樣只會保留 behavior、丟掉 optimization coverage，卻繼續留下 Rules of React violations。
+
+---
+
+## 9. 漸進採用 Stable Compiler
+
+React Compiler 已 stable 並經過 production 驗證，但它仍是 optional build step。是否採用，取決於 codebase health。
+
+Babel pipeline：
+
+<br />
+
+```bash
+pnpm add -D babel-plugin-react-compiler@latest
+```
+
+<br />
+
+```js
+module.exports = {
+  plugins: [
+    "babel-plugin-react-compiler", // Must run before other transforms.
+  ],
+}
+```
+
+<br />
+
+Compiler 需要 original source information，所以 Babel plugin 必須第一個執行。
+
+Next.js 有直接 option：
+
+<br />
+
+```ts
+import type { NextConfig } from "next"
+
+const nextConfig: NextConfig = {
+  reactCompiler: true,
+}
+
+export default nextConfig
+```
+
+<br />
+
+大型 application 可以從 annotation mode 開始：
+
+<br />
+
+```ts
+const nextConfig: NextConfig = {
+  reactCompiler: {
+    compilationMode: "annotation",
+  },
+}
+```
+
+<br />
+
+```tsx
+function ExpensiveList() {
+  "use memo"
+  // Only annotated components and Hooks compile in annotation mode.
+}
+```
+
+<br />
+
+其他 rollout 方式包括 Babel directory overrides 與 runtime gating。React 17 與 18 也受支援，但需要對應的 `target` 與 `react-compiler-runtime`；React 19 是 default target。
+
+使用當前 tooling 驗證 adoption：
+
+1. 啟用 `eslint-plugin-react-hooks@latest` 的 `recommended-latest` preset。Compiler diagnostics 會指出哪些 functions 將被跳過。
+2. 執行 behavior tests。Compilation 不應改變 users 觀察到的結果。
+3. Profile 重要 interactions。Automatic memoization 不等於有用 speedup 的證明。
+4. 在 React DevTools 查看官方 **Memo ✨** badge。
+5. 在 Compiler Playground 或 build output 抽查少量 components。
+
+2025 talk 展示的 health-check command 已不是推薦做法。當前 React docs 指向 ESLint integration。
+
+---
+
+## 10. Manual Memoization 仍是 Escape Hatch
+
+啟用 compiler 後，不要機械式刪除所有 `memo`、`useMemo` 或 `useCallback`。
+
+- Existing memoization 會影響 compiler output。除非 tests 與 profiling 證明該刪，否則保留。
+- New code 通常應信任 compiler inference。
+- 當 identity 是 integration contract 的一部分時，`useMemo` 與 `useCallback` 仍有用，尤其是穩定 Effect dependency。
+- 跨 component instances 共享的 cache，應放在 compiler-generated component caches 之外。
+- Memoization 仍有 memory 與 comparison costs。更快是 empirical result，不是 syntax choice。
+
+最短的正確 model：
+
+<br />
+
+```text
+HIR exposes.
+SSA separates.
+Effects constrain.
+Reactivity propagates.
+Scopes group.
+Codegen caches.
+React renders.
+```
+
+<br />
+
+主要參考：Lydia Hallie 的 [React Compiler Internals](https://www.youtube.com/watch?v=Pw8w2O5Y0no)，React 的 [compiler introduction](https://react.dev/learn/react-compiler/introduction)、[installation](https://react.dev/learn/react-compiler/installation)、[incremental adoption](https://react.dev/learn/react-compiler/incremental-adoption)、[directives](https://react.dev/reference/react-compiler/directives)、[configuration](https://react.dev/reference/react-compiler/configuration) 與 [Rules of React](https://react.dev/reference/rules)。Next.js 請使用最新的 [`reactCompiler` configuration](https://nextjs.org/docs/app/api-reference/config/next-config-js/reactCompiler)。
+
+---
+
+## Recap Q&A
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="compiler-problem">
+    <AccordionTrigger>1. React Compiler 解決甚麼問題？</AccordionTrigger>
+    <AccordionContent>
+
+      - State update 通常會重新執行 component 與 children。即使 inputs 沒變，calculations 與 JSX 也可能重新建立。
+      - Manual `memo`、`useMemo`、`useCallback` 會建立 boundaries，但 developer 必須放對位置並維護 dependency lists。
+      - Compiler 推斷 reusable scopes 與 dependencies。主要收益是 automatic **correct** memoization，不是保證打敗每個 hand-tuned component。
+      - 它改變 build output，不改變 React 的 render/commit semantics。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="compiler-pipeline">
+    <AccordionTrigger>2. Compiler 有哪些主要 phases？</AccordionTrigger>
+    <AccordionContent>
+
+      - Source lower 成 **HIR**，讓 instructions 與 control flow 變明確。
+      - **SSA** 為每次 assignment 建立一個 internal version。
+      - Type 與 effect analysis 判斷 operations 做甚麼，以及重用是否安全。
+      - Reactive analysis 找出 renders 之間可能改變的 values。
+      - Scope discovery 依 dependencies 分組 work；code generation emit cache slots。
+      - 這些 names 是 implementation details。Application code 依賴的是 Rules of React。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="compiler-effects-reactivity">
+    <AccordionTrigger>3. Effects 與 reactivity 有甚麼不同？</AccordionTrigger>
+    <AccordionContent>
+
+      - **Effect** 描述 instruction 如何與 data 互動：在 talk 的簡化 model 中是 read、store、capture、mutate 或 freeze。
+      - **Reactivity** 描述 value 在 renders 之間會不會不同。Props 與 Hook results 是 reactive roots，reactivity 會沿 dependent operations 傳播。
+      - Effects 回答 caching 是否安全；reactivity 指出哪項變化會 invalidate cache。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="compiler-skips">
+    <AccordionTrigger>4. Compiler 無法證明 optimization 安全時會怎樣？</AccordionTrigger>
+    <AccordionContent>
+
+      - 它可以跳過該 component 或 Hook，繼續 compile codebase 其他部分。
+      - Function 仍有普通 React behavior，只是沒有 compiler-generated memoization。
+      - 應修復 Rules of React violations，而不是藏起來。`"use no memo"` 只應是有說明的 temporary escape hatch。
+      - Class components 與 unsupported patterns 不會因為 compilation 自動變得可 optimize。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="compiler-adoption">
+    <AccordionTrigger>5. Codebase 今天應如何採用 React Compiler？</AccordionTrigger>
+    <AccordionContent>
+
+      - React Compiler 已 **stable 且 optional**。把它加為第一個 Babel transform，或啟用 framework integration。
+      - Full rollout 風險較高時，以 annotation mode、directory overrides 或 gating 漸進採用。
+      - 使用最新 React Hooks ESLint rules、behavior tests、profiling、DevTools Memo badge 與 Compiler Playground。
+      - Existing manual memoization 先保留，直到 testing 證明移除安全且有價值。
+      - React 17/18 需要 configured target 與 `react-compiler-runtime`；React 19 是 default target。
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>

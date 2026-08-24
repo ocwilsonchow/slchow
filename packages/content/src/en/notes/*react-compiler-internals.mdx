@@ -1,0 +1,537 @@
+---
+title: React Compiler Internals
+description: How HIR, SSA, effect analysis, reactive scopes, and cache slots turn ordinary React code into automatically memoized code
+date: 2026-08-24
+category: frontend
+---
+
+React Compiler is a build-time optimizer. It reads components and Hooks, proves which values can be reused, and emits cache checks that React executes at runtime.
+
+It does not change React's rendering model. A state update still schedules a render, rendering still computes a candidate tree, and committing still publishes it. The compiler makes some of that render work reusable.
+
+<br />
+
+```text
+source component
+  → analyze data flow and effects
+  → discover reactive scopes
+  → emit dependency checks and cache slots
+  → run the transformed component in React
+```
+
+<br />
+
+This note follows Lydia Hallie's [React Compiler Internals](https://www.youtube.com/watch?v=Pw8w2O5Y0no). The talk explains the pipeline clearly, but its release-status and setup slides are from 2025. React Compiler is now **stable**, remains optional, and the current [React Compiler documentation](https://react.dev/learn/react-compiler) is the source of truth.
+
+For the runtime half — Fibers, lanes, rendering, commits, and bailouts — see [Understanding React in Depth](/notes/understanding-react-in-depth).
+
+---
+
+## 1. The Problem Is Repeated Render Work
+
+When a component's state changes, React renders that component and, by default, its children. A child can therefore repeat a calculation even when the input to that calculation has not changed.
+
+<br />
+
+```tsx
+function UserStats({ users }: { users: User[] }) {
+  const activeUsers = users.filter((user) => user.active)
+  return <p>{activeUsers.length} active users</p>
+}
+
+function App({ users }: { users: User[] }) {
+  const [sort, setSort] = useState<"asc" | "desc">("asc")
+
+  return (
+    <>
+      <SortButton value={sort} onChange={setSort} />
+      <UserStats users={users} />
+    </>
+  )
+}
+```
+
+<br />
+
+Changing `sort` renders `App` again. Without a bailout, `UserStats` executes again and filters `users`, even though its `users` prop is the same reference.
+
+Manual memoization can add that bailout:
+
+<br />
+
+```tsx
+const UserStats = memo(function UserStats({ users }: { users: User[] }) {
+  const activeUsers = useMemo(
+    () => users.filter((user) => user.active),
+    [users]
+  )
+
+  return <p>{activeUsers.length} active users</p>
+})
+```
+
+<br />
+
+This works, but now the developer owns two boundaries and a dependency list. Add `department` to the filter but not to `[users]`, and the cache returns stale data.
+
+React Compiler solves the maintenance problem: infer dependencies from the program, create cache boundaries, and preserve the component's meaning.
+
+**Failure:** treating compilation as a semantic repair. The compiler cannot make an impure component pure or make a missing state update correct. Memoization may only skip work whose result would have been the same.
+
+---
+
+## 2. What the Compiler Actually Memoizes
+
+The compiler primarily improves **update performance** in two ways:
+
+1. It can reuse JSX so unchanged children do not receive cascading re-renders.
+2. It can reuse calculations performed inside components and Hooks when their reactive inputs are unchanged.
+
+Those boundaries can be finer than a hand-written `useMemo`.
+
+<br />
+
+```tsx
+function UserStats({ users }: { users: User[] }) {
+  const activeUsers = users.filter((user) => user.active)
+  const count = activeUsers.length
+  return <p>{count} active users</p>
+}
+```
+
+<br />
+
+The compiler can discover one scope for filtering by `users` and another for creating JSX from `count`. If `users` changes but its active count does not, the filter scope runs while the JSX scope can still reuse its output.
+
+The boundaries are local:
+
+- It analyzes React components and Hooks, not every JavaScript function in the program.
+- A cache belongs to one component or Hook instance. Two component instances do not share one result cache.
+- A costly helper called from several components may still need a cache outside React if its result should be shared.
+- It optimizes updates. It cannot avoid the first calculation needed to produce the initial UI.
+
+The result is often called **fine-grained reactivity**, but React has not become a signal runtime. React still renders components. Compiler-generated checks let parts of those renders reuse previous values.
+
+---
+
+## 3. The Compilation Pipeline
+
+The source passes through many compiler stages. The useful mental model is:
+
+<br />
+
+```text
+JavaScript / TypeScript source
+  → HIR                 atomic instructions and control flow
+  → SSA                 one assignment per variable version
+  → type inference      what kind of value is this?
+  → effect analysis     how can this operation touch data?
+  → reactive analysis   can this value change between renders?
+  → scope discovery     which instructions cache together?
+  → code generation     dependency checks and cache slots
+```
+
+<br />
+
+**HIR**, **SSA**, effect kinds, and pass names are implementation details. Application code should depend on the Rules of React, not a particular compiler pass.
+
+The [React Compiler Playground](https://playground.react.dev/) is the best way to inspect the current pipeline. It shows whether a function compiled and the transformed output without making an application's build artifacts part of its API.
+
+---
+
+## 4. HIR Makes Data Flow Explicit
+
+JavaScript syntax is convenient for humans but too large and flexible to reason about as one block. The compiler lowers it to a **High-level Intermediate Representation**.
+
+Conceptually, this:
+
+<br />
+
+```tsx
+const activeUsers = users.filter((user) => user.active)
+const count = activeUsers.length
+return <p>{count}</p>
+```
+
+<br />
+
+becomes a sequence closer to:
+
+<br />
+
+```text
+load users
+load users.filter
+create filter callback
+call filter(users, callback) → activeUsers
+load activeUsers.length      → count
+create JSX("p", count)       → result
+return result
+```
+
+<br />
+
+Each instruction has inputs, an output, and a place in control flow. That lets later passes answer:
+
+- Which instruction produced `count`?
+- Which source values can reach the returned JSX?
+- Does an operation only read a value, or might it mutate it?
+- Which instructions need to rerun if `users` changes?
+
+HIR is still high-level enough to retain React meaning. The compiler is not optimizing machine instructions; it is proving when JavaScript and JSX values can safely be reused.
+
+---
+
+## 5. SSA Separates Reassignments
+
+Reassignment makes data flow ambiguous because one source name can mean different values along different paths.
+
+<br />
+
+```tsx
+let activeUsers = users.filter((user) => user.active)
+
+if (filters.limitResults) {
+  activeUsers = activeUsers.slice(0, 10)
+}
+
+return <UserList users={activeUsers} />
+```
+
+<br />
+
+Which assignment reaches `UserList` depends on runtime control flow. **Static Single Assignment** gives each assignment a separate version:
+
+<br />
+
+```text
+activeUsers_1 = filter(users)
+
+if filters.limitResults:
+  activeUsers_2 = slice(activeUsers_1, 0, 10)
+
+activeUsers_3 = φ(activeUsers_2, activeUsers_1)
+return UserList(activeUsers_3)
+```
+
+<br />
+
+The `φ` notation is the conceptual join: choose the version produced by the path that actually ran. The source variable did not become immutable. The compiler created an internal form where every version has one definition.
+
+Now later passes can follow each value without asking which meaning of `activeUsers` a line refers to.
+
+---
+
+## 6. Effects and Reactivity Answer Different Questions
+
+After data flow is explicit, the compiler needs two different analyses.
+
+**Effect analysis** asks how an operation interacts with data. The talk illustrates:
+
+- **read:** inspect a property such as `users.length`;
+- **store:** assign a newly produced value;
+- **capture:** use a parameter or value from an outer scope;
+- **mutate:** possibly change an existing value;
+- **freeze:** establish that a value will not be modified afterward.
+
+These labels summarize compiler reasoning; they are not JavaScript effects or APIs. A read is easier to cache than an unknown mutation. A capture introduces a dependency the cache must track.
+
+**Reactive analysis** asks whether a value may differ between renders.
+
+<br />
+
+```text
+props and Hook results begin reactive
+             ↓
+users → users.filter → activeUsers → count → JSX
+```
+
+<br />
+
+Function parameters are reactive because props can change. Values returned by Hooks such as `useState` and `useContext` are reactive. When a reactive value flows into an operation, the output may become reactive too.
+
+The distinction matters:
+
+- An operation can be pure but still depend on reactive input.
+- An operation can read stable input and need no reactive cache boundary.
+- An unknown mutation can make a seemingly useful cache unsafe.
+
+The compiler needs both answers: **is reuse safe**, and **what change invalidates it**?
+
+**Failure:** mutating `users` during render. Reference equality can no longer represent whether its contents changed, and the component already violates React's immutable snapshot model.
+
+---
+
+## 7. Reactive Scopes Become Cache Slots
+
+Scope discovery groups instructions by the reactive values that invalidate them.
+
+<br />
+
+```text
+scope A
+  dependency: users
+  output: activeUsers
+
+scope B
+  dependency: count
+  output: <p>{count}</p>
+```
+
+<br />
+
+Operations that change together belong together. Operations with independent dependencies get independent scopes. Code generation then allocates slots for dependencies and outputs.
+
+Current generated output uses the compiler runtime. A simplified shape looks like:
+
+<br />
+
+```tsx
+import { c as _c } from "react/compiler-runtime"
+
+function UserStats({ users }: { users: User[] }) {
+  const $ = _c(4)
+  let activeUsers
+
+  if ($[0] !== users) {
+    activeUsers = users.filter((user) => user.active)
+    $[0] = users
+    $[1] = activeUsers
+  } else {
+    activeUsers = $[1]
+  }
+
+  const count = activeUsers.length
+  let result
+
+  if ($[2] !== count) {
+    result = <p>{count} active users</p>
+    $[2] = count
+    $[3] = result
+  } else {
+    result = $[3]
+  }
+
+  return result
+}
+```
+
+<br />
+
+The real output and sentinel checks can change. The durable model is:
+
+```text
+compare dependencies
+  → changed: calculate and store dependency + output
+  → unchanged: reuse cached output
+```
+
+The compiler does not literally insert a forest of source-level `useMemo` calls. The talk calls the primitive `useMemoCache`; minified output often exposes it as `_c`. Current documentation shows `c` imported from `react/compiler-runtime`.
+
+---
+
+## 8. The Compiler Is Conservative
+
+Automatic memoization is valid only when components and Hooks obey the [Rules of React](https://react.dev/reference/rules):
+
+- Components and Hooks are pure and idempotent during render.
+- Props, state, Hook arguments, and values passed to JSX are immutable snapshots.
+- React calls components; application code does not invoke component functions directly.
+- Hooks run at the top level and only from React functions.
+
+Conditional Hooks, render-time side effects, mutated props, class components, and JavaScript patterns the compiler cannot prove safe may not be optimized.
+
+This is a **local skip**, not normally an all-or-nothing verdict. The compiler can skip one component or Hook and continue optimizing others. The uncompiled function keeps its ordinary React behavior.
+
+<br />
+
+```tsx
+function LegacyGrid() {
+  "use no memo" // TODO: remove after upgrading the incompatible grid library
+
+  return <ThirdPartyGrid />
+}
+```
+
+<br />
+
+`"use no memo"` is a temporary escape hatch, not a performance strategy. Document why it exists, fix the underlying incompatibility, and remove it.
+
+**Failure:** adding `"use no memo"` to silence every compiler diagnostic. That preserves behavior by discarding optimization coverage while leaving the Rules of React violations in place.
+
+---
+
+## 9. Adopt the Stable Compiler Gradually
+
+React Compiler is stable and tested in production, but it is still an optional build step. Adoption depends on the health of the codebase.
+
+For a Babel pipeline:
+
+<br />
+
+```bash
+pnpm add -D babel-plugin-react-compiler@latest
+```
+
+<br />
+
+```js
+module.exports = {
+  plugins: [
+    "babel-plugin-react-compiler", // Must run before other transforms.
+  ],
+}
+```
+
+<br />
+
+The compiler needs original source information, so its Babel plugin runs first.
+
+Next.js has a direct option:
+
+<br />
+
+```ts
+import type { NextConfig } from "next"
+
+const nextConfig: NextConfig = {
+  reactCompiler: true,
+}
+
+export default nextConfig
+```
+
+<br />
+
+Large applications can begin with annotation mode:
+
+<br />
+
+```ts
+const nextConfig: NextConfig = {
+  reactCompiler: {
+    compilationMode: "annotation",
+  },
+}
+```
+
+<br />
+
+```tsx
+function ExpensiveList() {
+  "use memo"
+  // Only annotated components and Hooks compile in annotation mode.
+}
+```
+
+<br />
+
+Other rollout choices include Babel directory overrides and runtime gating. React 17 and 18 are supported, but require the matching `target` and `react-compiler-runtime`; React 19 is the default target.
+
+Use current tooling to verify adoption:
+
+1. Enable `eslint-plugin-react-hooks@latest` with its `recommended-latest` preset. Compiler diagnostics identify functions that will be skipped.
+2. Run behavior tests. Compilation must not change what users observe.
+3. Profile important interactions. Automatic memoization is not proof of a useful speedup.
+4. Look for the official **Memo ✨** badge in React DevTools.
+5. Inspect a small sample in the Compiler Playground or build output.
+
+The health-check command shown in the 2025 talk is no longer the recommended path. Current React docs direct codebases to the ESLint integration.
+
+---
+
+## 10. Manual Memoization Is Still an Escape Hatch
+
+Do not mechanically delete every `memo`, `useMemo`, or `useCallback` after enabling the compiler.
+
+- Existing memoization can affect compiler output. Leave it in place unless tests and profiling justify removal.
+- New code should normally rely on compiler inference.
+- `useMemo` and `useCallback` remain useful when identity is part of an integration contract, especially when stabilizing an Effect dependency.
+- A cache shared across component instances belongs outside compiler-generated component caches.
+- Memoization still has memory and comparison costs. Faster is an empirical result, not a syntax choice.
+
+The shortest accurate model:
+
+<br />
+
+```text
+HIR exposes.
+SSA separates.
+Effects constrain.
+Reactivity propagates.
+Scopes group.
+Codegen caches.
+React renders.
+```
+
+<br />
+
+Primary references: Lydia Hallie's [React Compiler Internals](https://www.youtube.com/watch?v=Pw8w2O5Y0no), React's docs on the [compiler introduction](https://react.dev/learn/react-compiler/introduction), [installation](https://react.dev/learn/react-compiler/installation), [incremental adoption](https://react.dev/learn/react-compiler/incremental-adoption), [directives](https://react.dev/reference/react-compiler/directives), [configuration](https://react.dev/reference/react-compiler/configuration), and the [Rules of React](https://react.dev/reference/rules). For Next.js, use the current [`reactCompiler` configuration](https://nextjs.org/docs/app/api-reference/config/next-config-js/reactCompiler).
+
+---
+
+## Recap Q&A
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="compiler-problem">
+    <AccordionTrigger>1. What problem does React Compiler solve?</AccordionTrigger>
+    <AccordionContent>
+
+      - A state update normally re-executes the component and its children. Calculations and JSX can be rebuilt even when their inputs are unchanged.
+      - Manual `memo`, `useMemo`, and `useCallback` add boundaries, but developers must place them and maintain dependency lists.
+      - The compiler infers reusable scopes and dependencies. Its main win is automatic **correct** memoization, not a promise to beat every hand-tuned component.
+      - It changes build output, not React's render/commit semantics.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="compiler-pipeline">
+    <AccordionTrigger>2. What are the major compiler phases?</AccordionTrigger>
+    <AccordionContent>
+
+      - Source lowers to **HIR**, where instructions and control flow are explicit.
+      - **SSA** gives every assignment one internal version.
+      - Type and effect analysis determine what operations do and whether reuse can be safe.
+      - Reactive analysis finds values that may change between renders.
+      - Scope discovery groups work by dependencies; code generation emits cache slots.
+      - These names are implementation details. Application code depends on the Rules of React.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="compiler-effects-reactivity">
+    <AccordionTrigger>3. How are effects different from reactivity?</AccordionTrigger>
+    <AccordionContent>
+
+      - An **effect** describes how an instruction interacts with data: read, store, capture, mutate, or freeze in the talk's simplified model.
+      - **Reactivity** describes whether a value can differ between renders. Props and Hook results are reactive roots, and reactivity flows through dependent operations.
+      - Effects answer whether caching is safe. Reactivity identifies which change invalidates a cache.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="compiler-skips">
+    <AccordionTrigger>4. What happens when the compiler cannot prove an optimization is safe?</AccordionTrigger>
+    <AccordionContent>
+
+      - It can skip that component or Hook and continue compiling the rest of the codebase.
+      - The function still has ordinary React behavior; it simply receives no compiler-generated memoization.
+      - Fix Rules of React violations rather than hiding them. Use `"use no memo"` only as a documented, temporary escape hatch.
+      - Class components and unsupported patterns are not made optimizable by compilation.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="compiler-adoption">
+    <AccordionTrigger>5. How should a codebase adopt React Compiler today?</AccordionTrigger>
+    <AccordionContent>
+
+      - React Compiler is **stable and optional**. Add it as the first Babel transform or enable the framework integration.
+      - Adopt incrementally with annotation mode, directory overrides, or gating when a full rollout is risky.
+      - Use the latest React Hooks ESLint rules, behavior tests, profiling, DevTools' Memo badge, and the Compiler Playground.
+      - Leave existing manual memoization until testing proves it is safe and useful to remove.
+      - React 17/18 need a configured target and `react-compiler-runtime`; React 19 is the default target.
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>
