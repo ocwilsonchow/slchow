@@ -1,0 +1,453 @@
+---
+title: React 与 React Native 里的 GraphQL
+description: Client 选定 fields；Next.js 决定 data 在哪边 fetch；React Native 需要 cache identity、可恢复的 errors，以及面向 mobile 的 transport
+date: 2026-08-23
+category: frontend
+---
+
+GraphQL 不是「REST，只是换成一个 endpoint」。它把一部分 API contract 移到 client：server 定义什么可行；每个 screen 声明自己真正需要什么。
+
+这篇 note 是 [System Design 里的 API Design](/notes/api-design-in-system-design) 的 client 侧companion。Rendering 边界见 [深入理解 React](/notes/understanding-react-in-depth) 与 [深入理解 React Native](/notes/understanding-react-native-in-depth)。Authorization 仍然属于 server：[Next.js 里的 Security](/notes/security-in-next-js) 与 [用 TypeScript 处理 Permissions](/notes/handling-permissions-in-typescript)。
+
+<br />
+
+---
+
+## 1. The contract
+
+GraphQL 是一套 typed API query language 与 runtime。它不是 database、不是 ORM，也不是让 browser 跑任意 SQL 的许可。Schema 描述 types 与 fields 组成的 graph；resolvers 决定这些 fields 如何被生产出来。
+
+<br />
+
+```graphql
+type Product {
+  id: ID!
+  name: String!
+  price: Money!
+  seller: User!
+}
+
+type Money {
+  amount: Int!
+  currency: String!
+}
+
+type Query {
+  product(id: ID!): Product
+}
+```
+
+<br />
+
+Client 命名 response shape。一张 card 要三个 fields。Detail screen 再要 seller。两者用同一份 schema 和同一个 endpoint。
+
+<br />
+
+```graphql
+query ProductCard($id: ID!) {
+  product(id: $id) {
+    id
+    name
+    price {
+      amount
+      currency
+    }
+  }
+}
+```
+
+<br />
+
+- **Schema:** 公开 contract。Tooling 能在部署前校验 operations，并为每个可达 field 做 autocomplete。
+- **Operation:** client 写的一次 named request。它的 selection set 也是 JSON response shape。
+- **Resolver:** 某个 field 的 server code。它可以读 Postgres、调另一个 service、返回 constant，或三者组合。
+- **One endpoint:** 通常是 `/graphql`。这消除 URL 膨胀；它并不消除 HTTP、authentication、rate limits，或 versioning 决策。
+- **No automatic efficiency:** 选更少 JSON fields 能省 network bytes。Server 仍然可能为了生产它们打五十次 database。
+
+REST 暴露 resource-shaped endpoints。GraphQL 暴露一张 graph，让 use case 自己选一条路径走过去。当 web、iOS、Android 与 partner clients 需要不同 shapes 时，这有帮助。当每个 client 都只要同一份小 CRUD response 时，这是 overhead。
+
+<br />
+
+**Failure:** 把 GraphQL 当成 database escape hatch。Resolver 仍然必须校验 input、authorize access、约束 cost，并把 storage 翻译成 public schema。
+
+---
+
+## 2. Operations and fragments
+
+有三种 operation types。**query** 读取，**mutation** 改变 state，**subscription** 保持一条 stream 以接收 pushed results。`query` 与 `mutation` 通常走 HTTP POST；subscriptions 常见于 WebSocket 或 server-sent events，取决于 server。
+
+把会变的值放进 variables。不要用 interpolation 拼接 operation strings。
+
+<br />
+
+```graphql
+mutation RenameProduct($input: RenameProductInput!) {
+  renameProduct(input: $input) {
+    product {
+      id
+      name
+    }
+    userErrors {
+      field
+      message
+    }
+  }
+}
+```
+
+<br />
+
+```json
+{
+  "input": {
+    "id": "product_42",
+    "name": "Mechanical Pencil"
+  }
+}
+```
+
+<br />
+
+Variables 让 document 对 parsing、persisted-operation hashes、logging 与 allowlists 保持稳定。Server 在 resolver 跑之前，会对照 schema 校验 variable types。
+
+Fragment 是可复用的 selection set。更重要的是，它让 component 拥有自己的 data dependency，而不是接收一个没有文档的 mega-object。
+
+<br />
+
+```graphql
+fragment ProductRow_product on Product {
+  id
+  name
+  price {
+    amount
+    currency
+  }
+}
+
+query ProductList {
+  products(first: 20) {
+    nodes {
+      ...ProductRow_product
+    }
+  }
+}
+```
+
+<br />
+
+- **Name every operation.** `query ProductList`，不是匿名 `query`。Logs 与 traces 才能说出哪个 use case 慢。
+- **Colocate fragments with components.** Page 把它们组成 operation；row 拥有它渲染的 fields。
+- **Generate types from operations.** Schema types 描述每个可能的 field。Operation types 描述实际选中的 fields。
+- **Do not share one global fragment.** `EverythingProduct` 会重建 over-fetching，并把无关 screens 绑在一起。
+- **Do not interpolate input.** Variables 把 executable document 与 user-controlled values 分开。
+
+<br />
+
+**Failure:** 把 response 写成完整 schema `Product`。Operation 并没有 fetch 每一个 `Product` field，于是 type 承诺了不可能存在的 data。
+
+---
+
+## 3. Next.js: server first
+
+在 App Router 里，从 Server Component 开始。Public GraphQL endpoint 并不需要 Apollo Client 只为了渲染 HTML。一个小的 typed request helper 把 credentials 留在 server，并只把 serialized data 送过 React Server Component boundary。
+
+<br />
+
+```ts
+type GraphQLResponse<T> = {
+  data?: T
+  errors?: Array<{ message: string; path?: Array<string | number> }>
+}
+
+export async function requestGraphQL<TData, TVariables>(
+  query: string,
+  variables: TVariables
+): Promise<TData> {
+  const response = await fetch(process.env.GRAPHQL_URL!, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${process.env.GRAPHQL_SERVICE_TOKEN}`,
+    },
+    body: JSON.stringify({ query, variables }),
+  })
+
+  if (!response.ok) throw new Error(`GraphQL HTTP ${response.status}`)
+
+  const result = (await response.json()) as GraphQLResponse<TData>
+  if (result.errors?.length || !result.data) {
+    throw new Error(result.errors?.[0]?.message ?? "Missing GraphQL data")
+  }
+  return result.data
+}
+```
+
+<br />
+
+```tsx
+type ProductPageData = {
+  product: { id: string; name: string } | null
+}
+
+export default async function ProductPage({
+  params,
+}: {
+  params: Promise<{ id: string }>
+}) {
+  const { id } = await params
+  const data = await requestGraphQL<ProductPageData, { id: string }>(
+    `query ProductPage($id: ID!) {
+      product(id: $id) { id name }
+    }`,
+    { id }
+  )
+
+  if (!data.product) return <p>Not found</p>
+  return <h1>{data.product.name}</h1>
+}
+```
+
+<br />
+
+这个手工 generic 演示的是 boundary；它不能证明 document 匹配 type。GraphQL Code Generator 应该读取 schema 与 checked-in operations，再发出 operation-specific 的 result 与 variable types。Typed-document-node、generated SDK functions，或 generated Apollo hooks 都能去掉手写 assertion。
+
+Next.js 16 默认不会让每一次 `fetch` 都 durable。启用 Cache Components 后，把共享的 public data 放进 cached function；user-specific data 保持 dynamic，除非 cache key 故意包含 identity。
+
+<br />
+
+```ts
+import { cacheLife, cacheTag } from "next/cache"
+
+async function getPublicProduct(id: string) {
+  "use cache"
+  cacheLife("minutes")
+  cacheTag(`product-${id}`)
+
+  return requestGraphQL<ProductPageData, { id: string }>(productQuery, { id })
+}
+```
+
+<br />
+
+- **Server Component:** 初始 page data、SEO、secrets，以及更少 client JavaScript 的最佳 default。
+- **Client Component:** 当 browser 拥有 live interaction、optimistic writes、polling，或长期存在的 normalized cache 时，再加 client GraphQL library。
+- **Route Handler / BFF:** 当 browser 不该知道 upstream URL 或 token，或 web app 必须组合多个 backends 时有用。
+- **Code generation:** 在 CI 里跑，并在 operation 不再通过 schema 校验时失败。
+- **Cache scope:** 广泛 cache public catalog data；不要把带 authorization 的 response 意外放进 shared cache。
+
+<br />
+
+**Failure:** 因为 page 里有 GraphQL，就把整个 App Router 包进 Apollo。Server-rendered、read-once data 需要的是一次 request，不是自动配一个 browser cache。
+
+---
+
+## 4. Pick one cache owner
+
+Library 决策大体上是 cache 决策。
+
+- **`fetch` 或 `graphql-request`:** 小的 transport layer，适合 Server Components 与简单调用。配 generated types。
+- **TanStack Query:** 基于 key 的 server-state cache。当 GraphQL 只是 transport，且团队已经用 query keys 建模 invalidation 时很好用。
+- **urql:** 更小的 GraphQL-focused client，行为由 exchanges 组成；选择 document caching 或 normalized Graphcache。
+- **Apollo Client:** 电池齐全的 normalized cache、links、optimistic writes、pagination policies、subscriptions，以及广泛 ecosystem。
+- **Relay:** 最强的 fragment colocation 与 compiler discipline；convention cost 最高；适合大型 graph-heavy products。
+
+Normalized cache 按 identity 存 entities，常见是 `Product:42`，而不是每个 request 存一份不透明 response。如果 mutation 返回 `Product { id name }`，每个正在读这个 entity 的 mounted view 都能看到新 name。
+
+TanStack Query 通常把每次 operation 存在类似 `["product", id]` 的 key 下。它不会推断 `["products"]` 里的某个 product 就是 `["product", id]`；两边都要 invalidate 或 update。
+
+在 Next.js 里可能同时有 server cache 和 browser cache：
+
+<br />
+
+```text
+request
+  ├── Next.js server cache ── GraphQL API
+  └── Apollo browser cache ── BFF / GraphQL API
+```
+
+<br />
+
+两个 caches 在拥有不同 lifetimes 时是合法的。当两者都声称同一份 interactive data，而 mutation 之后只 invalidate 其中一个时，就危险。
+
+- **RSC-owned path:** 在 server 上 mutate，invalidate Next.js cache tag，再 refresh route。
+- **Apollo-owned path:** 通过 Apollo mutate，返回变化的 entity IDs 与 fields，然后 update 或 evict normalized cache。
+- **TanStack-owned path:** 成功后 invalidate 精确的 query keys，或把 mutation result 写进去。
+- **Hydration:** 如果 server data 给 client cache 做种子，定义下一次 refresh 归谁，并避免立刻重复 request。
+
+<br />
+
+**Failure:** Server Action 更新了 product 并调用 `updateTag`，Apollo 却继续渲染它过期的 browser entity。被 invalidate 的 cache 不是屏幕上的 cache。
+
+---
+
+## 5. React Native: design for an unreliable network
+
+React Native 没有 Server Components 从受信 server 渲染第一屏。App 通常带着 client cache，从 secure storage 读 token，并直接与 GraphQL API 或 mobile BFF 通信。
+
+Apollo 常见，因为 normalized identity 自然映射到 navigation：list 写入 `Product:42`；detail screen 能立刻渲染同一个 entity，再在后台 refresh。
+
+<br />
+
+```tsx
+import {
+  ApolloClient,
+  ApolloLink,
+  HttpLink,
+  InMemoryCache,
+} from "@apollo/client"
+import { SetContextLink } from "@apollo/client/link/context"
+
+const authLink = new SetContextLink(async (prevContext) => {
+  const token = await readAccessTokenFromSecureStorage()
+
+  return {
+    headers: {
+      ...prevContext.headers,
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+    },
+  }
+})
+
+export const client = new ApolloClient({
+  link: ApolloLink.from([
+    authLink,
+    new HttpLink({ uri: "https://api.example.com/graphql" }),
+  ]),
+  cache: new InMemoryCache(),
+})
+```
+
+<br />
+
+精确的 link API 取决于 Apollo version。Architecture 不会变：token lookup 属于 transport chain，不要在每个 screen 重复。把 refresh-token coordination 放在一处，免得十个 requests 触发十次 refreshes。
+
+Optimistic UI 隐藏 round-trip latency。它是预测，所以必须包含与真实 result 相同的 cache identity，并且必须可逆。
+
+<br />
+
+```tsx
+renameProduct({
+  variables: { input: { id: product.id, name } },
+  optimisticResponse: {
+    renameProduct: {
+      __typename: "RenameProductPayload",
+      product: {
+        __typename: "Product",
+        id: product.id,
+        name,
+      },
+      userErrors: [],
+    },
+  },
+})
+```
+
+<br />
+
+- **Secure tokens:** 用 Keychain/Keystore-backed storage，不要把长期 credentials 放进 AsyncStorage。
+- **Offline:** persistence 本身不是 offline strategy。定义 queued mutations、conflict resolution、retry limits，以及「fresh」是什么意思。
+- **App lifecycle:** 暂停浪费的 polling，并在 app 回到 foreground 时 reconnect subscriptions。
+- **Subscriptions:** 用 `graphql-ws` 或 server 支持的 protocol；按 type 拆 operations，并用 backoff 实现 reconnect。
+- **Persisted operations / APQ:** 注册后发送 hash 而不是完整 document。这能减少重复 bytes，并可以变成 server allowlist。
+- **Uploads:** GraphQL multipart upload 不是 core spec 的一部分。Signed object-storage upload 通常更 portable、更好 observe。
+
+<br />
+
+**Failure:** 一旦 connectivity 回来就重试每一个失败的 mutation。非幂等的 charge 或「create order」可能跑两次；用 idempotency keys 和明确的 queue policy。
+
+---
+
+## 6. Errors are data
+
+GraphQL 把 transport failure 与 execution failure 分开。Server 可以返回 HTTP `200`，同时带 `data` 与 `errors`：例如 `product` 还在，而 `product.reviews` 是 `null`，timeout 出现在 `errors` 里，path 为 `["product", "reviews"]`。
+
+不要把它简化成 `response.ok`。HTTP status 回答 transport 与 request envelope 是否成功。GraphQL body 回答执行了什么。
+
+Nullability 决定 field error 能走多远。如果 `reviews` 可空，它变成 `null`，`product` 存活。如果 `reviews` 是 non-null，error 会冒泡到最近的 nullable parent。一串 `!` 可以把一片不可用的 leaf 变成一整页 null。
+
+Apollo 的 `errorPolicy` 让 UI 决策变明确：
+
+- **`none`:** 拒绝 GraphQL errors，并从正常 result 中省略 partial data。适合 partial data 不安全或没有意义时。
+- **`all`:** 同时暴露 data 与 errors。适合能渲染 product、同时允许 reviews 失败的 resilient screens。
+- **`ignore`:** 暴露 data 并压制 GraphQL errors。少用；observability 仍然需要这个 error。
+
+预期的 domain failures 往往属于 schema 里的 typed payload data：mutation payload 可以返回 `product` 加上 `userErrors { code field message }`。「Name is already taken」可以渲染在 form field 旁边。意外的 resolver crashes 属于 `errors`，internal details 对 clients 掩盖，并保留在 server logs。
+
+- Log operation name、request ID、error path，以及安全的 error code。
+- 永远不要把 stack traces、SQL、tokens 或 internal service names 发给 app。
+- 围绕真实 failure boundaries 设计 nullability，而不是希望每个 dependency 永远可用。
+- 在最小有用边界渲染 errors：reviews 失败了，不一定是整页 product。
+
+<br />
+
+**Failure:** `if (!result.data) showErrorScreen()`。Partial data 可能是有意的 availability model，单个 nullable field 不该抹掉屏幕其余部分。
+
+---
+
+## 7. Identity and pagination
+
+Normalized caching 依赖稳定 identity。Apollo 的默认 convention 是 `__typename` 加 `id`。从 list、search result 与 detail view 查询 `Product:42`；它们变成对同一个 entity 的 references。
+
+Code generation 或 client 可以补上 `__typename`，但 API 仍然需要稳定 key。如果某个 type 用 `sku`，配置 type policy。如果它没有 identity，cache 可能把它当 value data embed 再整份替换。
+
+Mutation 应该返回变化后的 object，带上它的 key，以及更新可见 UI 所需的每一个 field。Creation 与 deletion 通常需要明确的 list policy，因为 cache 无法推断哪些 filtered connections 该增加或失去一个 node。
+
+Offset pagination 简单，但当前 offset 前面插入 rows 时会漂移。Cursor pagination 把下一页锚在某个 item 上，对变化中的 feeds 更稳。
+
+<br />
+
+```graphql
+query ProductFeed($first: Int!, $after: String) {
+  products(first: $first, after: $after) {
+    edges {
+      cursor
+      node {
+        id
+        name
+      }
+    }
+    pageInfo {
+      endCursor
+      hasNextPage
+    }
+  }
+}
+```
+
+<br />
+
+即使不用 Relay，Relay connection shape 也是有用的 convention。`fetchMore` 取得下一个 connection；cache field policy 合并 edges 并按 nodes 去重。Merge function 必须把 filter 与 sort arguments 放进 cache key，否则「red shirts」和「blue shirts」会变成同一份 list。
+
+- 使用 opaque cursors。Clients 应该原样传回，而不是从中解析 database IDs 或 timestamps。
+- 由 server 返回 `pageInfo`。Client 不该用 page length 去猜 `hasNextPage`。
+- 合并时按稳定 node identity 去重。
+- Filters 或 sort order 改变时 reset connection。
+- 把 scroll position 与 network state 分开；pagination data 不是 view state。
+
+<br />
+
+**Failure:** fetch `name` 却没有 `id`，然后指望 mutation 去更新已有那一行。Cache 无法知道哪个匿名 product 变了。
+
+---
+
+## 8. Cost, security, and when to say no
+
+Client 控制一棵 tree-shaped request。这种灵活性会制造普通 endpoint rate limits 描述不了的 server work。
+
+- **N+1:** 每个 product 解析一次 `seller`，可能变成每行一次 database call。用 DataLoader 或等价的 repository layer，按 request batch 并 memoize reads。
+- **Complexity:** 限制 depth、aliases、list multipliers，以及总 estimated cost。浅 query 仍然可以请求一千个 expensive siblings。
+- **Pagination:** 要求 bounded list arguments，并强制 server-side maximums。
+- **Authorization:** 在 resolver/service/data layer 对请求的 object 与 action 做 check。在 React 里藏 field 或 button 不是 authorization。
+- **Rate limits:** 按 identity 与 operation cost 计费，不只按 raw request count。
+- **Timeouts:** 把 cancellation 与 deadlines 传到 downstream calls。
+- **Observability:** 记录 operation names 与 resolver timing。避免 log 可能含 secrets 或 personal data 的 raw variables。
+
+Introspection 对 tooling 有价值。在 production 关掉 public introspection 能减少随便的 schema discovery，但这不是 security boundary：clients 已经带着 operation documents，未授权 field 即使名字已知也必须仍然未授权。Schema registry 加上 persisted-operation allowlist 是更强的 production control。
+
+GraphQL over POST 也会失去 cacheable REST GET URLs 的默认 CDN semantics。Persisted operations over GET、感知 variables 与 identity 的 response cache，或 BFF，都能恢复 caching —— 但 machinery 更多，invalidation 也更小心。
+
+当多个 clients 需要重叠但不同的 data shapes、domain 确实是 graph-shaped、schema tooling 有 leverage、且团队会 operate gateway 时，选择 GraphQL。当 API 很小、use cases 干净映射到 endpoints、HTTP caching 比 selection flexibility 更重要，或只有一个受控 client 时，更适合 REST 或 typed RPC。
+
+<br />
+
+**Failure:** 采用 GraphQL 是为了去掉 endpoint design。Design work 会搬进 schema boundaries、nullability、authorization、cost、cache identity，以及 operation lifecycle。它不会消失。

@@ -1,0 +1,464 @@
+---
+title: Remix vs Next.js
+description: 2026 年 Remix 指什么 —— Next.js 16.3 vs React Router 8 Framework Mode vs Remix 3 —— rendering、data、cache，以及何时选哪个
+date: 2026-08-24
+category: frontend
+---
+
+**Remix** 这个名字不再指向单一产品。2026 年讲 "Remix vs Next.js"，其实是两个问题：Next.js 对上 **React Router Framework Mode**（Remix v2 的 React successor），以及 **Remix 3** 还算不算同一场比较。
+
+这篇 note 对准 **Next.js 16.3.2** App Router 与 **React Router 8.3.0**。Remix v2 已 end of life。Remix 3 是丢掉 React 的 beta。Next.js 的 rendering model 见 [深入理解 Next.js](/notes/understanding-next-js-in-depth)。Cache 词汇见 [System Design 里的 Caching](/notes/caching-in-system-design)。
+
+<br />
+
+---
+
+## Pattern Map
+
+| Name | Status | 是什么 |
+| --- | --- | --- |
+| Remix v2 | End of life | React meta-framework。并入 React Router v7。React Router v8（2026 年 6 月）起不再有 security updates。 |
+| React Router v8 Framework Mode | Production | Loaders、actions、nested routes、SSR / SPA / SSG。Remix v2 的官方 upgrade path。 |
+| Remix 3 | Beta | 全新、**非 React** 的 framework：zero-dependency、bundler-free、model-first，建立在 Web APIs 上。没有从 Remix v2 的 migration。 |
+| Next.js 16.3 | Production | RSC-first 的 React platform。Turbopack、Cache Components、Instant Navigations。 |
+
+<br />
+
+Shopify 的 React Router team 在 [v8 announcement](https://remix.run/blog/react-router-v8) 讲过：Remix v0–v2 是 React Router 的 feature branch。那些 ideas 并回去了。Remix 这个 brand 现在是另一个 full-stack JavaScript project。
+
+**若要比较 React framework，比的是 Next.js 16.3 与 React Router 8 Framework Mode。** Remix 3 是另一个 category。
+
+<br />
+
+---
+
+## 1. Philosophy
+
+**Next.js** 是 batteries-included 的 React platform。它拥有 compiler（Turbopack）、React Server Components 实现、caching、images、fonts、metadata，以及 —— 在 Vercel 上 —— runtime。Programming model 是：默认在 server render、少送 JavaScript、用 `'use cache'` 明确 cache。
+
+**React Router Framework Mode** 是 Vite-based 的 React framework，贴近 web platform。Routes 是 export `loader` / `action` / component 的 modules。Data 是 `Request` / `Response` / `FormData`。Progressive enhancement 是默认：`<Form>` 没有 JavaScript 也能用。你也可以把 React Router 当 library（Declarative 或 Data mode），而不是完整 framework。
+
+**Remix 3** 丢掉 React。UI 是 imperative handles 与 DOM mixins，不是 hooks。目标是一个 cohesive 的 `remix` package：server、router、data、UI、tests。
+
+<br />
+
+| | Next.js | React Router 8 | Remix 3 |
+| --- | --- | --- | --- |
+| Bet | React 的 server/client model 加上真正的 cache | HTTP、nested routes、automatic revalidation | 没有 React 的 web platform |
+| Default UI | Server Components | Client React + SSR | Imperative handles，不是 hooks |
+| Grain | Platform | 可以当 framework 的 router | Zero-dependency full stack |
+
+<br />
+
+**Failure:** 把 Remix 3 当成「我 React app 的下一版 Remix」。没有 upgrade path。Remix v2 的延续是 React Router。
+
+---
+
+## 2. Rendering
+
+### Next.js — RSC + Cache Components + Instant Navigations
+
+App Router 是 RSC-first。Pages 与 layouts 默认是 Server Components，除非加 `'use client'`。那个 boundary 的 React 侧见 [React 19 新功能](/notes/react-19-new-features)。
+
+开 `cacheComponents: true`（下一个 major 的方向）之后，rendering 是 **Partial Prerendering**：
+
+- Static / `'use cache'` UI 变成 **static shell**（HTML + RSC payload），CDN 可以直接 serve。
+- Uncached / request-time work（`cookies()`、`headers()`、live DB）在 `<Suspense>` 后面 stream。
+- Direct visits 与 client navigations 应该要 instant，因为 shell 已经在 client。
+
+16.3 的 **Instant Navigations**（`cacheComponents` + `partialPrefetching`）是把这套产品化：partial prefetch 可重用的 App Shell、DevTools 的 Instant Insights、Playwright 的 `instant()` helper，以及更好的 ISR —— unknown params 立刻拿到 shell，再在背景 upgrade。
+
+<br />
+
+```ts title="next.config.ts"
+import type { NextConfig } from "next"
+
+const nextConfig: NextConfig = {
+  cacheComponents: true,
+  partialPrefetching: true,
+}
+
+export default nextConfig
+```
+
+<br />
+
+不开这些 flags 时，你仍在用较旧、较 implicit 的 fetch-cache / `revalidate` model。Team 在把 apps 推向明确的 `'use cache'`。
+
+### React Router — classic SSR（RSC 仍 experimental）
+
+Default Framework Mode 是 **SSR + nested route modules**。Navigation 时，client 为变更中的 routes fetch loaders；React hydrate document。你也可以：
+
+- SPA mode（没有 SSR）
+- Build time pre-render 选定的 URLs
+- Mix：pre-render `/` 与 `/blog`，其余 SSR
+
+RSC 以 **`unstable_reactRouterRSC`** 存在（Vite plugin + experimental `@vitejs/plugin-rsc`）。你可以 export `ServerComponent`、用 `'use client'` / `'use server'`、从 loaders 回 RSC。SPA mode、pre-rendering、custom build entries 在 preview 里尚未完整。这**不是** production default。
+
+**实际差异：** Next.js 的 RSC 故事成熟，而且是默认。React Router 的是 opt-in，仍 unstable。今天就要 production RSC，选 Next.js 较安全。
+
+<br />
+
+---
+
+## 3. Routing
+
+**Next.js** 是 `app/` 的 file-system routing：
+
+- `app/blog/[slug]/page.tsx` → `/blog/:slug`
+- Nested `layout.tsx` wrap children，sibling navigations 不会 remount
+- Special files：`loading.tsx`、`error.tsx`、`not-found.tsx`、`route.ts`、`proxy.ts`（前身是 `middleware.ts`）
+- Parallel routes、intercepting routes、route groups `(marketing)`
+- 16.x 的 `params` 与 `searchParams` 是 **async**
+- 16.3 的 **root params**（`next/root-params`）让任何 Server Component 读 `[lang]`，不必 prop drilling
+
+**React Router** 用 route config（`routes.ts`）加上 route modules。Nested routes 是 first-class，比 Next 的 App Router 更早：
+
+<br />
+
+```ts title="app/routes.ts"
+import { index, route } from "@react-router/dev/routes"
+
+export default [
+  index("./home.tsx"),
+  route("products/:pid", "./product.tsx"),
+]
+```
+
+<br />
+
+Layouts 是带 `<Outlet />` 的 parent routes。你拿到 type-safe `href()`、从 route module 生成的 `./+types/product`（params 与 loader data），也可以把 file conventions 与 programmatic config 混用。
+
+**Tradeoff：** Next.js routing 比较「丢一个文件就有 URL」，外加 marketing/app patterns（intercepting routes、parallel slots）是 React Router 对不上的。React Router routing 更明确、更弹性（library vs framework），历史上更强的是 **nested data loading** —— parent 与 child loaders 平行跑；child UI 等自己的 loader。
+
+<br />
+
+---
+
+## 4. Data loading
+
+这是日常最大的差异。
+
+### Next.js — 在 component tree 里 fetch
+
+<br />
+
+```tsx
+async function ProductInfo({
+  params,
+}: {
+  params: Promise<{ slug: string }>
+}) {
+  const { slug } = await params
+  const product = await getProduct(slug) // 常搭配 'use cache'
+  return <h1>{product.name}</h1>
+}
+```
+
+<br />
+
+Data 活在 Server Components。用 `<Suspense>`、`React.cache()`、`'use cache'` 加上 `cacheLife` / `cacheTag` 组合。没有 route-level `loader`。若 parent await 了 child 也需要的 data，waterfall 是真的 footgun。
+
+Route Handlers（`app/api/hello/route.ts`）给 HTTP APIs（`GET` / `POST` / …）。它们与 page data 分开。
+
+### React Router — loaders 与 route 放一起
+
+<br />
+
+```tsx title="app/product.tsx"
+import type { Route } from "./+types/product"
+import { fakeDb } from "../db"
+
+export async function loader({ params }: Route.LoaderArgs) {
+  return fakeDb.getProduct(params.pid) // 从 client bundle 剥掉
+}
+
+export default function Product({ loaderData }: Route.ComponentProps) {
+  return <h1>{loaderData.name}</h1>
+}
+```
+
+<br />
+
+- `loader` 在 server 跑（initial load **以及** client navigations）
+- `clientLoader` 在 browser 跑；两者可以并用
+- Nested routes **平行** load；不必等 parent 结束 child 才开始
+- Serialization 对齐 RSC-serializable types（为未来 RSC migration 预留）
+
+**Mental model：** Next.js：「UI 是 data boundary。」React Router：「route 是 data boundary。」React Router 对 form-heavy CRUD 更简单。Next 在你要 per-component streaming、partial cache、同一页 mixed static/dynamic 时更强。
+
+**Failure:** 在 Next.js Server Component 里对独立 data 做 sequential `await`。两个都先 start，再用 `Promise.all`。独立 work 的 sequential `await` 是你自己引入的 waterfall。这是 React/Next 的 contract，不是 React Router 的问题 —— RR sibling routes 的 loaders 本来就 overlap。
+
+<br />
+
+---
+
+## 5. Mutations
+
+### Next.js — Server Actions
+
+<br />
+
+```tsx
+async function updateTitle(formData: FormData) {
+  "use server"
+  await db.update(/* ... */)
+  revalidateTag("posts", "max") // 16.x: two-arg API
+}
+```
+
+<br />
+
+Actions 是你可以传进 Client Components 的 functions。Revalidation 是 **手动**（`revalidateTag`、`revalidatePath`、`updateTag`）。你自己选要 invalidate 什么。弹性大，也容易弄错。
+
+从 client 达得到的 Server Action 是 **externally callable entry point**。Arguments 是 hostile input，即使 TypeScript 说不是。见 [Next.js 里的 Security](/notes/security-in-next-js)。
+
+### React Router — route `action` + automatic revalidation
+
+<br />
+
+```tsx title="app/project.tsx"
+import type { Route } from "./+types/project"
+import { Form } from "react-router"
+import { fakeDb } from "../db"
+
+export async function action({ request }: Route.ActionArgs) {
+  const formData = await request.formData()
+  return fakeDb.updateProject({ title: formData.get("title") })
+}
+
+export default function Project({ actionData }: Route.ComponentProps) {
+  return (
+    <Form method="post">
+      <input type="text" name="title" />
+      <button type="submit">Submit</button>
+    </Form>
+  )
+}
+```
+
+<br />
+
+Action 结束后，**页面上所有 active loaders 再跑一次**。UI 与 data 同步，不必跳 cache-tag 编舞。`useFetcher` 可以 mutate 而不 navigation。`clientAction` 在 browser 跑。
+
+这仍是 Remix 的杀手锏。Admin UIs、settings、CRUD —— 任何「POST 然后显示新鲜 data」—— React Router 仪式较少。Next.js Server Actions 比较适合 mutation 是挂在 component 上的 function、而不是 route，以及你要 RSC 式的 progressive rendering 包住结果。
+
+<br />
+
+---
+
+## 6. Caching
+
+**Next.js 16.3** 拥有 React 生态里最有野心的 cache：
+
+| Primitive | Role |
+| --- | --- |
+| `'use cache'` | Cache function 或 component；args 成为 cache key |
+| `cacheLife('hours')` | Freshness profile（`stale` / `revalidate` / `expire`） |
+| `cacheTag` + `revalidateTag(tag, profile)` | On-demand invalidation |
+| `'use cache: private'` | 依 cookie/header；活在 browser prefetch |
+| `'use cache: remote'` | Durable shared store（serverless 需要；默认是 in-memory） |
+| Partial Prefetching | App Shells 的 client cache |
+| ISR + Cache Components | Unknown params：instant shell，然后 background fill |
+
+<br />
+
+旧的 implicit `fetch` cache 造成多年困惑。新 model 是 **默认 dynamic，你说 cache 才 cache**。代价：你必须学会 directives，并把 async work 放到 Suspense 后面。
+
+**React Router** 没有这种 first-party data cache。工具是 loader responses 上的 HTTP `Cache-Control`、CDN caching、以及你自己的 store。Pre-rendering 在 build time cache HTML/data。Mutation 之后的 revalidation 是「再跑 loaders」，不是「invalidate tag X」。
+
+若产品是 content site、marketing 加 docs、或仍想要 CDN-fast shells 的 personalized app，Next.js 的 cache 是很大的优势。若产品大多是 per-request authenticated data，React Router「不要 cache，只 revalidate loaders」更简单，也比较难射自己的脚。
+
+**Failure:** 把 `cookies()` 放在 Next.js layout 顶层，然后怪整条 route 变 dynamic。把 runtime read 推到 `<Suspense>` 后面（或 `'use cache: private'`），shell 才能 prerender。React Router 没有这个 footgun，因为它不会假装页面是 static，除非你 pre-render 它。
+
+<br />
+
+---
+
+## 7. Forms、progressive enhancement、要不要 JavaScript？
+
+**React Router：** 真正的 `<form method="post">`（经 `<Form>`）即使 JavaScript 没载入也会 post 到 action。Pending UI（`useNavigation`、`useFetcher.state`）是 additive。这是 Remix 最初的 thesis，现在仍然成立。
+
+**Next.js：** Server Actions 理论上没有 JavaScript 也能用（POST 到特殊 endpoint），但默认 DX 假设 hydrated client：`'use client'` forms、`useFormStatus`、`useOptimistic`。Progressive enhancement 做得到，但不是木头的纹理。
+
+公开、对 resilience 敏感的表面 —— 烂网络上的 e-commerce checkout、政府表单、content sites —— React Router 仍赢。Next.js 16.3 experimental 的 `useOffline`（让 navigations/actions pending 再 retry）从 SPA-resilience 侧处理类似问题，不是「zero JS」那一侧。
+
+<br />
+
+---
+
+## 8. Bundler、compiler、DX
+
+| | Next.js 16.3 | React Router 8 |
+| --- | --- | --- |
+| Bundler | **Turbopack default** | **Vite 7+** |
+| Dev memory | 相对早期 16.x 最多少 90% RAM（disk cache + eviction） | Vite 一贯的低 overhead HMR |
+| Builds | Filesystem cache；有人报 ~5.5× 的 repeat CI builds | Vite；普遍快，较少「framework cache」 |
+| Typecheck | `next build` 可用 **TypeScript 7**（native） | `react-router typegen` + `tsc` |
+| React Compiler | Turbopack 里 experimental 的 **Rust** compiler | 你在 Vite 接什么就是什么 |
+| SSR throughput | Native Node streams；最多约 22% 更多 req/s | 经 adapters 的标准 SSR |
+| Type safety | `PageProps<'/store/[slug]'>`、typed `href` | 从 route module 生成的 `./+types/*` |
+| AI tooling | `node_modules` 里的 versioned docs、`AGENTS.md` | v8 附带的 agent skills |
+
+<br />
+
+Turbopack 不再是「未来」；它是 default。Vite 仍是更 portable、plugin-rich、「这就是一个 Vite app」的体验。React Router Framework Mode 是 Vite plugin。Next.js 是自己的 compiler pipeline。React Compiler 内部见 [深入理解 React Compiler Internals](/notes/react-compiler-internals)。
+
+v8 baselines：**Node 22.22+**、**React 19.2.7+**、**Vite 7+**、ESM-only。`react-router-dom` 没了；DOM APIs 从 `react-router/dom` 来。Middleware **默认开启**。Next.js 16 把 `middleware.ts` 改名成 **`proxy.ts`**。
+
+<br />
+
+---
+
+## 9. Deployment 与 batteries
+
+**Next.js** 任何能 `next start` 的 Node 都能跑。Image optimization 需要 `sharp`。Self-hosting 行得通；ISR、Cache Components、多 instance cache consistency 需要额外基础设施（shared cache handler、CDN）。
+
+- **在 Vercel 上最好：** Fluid Compute、ISR、image/font optimization、Cron、preview deploys。
+- **在别处比以前好：** Build Adapters API 在 16.2 稳定；有官方 Netlify/Cloudflare 路径。Cloudflare 仍不如 React Router 长年的 Workers adapter 那么 native。
+
+**React Router** 天生 runtime-agnostic：Node、Bun、Deno、Cloudflare Workers、Netlify、Vercel、Fly、你的 Express server。Loaders 讲 `Request` / `Response`。Portability 仍是它赢，尤其 Workers / edge。
+
+Next.js 出货更多产品面：`next/image`、`next/font`、metadata / Open Graph、`next/link` prefetch、Route Handlers、`after()`、`connection()`、draft mode。React Router 出货 web primitives —— sessions 与 cookies（`createCookieSessionStorage`）很好 —— 其余你自己选。
+
+Ecosystem 引力仍偏向 Next.js：更多职缺、更多 templates、更多 integrations。React Router 的 hiring pool 较小，但 Remix v2 → RR 的 upgrade path 是 Shopify 用 codemods 写过的那条。
+
+**Failure:** 把 Remix v2 app migrate 到 Next.js「为了保住 Remix」。Data layer（loaders vs Server Components）是 rewrite。React Router 8 才是延续。
+
+<br />
+
+---
+
+## 10. Remix 3
+
+Remix 3 在 React 意义上 **不是** Next.js 的替代。它：
+
+- 不用 React
+- 避开 hooks；用 `Handle`、`handle.update()`、DOM mixins
+- 想要 zero dependencies、没有 bundler
+- 为人 **以及** LLMs 设计（skills 在盒里、一个 package）
+- 是 beta；APIs 每周在动
+- **没有** 从 Remix v2 的 upgrade path
+
+把它当 greenfield experiment，放在新的 web-standard stacks 那一桶，而不是「我 React app 的下一版 Remix」。Scaffold 用 `npx remix@next new`。
+
+<br />
+
+---
+
+## 11. Side by side
+
+| Dimension | Next.js 16.3 | React Router 8 Framework |
+| --- | --- | --- |
+| Identity | Full React platform | Multi-strategy router + Vite framework |
+| Default UI model | RSC + Client Components | Client React + SSR（RSC experimental） |
+| Data | 在 Server Components 里 fetch | `loader` / `clientLoader` |
+| Mutations | Server Actions；手动 revalidate | `action`；自动 revalidate 所有 loaders |
+| Cache | `'use cache'`、PPR、ISR、prefetch | HTTP / CDN / prerender |
+| Forms without JS | 做得到，不是默认 | 默认 |
+| Nested parallel data | 你自己结构 | Built in |
+| File routing | 有，convention-heavy | Config + modules（optional FS） |
+| Bundler | Turbopack | Vite 7 |
+| Images / fonts / OG | Built in | BYO |
+| Hosting | Vercel 最好；别处有 adapters | 任何 JS runtime |
+| RSC in production | 是，默认 | Unstable preview |
+| SPA option | 做得到；不是纹理 | First-class mode |
+| Legacy | Pages Router 仍在 | Remix v2 / RR v6 EOL |
+| Complexity | 碰到 cache / RSC 就高 | 较低，直到你需要 RSC / cache |
+
+<br />
+
+---
+
+## 12. How to choose
+
+**选 Next.js 16.3，若你：**
+
+- 要 RSC、streaming、mixed static/dynamic pages 当默认
+- 在意 CDN-fast shells、ISR、Instant Navigations
+- 要 images、fonts、metadata、以及巨大的 ecosystem
+- 部署到 Vercel（或能接受带 cache handler 的 self-host Node）
+- 在做 content + app hybrids、AI UIs、带 personalization 的 marketing sites
+
+**选 React Router 8 Framework Mode，若你：**
+
+- 2023–2024 会选 Remix
+- 要 loaders/actions、nested routes、「POST 然后全部刷新」
+- 需要 Cloudflare Workers、Bun、或自定义 Node server，不想跟 adapters 打架
+- 要 progressive enhancement 与较小的 conceptual surface
+- 偏好 Vite，或可能先 SPA 再加 SSR
+- 正在 migrate 现有 Remix v2 app（这是官方路径）
+
+**留在 Remix v2：** 不要。它是 EOL。升到 React Router 7/8。
+
+**只在这种情况选 Remix 3：** 你在开一个非 React 的 experiment，并且接受 beta churn。
+
+它们不再是两个对等的「data API 不同的 React meta-frameworks」。Next.js 加码 React 的 server architecture 与真正的 cache/prefetch runtime。Remix 的 React 故事变成 React Router，加码 HTTP、nested routes、以及自己 revalidate 的 mutations。Remix 这个 brand 现在是非 React 的赌注。
+
+最新细节见 [Next.js 16.3](https://nextjs.org/blog/next-16-3)、[Cache Components](https://nextjs.org/docs/app/getting-started/caching)、[React Router modes](https://reactrouter.com/start/modes)、[data loading](https://reactrouter.com/start/framework/data-loading)、[actions](https://reactrouter.com/start/framework/actions)、[upgrading from Remix](https://reactrouter.com/upgrading/remix)，以及 [Remix 3](https://remix.run/)。
+
+---
+
+## Recap Q&A
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="remix-name">
+    <AccordionTrigger>1. 2026 年「Remix」指什么？</AccordionTrigger>
+    <AccordionContent>
+
+      - **Remix v2** 是 EOL。它的 React meta-framework features 并入 React Router v7 Framework Mode，现在是 v8。
+      - **React Router 8 Framework Mode** 是 production 延续：loaders、actions、nested routes、SSR / SPA / SSG。
+      - **Remix 3** 是丢掉 React 的 beta。Zero-dependency、bundler-free、model-first。没有从 v2 的 migration。
+      - React 比较是 Next.js 16.3 vs React Router 8。Remix 3 是另一个 category。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="remix-data">
+    <AccordionTrigger>2. Data boundary 在哪？</AccordionTrigger>
+    <AccordionContent>
+
+      - Next.js：**UI** 是 data boundary。在 Server Components 里 fetch。用 Suspense、`'use cache'`、`cacheLife` / `cacheTag` 组合。没有 route-level `loader`。
+      - React Router：**route** 是 data boundary。`loader` 在 server 跑，涵盖 initial load 与 client navigations。Nested routes 平行 load。
+      - Next 的 model 对同一页 mixed static/dynamic 更强。React Router 对 form-heavy CRUD 更简单。
+      - **Failure:** 在 Next.js Server Component 里对独立 data 做 sequential `await`。那是你自己引入的 waterfall。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="remix-mutate">
+    <AccordionTrigger>3. Mutations 如何与 UI 保持同步？</AccordionTrigger>
+    <AccordionContent>
+
+      - Next.js Server Actions 是传进 Client Components 的 functions。Revalidation 是 **手动**：`revalidateTag`、`revalidatePath`、`updateTag`。
+      - React Router `action` 结束后，**页面上所有 active loaders 再跑一次**。没有 cache-tag 编舞。
+      - `useFetcher` 可以 mutate 而不 navigation。`<Form method="post">` 没有 JavaScript 也能用。
+      - 从 client 达得到的 Server Action 是 externally callable entry point。在 action 里 authorize。见 [Next.js 里的 Security](/notes/security-in-next-js)。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="remix-cache">
+    <AccordionTrigger>4. Cache 谁负责，Instant Navigations 是什么？</AccordionTrigger>
+    <AccordionContent>
+
+      - Next.js 16.3：`'use cache'`、`cacheLife`、`cacheTag`、private/remote variants、Partial Prefetching、带 Cache Components 的 ISR。默认 dynamic；你说 cache 才 cache。
+      - Instant Navigations（`cacheComponents` + `partialPrefetching`）prefetch 可重用的 App Shell，让 client navigations 像 SPA，同时保住 Server Components。
+      - React Router：HTTP `Cache-Control`、CDN、prerender。Mutation 之后再跑 loaders。没有像 `'use cache'` 的 first-party data cache。
+      - RSC 在 Next.js 是默认。在 React Router 是 `unstable_reactRouterRSC` —— preview，不是 production default。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="remix-choose">
+    <AccordionTrigger>5. 怎么选？</AccordionTrigger>
+    <AccordionContent>
+
+      - **Next.js 16.3** 给 RSC、CDN-fast shells、ISR、Instant Navigations、images/fonts/metadata、Vercel、content + app hybrids。
+      - **React Router 8 Framework Mode** 给 loaders/actions、progressive enhancement、Cloudflare Workers / Bun / 自定义 Node、Vite，或 Remix v2 migration。
+      - 不要留在 Remix v2。不要把 Remix v2 migrate 到 Next.js「为了保住 Remix」—— 那是 data-layer rewrite。React Router 8 才是延续。
+      - Remix 3 只给能吸收 beta churn 的非 React greenfield experiment。
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>

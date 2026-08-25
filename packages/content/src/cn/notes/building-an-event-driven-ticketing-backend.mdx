@@ -1,0 +1,1767 @@
+---
+title: 打造 Event-Driven 票务 Backend
+description: 用 Hono 与 AWS 完成 hold、authorize、confirm、capture 与 issue——不超卖座位，也不在 Postgres 与 Kafka 之间丢掉订单
+date: 2026-08-24
+category: backend
+---
+
+买票不是一次 request。它是一台跨 inventory、支付商与出票的 state machine，而 clients、workers、brokers 与 regions 会各自 fail。
+
+这套 stack 是跑在 **ECS Fargate** 上的 **Hono**、**Drizzle** 配 **Aurora PostgreSQL**、**Amazon MSK** 上的 **Kafka**、**Stripe PaymentIntents**，以及 **Terraform**。目标是 100,000 并发买家与每秒 10,000 次 onsale 尝试，但不承诺网络给不了的 exactly once。
+
+Typed HTTP 基础见 [用 Hono、Drizzle、Zod OpenAPI 与 SST 打造 Backend APIs](/notes/_backend-apis-hono-sst)。可靠性 pattern 见 [System Design 里的 Message Queues](/notes/message-queues-in-system-design)。Partitioning、offsets 与 replay 见 [System Design 里的 Kafka](/notes/kafka-in-system-design)。Schema 从 [System Design 里的 Data Modeling](/notes/data-modeling-in-system-design) 开始。Hold versus event catalog 见 [System Design 里的 CAP Theorem](/notes/cap-theorem-in-system-design)。这篇 note 讲的是购票路径。
+
+<br />
+
+---
+
+## Pattern Map
+
+| Stage | 同步真相 | Event-driven 续写 |
+| --- | --- | --- |
+| Admit | 签名 admission token | Waiting room 按可测速率放行买家 |
+| Hold | Postgres transaction 拥有座位 | `HoldCreated` 让支付去准备 |
+| Authorize | Stripe 预留资金 | Webhook 发出 `PaymentAuthorized` |
+| Confirm | Postgres 冻结 hold | `CaptureRequested` 让 Stripe 收款 |
+| Issue | Unique ticket rows 证明所有权 | Notifications 与 analytics fan out |
+| Compensate | 释放座位或记录 refund | Cancellation/refund events 收尾 saga |
+
+<br />
+
+Kafka 不是座位锁。Redis 也不是座位锁。**Aurora PostgreSQL 才是权威 inventory 边界。** Kafka 在各 stage 之间搬运 durable facts。Redis 保护这条边界不被 onsale 踩踏。
+
+<br />
+
+---
+
+## 1. 先写 invariants，再写 services
+
+只有这些在 retries 与 failures 期间仍成立，architecture 才算对：
+
+1. 一个座位最多一个 active hold。
+2. 一个 confirmed 座位最多一张 ticket。
+3. 没有 live hold 与 authorized payment，order 不得 confirm。
+4. 同一 user 与 idempotency key 的 HTTP retry 返回原来的 order。
+5. Kafka 或 Stripe event 可以到两次，但不能产生第二次 effect。
+6. 已 commit 的 business write 最终一定 published，即使 commit 时 Kafka 挂了。
+7. 迟到的 authorization 或 capture 必须 compensate；不能悄悄挂到已过期的 order 上。
+
+<br />
+
+```text
+availability may be stale
+ownership may not
+
+cached green seat → invitation to attempt a hold
+committed hold     → temporary ownership
+issued ticket      → final ownership
+```
+
+<br />
+
+Client 看到的是 workflow，不是 distributed transaction：
+
+<br />
+
+```text
+waiting → held → payment_required → authorized → confirming
+        → paid → ticketed
+
+failure branches:
+held → expired
+payment_required → failed
+authorized → canceled
+paid but unrecoverable → refunding → refunded
+```
+
+<br />
+
+**Failure:** 把 cached map 上的绿座当成承诺。那只是 hint。只有 hold transaction 能说 yes。
+
+<br />
+
+---
+
+## 2. AWS architecture
+
+Primary Region 跨三个 Availability Zones。Public traffic 止于 CloudFront、WAF 与 Application Load Balancer。API 与 worker tasks 跑在 private subnets。Aurora、MSK 与 ElastiCache 没有 public endpoints。
+
+<br />
+
+```text
+Buyer
+  → Route 53
+  → CloudFront + WAF
+  → ALB
+  → Hono API tasks ──────────────┐
+          │                      │
+          ├→ ElastiCache         │ admission / cached reads only
+          └→ RDS Proxy → Aurora  │ authoritative writes
+                              │
+                              └→ outbox
+                                   ↓
+                              Outbox relay
+                                   ↓
+                           MSK, three AZs
+                     ┌─────────────┼──────────────┐
+                     ↓             ↓              ↓
+                Saga worker   Payment worker  Ticket worker
+                                   ↕
+                                 Stripe
+                                   ↓ webhook
+                                Hono API
+```
+
+<br />
+
+拆开的 ECS services 有各自的 scaling 与 failure domains：
+
+- **API service:** admission verification、hold creation、status，以及 Stripe webhook ingress。
+- **Outbox relay:** claim 未 published 的 rows，再写入 Kafka。
+- **Saga orchestrator:** 套用合法的 order-state transitions，并发出下一道 command。
+- **Payment worker:** create、capture、cancel 与 refund PaymentIntents。
+- **Expiry worker:** 按有界 batches 释放超时 holds。
+- **Ticket worker:** capture 之后签发 unique ticket。
+
+每个关键 service 至少两台 tasks，铺开三个 AZs。ALB health check 摘掉不健康的 API tasks。Worker 挂掉时，Kafka consumer groups 搬走 partitions。RDS Proxy 吸收 task scaling 与 database failover 时的 connection churn。
+
+Holds、saga transitions 与 read-after-write status 走 Aurora writer endpoint。Catalog 与 reporting 这类能容忍 replica lag 的查询走 readers。[System Design 里的 Caching](/notes/caching-in-system-design) 讲 read path；卖票路径绕开 stale cache。
+
+<br />
+
+**Failure:** 三个 API tasks 都叫 "highly available"，但每个 task、broker 与 database instance 都坐在同一个 AZ——或者让 reader endpoint 决定刚 hold 的座位是否还在。
+
+<br />
+
+---
+
+## 3. Waiting room 保护 invariant
+
+Autoscaling API 不会无限 autoscaling 一台 Aurora writer。大型 onsale 时，**virtual waiting room** 把每秒 10,000 次 hold attempts 塑成 purchase cell 已证明能撑住的速率。
+
+<br />
+
+```text
+10,000 attempts/s
+  → WAF bot and per-IP controls
+  → waiting room
+  → release R admitted buyers/s
+  → signed, short-lived admission token
+  → hold endpoint
+```
+
+<br />
+
+Release controller 读：
+
+- Aurora commit latency、lock waits、connection saturation 与 deadlocks。
+- Outbox age 与 Kafka producer errors。
+- Purchase topics 的 consumer lag。
+- Active holds 与 expiry-worker delay。
+
+它在 database 倒下之前先降低 `R`。Redis 存 queue position、rate buckets 与 token revocation。它**不**存权威座位所有权。
+
+<br />
+
+```ts title="src/admission/claims.ts"
+export type AdmissionClaims = {
+  jti: string
+  userId: string
+  eventId: string
+  purchaseCell: string
+  issuedAt: number
+  expiresAt: number
+}
+
+export async function requireAdmission(
+  token: string,
+  expected: { userId: string; eventId: string },
+) {
+  const claims = await verifySignedToken<AdmissionClaims>(token)
+
+  if (
+    claims.userId !== expected.userId ||
+    claims.eventId !== expected.eventId ||
+    claims.expiresAt <= Date.now()
+  ) {
+    throw new HTTPException(403, { message: "Invalid admission token" })
+  }
+
+  return claims
+}
+```
+
+<br />
+
+Token 绑定 user、event、purchase cell 与 expiry。它证明买家已被 admit，不证明座位还在。Retries 复用 token 与 HTTP idempotency key。
+
+<br />
+
+**Failure:** 把 admission token 当 exactly-once consume。Response 丢了，retry 会在找回已创建 order 之前被拒。Admission 有时限；purchase creation 必须 idempotent。
+
+<br />
+
+---
+
+## 4. PostgreSQL 是 inventory ledger
+
+座位身份与临时所有权分开建模。Active `hold_seat` row 暂时拥有座位。`ticket` row 才是最终所有权。
+
+<br />
+
+```ts title="src/db/schema/ticketing.ts"
+import { sql } from "drizzle-orm"
+import {
+  index,
+  integer,
+  jsonb,
+  pgEnum,
+  pgTable,
+  primaryKey,
+  text,
+  timestamp,
+  uniqueIndex,
+  uuid,
+} from "drizzle-orm/pg-core"
+
+export const holdStatus = pgEnum("hold_status", [
+  "active",
+  "authorized",
+  "confirmed",
+  "expired",
+  "released",
+])
+
+export const orderStatus = pgEnum("order_status", [
+  "pending_payment",
+  "authorized",
+  "capture_pending",
+  "paid",
+  "ticketed",
+  "failed",
+  "refunding",
+  "refunded",
+])
+
+export const events = pgTable("events", {
+  id: uuid("id").primaryKey(),
+  name: text("name").notNull(),
+  startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
+  purchaseCell: text("purchase_cell").notNull(),
+})
+
+export const seats = pgTable(
+  "seats",
+  {
+    id: uuid("id").primaryKey(),
+    eventId: uuid("event_id")
+      .notNull()
+      .references(() => events.id),
+    label: text("label").notNull(),
+    priceMinor: integer("price_minor").notNull(),
+    currency: text("currency").notNull(),
+  },
+  (t) => [
+    uniqueIndex("seat_event_label_uq").on(t.eventId, t.label),
+    index("seat_event_idx").on(t.eventId),
+  ],
+)
+
+export const orders = pgTable(
+  "orders",
+  {
+    id: uuid("id").primaryKey(),
+    userId: uuid("user_id").notNull(),
+    eventId: uuid("event_id").notNull(),
+    status: orderStatus("status").notNull(),
+    amountMinor: integer("amount_minor").notNull(),
+    currency: text("currency").notNull(),
+    version: integer("version").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [index("order_user_idx").on(t.userId, t.createdAt)],
+)
+
+export const holds = pgTable(
+  "holds",
+  {
+    id: uuid("id").primaryKey(),
+    orderId: uuid("order_id")
+      .notNull()
+      .unique()
+      .references(() => orders.id),
+    status: holdStatus("status").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [index("hold_expiry_idx").on(t.status, t.expiresAt)],
+)
+
+export const holdSeats = pgTable(
+  "hold_seats",
+  {
+    holdId: uuid("hold_id")
+      .notNull()
+      .references(() => holds.id),
+    seatId: uuid("seat_id")
+      .notNull()
+      .references(() => seats.id),
+    releasedAt: timestamp("released_at", { withTimezone: true }),
+  },
+  (t) => [
+    primaryKey({ columns: [t.holdId, t.seatId] }),
+    index("hold_seat_lookup_idx").on(t.seatId),
+  ],
+)
+
+export const payments = pgTable("payments", {
+  orderId: uuid("order_id")
+    .primaryKey()
+    .references(() => orders.id),
+  stripePaymentIntentId: text("stripe_payment_intent_id").unique(),
+  clientSecret: text("client_secret"),
+  status: text("status").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+})
+
+export const tickets = pgTable(
+  "tickets",
+  {
+    id: uuid("id").primaryKey(),
+    orderId: uuid("order_id").notNull(),
+    seatId: uuid("seat_id").notNull(),
+    issuedAt: timestamp("issued_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("ticket_seat_uq").on(t.seatId),
+    uniqueIndex("ticket_order_seat_uq").on(t.orderId, t.seatId),
+  ],
+)
+
+export const idempotencyKeys = pgTable(
+  "idempotency_keys",
+  {
+    userId: uuid("user_id").notNull(),
+    key: text("key").notNull(),
+    requestHash: text("request_hash").notNull(),
+    resourceId: uuid("resource_id"),
+    response: jsonb("response"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.key] })],
+)
+
+export const outbox = pgTable(
+  "outbox",
+  {
+    id: uuid("id").primaryKey(),
+    topic: text("topic").notNull(),
+    messageKey: text("message_key").notNull(),
+    eventType: text("event_type").notNull(),
+    payload: jsonb("payload").notNull(),
+    claimedBy: text("claimed_by"),
+    claimExpiresAt: timestamp("claim_expires_at", { withTimezone: true }),
+    publishedAt: timestamp("published_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [index("outbox_pending_idx").on(t.publishedAt, t.createdAt)],
+)
+
+export const inbox = pgTable(
+  "inbox",
+  {
+    consumer: text("consumer").notNull(),
+    eventId: uuid("event_id").notNull(),
+    processedAt: timestamp("processed_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.consumer, t.eventId] })],
+)
+
+export const stripeEvents = pgTable("stripe_events", {
+  id: text("id").primaryKey(),
+  type: text("type").notNull(),
+  receivedAt: timestamp("received_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+})
+```
+
+<br />
+
+最重要的 constraint 写成 migration 更清楚：
+
+<br />
+
+```sql title="drizzle/0042_active_hold_per_seat.sql"
+CREATE UNIQUE INDEX hold_seat_active_uq
+ON hold_seats (seat_id)
+WHERE released_at IS NULL;
+```
+
+<br />
+
+两个 application processes 可能都以为座位还在。PostgreSQL 只让一个 commit 未释放的 ownership row。Database constraint 是最后一道守卫，不是 preflight query。
+
+加密 Aurora、snapshots 与 connections。把 `client_secret` 当敏感数据：只回给 owner、永不进 logs、支付后短 retention。另一种做法是需要时再向 Stripe 取，而不是 persist。
+
+<br />
+
+**Failure:** 只存 `seats.status = "held"`，没有 owner、expiry 或 unique ownership record。Recovery 无法解释谁拥有座位，也无法安全释放。
+
+<br />
+
+---
+
+## 5. 在一个 transaction 里 hold 全部请求座位
+
+Hold route 做 authenticate、校验签名 admission token、要求 `Idempotency-Key`，然后调用一个 transaction。Seat IDs 在 lock 前排序，让两笔多座位 orders 按同一顺序拿锁。
+
+<br />
+
+```ts title="src/services/reserve-seats.ts"
+import { and, eq, inArray, isNull, lt } from "drizzle-orm"
+
+type ReserveInput = {
+  userId: string
+  eventId: string
+  seatIds: string[]
+  idempotencyKey: string
+  requestHash: string
+  correlationId: string
+}
+
+export async function reserveSeats(input: ReserveInput) {
+  const seatIds = [...new Set(input.seatIds)].sort()
+  const now = new Date()
+  const expiresAt = new Date(now.getTime() + 5 * 60_000)
+
+  return db.transaction(
+    async (tx) => {
+      const [existing] = await tx
+        .select()
+        .from(idempotencyKeys)
+        .where(
+          and(
+            eq(idempotencyKeys.userId, input.userId),
+            eq(idempotencyKeys.key, input.idempotencyKey),
+          ),
+        )
+        .limit(1)
+
+      if (existing) {
+        if (existing.requestHash !== input.requestHash) {
+          throw new IdempotencyConflict()
+        }
+        return existing.response as HoldResponse
+      }
+
+      const claimed = await tx
+        .insert(idempotencyKeys)
+        .values({
+          userId: input.userId,
+          key: input.idempotencyKey,
+          requestHash: input.requestHash,
+          expiresAt: new Date(now.getTime() + 24 * 60 * 60_000),
+        })
+        .onConflictDoNothing()
+        .returning()
+
+      if (claimed.length === 0) {
+        throw new RetryTransaction()
+      }
+
+      const lockedSeats = await tx
+        .select()
+        .from(seats)
+        .where(
+          and(eq(seats.eventId, input.eventId), inArray(seats.id, seatIds)),
+        )
+        .orderBy(seats.id)
+        .for("update")
+
+      if (lockedSeats.length !== seatIds.length) throw new SeatUnavailable()
+
+      // Reclaim only expired holds while the seat rows are locked.
+      await tx
+        .update(holdSeats)
+        .set({ releasedAt: now })
+        .where(
+          and(
+            inArray(holdSeats.seatId, seatIds),
+            isNull(holdSeats.releasedAt),
+            inArray(
+              holdSeats.holdId,
+              tx
+                .select({ id: holds.id })
+                .from(holds)
+                .where(lt(holds.expiresAt, now)),
+            ),
+          ),
+        )
+
+      const active = await tx
+        .select({ seatId: holdSeats.seatId })
+        .from(holdSeats)
+        .where(
+          and(
+            inArray(holdSeats.seatId, seatIds),
+            isNull(holdSeats.releasedAt),
+          ),
+        )
+
+      const sold = await tx
+        .select({ seatId: tickets.seatId })
+        .from(tickets)
+        .where(inArray(tickets.seatId, seatIds))
+
+      if (active.length > 0 || sold.length > 0) throw new SeatUnavailable()
+
+      const orderId = crypto.randomUUID()
+      const holdId = crypto.randomUUID()
+      const amountMinor = lockedSeats.reduce((sum, s) => sum + s.priceMinor, 0)
+
+      await tx.insert(orders).values({
+        id: orderId,
+        userId: input.userId,
+        eventId: input.eventId,
+        status: "pending_payment",
+        amountMinor,
+        currency: lockedSeats[0].currency,
+      })
+
+      await tx.insert(holds).values({
+        id: holdId,
+        orderId,
+        status: "active",
+        expiresAt,
+      })
+
+      await tx.insert(holdSeats).values(
+        seatIds.map((seatId) => ({ holdId, seatId })),
+      )
+
+      const event = makeEvent("HoldCreated", orderId, input.correlationId, {
+        orderId,
+        holdId,
+        eventId: input.eventId,
+        seatIds,
+        expiresAt: expiresAt.toISOString(),
+        amountMinor,
+        currency: lockedSeats[0].currency,
+      })
+
+      await tx.insert(outbox).values(toOutbox(event))
+
+      const response = {
+        orderId,
+        holdId,
+        status: "pending_payment",
+        expiresAt: expiresAt.toISOString(),
+      }
+
+      await tx
+        .update(idempotencyKeys)
+        .set({ resourceId: orderId, response })
+        .where(
+          and(
+            eq(idempotencyKeys.userId, input.userId),
+            eq(idempotencyKeys.key, input.idempotencyKey),
+          ),
+        )
+
+      return response
+    },
+    { isolationLevel: "read committed", accessMode: "read write" },
+  )
+}
+```
+
+<br />
+
+Unique partial index 仍会抓住失误或意外 lock path。Serialization/deadlock failures 用 bounded jitter 重试**整个 transaction**，并沿用同一把 idempotency key。
+
+Transaction 内不打 Kafka 或 Stripe call。
+
+<br />
+
+```ts title="src/routes/holds.ts"
+const HoldBody = z.object({
+  seatIds: z.array(z.string().uuid()).min(1).max(8),
+})
+
+app.post("/events/:eventId/holds", requireUser, async (c) => {
+  const user = c.get("user")
+  const eventId = c.req.param("eventId")
+  const idempotencyKey = c.req.header("idempotency-key")
+  const admissionToken = c.req.header("x-admission-token")
+
+  if (!idempotencyKey || !admissionToken) {
+    return c.json({ error: "Missing idempotency or admission token" }, 400)
+  }
+
+  await requireAdmission(admissionToken, { userId: user.id, eventId })
+
+  const body = HoldBody.parse(await c.req.json())
+  const result = await reserveSeats({
+    userId: user.id,
+    eventId,
+    seatIds: body.seatIds,
+    idempotencyKey,
+    requestHash: sha256(JSON.stringify(body)),
+    correlationId: c.get("requestId"),
+  })
+
+  return c.json(result, 202, {
+    Location: `/orders/${result.orderId}`,
+  })
+})
+```
+
+<br />
+
+**Failure:** 先 select availability，再 call Stripe，最后 update 座位。网络 call 期间第二笔 request 买走同一批座位。Locks 保护短 database transaction，从不保护外部 request。
+
+<br />
+
+---
+
+## 6. Events 是带版本的 facts 与 commands
+
+每条 event 都有稳定 identity、aggregate identity、schema version 与 trace context。Kafka key 是 `orderId`，于是一笔 order 的 saga 保持有序，又不会把一场演唱会的全部购票打进一个 hot partition。
+
+<br />
+
+```ts title="src/events/types.ts"
+export type EventEnvelope<TType extends string, TPayload> = {
+  eventId: string
+  eventType: TType
+  schemaVersion: 1
+  aggregateType: "order"
+  aggregateId: string
+  occurredAt: string
+  correlationId: string
+  causationId?: string
+  payload: TPayload
+}
+
+export const topics = {
+  purchase: "ticketing.purchase.v1",
+  retry5s: "ticketing.purchase.retry-5s.v1",
+  retry1m: "ticketing.purchase.retry-1m.v1",
+  deadLetter: "ticketing.purchase.dlq.v1",
+} as const
+
+export type TicketingEvent =
+  | EventEnvelope<"HoldCreated", HoldCreated>
+  | EventEnvelope<"PaymentAuthorizationRequested", PaymentRequest>
+  | EventEnvelope<"PaymentIntentCreated", PaymentIntentCreated>
+  | EventEnvelope<"PaymentAuthorized", PaymentAuthorized>
+  | EventEnvelope<"OrderConfirmed", OrderConfirmed>
+  | EventEnvelope<"CaptureRequested", CaptureRequested>
+  | EventEnvelope<"PaymentCaptured", PaymentCaptured>
+  | EventEnvelope<"TicketIssueRequested", TicketIssueRequested>
+  | EventEnvelope<"TicketIssued", TicketIssued>
+  | EventEnvelope<"HoldExpired", HoldExpired>
+  | EventEnvelope<"AuthorizationCancelRequested", CancelAuthorization>
+  | EventEnvelope<"RefundRequested", RefundRequested>
+```
+
+<br />
+
+- Version 1 内兼容加 fields；consumers 忽略未知 fields。
+- Breaking change 时，version 2 与 version 1 并排 publish。
+- 不要把卡资料、Stripe client secrets 或个人 profiles 放进 Kafka。
+- Production 用 Avro/Protobuf/JSON Schema registry；TypeScript union 是 compile-time 帮助，不是 runtime governance。
+
+<br />
+
+**Failure:** 因为听起来 domain-correct 就按 `eventId` key。一场体育场 onsale 就会串行穿过一个 Kafka partition。Inventory 安全属于 Postgres；saga 顺序属于 `orderId`。
+
+<br />
+
+---
+
+## 7. Transactional outbox 补上 dual-write 缺口
+
+Hold 与 `HoldCreated` outbox row 一起 commit。Relay 稍后 publish。Kafka 不可用时，order 仍 durable，outbox age 上升。
+
+不要在 publishing 时撑开 database transaction。用 lease claim rows，commit claim，publish，再标记 sent。
+
+<br />
+
+```ts title="src/workers/outbox-relay.ts"
+const workerId = `${process.env.ECS_TASK_ID}:${process.pid}`
+
+async function claimBatch(limit = 200) {
+  return db.execute<OutboxRow>(sql`
+    WITH picked AS (
+      SELECT id
+      FROM outbox
+      WHERE published_at IS NULL
+        AND (claim_expires_at IS NULL OR claim_expires_at < now())
+      ORDER BY created_at
+      FOR UPDATE SKIP LOCKED
+      LIMIT ${limit}
+    )
+    UPDATE outbox AS o
+    SET claimed_by = ${workerId},
+        claim_expires_at = now() + interval '30 seconds'
+    FROM picked
+    WHERE o.id = picked.id
+    RETURNING o.*
+  `)
+}
+
+async function publish(row: OutboxRow) {
+  await producer.send({
+    topic: row.topic,
+    acks: -1,
+    messages: [
+      {
+        key: row.messageKey,
+        value: JSON.stringify(row.payload),
+        headers: {
+          "event-id": row.id,
+          "event-type": row.eventType,
+        },
+      },
+    ],
+  })
+
+  await db
+    .update(outbox)
+    .set({
+      publishedAt: new Date(),
+      claimedBy: null,
+      claimExpiresAt: null,
+    })
+    .where(and(eq(outbox.id, row.id), eq(outbox.claimedBy, workerId)))
+}
+
+for (;;) {
+  for (const row of await claimBatch()) await publish(row)
+  await sleep(100)
+}
+```
+
+<br />
+
+```ts title="src/kafka/producer.ts"
+const producer = kafka.producer({
+  idempotent: true,
+  maxInFlightRequests: 1,
+  retry: { retries: 8, initialRetryTime: 100 },
+})
+```
+
+<br />
+
+若 Kafka 已接受 event，而 relay 在 `publishedAt` 前挂掉，lease 过期后另一台 relay 会再 publish。Kafka producer idempotence 帮同一 producer session 内含糊的 retries；它不能在 crash 后的新 process 上 deduplicate。Consumers 仍需要 event ID。
+
+监控最老的 unpublished row。**Outbox age** 就是业务的 event-delivery latency。
+
+<br />
+
+**Failure:** Kafka acknowledge 之前就标记 published，会丢 event。先 publish 再标记可能 duplicate。选 at-least-once，并让 duplicate delivery 安全。
+
+<br />
+
+---
+
+## 8. Inbox 让 consumers 可安全 replay
+
+每个 consumer 拥有 unique `(consumer, event_id)` record。插入这条 record 与套用 business effect 必须在同一个 PostgreSQL transaction。之后才 commit Kafka offset。
+
+<br />
+
+```ts title="src/kafka/run-consumer.ts"
+export async function handleOnce(
+  consumerName: string,
+  event: TicketingEvent,
+  handler: (tx: DbTransaction, event: TicketingEvent) => Promise<void>,
+) {
+  return db.transaction(async (tx) => {
+    const firstDelivery = await tx
+      .insert(inbox)
+      .values({ consumer: consumerName, eventId: event.eventId })
+      .onConflictDoNothing()
+      .returning({ eventId: inbox.eventId })
+
+    if (firstDelivery.length === 0) return "duplicate" as const
+
+    try {
+      await handler(tx, event)
+    } catch (error) {
+      if (isPermanent(error)) {
+        await tx.insert(outbox).values(
+          toOutbox(
+            makeDeadLetter(event, {
+              reason: publicErrorCode(error),
+              consumer: consumerName,
+            }),
+          ),
+        )
+        return "dead-lettered" as const
+      }
+      throw error // rolls back inbox + business effect; Kafka retries
+    }
+
+    return "processed" as const
+  })
+}
+
+await consumer.run({
+  autoCommit: false,
+  eachBatchAutoResolve: false,
+  eachBatch: async ({
+    batch,
+    resolveOffset,
+    heartbeat,
+    isRunning,
+    isStale,
+  }) => {
+    for (const message of batch.messages) {
+      if (!isRunning() || isStale()) break
+
+      const event = TicketingEventSchema.parse(
+        JSON.parse(message.value!.toString()),
+      )
+
+      await handleOnce("purchase-saga-v1", event, applySagaEvent)
+
+      resolveOffset(message.offset)
+      await consumer.commitOffsets([
+        {
+          topic: batch.topic,
+          partition: batch.partition,
+          offset: (BigInt(message.offset) + 1n).toString(),
+        },
+      ])
+      await heartbeat()
+    }
+  },
+})
+```
+
+<br />
+
+Database 已 commit 而 offset commit 失败时，Kafka 会 replay。Inbox 把 replay 变成 no-op，然后 consumer 前进。Handler 瞬时失败时，inbox insert 回滚，offset 留在后面。
+
+用 retry topics 做 delayed backoff。永久无效 schema 进 DLQ，并带够修与 replay 的 context。不要让一条 poison record 在 partition 头 busy-loop。
+
+<br />
+
+**Failure:** 先插入 inbox row 并 commit，再在另一个 transaction 里套用 effect。两者之间 crash，会把未完成工作永久标成 processed。
+
+<br />
+
+---
+
+## 9. 编排购票 saga
+
+Orchestrator 拥有合法 transitions。Workers 拥有外部 actions。每次 transition 用 optimistic versioning 或 row lock，写入新 state，并通过 outbox 发出下一道 command。
+
+<br />
+
+```text
+HoldCreated
+  → PaymentAuthorizationRequested
+  → PaymentIntentCreated
+  → customer confirms payment
+  → PaymentAuthorized
+  → OrderConfirmed
+  → CaptureRequested
+  → PaymentCaptured
+  → TicketIssueRequested
+  → TicketIssued
+```
+
+<br />
+
+Stripe manual capture 把 **reserve funds** 与 **collect funds** 分开。Saga 在请 Stripe capture 之前，先 confirm 仍活着的 seat hold。Stripe 文档见 [separate authorization and capture](https://docs.stripe.com/payments/place-a-hold-on-a-payment-method)。
+
+<br />
+
+```ts title="src/saga/on-payment-authorized.ts"
+export async function onPaymentAuthorized(
+  tx: DbTransaction,
+  event: PaymentAuthorizedEvent,
+) {
+  const [order] = await tx
+    .select()
+    .from(orders)
+    .where(eq(orders.id, event.payload.orderId))
+    .for("update")
+
+  const [hold] = await tx
+    .select()
+    .from(holds)
+    .where(eq(holds.orderId, order.id))
+    .for("update")
+
+  if (order.status === "capture_pending" || order.status === "paid") return
+
+  if (
+    order.status !== "pending_payment" ||
+    hold.status !== "active" ||
+    hold.expiresAt <= new Date()
+  ) {
+    await tx.insert(outbox).values(
+      toOutbox(
+        makeEvent(
+          "AuthorizationCancelRequested",
+          order.id,
+          event.correlationId,
+          {
+            orderId: order.id,
+            paymentIntentId: event.payload.paymentIntentId,
+            reason: "hold_expired",
+          },
+          event.eventId,
+        ),
+      ),
+    )
+    return
+  }
+
+  await tx
+    .update(holds)
+    .set({ status: "confirmed" })
+    .where(eq(holds.id, hold.id))
+
+  await tx
+    .update(orders)
+    .set({
+      status: "capture_pending",
+      version: sql`${orders.version} + 1`,
+    })
+    .where(eq(orders.id, order.id))
+
+  await tx.insert(outbox).values([
+    toOutbox(makeOrderConfirmed(event, order.id)),
+    toOutbox(makeCaptureRequested(event, order.id)),
+  ])
+}
+```
+
+<br />
+
+Compensations 是向前的 actions：
+
+| Failure | Compensation |
+| --- | --- |
+| Hold 在 authorization 前过期 | 释放 `hold_seats`；若有 PaymentIntent 则 cancel |
+| Authorization 在过期后到达 | Cancel 未 capture 的 PaymentIntent |
+| Capture 失败 | 释放 confirmed hold；把 order 标 failed |
+| Capture 成功但 ticket issue 在 retry | 座位保持 confirmed；replay ticket issue |
+| Order 已释放后 Capture 才成功 | 记录 incident；idempotent refund |
+
+<br />
+
+不要只因为出票慢就释放 confirmed hold。一旦 captured，继续 retry idempotent ticket insert，或明确 refund。
+
+<br />
+
+**Failure:** 把 refund 叫成 "rollback"。钱已经动了。Refund 是另一项 durable、可观察、可 retry 的业务操作。
+
+<br />
+
+---
+
+## 10. Stripe 也是 at-least-once 系统
+
+Payment worker 在 database transaction 外创建 PaymentIntent。Event ID 就是 Stripe 的 idempotency key。若 Stripe 成功而 worker 在 persist 前 crash，replay 这条 event 会取回同一逻辑操作，而不是再建一次 authorization。
+
+<br />
+
+```ts title="src/workers/payment-authorize.ts"
+const intent = await stripe.paymentIntents.create(
+  {
+    amount: event.payload.amountMinor,
+    currency: event.payload.currency,
+    capture_method: "manual",
+    automatic_payment_methods: { enabled: true },
+    metadata: {
+      orderId: event.payload.orderId,
+      holdId: event.payload.holdId,
+    },
+  },
+  { idempotencyKey: `authorize:${event.eventId}` },
+)
+
+await db.transaction(async (tx) => {
+  await tx
+    .insert(payments)
+    .values({
+      orderId: event.payload.orderId,
+      stripePaymentIntentId: intent.id,
+      clientSecret: intent.client_secret,
+      status: intent.status,
+    })
+    .onConflictDoUpdate({
+      target: payments.orderId,
+      set: {
+        stripePaymentIntentId: intent.id,
+        clientSecret: intent.client_secret,
+        status: intent.status,
+        updatedAt: new Date(),
+      },
+    })
+
+  await tx.insert(outbox).values(
+    toOutbox(makePaymentIntentCreated(event, intent)),
+  )
+})
+```
+
+<br />
+
+已认证的 order-status endpoint 只在 payment pending 时把 client secret 回给 order owner。永远不要放进 logs、Kafka、analytics 或 URLs。
+
+Webhook 必须在 parse 前用 **raw body** 校验 Stripe signature。Hono 跑在 Web-standard requests 上，所以 body 只读一次，不要在这条 route 前面放 JSON-body parser。
+
+<br />
+
+```ts title="src/routes/stripe-webhook.ts"
+app.post("/webhooks/stripe", async (c) => {
+  const signature = c.req.header("stripe-signature")
+  if (!signature) return c.text("Missing signature", 400)
+
+  const rawBody = await c.req.text()
+
+  let stripeEvent: Stripe.Event
+  try {
+    stripeEvent = stripe.webhooks.constructEvent(
+      rawBody,
+      signature,
+      env.STRIPE_WEBHOOK_SECRET,
+    )
+  } catch {
+    return c.text("Invalid signature", 400)
+  }
+
+  await db.transaction(async (tx) => {
+    const inserted = await tx
+      .insert(stripeEvents)
+      .values({ id: stripeEvent.id, type: stripeEvent.type })
+      .onConflictDoNothing()
+      .returning({ id: stripeEvents.id })
+
+    if (inserted.length === 0) return
+
+    const domainEvent = mapStripeEvent(stripeEvent)
+    if (domainEvent) await tx.insert(outbox).values(toOutbox(domainEvent))
+  })
+
+  return c.json({ received: true })
+})
+```
+
+<br />
+
+把 `payment_intent.amount_capturable_updated` 映射成 `PaymentAuthorized`；手动 capture 的 PaymentIntent 会到 `requires_capture`。把 `payment_intent.succeeded` 映射成 `PaymentCaptured`。Webhooks 可能延迟、重复、乱序；本地 state 与 event payload 不一致时，向 Stripe 再取 PaymentIntent。
+
+Capture 与 compensation 也用稳定 keys：
+
+<br />
+
+```ts
+await stripe.paymentIntents.capture(
+  paymentIntentId,
+  {},
+  { idempotencyKey: `capture:${orderId}` },
+)
+
+await stripe.refunds.create(
+  { payment_intent: paymentIntentId, metadata: { orderId } },
+  { idempotencyKey: `refund:${orderId}` },
+)
+```
+
+<br />
+
+只有 webhook event 与 outbox continuation 都 durable 之后才返回 2xx。不要等完整 saga。
+
+<br />
+
+**Failure:** 用未校验 webhook 直接 update order，或还没记下就返回 200。前者接受伪造支付；后者让 Stripe 停止 retry 你还没存下的工作。
+
+<br />
+
+---
+
+## 11. Expiry 与出票是 idempotent workers
+
+Expiry worker 小批次 claim 超时 holds。`SKIP LOCKED` 让多台 tasks 不会 claim 同一批 rows。
+
+<br />
+
+```sql title="src/workers/expire-holds.sql"
+WITH expired AS (
+  SELECT id, order_id
+  FROM holds
+  WHERE status = 'active'
+    AND expires_at < now()
+  ORDER BY expires_at
+  FOR UPDATE SKIP LOCKED
+  LIMIT 500
+)
+UPDATE holds AS h
+SET status = 'expired'
+FROM expired AS e
+WHERE h.id = e.id
+RETURNING h.id, h.order_id;
+```
+
+<br />
+
+对每条返回的 hold，同一个 transaction：
+
+1. 设置 `hold_seats.released_at`。
+2. 若仍 pending，把 `orders.status` 改成 `failed`。
+3. 向 outbox 插入 `HoldExpired`，需要时再插 `AuthorizationCancelRequested`。
+
+出票时每个 held seat 插一张 ticket。`ticket_seat_uq` 让 replay 安全。Inbox 让整个 consumer effect 安全。
+
+<br />
+
+```ts title="src/workers/issue-tickets.ts"
+await tx
+  .insert(tickets)
+  .values(
+    seatIds.map((seatId) => ({
+      id: stableTicketId(orderId, seatId),
+      orderId,
+      seatId,
+    })),
+  )
+  .onConflictDoNothing()
+
+await tx
+  .update(holdSeats)
+  .set({ releasedAt: new Date() })
+  .where(eq(holdSeats.holdId, holdId))
+
+await tx
+  .update(orders)
+  .set({ status: "ticketed" })
+  .where(eq(orders.id, orderId))
+
+await tx.insert(outbox).values(toOutbox(makeTicketIssued(event)))
+```
+
+<br />
+
+Status API 从 Postgres 读 order、hold、payment 与 ticket state。Client 用 poll、SSE 或 push notification。它从不在原来的 HTTP socket 里等 Kafka reply。
+
+<br />
+
+**Failure:** 用 in-process timer 做 hold expiry。Deploys、crashes 与 autoscaling 会抹掉 timers。Expiry 是 durable data 加一条可重复 query。
+
+<br />
+
+---
+
+## 12. Kafka 与 database capacity
+
+从 admitted write rate 出发，而不是人群规模。
+
+<br />
+
+```text
+attempt rate                     10,000/s
+waiting-room admission rate R       800/s   measured, not guessed
+seats per order                       2.4
+seat lock attempts                 1,920/s
+purchase events per successful order    8
+successful orders                    500/s
+Kafka event rate                   4,000/s
+```
+
+<br />
+
+这些是示例数字。Load test 直到 Aurora lock latency、WAL、CPU、I/O 与 connections 定义真正的 `R`。留 safety margin；p99 或 outbox age 越过阈值时自动降低 admission。
+
+Kafka partition 数必须同时覆盖 throughput 与 consumer parallelism：
+
+<br />
+
+```text
+partitions ≥ max(
+  peak_topic_bytes_per_second / tested_partition_bytes_per_second,
+  desired_parallel_consumers
+)
+```
+
+<br />
+
+用 replication factor 3、`acks=all`、`min.insync.replicas=2`。关掉 unclean leader election。Producers 用 IAM authentication、TLS 与 KMS-backed storage。Purchase topic 的 key 是 `orderId`。
+
+Retention 是 recovery 要求：
+
+<br />
+
+```text
+stored bytes
+  ≈ events/sec × average bytes × retention seconds × replication factor
+```
+
+留够 history，好在坏 deployment 后 rebuild projections 与 replay。长期 audit records 归档到 S3；Kafka 不是财务 ledger。
+
+Connection 算术同样重要：
+
+<br />
+
+```text
+maximum open DB connections
+  = API tasks × pool size
+  + all worker tasks × pool size
+  + migrations and operations
+```
+
+RDS Proxy 平滑 task churn，但不让无限并发 transactions 变免费。限制每台 task 的工作量，并按有用信号 scale：API 看 ALB p99，consumers 看 Kafka lag，expiry workers 看 expiry delay。
+
+<br />
+
+**Failure:** consumers autoscaling 超过 partition 数，或 API tasks 超过 database connection budget。更多 compute 反而更少 throughput。
+
+<br />
+
+---
+
+## 13. 按 purchase cell 扩容
+
+按 `event_id` 做 table partitioning 有助于 pruning 与维护。它不会多出一个 Aurora writer。当一个 cluster 不够时，把 events 分到 **purchase cells**。
+
+<br />
+
+```text
+event directory
+  event A → cell 1 → Aurora 1 + API/worker pool 1
+  event B → cell 2 → Aurora 2 + API/worker pool 2
+  event C → cell 3 → Aurora 3 + API/worker pool 3
+```
+
+<br />
+
+Admission token 带上 cell。CloudFront/ALB routing 或 API gateway 把买家送到那个 cell。一场明星 onsale 可以独占一个 cell。Cell 2 失败不会停掉 cell 1 与 3 的销售。
+
+一笔 order 留在一个 cell 内。跨 cell reporting 消费 Kafka 或 S3 projections。不要在 request path 上 join 购票 databases。[System Design 里的 Sharding](/notes/sharding-in-system-design) 讲 key、routing 与 rebalance 成本。
+
+在一场热门 event 内，assigned seats 仍把 lock contention 摊到各 seat rows。Waiting room 控制总 writer 压力。全局 order 保证会毁掉这份 parallelism，也不是必须的。
+
+<br />
+
+**Failure:** 把 PostgreSQL table partitioning 叫成 horizontal scale。Partitions 仍共享一个 writer、一条 WAL path 与一个 connection 上限。
+
+<br />
+
+---
+
+## 14. Terraform：primary Region
+
+这个仓库用 SST。下面的 Terraform 是独立 architecture 示例，不是这里已经存在的基础设施。在真正的 platform repository 里 pin 并测试 provider version。
+
+Primary 与 DR Regions 用 aliased providers：
+
+<br />
+
+```hcl title="infra/providers.tf"
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 6.33"
+    }
+  }
+}
+
+provider "aws" {
+  alias  = "primary"
+  region = var.primary_region
+}
+
+provider "aws" {
+  alias  = "dr"
+  region = var.dr_region
+}
+```
+
+<br />
+
+API service 跑在没有 public IP 的 private subnets。它的 target group 挂到 public ALB；security group 只接受来自 ALB 的流量。
+
+<br />
+
+```hcl title="infra/ecs.tf"
+resource "aws_ecs_service" "api" {
+  provider                         = aws.primary
+  name                             = "ticketing-api"
+  cluster                          = aws_ecs_cluster.purchase.id
+  task_definition                  = aws_ecs_task_definition.api.arn
+  desired_count                    = 6
+  launch_type                      = "FARGATE"
+  availability_zone_rebalancing    = "ENABLED"
+  deployment_minimum_healthy_percent = 100
+  deployment_maximum_percent         = 200
+  enable_execute_command           = false
+
+  network_configuration {
+    assign_public_ip = false
+    subnets          = module.vpc.private_subnets
+    security_groups  = [aws_security_group.api.id]
+  }
+
+  load_balancer {
+    target_group_arn = aws_lb_target_group.api.arn
+    container_name   = "api"
+    container_port   = 4111
+  }
+
+  health_check_grace_period_seconds = 30
+}
+
+resource "aws_appautoscaling_target" "api" {
+  max_capacity       = 100
+  min_capacity       = 6
+  resource_id        = "service/${aws_ecs_cluster.purchase.name}/${aws_ecs_service.api.name}"
+  scalable_dimension = "ecs:service:DesiredCount"
+  service_namespace  = "ecs"
+}
+```
+
+<br />
+
+为 relay、saga、payment、expiry 与 ticket workers 分别创建 task definitions、services、IAM roles、autoscaling targets 与 alarms。各给它需要的最小 Kafka topic、Secrets Manager、KMS 与 CloudWatch permissions。
+
+Aurora 一个 writer，跨 AZs 至少两个 readers。Master password 放 Secrets Manager，强制 TLS，打开 Performance Insights，导出 PostgreSQL logs，开 deletion protection，并保留 backups。
+
+<br />
+
+```hcl title="infra/aurora.tf"
+resource "aws_rds_global_cluster" "ticketing" {
+  provider                  = aws.primary
+  global_cluster_identifier = "ticketing-global"
+  engine                    = "aurora-postgresql"
+  engine_version            = var.aurora_postgres_version
+  database_name             = "ticketing"
+  storage_encrypted         = true
+}
+
+resource "aws_rds_cluster" "primary" {
+  provider                    = aws.primary
+  cluster_identifier          = "ticketing-primary"
+  global_cluster_identifier   = aws_rds_global_cluster.ticketing.id
+  engine                      = "aurora-postgresql"
+  engine_version              = var.aurora_postgres_version
+  db_subnet_group_name        = aws_db_subnet_group.primary.name
+  vpc_security_group_ids      = [aws_security_group.aurora.id]
+  manage_master_user_password = true
+  storage_encrypted           = true
+  backup_retention_period     = 35
+  deletion_protection         = true
+  enabled_cloudwatch_logs_exports = ["postgresql"]
+}
+
+resource "aws_rds_cluster_instance" "primary" {
+  provider             = aws.primary
+  count                = 3
+  identifier           = "ticketing-primary-${count.index}"
+  cluster_identifier   = aws_rds_cluster.primary.id
+  instance_class       = var.aurora_instance_class
+  engine               = aws_rds_cluster.primary.engine
+  engine_version       = aws_rds_cluster.primary.engine_version
+  db_subnet_group_name = aws_db_subnet_group.primary.name
+  performance_insights_enabled = true
+}
+```
+
+<br />
+
+MSK 每个 AZ 至少一台 broker。Production sizing 可以更多，但 broker 数必须是 AZ 数的倍数。
+
+<br />
+
+```hcl title="infra/msk.tf"
+resource "aws_msk_configuration" "purchase" {
+  provider       = aws.primary
+  name           = "ticketing-purchase"
+  kafka_versions = [var.kafka_version]
+
+  server_properties = <<-PROPERTIES
+    auto.create.topics.enable=false
+    default.replication.factor=3
+    min.insync.replicas=2
+    unclean.leader.election.enable=false
+    num.partitions=48
+  PROPERTIES
+}
+
+resource "aws_msk_cluster" "primary" {
+  provider               = aws.primary
+  cluster_name           = "ticketing-primary"
+  kafka_version          = var.kafka_version
+  number_of_broker_nodes = 3
+
+  broker_node_group_info {
+    instance_type  = var.msk_instance_type
+    client_subnets = slice(module.vpc.private_subnets, 0, 3)
+    security_groups = [aws_security_group.msk.id]
+
+    storage_info {
+      ebs_storage_info {
+        volume_size = 1000
+      }
+    }
+  }
+
+  client_authentication {
+    sasl {
+      iam = true
+    }
+  }
+
+  encryption_info {
+    encryption_at_rest_kms_key_arn = aws_kms_key.msk.arn
+    encryption_in_transit {
+      client_broker = "TLS"
+      in_cluster    = true
+    }
+  }
+
+  configuration_info {
+    arn      = aws_msk_configuration.purchase.arn
+    revision = aws_msk_configuration.purchase.latest_revision
+  }
+}
+```
+
+<br />
+
+ElastiCache 应 Multi-AZ，带 automatic failover 与 encryption。丢掉它会暂停新 admission 或降级 cached reads；它不会释放或卖掉座位。
+
+<br />
+
+**Failure:** tasks 放 private subnets，却给 Aurora 或 MSK public access「方便 debug」。用 Session Manager、受控 tooling 与可审计的 break-glass access。
+
+<br />
+
+---
+
+## 15. Warm cross-Region disaster recovery
+
+Multi-AZ 处理 AZ failure。它不是 regional disaster recovery。Strategy map——backup versus HA versus DR——见 [System Design 里的 Disaster Recovery](/notes/disaster-recovery-in-system-design)。这里的目标是 **RPO 不到一分钟** 与 **RTO 不到十五分钟**。那是可测目标，不是 AWS 产品保证。
+
+Warm Region 包含：
+
+- 一个随时可 promote 的 Aurora Global Database secondary cluster。
+- 一个三 broker 的 MSK target cluster。
+- MSK Replicator 复制选定 topics 与 consumer-group offsets。
+- ECR image replication、Secrets Manager replicas、KMS keys、VPC、ALB，以及低数量 ECS services。
+- Route 53 failover records 与 health checks。
+
+Aurora Global Database replication 是 asynchronous。MSK replication 也是 asynchronous。真正的 RPO 是更差的 observed lag，再加上任何还没从 outbox 拷走的 event。
+
+<br />
+
+```hcl title="infra/dr.tf"
+resource "aws_rds_cluster" "dr" {
+  provider                  = aws.dr
+  cluster_identifier        = "ticketing-dr"
+  global_cluster_identifier = aws_rds_global_cluster.ticketing.id
+  engine                    = "aurora-postgresql"
+  engine_version            = var.aurora_postgres_version
+  db_subnet_group_name      = aws_db_subnet_group.dr.name
+  vpc_security_group_ids    = [aws_security_group.aurora_dr.id]
+  storage_encrypted         = true
+
+  lifecycle {
+    ignore_changes = [replication_source_identifier]
+  }
+}
+
+resource "aws_rds_cluster_instance" "dr" {
+  provider           = aws.dr
+  count              = 2
+  identifier         = "ticketing-dr-${count.index}"
+  cluster_identifier = aws_rds_cluster.dr.id
+  instance_class     = var.aurora_instance_class
+  engine             = aws_rds_cluster.dr.engine
+  engine_version     = aws_rds_cluster.dr.engine_version
+}
+
+resource "aws_msk_replicator" "dr" {
+  provider                   = aws.dr
+  replicator_name            = "ticketing-primary-to-dr"
+  service_execution_role_arn = aws_iam_role.msk_replicator.arn
+
+  kafka_cluster {
+    amazon_msk_cluster {
+      msk_cluster_arn = aws_msk_cluster.primary.arn
+    }
+    vpc_config {
+      subnet_ids     = slice(module.vpc.private_subnets, 0, 3)
+      security_groups = [aws_security_group.msk_replicator_source.id]
+    }
+  }
+
+  kafka_cluster {
+    amazon_msk_cluster {
+      msk_cluster_arn = aws_msk_cluster.dr.arn
+    }
+    vpc_config {
+      subnet_ids     = slice(module.vpc_dr.private_subnets, 0, 3)
+      security_groups = [aws_security_group.msk_replicator_target.id]
+    }
+  }
+
+  replication_info_list {
+    source_kafka_cluster_arn = aws_msk_cluster.primary.arn
+    target_kafka_cluster_arn = aws_msk_cluster.dr.arn
+    target_compression_type  = "ZSTD"
+
+    topic_replication {
+      topics_to_replicate           = ["ticketing\\..*"]
+      detect_and_copy_new_topics    = true
+      copy_topic_configurations     = true
+      copy_access_control_lists_for_topics = false
+
+      starting_position {
+        type = "EARLIEST"
+      }
+
+      topic_name_configuration {
+        type = "IDENTICAL"
+      }
+    }
+
+    consumer_group_replication {
+      consumer_groups_to_replicate         = ["ticketing-.*"]
+      detect_and_copy_new_consumer_groups   = true
+      synchronise_consumer_group_offsets    = true
+    }
+  }
+}
+```
+
+<br />
+
+把它当 representative。当前 [MSK Replicator requirements](https://docs.aws.amazon.com/msk/latest/developerguide/msk-replicator-prepare-clusters.html) 要求 IAM access control；跨 Region 的 provisioned sources 需要 IAM multi-VPC private connectivity 与 resource policy。Source 与 target 至少三台 brokers。在 platform repository 校验确切的 provider schema 与 network policy。
+
+Failover 是一份有序 runbook：
+
+1. 停止 waiting-room admission，并用单调递增的 **region epoch** 围栏 primary writes。
+2. 确认 primary 不可用或被故意隔离。绝不允许两个 writers。
+3. 记录 Aurora 与 MSK replication lag；宣布 recovery point。
+4. Promote Aurora secondary，并更新 Secrets Manager/RDS Proxy endpoints。
+5. 用新 epoch 激活 DR ECS services。
+6. 把 consumers 指向 DR MSK；从 replicated offsets replay，让 inbox dedupe。
+7. Synthetic hold 与 webhook tests 通过后，才切 Route 53。
+8. 把 cutover 附近创建的 Stripe PaymentIntents 与本地 payment rows 对账。
+
+每笔 write transaction 都检查 region epoch。它防止回来的旧 primary 在 promote 后接受 stale writes。
+
+Failback 是另一次 migration。复制并对账回去；不要只反转 DNS。
+
+<br />
+
+**Failure:** 还没围栏旧 Region 就 failover DNS。两个健康 writers 比一个不可用 writer 更糟：两边都能卖掉同一份逻辑库存。
+
+<br />
+
+---
+
+## 16. 观察业务时间线
+
+Infrastructure metrics 必要。Order-level 证据才解释 incident。
+
+每条 request 与 event 带着：
+
+- `correlationId`：一次买家旅程。
+- `eventId`：一条不可变 message。
+- `causationId`：导致这条的 event。
+- `orderId`、`holdId` 与 Stripe PaymentIntent ID。
+- `region`、`purchaseCell`、Kafka topic、partition 与 offset。
+
+永远不要 log client secrets、卡资料、admission tokens 或完整 webhook bodies。
+
+<br />
+
+| Signal | 何时告警 |
+| --- | --- |
+| Hold endpoint p99 与 conflict rate | Latency 超过 SLO，或 conflicts 异常跳升 |
+| Postgres lock wait / deadlock / connections | Admission rate 高于安全容量 |
+| 最老 unpublished outbox row | Events 到不了 Kafka |
+| 按 partition 的 consumer lag | Worker 或 hot key 落后 |
+| Expired hold processing delay | 座位过了 TTL 仍不可用 |
+| DLQ depth | 永久 event failure 需要处理 |
+| Stripe/local status mismatch | Payment reconciliation 发现漂移 |
+| Ticket uniqueness violation | Invariant 或 replay handler 出错 |
+| Aurora/MSK cross-Region lag | RPO 目标告急 |
+
+<br />
+
+做演练：
+
+- Kill 一台 API task、一个 consumer、一台 broker、一个 AZ。
+- 弄挂 database writer，记录经 RDS Proxy 的 reconnect 时间。
+- 堵住 Kafka publishing，验证 outbox 堆积与恢复。
+- 同一条 Stripe event 送十次。
+- 暂停 expiry worker，再追上且不引发 lock storm。
+- Game day 里 promote warm Region，记录实际 RPO/RTO。
+
+<br />
+
+**Failure:** Dashboard 说 Kafka 健康，而 orders 已在 outbox 里坐了二十分钟。量业务边界，不只量 managed service。
+
+<br />
+
+---
+
+## 17. 测试防止超卖的性质
+
+Unit tests 不够。在 integration tests 里对着真正的 PostgreSQL 跑这些；row locks 与 unique indexes 才是被测行为。
+
+<br />
+
+```ts title="test/integration/purchase-concurrency.test.ts"
+it("allows one active hold for one seat", async () => {
+  const attempts = await Promise.allSettled(
+    Array.from({ length: 100 }, (_, i) =>
+      reserveSeats({
+        userId: users[i].id,
+        eventId,
+        seatIds: [seatId],
+        idempotencyKey: crypto.randomUUID(),
+        requestHash: hash([seatId]),
+        correlationId: crypto.randomUUID(),
+      }),
+    ),
+  )
+
+  expect(attempts.filter((x) => x.status === "fulfilled")).toHaveLength(1)
+  expect(await countActiveHolds(seatId)).toBe(1)
+})
+
+it("returns one order for an HTTP retry", async () => {
+  const input = holdInput({ idempotencyKey: "same-key" })
+  const [a, b] = await Promise.all([reserveSeats(input), reserveSeats(input)])
+
+  expect(a.orderId).toBe(b.orderId)
+  expect(await countOrdersForKey(input.userId, "same-key")).toBe(1)
+})
+
+it("applies a duplicate Kafka event once", async () => {
+  await handleOnce("purchase-saga-v1", paymentAuthorized, applySagaEvent)
+  await handleOnce("purchase-saga-v1", paymentAuthorized, applySagaEvent)
+
+  expect(await countOutbox("CaptureRequested", orderId)).toBe(1)
+  expect(await orderStatus(orderId)).toBe("capture_pending")
+})
+
+it("compensates authorization after hold expiry", async () => {
+  await expireHold(orderId)
+  await handleOnce("purchase-saga-v1", lateAuthorization, applySagaEvent)
+
+  expect(await orderStatus(orderId)).toBe("failed")
+  expect(
+    await countOutbox("AuthorizationCancelRequested", orderId),
+  ).toBe(1)
+  expect(await countActiveHolds(seatId)).toBe(0)
+})
+```
+
+<br />
+
+还要证明：
+
+- Kafka publish 之后、`publishedAt` 之前 crash，产生 duplicate，而不是第二次 effect。
+- Database effect 之后、offset commit 之前 crash，replay 进入 inbox no-op。
+- 同一把 idempotency key、不同 payloads 返回 `409`。
+- Expiry 与 authorization 在 locks 下 race，选出一个合法 state。
+- Capture retry 只用一次 Stripe operation。
+- Ticket issuance retry 每个座位只留一张 ticket。
+- Regional promotion 拒绝旧 region epoch。
+
+在每条边界做 fault injection：call 前、远端成功后、local commit 前、local commit 后、acknowledgment 前。
+
+<br />
+
+**Failure:** 只测 happy path。超卖活在两笔 requests、两个 workers，或成功步骤之间的一次 crash。
+
+<br />
+
+---
+
+## Recap Q&A
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="ticketing-hold">
+    <AccordionTrigger>1. 到底是什么阻止两个买家 hold 同一座位？</AccordionTrigger>
+    <AccordionContent>
+
+      - PostgreSQL 是权威。Transaction 按确定顺序 lock 请求的 seat rows，检查 active holds 与 tickets，再插入 ownership rows。
+      - Partial unique index 允许每个座位最多一条未释放 `hold_seat`。Unique ticket index 允许一个最终 owner。
+      - Redis availability 与座位图是 hints。它们从不授予所有权。
+      - **Failure:** 没有 lock 或 constraint 就 check-then-insert。两笔 requests 都看到 "available"，然后都继续。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="ticketing-outbox">
+    <AccordionTrigger>2. 为什么 outbox 与 inbox 都要？</AccordionTrigger>
+    <AccordionContent>
+
+      - Outbox 让 business write 与 intent-to-publish 成为一次 PostgreSQL transaction。Kafka 宕机延迟 publication，而不是丢掉它。
+      - 先 publish 再标记，crash 后可能 duplicate。Inbox 让每个 consumer 的 business effect idempotent。
+      - 只有 inbox 与 effect commit 之后才 commit Kafka offset。Replay 才安全。
+      - **Failure:** 把 Kafka producer idempotence 说成端到端 exactly once。它不能让 database transaction 与 Kafka 原子，也撑不过每一个新 producer session。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="ticketing-payment">
+    <AccordionTrigger>3. 为什么先 authorize 再 capture？</AccordionTrigger>
+    <AccordionContent>
+
+      - Manual-capture PaymentIntent 预留合格资金，但不收款。
+      - `PaymentAuthorized` 之后，saga 再检查 live hold，在 PostgreSQL 里 confirm，再请求 capture。
+      - 迟到的 authorization 被 cancel。迟到的 capture 被 refund。Stripe calls 与 webhook ingestion 用稳定 idempotency keys。
+      - **Failure:** 在 durable inventory confirmation 之前就 capture 钱，然后藏起 mismatch，而不是跑 refund compensation。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="ticketing-scale">
+    <AccordionTrigger>4. 系统如何撑住每秒 10,000 次尝试的 onsale？</AccordionTrigger>
+    <AccordionContent>
+
+      - WAF 去掉明显 abuse。Waiting room 只按测过的安全 hold rate 放行，并签发短命的 event/user/cell admission tokens。
+      - Cached reads 与 reader replicas 服务浏览。Writer 只处理权威 holds 与 saga transitions。
+      - API tasks 按 latency scale；consumers 按 lag scale；Kafka 按 `orderId` key。下一道天花板，把 events 分到独立 purchase cells。
+      - **Failure:** 把全部 attempts 打到 Aurora，指望 autoscaling 在 lock latency 崩掉前加出 write capacity。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="ticketing-dr">
+    <AccordionTrigger>5. 什么让 warm Region 可以安全 promote？</AccordionTrigger>
+    <AccordionContent>
+
+      - Aurora Global Database 与 MSK Replicator 异步拷贝 state。它们的 observed lag 定义 recovery point。
+      - 停止 admission，用 region epoch 围栏旧 writer，promote Aurora，激活 DR services，经 inboxes replay，测试，再改 Route 53。
+      - 对账 Stripe，因为 cutover 附近外部支付可能已成功，而本地 continuation 还没有。
+      - **Failure:** 把 asynchronous replicas 当成 zero-RPO，或让两个 Regions 都接受购票 writes。
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>

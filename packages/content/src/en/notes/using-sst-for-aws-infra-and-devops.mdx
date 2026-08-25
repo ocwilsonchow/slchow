@@ -13,7 +13,7 @@ Three infra stories stay separate:
 
 1. **Deployed today** — `sst.config.ts` imports the Next.js / OpenNext stack only.
 2. **Defined in-repo, not yet imported** — container API infra (`Vpc` → `Cluster` → `Service` + `Router`) lives under `packages/infra` and stays commented out of `run()` until that stack should deploy.
-3. **Related pattern elsewhere** — Lambda + API Gateway for a Hono API is in [Backend APIs with Hono, Drizzle, Zod OpenAPI, and SST](/notes/backend-apis-hono-sst). That note is not what this site’s `sst.config.ts` runs.
+3. **Related pattern elsewhere** — Lambda + API Gateway for a Hono API is in [Backend APIs with Hono, Drizzle, Zod OpenAPI, and SST](/notes/_backend-apis-hono-sst). That note is not what this site’s `sst.config.ts` runs.
 
 <br />
 
@@ -49,7 +49,7 @@ All of these tools share **infrastructure as code**. SST is framed for **develop
 
 - SST components encode common app patterns and still allow [`transform`](https://sst.dev/docs/components#transforms) plus [150+ providers](https://sst.dev/docs/all-providers#directory) when lower-level control is required.
 - Linking closes the runtime gap that Terraform or CDK usually fill with hand-wired env vars and IAM. `sst dev` is a product feature rather than an assemble-yourself local stack.
-- SST still has state — local plus a backup bucket — so managed resources should not be edited by hand in the Console ([Basics](https://sst.dev/docs/basics/)).
+- SST still has state — local plus a backup bucket — so managed resources should not be edited by hand in the Console ([Basics](https://sst.dev/docs/basics/)). Backup of that state, and when a snapshot is not a failover, is [Disaster Recovery in System Design](/notes/disaster-recovery-in-system-design).
 
 SST is a poor fit when a platform team already owns shared networking in Terraform or OpenTofu, when Pulumi or Terraform is the team language for multi-cloud control planes, or when CloudFormation-native CDK construct libraries are the hiring and review surface.
 
@@ -144,7 +144,7 @@ export const nextjs = new sst.aws.Nextjs("Web", {
 - Production keeps one warm server instance; non-prod uses `warm: 0`. The `edge` prop attaches non-prod Basic Auth. The `dev` block tells `sst dev` how to start the local Next process.
 - Secrets are first-class resources, not loose `.env` files: `sst.Secret("Username")`, `Password`, `DatabaseUrl`, `BetterAuthSecret`, `AiGatewayApiKey`.
 - When the API module is imported, the path is `Vpc` → `Cluster` → `Service`, with `Router` for `api.example.com` or `{stage}.api.example.com`. Until `await import("./infra/api")` is enabled, that stack does not deploy.
-- A different shape — Lambda behind API Gateway with a Lambda authorizer — is the pattern in [Backend APIs with Hono, Drizzle, Zod OpenAPI, and SST](/notes/backend-apis-hono-sst). That uses `sst.aws.Function` and `sst.aws.ApiGatewayV2`. It is not the infrastructure this site’s config currently loads.
+- A different shape — Lambda behind API Gateway with a Lambda authorizer — is the pattern in [Backend APIs with Hono, Drizzle, Zod OpenAPI, and SST](/notes/_backend-apis-hono-sst). That uses `sst.aws.Function` and `sst.aws.ApiGatewayV2`. It is not the infrastructure this site’s config currently loads.
 
 <br />
 
@@ -258,7 +258,7 @@ ci: checks → tests → build → sst deploy --stage …
 
 <br />
 
-SST keeps AWS infrastructure as reviewable TypeScript beside the app. Terraform, CDK, or Pulumi remain the better fit when the problem is org-wide platform ownership. For current component and CLI details, start at the [SST docs](https://sst.dev/docs/). For the Hono API on Lambda or Fargate, continue with [Backend APIs with Hono, Drizzle, Zod OpenAPI, and SST](/notes/backend-apis-hono-sst).
+SST keeps AWS infrastructure as reviewable TypeScript beside the app. Terraform, CDK, or Pulumi remain the better fit when the problem is org-wide platform ownership. For current component and CLI details, start at the [SST docs](https://sst.dev/docs/). For the Hono API on Lambda or Fargate, continue with [Backend APIs with Hono, Drizzle, Zod OpenAPI, and SST](/notes/_backend-apis-hono-sst).
 
 ---
 

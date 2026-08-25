@@ -76,10 +76,10 @@
   "metadata": {
     "siteName": "Wilson Chow",
     "siteTitle": "Wilson Chow",
-    "siteDescription": "軟件工程師，專精 frontend。交付全棧產品、設計系統與 AI agents。AWS Solutions Architect Associate 認證。",
+    "siteDescription": "熱衷於構建有意義的軟件方案。Web、mobile、AI、systems、cloud。持續學習，持續構建。",
     "home": {
       "title": "Wilson Chow",
-      "description": "軟件工程師，專精 frontend。交付全棧產品、設計系統與 AI agents。AWS Solutions Architect Associate 認證。"
+      "description": "熱衷於構建有意義的軟件方案。Web、mobile、AI、systems、cloud。持續學習，持續構建。"
     },
     "resume": {
       "title": "履歷",
@@ -186,7 +186,8 @@
     "variants": {
       "frontend": "前端",
       "full-stack": "全棧",
-      "ai": "AI"
+      "ai": "AI",
+      "mobile": "流動"
     }
   },
   "code": {

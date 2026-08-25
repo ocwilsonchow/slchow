@@ -175,7 +175,7 @@ function Frame({
   return (
     <Portal
       className={cn(
-        "fixed bottom-4 left-4 right-4 z-50 grid content-end",
+        "pointer-events-none fixed bottom-4 left-4 right-4 z-50 grid content-end",
         fontPresets.aero,
         className
       )}
@@ -190,7 +190,7 @@ function Frame({
         <nav
           ref={navRef}
           aria-label={t("menu")}
-          className="bg-surface-popover border border-stroke-soft/75 text-content-body-on-popover rounded-3xl sm:max-w-sm [&_a]:outline-none [&_a]:focus:outline-none [&_a]:focus-visible:outline-none [&_button]:outline-none [&_button]:focus:outline-none [&_button]:focus-visible:outline-none"
+          className="pointer-events-auto bg-surface-popover border border-stroke-soft/75 text-content-body-on-popover rounded-3xl sm:max-w-sm [&_a]:outline-none [&_a]:focus:outline-none [&_a]:focus-visible:outline-none [&_button]:outline-none [&_button]:focus:outline-none [&_button]:focus-visible:outline-none"
         >
           {children}
         </nav>

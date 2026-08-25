@@ -44,7 +44,7 @@ export function ContactReviewFields({ values }: Props) {
             key={field}
             className="flex flex-col gap-1 rounded-xl border border-stroke-soft px-3 py-2"
           >
-            <dt className="text-xs text-content-subdued">{labels[field]}</dt>
+            <dt className="text-sm text-content-subdued">{labels[field]}</dt>
             <dd className="m-0 whitespace-pre-wrap wrap-break-word text-content-ink">
               {value}
             </dd>

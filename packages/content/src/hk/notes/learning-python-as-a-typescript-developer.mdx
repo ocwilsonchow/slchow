@@ -7,7 +7,7 @@ category: backend
 
 TypeScript 會 erase types。**Python 從未要求過 types。** Duck typing 是 default：只要它有 `id` 與 `email`，它就走得通。Compiler 不在門口等。一支帶 Pydantic body 的 **FastAPI** route，跟 Zod-validated Hono route 是同一直覺 —— check 搬到 HTTP boundary，而不是 language。
 
-這篇 note 是以 **Hono** developer 身分讀 **FastAPI** API 時用的 mapping。Samples 對準 **Python 3.12+**：type parameter syntax、`match`、dataclasses。**Pydantic v2** 與 **SQLAlchemy 2** 各出現一次，作為 Zod 與 Drizzle 的表親。不是把這個 site 重寫成 Python。Typed Hono stack 見 [用 Hono、Drizzle、Zod OpenAPI 與 SST 打造 Backend APIs](/notes/backend-apis-hono-sst)。Types 真的活過 compilation 的 Java 兄弟篇是 [以 TypeScript Developer 身分學 Java](/notes/learning-java-as-a-typescript-developer)。你已有的 object model 見 [TypeScript Class 與 Runtime Identity](/notes/typescript-classes-and-runtime-identity)。
+這篇 note 是以 **Hono** developer 身分讀 **FastAPI** API 時用的 mapping。Samples 對準 **Python 3.12+**：type parameter syntax、`match`、dataclasses。**Pydantic v2** 與 **SQLAlchemy 2** 各出現一次，作為 Zod 與 Drizzle 的表親。不是把這個 site 重寫成 Python。Typed Hono stack 見 [用 Hono、Drizzle、Zod OpenAPI 與 SST 打造 Backend APIs](/notes/_backend-apis-hono-sst)。Types 真的活過 compilation 的 Java 兄弟篇是 [以 TypeScript Developer 身分學 Java](/notes/learning-java-as-a-typescript-developer)。Types 活過 compilation 且 interfaces 是 structural 的 Go 兄弟篇是 [以 TypeScript Developer 身分學 Go](/notes/learning-go-as-a-typescript-developer)。你已有的 object model 見 [TypeScript Class 與 Runtime Identity](/notes/typescript-classes-and-runtime-identity)。
 
 <br />
 
@@ -404,8 +404,9 @@ user = session.scalars(stmt).first()
 Python 是 **這個 interpreter** 如何把 value 傳來傳去。FastAPI 是 **這個 process** 如何接收 request。兩者都不取代 authorization、SQL，或 session。
 
 - JVM 兄弟篇：[以 TypeScript Developer 身分學 Java](/notes/learning-java-as-a-typescript-developer)
+- Go 兄弟篇：[以 TypeScript Developer 身分學 Go](/notes/learning-go-as-a-typescript-developer)
 - TypeScript 的 runtime identity：[TypeScript Class 與 Runtime Identity](/notes/typescript-classes-and-runtime-identity)
 - JS 何時執行：[JavaScript 核心概念](/notes/core-javascript-concepts)
-- Hono analog：[用 Hono、Drizzle、Zod OpenAPI 與 SST 打造 Backend APIs](/notes/backend-apis-hono-sst)
+- Hono analog：[用 Hono、Drizzle、Zod OpenAPI 與 SST 打造 Backend APIs](/notes/_backend-apis-hono-sst)
 - Statement：[SQL 核心概念](/notes/core-sql-concepts)
 - Identity、membership，以及那一行：[用 Hono、Better Auth、Drizzle 與 Postgres RLS 打造 Multi-Tenant 後端](/notes/multi-tenant-backend-drizzle-hono-better-auth)

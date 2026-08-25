@@ -1,0 +1,453 @@
+---
+title: GraphQL in React and React Native
+description: The client selects fields; Next.js decides where data is fetched; React Native needs cache identity, resilient errors, and mobile-aware transport
+date: 2026-08-23
+category: frontend
+---
+
+GraphQL is not "REST, but with one endpoint." It moves part of the API contract into the client: the server defines what is possible; each screen declares exactly what it needs.
+
+This note is the client-side companion to [API Design in System Design](/notes/api-design-in-system-design). The rendering boundaries are [Understanding React in Depth](/notes/understanding-react-in-depth) and [Understanding React Native in Depth](/notes/understanding-react-native-in-depth). Authorization still belongs on the server: [Security in Next.js](/notes/security-in-next-js) and [Handling Permissions in TypeScript](/notes/handling-permissions-in-typescript).
+
+<br />
+
+---
+
+## 1. The contract
+
+GraphQL is a typed API query language and runtime. It is not a database, an ORM, or permission to let the browser run arbitrary SQL. A schema describes a graph of types and fields; resolvers decide how those fields are produced.
+
+<br />
+
+```graphql
+type Product {
+  id: ID!
+  name: String!
+  price: Money!
+  seller: User!
+}
+
+type Money {
+  amount: Int!
+  currency: String!
+}
+
+type Query {
+  product(id: ID!): Product
+}
+```
+
+<br />
+
+The client names the response shape. A card asks for three fields. A detail screen asks for the seller too. Both use the same schema and endpoint.
+
+<br />
+
+```graphql
+query ProductCard($id: ID!) {
+  product(id: $id) {
+    id
+    name
+    price {
+      amount
+      currency
+    }
+  }
+}
+```
+
+<br />
+
+- **Schema:** the public contract. Tooling can validate operations before deployment and autocomplete every reachable field.
+- **Operation:** one named request written by the client. Its selection set is also the JSON response shape.
+- **Resolver:** server code for a field. It may read Postgres, call another service, return a constant, or combine all three.
+- **One endpoint:** usually `/graphql`. This removes URL proliferation; it does not remove HTTP, authentication, rate limits, or versioning decisions.
+- **No automatic efficiency:** selecting fewer JSON fields saves network bytes. The server can still make fifty database calls to produce them.
+
+REST exposes resource-shaped endpoints. GraphQL exposes a graph and lets a use case select a path through it. This helps when web, iOS, Android, and partner clients need different shapes. It is overhead when every client needs the same small CRUD response.
+
+<br />
+
+**Failure:** treating GraphQL as a database escape hatch. The resolver must still validate input, authorize access, constrain cost, and translate storage into the public schema.
+
+---
+
+## 2. Operations and fragments
+
+There are three operation types. A **query** reads, a **mutation** changes state, and a **subscription** keeps a stream open for pushed results. `query` and `mutation` normally travel as HTTP POST requests; subscriptions commonly use WebSocket or server-sent events, depending on the server.
+
+Put changing values in variables. Do not build operation strings with interpolation.
+
+<br />
+
+```graphql
+mutation RenameProduct($input: RenameProductInput!) {
+  renameProduct(input: $input) {
+    product {
+      id
+      name
+    }
+    userErrors {
+      field
+      message
+    }
+  }
+}
+```
+
+<br />
+
+```json
+{
+  "input": {
+    "id": "product_42",
+    "name": "Mechanical Pencil"
+  }
+}
+```
+
+<br />
+
+Variables keep the document stable for parsing, persisted-operation hashes, logging, and allowlists. The server validates variable types against the schema before a resolver runs.
+
+A fragment is a reusable selection set. More importantly, it lets a component own its data dependency instead of receiving an undocumented mega-object.
+
+<br />
+
+```graphql
+fragment ProductRow_product on Product {
+  id
+  name
+  price {
+    amount
+    currency
+  }
+}
+
+query ProductList {
+  products(first: 20) {
+    nodes {
+      ...ProductRow_product
+    }
+  }
+}
+```
+
+<br />
+
+- **Name every operation.** `query ProductList`, not anonymous `query`. Logs and traces then say which use case was slow.
+- **Colocate fragments with components.** The page composes them into an operation; the row owns the fields it renders.
+- **Generate types from operations.** Schema types describe every possible field. Operation types describe the fields actually selected.
+- **Do not share one global fragment.** `EverythingProduct` recreates over-fetching and couples unrelated screens.
+- **Do not interpolate input.** Variables separate the executable document from user-controlled values.
+
+<br />
+
+**Failure:** typing the response as the full schema `Product`. The operation did not fetch every `Product` field, so the type promises data that cannot exist.
+
+---
+
+## 3. Next.js: server first
+
+In the App Router, start with a Server Component. A public GraphQL endpoint does not require Apollo Client merely to render HTML. A small typed request helper keeps credentials on the server and sends only serialized data across the React Server Component boundary.
+
+<br />
+
+```ts
+type GraphQLResponse<T> = {
+  data?: T
+  errors?: Array<{ message: string; path?: Array<string | number> }>
+}
+
+export async function requestGraphQL<TData, TVariables>(
+  query: string,
+  variables: TVariables
+): Promise<TData> {
+  const response = await fetch(process.env.GRAPHQL_URL!, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${process.env.GRAPHQL_SERVICE_TOKEN}`,
+    },
+    body: JSON.stringify({ query, variables }),
+  })
+
+  if (!response.ok) throw new Error(`GraphQL HTTP ${response.status}`)
+
+  const result = (await response.json()) as GraphQLResponse<TData>
+  if (result.errors?.length || !result.data) {
+    throw new Error(result.errors?.[0]?.message ?? "Missing GraphQL data")
+  }
+  return result.data
+}
+```
+
+<br />
+
+```tsx
+type ProductPageData = {
+  product: { id: string; name: string } | null
+}
+
+export default async function ProductPage({
+  params,
+}: {
+  params: Promise<{ id: string }>
+}) {
+  const { id } = await params
+  const data = await requestGraphQL<ProductPageData, { id: string }>(
+    `query ProductPage($id: ID!) {
+      product(id: $id) { id name }
+    }`,
+    { id }
+  )
+
+  if (!data.product) return <p>Not found</p>
+  return <h1>{data.product.name}</h1>
+}
+```
+
+<br />
+
+This manual generic demonstrates the boundary; it does not prove the document matches the type. GraphQL Code Generator should read the schema and checked-in operations, then emit operation-specific result and variable types. Typed-document-node, generated SDK functions, or generated Apollo hooks all remove the handwritten assertion.
+
+Next.js 16 does not make every `fetch` durable by default. With Cache Components enabled, put shared public data behind a cached function; keep user-specific data dynamic unless the cache key deliberately includes identity.
+
+<br />
+
+```ts
+import { cacheLife, cacheTag } from "next/cache"
+
+async function getPublicProduct(id: string) {
+  "use cache"
+  cacheLife("minutes")
+  cacheTag(`product-${id}`)
+
+  return requestGraphQL<ProductPageData, { id: string }>(productQuery, { id })
+}
+```
+
+<br />
+
+- **Server Component:** best default for initial page data, SEO, secrets, and less client JavaScript.
+- **Client Component:** add a client GraphQL library when the browser owns live interaction, optimistic writes, polling, or a long-lived normalized cache.
+- **Route Handler / BFF:** useful when the browser must not know the upstream URL or token, or when the web app must compose several backends.
+- **Code generation:** run it in CI and fail when an operation no longer validates against the schema.
+- **Cache scope:** cache public catalog data broadly; do not place an authorization-bearing response in a shared cache by accident.
+
+<br />
+
+**Failure:** wrapping the whole App Router in Apollo because the page contains GraphQL. Server-rendered, read-once data needs a request, not automatically a browser cache.
+
+---
+
+## 4. Pick one cache owner
+
+The library decision is mostly a cache decision.
+
+- **`fetch` or `graphql-request`:** small transport layer, good for Server Components and simple calls. Pair with generated types.
+- **TanStack Query:** key-based server-state cache. Works well when GraphQL is only the transport and the team already models invalidation with query keys.
+- **urql:** smaller GraphQL-focused client with exchange-based behavior; choose document caching or normalized Graphcache.
+- **Apollo Client:** batteries-included normalized cache, links, optimistic writes, pagination policies, subscriptions, and broad ecosystem.
+- **Relay:** strongest fragment colocation and compiler discipline; highest convention cost; excellent for large graph-heavy products.
+
+A normalized cache stores entities by identity, often `Product:42`, rather than storing one opaque response per request. If a mutation returns `Product { id name }`, every mounted view reading that entity can see the new name.
+
+TanStack Query usually stores each operation under a key such as `["product", id]`. It does not infer that a product inside `["products"]` is the same object as `["product", id]`; invalidate or update both keys.
+
+In Next.js there may be a server cache and a browser cache:
+
+<br />
+
+```text
+request
+  ├── Next.js server cache ── GraphQL API
+  └── Apollo browser cache ── BFF / GraphQL API
+```
+
+<br />
+
+Two caches are valid when they own different lifetimes. They are dangerous when both claim the same interactive data and only one is invalidated after a mutation.
+
+- **RSC-owned path:** mutate on the server, invalidate the Next.js cache tag, and refresh the route.
+- **Apollo-owned path:** mutate through Apollo, return changed entity IDs and fields, then update or evict the normalized cache.
+- **TanStack-owned path:** invalidate precise query keys after success, or write the mutation result into them.
+- **Hydration:** if server data seeds a client cache, define who owns the next refresh and avoid an immediate duplicate request.
+
+<br />
+
+**Failure:** a Server Action updates a product and calls `updateTag`, while Apollo keeps rendering its stale browser entity. The invalidated cache is not the cache on screen.
+
+---
+
+## 5. React Native: design for an unreliable network
+
+React Native has no Server Components rendering the first screen from a trusted server. The app normally carries a client cache, reads a token from secure storage, and talks directly to the GraphQL API or a mobile BFF.
+
+Apollo is common because normalized identity maps naturally to navigation: a list writes `Product:42`; the detail screen can render that same entity immediately and refresh it in the background.
+
+<br />
+
+```tsx
+import {
+  ApolloClient,
+  ApolloLink,
+  HttpLink,
+  InMemoryCache,
+} from "@apollo/client"
+import { SetContextLink } from "@apollo/client/link/context"
+
+const authLink = new SetContextLink(async (prevContext) => {
+  const token = await readAccessTokenFromSecureStorage()
+
+  return {
+    headers: {
+      ...prevContext.headers,
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+    },
+  }
+})
+
+export const client = new ApolloClient({
+  link: ApolloLink.from([
+    authLink,
+    new HttpLink({ uri: "https://api.example.com/graphql" }),
+  ]),
+  cache: new InMemoryCache(),
+})
+```
+
+<br />
+
+The exact link API depends on the Apollo version. The architecture does not: token lookup belongs in the transport chain, not repeated in every screen. Keep refresh-token coordination in one place so ten requests do not trigger ten refreshes.
+
+Optimistic UI hides round-trip latency. It is a prediction, so it must contain the same cache identity as the real result and must be reversible.
+
+<br />
+
+```tsx
+renameProduct({
+  variables: { input: { id: product.id, name } },
+  optimisticResponse: {
+    renameProduct: {
+      __typename: "RenameProductPayload",
+      product: {
+        __typename: "Product",
+        id: product.id,
+        name,
+      },
+      userErrors: [],
+    },
+  },
+})
+```
+
+<br />
+
+- **Secure tokens:** use Keychain/Keystore-backed storage, not AsyncStorage for long-lived credentials.
+- **Offline:** persistence is not an offline strategy by itself. Define queued mutations, conflict resolution, retry limits, and what "fresh" means.
+- **App lifecycle:** pause wasteful polling and reconnect subscriptions when the app returns to the foreground.
+- **Subscriptions:** use `graphql-ws` or the server's supported protocol; split operations by type and implement reconnect with backoff.
+- **Persisted operations / APQ:** send a hash instead of the full document after registration. This cuts repeated bytes and can become a server allowlist.
+- **Uploads:** GraphQL multipart upload is not part of the core spec. A signed object-storage upload is usually more portable and observable.
+
+<br />
+
+**Failure:** retrying every failed mutation whenever connectivity returns. A non-idempotent charge or "create order" can run twice; use idempotency keys and an explicit queue policy.
+
+---
+
+## 6. Errors are data
+
+GraphQL separates transport failure from execution failure. A server can return HTTP `200` with both `data` and `errors`: for example, `product` survives while `product.reviews` is `null` and its timeout appears in `errors` with the path `["product", "reviews"]`.
+
+Do not reduce this to `response.ok`. HTTP status answers whether the transport and request envelope worked. The GraphQL body answers what executed.
+
+Nullability decides how far a field error travels. If `reviews` is nullable, it becomes `null` and `product` survives. If `reviews` is non-null, the error bubbles to the nearest nullable parent. A chain of `!` can turn one unavailable leaf into a null page.
+
+Apollo's `errorPolicy` makes the UI decision explicit:
+
+- **`none`:** reject GraphQL errors and omit partial data from the normal result. Good when partial data is unsafe or meaningless.
+- **`all`:** expose data and errors together. Good for resilient screens that can render the product while reviews fail.
+- **`ignore`:** expose data and suppress GraphQL errors. Use sparingly; observability still needs the error.
+
+Expected domain failures often belong in the schema as typed payload data: a mutation payload can return `product` plus `userErrors { code field message }`. "Name is already taken" can render beside a form field. Unexpected resolver crashes belong in `errors`, with internal details masked from clients and preserved in server logs.
+
+- Log operation name, request ID, error path, and safe error code.
+- Never send stack traces, SQL, tokens, or internal service names to the app.
+- Design nullability around real failure boundaries, not the hope that every dependency is always available.
+- Render errors at the smallest useful boundary: reviews failed, not necessarily the entire product page.
+
+<br />
+
+**Failure:** `if (!result.data) showErrorScreen()`. Partial data may be the intended availability model, and a single nullable field should not erase the rest of the screen.
+
+---
+
+## 7. Identity and pagination
+
+Normalized caching depends on stable identity. Apollo's default convention is `__typename` plus `id`. Query `Product:42` from a list, a search result, and a detail view; they become references to one entity.
+
+Code generation or the client can add `__typename`, but the API still needs a stable key. If a type uses `sku`, configure a type policy. If it has no identity, the cache may embed and replace it as value data.
+
+A mutation should return the changed object with its key and every field needed to update visible UI. Creation and deletion usually need an explicit list policy because the cache cannot infer which filtered connections should gain or lose a node.
+
+Offset pagination is simple but drifts when rows are inserted before the current offset. Cursor pagination anchors the next page to an item and behaves better for changing feeds.
+
+<br />
+
+```graphql
+query ProductFeed($first: Int!, $after: String) {
+  products(first: $first, after: $after) {
+    edges {
+      cursor
+      node {
+        id
+        name
+      }
+    }
+    pageInfo {
+      endCursor
+      hasNextPage
+    }
+  }
+}
+```
+
+<br />
+
+The Relay connection shape is a useful convention even without Relay. `fetchMore` obtains the next connection; a cache field policy merges edges and deduplicates nodes. The merge function must include filter and sort arguments in the cache key, or "red shirts" and "blue shirts" become one list.
+
+- Use opaque cursors. Clients should pass them back, not parse database IDs or timestamps out of them.
+- Return `pageInfo` from the server. The client should not guess `hasNextPage` from page length.
+- Deduplicate by stable node identity when merging.
+- Reset the connection when filters or sort order change.
+- Keep scroll position and network state separate; pagination data is not view state.
+
+<br />
+
+**Failure:** fetching `name` without `id`, then expecting a mutation to update the existing row. The cache cannot know which anonymous product changed.
+
+---
+
+## 8. Cost, security, and when to say no
+
+The client controls a tree-shaped request. That flexibility creates server work that ordinary endpoint rate limits do not describe.
+
+- **N+1:** resolving `seller` once per product can create one database call per row. Batch and memoize reads per request with DataLoader or an equivalent repository layer.
+- **Complexity:** limit depth, aliases, list multipliers, and total estimated cost. A shallow query can still request a thousand expensive siblings.
+- **Pagination:** require bounded list arguments and enforce server-side maximums.
+- **Authorization:** check at the resolver/service/data layer for the requested object and action. Hiding a field or button in React is not authorization.
+- **Rate limits:** charge by identity and operation cost, not only raw request count.
+- **Timeouts:** propagate cancellation and deadlines to downstream calls.
+- **Observability:** record operation names and resolver timing. Avoid logging raw variables that may contain secrets or personal data.
+
+Introspection is valuable for tooling. Disabling public introspection in production can reduce casual schema discovery, but it is not a security boundary: clients already contain operation documents, and an unauthorized field must remain unauthorized even when its name is known. A schema registry plus persisted-operation allowlist is a stronger production control.
+
+GraphQL over POST also loses the default CDN semantics of cacheable REST GET URLs. Persisted operations over GET, a response cache aware of variables and identity, or a BFF can recover caching — with more machinery and careful invalidation.
+
+Choose GraphQL when several clients need overlapping but different data shapes, the domain is genuinely graph-shaped, schema tooling has leverage, and the team will operate the gateway. Prefer REST or typed RPC when the API is small, use cases map cleanly to endpoints, HTTP caching matters more than selection flexibility, or there is only one controlled client.
+
+<br />
+
+**Failure:** adopting GraphQL to remove endpoint design. The design work moves into schema boundaries, nullability, authorization, cost, cache identity, and operation lifecycle. It does not disappear.

@@ -187,6 +187,8 @@ retry for Suspense        ─┘
 
 <br />
 
+一次 click 通常占的是 **SyncLane**——urgent-input 这类工作在实现里的名字，不是应用代码会 import 的东西。
+
 一次很长的 **blocking** render 会占住 main thread：React 结束之前，browser 不能 paint、处理 click，或滚动。那正是 Fiber 与 lanes 要避免的冻结——但只对 opt-in 的 renders 成立。
 
 Concurrent rendering 是 **按 feature opt-in**。默认的 `setState` 仍是一次不中断的 transaction。`startTransition`、`useTransition`、`useDeferredValue`，以及相关的 Suspense 行为，才标记 React 可以中断的工作。
@@ -213,6 +215,10 @@ function handleChange(value: string) {
   })
 }
 ```
+
+<br />
+
+同一套 urgent/transition 拆分就是 counter 与 heavy chart demo：increment 保持 urgent；把 `setSeed` 包进 `startTransition`，chart 就可以 yield。
 
 <br />
 
@@ -421,6 +427,8 @@ useEffect(() => {
 - `useCallback` 对 function reference 做同样的事。
 - 这些是性能工具，不是语义保证。若 React 重新计算，结果仍然必须正确。
 - Parent 可以 render 而 child 不 render。Component 可以 render 而 DOM 不变。
+
+Runtime 决定一个 Fiber 能否 bail out。[React Compiler Internals](/notes/react-compiler-internals) 是 build-time 那一半：HIR、effects 与 reactive scopes 如何自动产生更细的 cache boundaries。
 
 调查性能时，把三个问题分开：
 

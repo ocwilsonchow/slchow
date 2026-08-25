@@ -210,7 +210,7 @@ try {
 <br />
 
 - Extra fields — a `code`, an HTTP status, a `cause` — ride on the instance. A plain object `{ message, code }` cannot do that test after it has been thrown.
-- A string union on a result type is often better when the failure is a **return** value.
+- A string union on a result type is often better when the failure is a **return** value. That half is [TypeScript Error Handling](/notes/typescript-error-handling).
 - **Failure:** throwing a plain object. Once something is `throw`n, the prototype chain is the test that survives.
 
 ---
@@ -287,7 +287,7 @@ displayName(user) // "Ada"
 
 - React class components stored state on `this` and rebound event handlers by hand. Hooks moved that state onto the Fiber. New UI in this stack is a function. The rendering model is [Understanding React in Depth](/notes/understanding-react-in-depth).
 - A DTO that crosses the network is a type. `JSON.parse` returns a plain object. Methods hung on a `class User` will not be there, and `instanceof User` will be false.
-- A Hono handler is a function from context to response. Nest-style controller classes belong to a different stack. [Backend APIs with Hono](/notes/backend-apis-hono-sst) keeps routes as functions.
+- A Hono handler is a function from context to response. Nest-style controller classes belong to a different stack. [Backend APIs with Hono](/notes/_backend-apis-hono-sst) keeps routes as functions.
 - **Failure:** inventing a class hierarchy for data that will be JSON tomorrow.
 
 ---
@@ -352,7 +352,7 @@ When the question is whether to write one:
 
       - `catch` yields `unknown`. `instanceof` distinguishes a domain failure from a programmer error, and one domain failure from another.
       - Extra fields — a `code`, a status, a `cause` — ride on the instance. A plain `{ message, code }` cannot do that test after it has been thrown.
-      - A string union on a result type is often better when the failure is a **return** value. Once something is `throw`n, the prototype chain is the test that survives.
+      - A string union on a result type is often better when the failure is a **return** value. That half is [TypeScript Error Handling](/notes/typescript-error-handling). Once something is `throw`n, the prototype chain is the test that survives.
       - Most classes in a TypeScript program were not written there: `SyntaxError`, `Map`, `Response`, DOM nodes. Application code inherits that choice at the boundary.
 
     </AccordionContent>

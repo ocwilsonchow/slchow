@@ -2,11 +2,8 @@
 
 import { RootProvider } from "fumadocs-ui/provider/next"
 import { useLocale, useTranslations } from "next-intl"
-import { lazy, type ReactNode } from "react"
-
-const SiteSearchDialog = lazy(() =>
-  import("./search-dialog").then((m) => ({ default: m.SiteSearchDialog }))
-)
+import type { ReactNode } from "react"
+import { SiteSearchDialog } from "./search-dialog"
 
 export function SiteSearchProvider({ children }: { children: ReactNode }) {
   const locale = useLocale()
@@ -25,7 +22,6 @@ export function SiteSearchProvider({ children }: { children: ReactNode }) {
       }}
       search={{
         SearchDialog: SiteSearchDialog,
-        preload: false,
       }}
     >
       {children}

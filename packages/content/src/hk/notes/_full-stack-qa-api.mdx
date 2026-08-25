@@ -1,0 +1,265 @@
+---
+title: "Full-Stack Q&A: API Design"
+description: API Design 問題的口語長度答案
+category: full-stack
+---
+
+## API Design
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="api-restful">
+    <AccordionTrigger>1. 什麼讓一個 API 算 "RESTful"？實務中 teams 最常違反哪些 REST constraints？</AccordionTrigger>
+    <AccordionContent>
+
+      - REST 是 Fielding 的 constraints —— **client-server**、**stateless**、**cacheable**、**layered**、可選的 **code-on-demand**，以及 **uniform interface** —— 不是 JSON over HTTP 配名詞形狀的 URLs。
+      - Uniform interface 才是會咬人的那條：identify resources，透過 representations 操作它們，發 self-descriptive messages，用 hypermedia 驅動 application state。
+      - Teams 最常違反 **statelessness**（conversational server state）、**cacheability**（uncacheable GET，或帶 side effects 的 GET），以及 method semantics —— path 裡的動詞、RPC bodies、會寫的 GET（這是 **safety** 違規）。
+      - **HATEOAS** 在 internal product APIs 上是故意跳過的；這才是老實話。
+      - Production 預設是 resource-oriented 的 HTTP API：stateless，GET 是 safe 的地方用 cache headers，error envelope 保持一致。完整 hypermedia 不值得，除非 client 是 generic agent。
+      - **失敗：** 把 POST-everything 的 RPC 標成 "REST"，然後奇怪 retries、caches 與 gateways 行為不對。完整地圖：[System Design 裡的 API Design](/notes/api-design-in-system-design)。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="api-idempotent-methods">
+    <AccordionTrigger>2. 哪些 HTTP methods 是 idempotent，為什麼 idempotency 對 retry-safe 的 clients 重要？</AccordionTrigger>
+    <AccordionContent>
+
+      - **Idempotency** 是 method 對 server state 的效果：同一份 request 重複 N 次，留下的 resource 與做一次相同。Body 仍可以不同 —— 第二次 DELETE 可能在 204 之後回傳 404。
+      - **Safe** methods 是更嚴的子集：client 並沒有在請求一次 resource 變更。附帶的 logging 可以；會 create 一筆 order 的 GET 不行。
+      - Spec 上 GET、HEAD、PUT、DELETE、OPTIONS 與 TRACE 是 idempotent。POST 不是。PATCH 不要求是 —— 同一份 document 的 JSON Merge Patch 可以是；JSON Patch 對 `/-` 的 `add` 不是。
+      - Clients、proxies 與 meshes 會 retry。一次超時的 create-payment 沒有 idempotency 再 retry，就是雙扣。
+      - Production 預設是 GET cacheable 且沒有 side effects，PUT 與 DELETE 是真正的 replace 與 remove，從不假設沒有 idempotency key 的 POST 是 retry-safe。
+      - **失敗：** 會 append 到 collection 的 PUT，或會 decrement counter 的 DELETE —— 同一個 method 名，不是 idempotent。完整地圖：[System Design 裡的 API Design](/notes/api-design-in-system-design)。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="api-idempotency-keys">
+    <AccordionTrigger>3. POST endpoint 建立 payment 或 order 時，你會怎麼實作 idempotency keys？</AccordionTrigger>
+    <AccordionContent>
+
+      - **idempotency key** 是 write path 的一等公民。Client 為每次 user intent 生成一把 UUID，放在 `Idempotency-Key` 上送來。Server 把這把 key 與 canonical body 的 hash、status 與 payload 一起 persist，scoped 到 tenant 與 endpoint。
+      - 同一把 key 同一份 body 回傳存下來的 response，包括原來的 201。同一把 key 不同 body 是 **409**。Keys 大約二十四小時後過期。
+      - **Concurrency** 才是難處：在 tenant plus key 的 unique constraint 下 insert 一行 pending；輸的一方等，或拿 409。Row 還不存在就不要處理 payment。把 **同一把 key 傳給 provider**，persist 他們的 operation id，再 reconcile pending rows。
+      - Production 預設是 hash body，這樣 retried request 不能默默改 amount。
+      - **失敗：** 全域的 key namespace —— 兩個 tenants 複用一把 UUID，一方收到另一方的 receipt。Uniqueness 按 tenant 分區。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="api-status-codes">
+    <AccordionTrigger>4. 什麼時候回傳 200 vs 201 vs 204？400 vs 401 vs 403 vs 404 vs 409 vs 422 呢？</AccordionTrigger>
+    <AccordionContent>
+
+      - 選那個告訴 client 下一步做什麼的 code。**200** 是成功的 GET、PUT 或 PATCH，回傳一份 representation。**201** 表示 resource 被建立了 —— 通常是 POST，也可以是 PUT 到新 URL —— 並送 `Location`。**204** 是成功且沒有 body。
+      - **400** 是 malformed（壞 JSON、缺 header）。**415** 是 unsupported media type，不是泛用的 400。**401** 表示 server 不知道 client 是誰。**403** 表示知道了，但不允許。
+      - **404** 是未知 resource；private objects 仍用 404，以免洩漏存在。**409** 是與當前 state 衝突。**422** 是 well-formed JSON 但過不了 business validation。
+      - Production 預設是略顯無聊的 400/422 拆分，而不是 200 配 JSON 裡的 error flag。
+      - **失敗：** 用 401 表示 authorization 失敗；clients 於是清掉 session，把用戶彈去 login，而他們只是缺一個 permission。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="api-pagination">
+    <AccordionTrigger>5. 比較 offset pagination 與 cursor-based pagination。為什麼 offset 在大、頻繁寫入的 tables 上會退化？</AccordionTrigger>
+    <AccordionContent>
+
+      - **Offset** 是頁碼加 page size，通常 `OFFSET`/`LIMIT`。跳到第五十頁很容易；table 小、基本靜態時沒問題。
+      - **Cursor** 回傳最後看到那一行的 opaque token，再按 indexed sort tuple 如 `created_at` plus `id` 往後 seek。每一頁是 range scan，不是丟掉的前綴。
+      - Offset 在 **cost** 上退化 —— Postgres 仍要走過被 skip 的 rows —— 也在 **correctness** 上：inserts 與 deletes 會移動窗口，於是 client 看到 duplicates 或 skips。
+      - Production 預設是 feeds、search 與 audit logs 用 keyset cursors，只有頁碼就是產品的小 admin screens 才用 offset。
+      - **失敗：** 把 offset 塞進 cursor string，再稱之為 cursor pagination —— skip 的成本與被 skip 的 rows 都還在。完整地圖：[System Design 裡的 API Design](/notes/api-design-in-system-design)。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="api-error-format">
+    <AccordionTrigger>6. 設計一份一致的 error response format。見過 RFC 7807（Problem Details）嗎，會採用嗎？</AccordionTrigger>
+    <AccordionContent>
+
+      - 上 **RFC 9457 Problem Details**（它淘汰了 RFC 7807）：`type` 是穩定 URI，`title`，`status` 匹配 HTTP code，`detail` 是給人看的 instance message，`instance` 是這次 occurrence 的 URI —— 常常是 request id。Content type 是 `application/problem+json`。
+      - Validation 加一個 `errors` array，含 field、code 與 message。像 `order.already_paid` 這種自訂 `code` 放在 extension member 裡。
+      - Public 或 partner API 採用 9457。Internal 仍用同一份 shape，即使 `type` URIs 從沒在 public web 上註冊。
+      - Production 預設是從 request id 生成 `instance`，log 同一個 id，永遠不要把 stack traces 或 SQL 放進 `detail`。
+      - **失敗：** endpoints 有時回傳 Problem Details，有時回傳 `{ error: string }` —— clients 於是每個 route 都要 special-case。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="api-versioning">
+    <AccordionTrigger>7. 比較 API versioning 策略（URL path、header、query param）。什麼時候 versioning 真的必要，什麼時候 additive 變更就能避開？</AccordionTrigger>
+    <AccordionContent>
+
+      - 只有 contract 必須 **break** 才 version。**Additive** 變更 —— 新的 optional fields、新 endpoints、新 error codes —— 如果 clients 已經 ignore unknown members，就避開一次 version。
+      - **Path** versioning（`/v1/orders`）是 teams 最常 ship 的：logs 裡看得見、route 極簡單、cache-friendly 因為 URI 就是 cache key。代價是 URL 雜亂，以及一條長尾 `/v1`。
+      - **Header** versioning 走 `Accept`，更接近 HTTP semantics，paths 保持穩定；不送 `Vary` 的話 caches 會混版本。**Query parameter** 容易漏掉，看起來 optional，其實不是。
+      - Production 預設是 public HTTP APIs 用 path versions，v1 跑到 traffic 死掉，舊 contract 上放 compatibility tests。
+      - **失敗：** 為 additive fields 鑄造 `/v2`，然後維護兩套只差一個舊 client 本會 ignore 的 key 的 stacks。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="api-rate-limiting">
+    <AccordionTrigger>8. Rate-limiting algorithms 有何不同（fixed window、sliding window、token bucket）？429 response 該帶什麼？</AccordionTrigger>
+    <AccordionContent>
+
+      - **Fixed window** 按日曆 bucket 計數 requests。Redis 裡便宜 —— INCR plus EXPIRE —— 但邊界允許雙倍 burst。
+      - **Sliding window** 用加權上一個 bucket 或存 timestamps 來抹平；精度耗 memory。**Token bucket** 以穩定速率補 tokens 直到 cap，並 **允許有界 burst**。**Leaky bucket** 以固定速率排空 queued work，抹平 bursts 而不是放行。
+      - APIs 的 Production 預設是 token-bucket 形狀：sustained rate 加一小段給合法 retries 的 burst。
+      - **429** 應送 `Retry-After`，暴露 `X-RateLimit-Limit` / `Remaining` / `Reset`（或 IETF `RateLimit` fields），並用 Problem Details。Counter 按 API key 或 tenant scope，不只按 IP。
+      - **失敗：** B2B API 上全域 per-IP limit —— 一個公司 proxy 把後面每個用戶的 quota 用光，而且沒人拿到有用的 `Retry-After`。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="api-rest-graphql-trpc">
+    <AccordionTrigger>9. REST vs GraphQL vs tRPC/RPC：各給一個它才是對的選擇的具體場景。</AccordionTrigger>
+    <AccordionContent>
+
+      - **REST** 是對的預設，當 API 是 public HTTP contract：多種語言、CDNs、partners、能 map 到 URLs 的 resources。Payments API —— `GET /invoices/id` 可 cache，Java client 不該需要 GraphQL runtime。
+      - **GraphQL** 是對的選擇，當一個 product BFF 服務 web 與 mobile，它們需要 nested graph 的不同切片。Dashboard 一次 query 載入 project、members 與 avatars —— 這才是要辯護的 case —— 然後自己扛 query cost、persisted queries，以及按 field 的 authz。
+      - **tRPC**（或任何 typed RPC）是對的選擇，當 client 與 server 是同一個 repo 裡的 TypeScript，API 不是 public product，贏的是 shared types。Internal admin app 打一個 Node API 就是這個 case。
+      - Production 預設是不把 tRPC 暴露給 third parties，也不用 GraphQL 開 partner API，除非 query shape 本身就是產品。
+      - **失敗：** GraphQL 當 public surface，query 無界，也沒有 persisted-query allowlist —— 一次 nested request 變成 N-plus-one，再變成 outage。完整地圖：[System Design 裡的 API Design](/notes/api-design-in-system-design)。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="api-n-plus-one">
+    <AccordionTrigger>10. Endpoint 回傳 nested resources 時，怎麼避免 N+1 queries？Embed vs. link related resources —— tradeoffs？</AccordionTrigger>
+    <AccordionContent>
+
+      - **N-plus-one** 是 parent list 一次 query，然後每一行 nested data 再一次 query。避免它：children 一次載入：`WHERE order_id IN (...)`，cardinality 安全時 join，或 DataLoader-style batch，讓 loop-in-code 仍塌成每種 resource type 一條 SQL statement。
+      - **Embed** related resources 以減少 client round trips —— 小、總是需要的 relations 的預設。**Link**（`customer_url` 或 `relationships`）當 child 很大、optional，或有不同的 cache lifetime。JSON:API-style `include` 讓 caller 自己選。
+      - Production 預設是 cap 能 embed 的東西，永遠不要 embed 無界 collection，例如一個 order 的全部 events。
+      - **失敗：** join 把 rows 乘開 —— 一筆 order 帶 200 條 line items，再被 customer join 複製一遍 —— 然後在 memory 裡 mapping，稱之為一次 query，同時分配一份巨大的 result set。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="api-auth-s2s">
+    <AccordionTrigger>11. 比較 server-to-server APIs 的 API keys、OAuth 2.0 client credentials 與 JWT bearer tokens。</AccordionTrigger>
+    <AccordionContent>
+
+      - **API keys** 是每次 call 上的 shared secret。好發，也好搞錯：long-lived、常被 log、rotate 很痛、沒有 standard scopes。適合簡單的 partner integration 或 webhook receiver。只存 hash，綁到 tenant，支援兩把 active keys。
+      - **OAuth 2.0 client credentials** 是一種 **grant**，不是 token format。Client 用 `client_id` 與 `client_secret` authenticate，拿到 short-lived access token —— 常常是 JWT —— server 強制 scopes。Caller 是另一家公司時，這就是 Production 預設。
+      - **JWT bearer** token 是 **format**：signed claims，resource server 用 JWKS 本地驗證 —— signature、issuer、audience、expiry、明確的 algorithm allowlist。Revocation 是弱點，除非 tokens 短，或保一份 denylist。Config file 裡的 static JWT 是另一種更糟的 pattern。
+      - **失敗：** query string 裡的 static API key —— 它會進 access logs 與 browser history —— 或一把 24-hour JWT，service account 洩漏後沒有 revoke path。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="api-webhooks">
+    <AccordionTrigger>12. 設計一套 webhook delivery 系統：signing、帶 backoff 的 retries、ordering guarantees，以及 idempotent receivers。</AccordionTrigger>
+    <AccordionContent>
+
+      - Webhooks 按 **at-least-once** 投遞 signed events 來設計。每個 event 一把穩定的 `event_id`。用 HMAC-SHA256 簽 `timestamp + body`。過期 timestamp 只 **收窄 replay window**；durable 的 `event_id` dedup 處理被 replay 的投遞。
+      - Retries 用帶 jitter 的 **exponential backoff**。Retry timeouts、**408**、**429**（遵守 `Retry-After`），以及可 retry 的 5xx，預算用盡後停下，落入 dead-letter queue。不承諾 global ordering；order 重要就按 resource id 分區。
+      - Receiver 應按 `event_id` upsert，把 duplicates 當成功。Production 預設還要守 outbound worker：用戶提供的 URLs 是 SSRF 風險，所以擋住 private CIDRs，並要求 HTTPS。
+      - **失敗：** handler 已經回傳 200，worker 讀 response 超時又 retry —— 沒有 idempotent receivers，結果是 double-provision。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="api-long-running">
+    <AccordionTrigger>13. 怎麼透過 HTTP 暴露一個 long-running operation（例如生成 report）？比較 202 + status polling vs. webhooks vs. WebSockets。</AccordionTrigger>
+    <AccordionContent>
+
+      - 要花幾分鐘的 report 不該佔著 HTTP socket。Accept 這份 job，persist 一條 operation record，回傳 **202**，`Location` 指向 `/operations/id`。GET 回傳 `pending`、`running`、`succeeded` 或 `failed`，做完再加 result URL。
+      - **Webhook** 更好，當 caller 是另一台能暴露 HTTPS endpoint 的 server。**WebSockets**（或 SSE）給想要 progress percent 的 human UI —— 它們加上 connection state，不該是唯一的完成路徑。
+      - Production 預設是 202 plus polling 作為 source of truth，optional webhook，dashboard 用 SSE。
+      - **失敗：** 同步 POST 坐在 60 秒 gateway timeout 上 —— client 再 retry，server enqueue 兩次，沒人有 operation id 可查。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="api-put-patch">
+    <AccordionTrigger>14. PUT vs PATCH：語義差在哪，JSON Patch 與 JSON Merge Patch 又差在哪？</AccordionTrigger>
+    <AccordionContent>
+
+      - **PUT** 替換整個 resource。Body 是新的完整 representation；省略的 fields 沒了。這就是 PUT 是 idempotent 的原因。**PATCH** 套一份 delta，不要求 idempotent。
+      - **JSON Patch**（RFC 6902）是瞄準 JSON pointer 的 operations array —— 很強，也很容易 `remove` 錯 path。**JSON Merge Patch**（RFC 7396）是一份 partial object：出現的 keys overwrite，`null` 刪除，省略的 keys 留下；arrays 整份替換。簡單 resource APIs 的 Production 預設是 Merge Patch，因為人讀得懂。
+      - Production 預設是 PUT 與 PATCH 都要求帶 ETag 的 `If-Match`，這樣兩個 tabs 不會 last-write-win。
+      - **失敗：** 文檔寫 merge semantics，實作卻是 PUT replacement —— 一份 partial body 然後默默 **清掉** 省略的 fields。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="api-conditional">
+    <AccordionTrigger>15. ETag、Last-Modified 與 Cache-Control 如何啟用 conditional requests 並省頻寬？</AccordionTrigger>
+    <AccordionContent>
+
+      - **ETag** 是 representation 的 opaque version。GET 時 client 送 `If-None-Match`，可能拿到沒有 body 的 **304**。Writes 上不匹配的 `If-Match` 回傳 **412**。同一對 headers 同時給 optimistic concurrency 和省頻寬。
+      - **Last-Modified** plus `If-Modified-Since` 更弱：timestamp 粒度會漏掉同一秒裡的兩次 updates，clock skew 讓它脆。ETag 才是真正的 validator。
+      - **Cache-Control** 告訴 intermediaries 可以存什麼：`max-age`，`private` 以免 CDN 把一個用戶的 data 端給另一個，secrets 用 `no-store`。`must-revalidate` 表示 stale response 必須成功 revalidate 才能 reuse —— 不是特指「發一次 conditional GET」。
+      - Production 預設是 **strong** ETag 只在 equal tags 意味著 byte-identical representations 時用。JSON shape 會變的話，光 row version 不夠。否則送 weak validator。
+      - **失敗：** PUT path 上的 weak ETag，或在 tenant-scoped response 上送 `Cache-Control: public` —— CDN 於是跨 tenants 洩漏 data。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="api-file-transfer">
+    <AccordionTrigger>16. 你會怎麼設計 API 裡的 file upload/download —— multipart uploads vs. presigned S3 URLs？5MB vs 5GB 有什麼變化？</AccordionTrigger>
+    <AccordionContent>
+
+      - 大約 **5MB** 時，如果 bytes 需要檢查 —— virus scan、EXIF strip、image transcode —— 且 app server 能 stream 到 object storage 而不 buffer 整份 file，`multipart/form-data` 上傳到 API 可以接受。API 不需要 bytes 時，更偏好一次 presigned PUT。
+      - **5GB** 時，app server 絕不能 proxy 這個 object。用 S3 multipart upload 配 presigned part URLs 與 S3 的 **full-object checksums**，然後 **server-side** 驗證 size 與 checksum。Client 的 "complete" callback 不是 integrity 的證明。Multipart 上 `Content-MD5` 不是 full-object checksum。
+      - Download 是短命的 presigned GET，或 signed CDN URL，永遠不是 public bucket。API 做 authorize，再發一把幾分鐘後過期的 URL。
+      - **失敗：** 5GB upload 上 `fs.readFile` 或把 `req` buffer 進 memory —— process OOM。Stream 或 presign；allowlist content types；object 落地後再非同步 scan。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="api-multi-tenant">
+    <AccordionTrigger>17. Multi-tenant API 裡，tenant identity 該從哪來（subdomain、header、JWT claim），怎麼保證 cross-tenant requests 被拒絕？</AccordionTrigger>
+    <AccordionContent>
+
+      - Tenant identity 必須來自 client 無法偽造的東西：JWT claim 如 `tenant_id`，或已經綁到 tenant 的 session。**Subdomain** 是 routing hint —— 仍要 resolve 成 internal tenant id，並對照 token 檢查。
+      - Client 提供的 **header** 如 `X-Tenant-Id`，只適合已經過更強檢查的 platform admins 當 selector；對普通用戶是可 spoof 的。
+      - Handler 從 auth context 讀 tenant，永不從 body。每條 query 都帶這個 predicate。Postgres **RLS** 是後盾，少一個 `WHERE` 仍回傳零 rows —— 但前提是 runtime role **不是** table owner，沒有 `BYPASSRLS`，且設了 `FORCE ROW LEVEL SECURITY`。Tenant context 是 `SET LOCAL`。Cross-tenant path ids 回傳 404。隔離：[用 Hono、Better Auth、Drizzle 與 Postgres RLS 打造 Multi-Tenant 後端](/notes/multi-tenant-backend-drizzle-hono-better-auth)。
+      - **失敗：** endpoint 為方便在 JSON 裡接受 `tenant_id`，再加一個覆蓋 JWT 的 header。一次精心構造的 request，結果是 cross-tenant read。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="api-design-first">
+    <AccordionTrigger>18. Design-first（OpenAPI spec）vs code-first：tradeoffs，以及 contract testing 怎麼卡進來？</AccordionTrigger>
+    <AccordionContent>
+
+      - **Design-first** 表示 OpenAPI document 是 teams 寫 handlers 之前 review 的 contract。API 有多個 consumer teams、generated SDKs，或 partner program 時才對。代價是儀式感，以及 CI 不在 server 與 spec 不一致時失敗的 drift。
+      - **Code-first** 表示 implementation 是 source，OpenAPI 從 types emit。同一個 repo 裡的 internal API 更快；consumers 在程式碼存在之後才看到 contract，也容易洩漏 internals。
+      - **Contract testing** 卡在兩者中間：CI 裡用 spec schema-validate 真實 responses，mobile clients 再用 consumer-driven contracts（Pact），讓 provider 驗證 app 真正會送的東西。
+      - Production 預設是 public HTTP 走 design-first，tRPC-style 的 internal apps 走 code-first，永遠不要生成一份沒測過的 spec。
+      - **失敗：** 漂亮的 OpenAPI site，server 上週二卻回傳了另一份 JSON。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="api-evolve-clients">
+    <AccordionTrigger>19. 怎麼演進 API 而不打破可能永遠不 update 的現有 mobile clients？</AccordionTrigger>
+    <AccordionContent>
+
+      - 假設一部分 mobile clients 永遠不會 update。規則是 **additive change**：新的 optional fields、新 endpoints、舊 client 會 ignore 的新 error codes。永遠不要把 field name 複用成新含義，永遠不要改 type，永遠不要把曾經 optional 的 field 變成 required。
+      - Enums 是 footgun —— 舊 clients 會 crash 或丟掉 unknown values —— 所以 app 裡把 unknown members 當 ignore，只有舊 builds 能活下來時才加新 variants。
+      - 必須 break 時，加一個新 resource 或 path version，舊的留到 traffic 沒了。用 `Sunset` 與 `Deprecation` headers 宣告 deprecation。Feature flags 可以對舊 `app-version` headers 藏起新行為。
+      - Production 預設是一套 contract test suite，replay 舊 app versions 的 fixtures。
+      - **失敗：** 收緊 validation —— 拒絕 extra fields 或要求一個新 header —— 於是一份永不 update 的 install 立刻變成 outage，儘管這次變更看起來只是更嚴。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="api-design-audit-log">
+    <AccordionTrigger>20. Design exercise：一份 paginated、可 filter 的 audit-log API，給 multi-tenant healthcare SaaS，auditors 只能看見自己 tenant 的 data。</AccordionTrigger>
+    <AccordionContent>
+
+      - 這是 append-only、tenant-scoped 的 read API。每個 event immutable，每行有 `tenant_id`，auditors 以該 tenant 裡帶 `auditor` role 的用戶 authenticate，API 從不接受 client 自選的 tenant filter。對 log 的訪問本身也被 log。
+      - Shape：`GET /v1/audit-events`，keyset cursor 在 `(occurred_at, id)` 上，page size cap 100，indexed filters：`actor_id`、`action`、`resource_type`、`resource_id`、`from`、`to`。不提供 offset pages。單條 event 的 GET 仍強制 tenant。
+      - Authz：tenant 來自 JWT claim，role check，然後 RLS 當後盾，少一個 predicate 仍回傳 empty。Cross-tenant ids 回傳 404。隔離：[用 Hono、Better Auth、Drizzle 與 Postgres RLS 打造 Multi-Tenant 後端](/notes/multi-tenant-backend-drizzle-hono-better-auth)。
+      - **失敗：** 在熱的 events table 上用 offset；wide select 之後在 memory 裡 filter；寫會複製 audit payload 的 request logs；export endpoint 因為 `tenant_id` 取自 query 而 stream 了另一個 tenant。即使 super-admin 也拒絕這個 parameter，除非它是帶自己 audit trail 的獨立 break-glass service。
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>
+
+<br />

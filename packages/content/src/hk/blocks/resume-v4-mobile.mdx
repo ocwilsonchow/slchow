@@ -1,0 +1,97 @@
+---
+title: 履歷 — 流動端
+---
+
+## Wilson, Chow Sin Long
+
+**Mobile software engineer**，擁有 **5 年**經驗，將 React Native 與 Flutter 應用上架 Apple App Store 與 Google Play——從 Figma 做到上線。負責產品流程、原生執行緒效能，以及 crash-free sessions。覆蓋 **15+** 個正式產品。
+
+---
+
+## 工作經驗
+
+### Frontend Developer，Vioo Company Limited，2022 年 5 月至今
+
+擔任多個並行客戶產品的主要工程師：與設計及持份者釐清 UX，並負責 iOS 與 Android 流程，從 Figma 做到商店上架。
+
+- 將 React Native 與 Flutter 應用上架 Apple App Store 與 Google Play；與設計及產品合作，把每條流程做到上線。
+- 剖析長列表與全解析度圖片造成的 JS-thread 停頓；改用 **FlashList** + 列 memoization，以 **Reanimated** 在原生執行緒做轉場與手勢，並凍結非作用中分頁——RN Perf Monitor 維持 **55+ / 60 FPS**。
+- 在流動應用及其 API 上運行 **Sentry**；上線後診斷崩潰、裝置相容性與 API 瓶頸，維持 **99%** crash-free sessions。
+- Refresh tokens 存於 **SecureStore**（iOS Keychain／Android Keystore）——而非 AsyncStorage——以 Face ID／指紋解鎖工作階段；裝置端使用型別安全 **OpenAPI** REST 客戶端。
+- 以 **Vitest** 與 **Playwright**／**Cypress** 作為品質關卡；GitHub Actions 在上線前跑 lint、typecheck、測試與建置。
+- 以 **Cursor** 與 **Claude Code** 作為核心交付工作流——不只用來生成程式碼，也用來審查 diffs、追蹤生產問題，以及記錄可重複的步驟。
+- 透過結對編程、程式碼審查與指導，帶領暑期實習生與初級開發者交付正式 UI。
+
+## 精選項目
+
+### React Native 影相亭應用，2024
+
+- 負責影相亭應用，從設計與開發做到 Apple App Store 與 Google Play 上架。
+- 使用者自拍、載入畫布、以貼紙與畫筆編輯，再上傳並分享。
+- 以 **React Native Skia**、**React Native Reanimated** 與 gesture handlers 建立畫布；以 **react-native-vision-camera** 擷取影像。
+- 將 SVG 貼紙轉成 Skia SVG React 元件，支援畫布上 **縮放、旋轉、平移**。
+- 以 **Zustand** 管理狀態；選取保持 atomic，並對高頻更新做 debounce。
+- 以 **memoization** 與 context isolation 優化；畫布上超過 100 張貼紙與筆劃時，RN Perf Monitor 維持 **55+ FPS**。
+
+### React Native 學生應用，2023
+
+- 負責學生流程（課程目錄、預約、公告），從 Figma 做到 Apple App Store 與 Google Play 上架。
+- 上線後維持 **99%** crash-free sessions，以 **Sentry** 診斷崩潰、裝置相容性與 API 瓶頸。
+- 以 **Tanstack Query** 拉取資料，用 cache 與 staleTime 減少重複請求；客戶端狀態以 **Redux Toolkit** 管理。
+- 剖析後發現長列表與全解析度圖片卡住 JS thread，導致動態列表捲動卡頓；改用 **FlashList** + 列 memoization，快取／縮小動態列表圖片，並以 **Reanimated** 在原生執行緒做轉場與手勢。
+- 凍結非作用中分頁與已離開畫面，並延遲掛載，避免不必要的 re-render。
+- 以 Firebase Cloud Messaging deep links，把促銷與里程碑通知導向對應畫面。
+
+### React Native 會員平台，2024
+
+- 負責會員流程（電子會員卡、積分、優惠），從 Figma 做到 Apple App Store 與 Google Play 上架。
+- Refresh tokens 存於 **SecureStore**／Keychain；Face ID／指紋解鎖工作階段；以 **OpenAPI** 產生型別安全 **REST** 客戶端。
+- 上線後維持 **99%** crash-free sessions，以 **Sentry** 診斷崩潰、裝置相容性與 API 瓶頸。
+- 以 **FlashList** + 列 memoization 改善捲動卡頓；快取／縮小動態列表圖片；以 **Reanimated**／**Moti** 在原生執行緒做轉場；凍結非作用中分頁並延遲掛載。RN Perf Monitor 維持 **60fps**。
+- 以 Firebase Cloud Messaging deep links，把促銷與會員里程碑通知導向對應畫面。
+
+<br />
+
+---
+
+## 其他工作
+
+此外亦交付了餐廳忠誠度應用（React Native）、居家長者照護應用（Flutter）、活動／電商 storefronts（Next.js、Shopify **GraphQL**）、CMS 內容站點，以及醫療保健 AI 聊天／後台（Next.js）。
+
+<br />
+
+---
+
+## 技能
+
+- **流動端**：TypeScript、React Native、Expo、Flutter、FlashList、Reanimated、Moti、Skia、Gesture Handler、Unistyles、SecureStore、FCM
+- **UI**：React、Next.js、Tailwind CSS、Figma、Zustand、Redux、TanStack Query
+- **架構**：state modeling（server／local）、React composition、component APIs、OpenAPI clients、Storybook
+- **品質**：Vitest、Playwright、Cypress、Sentry、GitHub Actions
+- **工作流**：Cursor、Claude Code
+
+<br />
+
+---
+
+## 認證
+
+- AWS Certified Solutions Architect – Associate，2026
+- AWS Certified Cloud Practitioner，2025
+
+<br />
+
+---
+
+## 教育背景
+
+### University College London
+
+- MPharm 藥學（本科），2016 至 2020 年 — 一等榮譽學位
+- 從藥劑轉行至軟件開發。
+
+<br />
+
+---
+
+你亦可以在[這裡](/resume-mobile.pdf)下載我的履歷。

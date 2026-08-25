@@ -9,7 +9,7 @@ category: backend
 
 一個 production-grade 的服務需要三層彼此一致：**identity / membership**（Better Auth organization plugin）、**request context**（每個受保護的 Hono handler 都收到已驗證的 `userId` 與 `organizationId`，絕不能只靠 client 可控的 header），以及 **data boundary**（即使 application code 忘了 filter，PostgreSQL row-level security 也會拒絕跨 tenant 的 rows）。
 
-這篇 note 假設 typed stack 見 [用 Hono、Drizzle、Zod OpenAPI 與 SST 打造 Backend APIs](/notes/backend-apis-hono-sst)。這裡聚焦 **tenant isolation**。
+這篇 note 假設 typed stack 見 [用 Hono、Drizzle、Zod OpenAPI 與 SST 打造 Backend APIs](/notes/_backend-apis-hono-sst)。這裡聚焦 **tenant isolation**。
 
 <br />
 
@@ -518,7 +518,7 @@ src/
 
 - 從 shared schema、static roles，以及每個 tenant-owned table 上的 RLS 開始。
 - 當真實產品需求出現時，再加入 teams 或 dynamic access control。
-- Deploy、OpenAPI 與 Lambda 細節留在 [Backend APIs 筆記](/notes/backend-apis-hono-sst)；這篇 note 只談 isolation contract。
+- Deploy、OpenAPI 與 Lambda 細節留在 [Backend APIs 筆記](/notes/_backend-apis-hono-sst)；這篇 note 只談 isolation contract。
 
 Production 門檻很簡單：忘了 `WHERE` clause，絕不能變成跨 tenant 事故。
 

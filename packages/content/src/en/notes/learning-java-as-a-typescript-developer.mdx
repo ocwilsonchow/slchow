@@ -7,7 +7,7 @@ category: backend
 
 TypeScript erases types. **Java keeps them.** A duck-typed object that "has `id` and `email`" is a TypeScript habit. In Java it is not a type. The compiler and the runtime both want a named class, a record, or an interface. A **Spring Boot** controller with Bean Validation on a record body is the same instinct as a Zod-validated Hono route — the check lives in a type the JVM still knows, not in a schema you parse by hand.
 
-This note is the mapping used when reading a **Spring Boot 3** API as a **Hono** developer. Samples target **Java 21**: records, sealed types, pattern matching, virtual threads mentioned once. **JPA/Hibernate** and **Bean Validation** appear once, as the Drizzle and Zod cousins. It is not a rewrite of this site in Java. The typed Hono stack is [Backend APIs with Hono, Drizzle, Zod OpenAPI, and SST](/notes/backend-apis-hono-sst). The Python sibling, where the types are annotations until the HTTP boundary, is [Learning Python as a TypeScript Developer](/notes/learning-python-as-a-typescript-developer). The object model you already have is [TypeScript Classes and Runtime Identity](/notes/typescript-classes-and-runtime-identity).
+This note is the mapping used when reading a **Spring Boot 3** API as a **Hono** developer. Samples target **Java 21**: records, sealed types, pattern matching, virtual threads mentioned once. **JPA/Hibernate** and **Bean Validation** appear once, as the Drizzle and Zod cousins. It is not a rewrite of this site in Java. The typed Hono stack is [Backend APIs with Hono, Drizzle, Zod OpenAPI, and SST](/notes/_backend-apis-hono-sst). The Python sibling, where the types are annotations until the HTTP boundary, is [Learning Python as a TypeScript Developer](/notes/learning-python-as-a-typescript-developer). The Go sibling, where the types survive, interfaces are structural, and there is no container, is [Learning Go as a TypeScript Developer](/notes/learning-go-as-a-typescript-developer). The object model you already have is [TypeScript Classes and Runtime Identity](/notes/typescript-classes-and-runtime-identity).
 
 <br />
 
@@ -392,8 +392,9 @@ public interface UserRepository extends JpaRepository<UserEntity, String> {}
 Java is how **this JVM** types a value. Spring is how **this process** receives a request. Neither replaces authorization, SQL, or the session.
 
 - The interpreter sibling: [Learning Python as a TypeScript Developer](/notes/learning-python-as-a-typescript-developer)
+- The Go sibling: [Learning Go as a TypeScript Developer](/notes/learning-go-as-a-typescript-developer)
 - Runtime identity in TypeScript: [TypeScript Classes and Runtime Identity](/notes/typescript-classes-and-runtime-identity)
 - When JS runs: [Core JavaScript Concepts](/notes/core-javascript-concepts)
-- The Hono analog: [Backend APIs with Hono, Drizzle, Zod OpenAPI, and SST](/notes/backend-apis-hono-sst)
+- The Hono analog: [Backend APIs with Hono, Drizzle, Zod OpenAPI, and SST](/notes/_backend-apis-hono-sst)
 - The statement: [Core SQL Concepts](/notes/core-sql-concepts)
 - Identity, membership, and the row: [Building a Multi-Tenant Backend with Hono, Better Auth, Drizzle, and Postgres RLS](/notes/multi-tenant-backend-drizzle-hono-better-auth)

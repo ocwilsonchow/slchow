@@ -12,7 +12,7 @@ Full-stack **software engineer** with **5 years of experience** delivering **15+
 
 ### Software Developer, Vioo Company Limited, May 2022 – Present
 
-Primary engineer for concurrent client products, owning delivery from UX scoping through cloud deployment.
+Key developer for concurrent client products, owning delivery from UX scoping through cloud deployment.
 
 - Shipped and maintained **15+** React / React Native apps with high-fidelity Figma design, shared design systems, and Apple App Store / Google Play releases.
 - Migrated WordPress sites to Strapi / Sanity and Meilisearch / Algolia in a **Turborepo** on **SST** without interrupting publishing; cut load times by **80%**, search latency by **90%**, and achieved PageSpeed scores above **95**.
@@ -35,10 +35,10 @@ Primary engineer for concurrent client products, owning delivery from UX scoping
 Durable agent that empowers internal tools and workflows.
 
 - Built agent runs durable streams so clients could disconnect, reconnect, and resume without losing progress.
-- Built **Mastra workflows**, memory, schedules, tools, pause/resume, retries, sandboxing, and skills.
+- Built **Mastra workflows**, memory, schedules, tools, pause/resume, retries, sandboxing, and skills; **Langfuse** for observability.
+- Ran on **Hono**, **Better Auth**, **Postgres** with **Drizzle** ORM; **S3** for file storage; deployed to AWS ECS Fargate using **SST** as IaC.
 - **RAG** (ingestion, parsing, embedding, **Pinecone** query/reranking); also built an **SQL agent** for experimental data analysis.
 - Built a custom **@mentions-style** input component for attaching workspace files to messages.
-- Ran Hono + Better Auth on **ECS Fargate**, with Postgres, S3, and **Langfuse** for observability.
 
 ---
 
@@ -52,7 +52,7 @@ Healthcare and shopping assistant grounded in uploaded documents and Shopify sto
 - Built an admin form builder with conditional logic for dynamic questionnaires and ran those questionnaires in-thread; modeled with **XState** and **React Hook Form** / **Zod**.
 - Optimized expensive components with **memoization** and **useTransition** for heavy UI updates.
 - Used **TanStack Query** with server prefetch and client-side rehydration for data lists, and **TanStack Table** with pagination, filters, and sorting; stored table state in URL search parameters so lists stay shareable and bookmarkable.
-- Deployed on AWS with IaC for scalable, production-ready infrastructure.
+- Deployed to AWS **Lambda** (Hono API) and **OpenNext** (Nextjs) using **SST** as IaC.
 
 ---
 
@@ -94,7 +94,7 @@ Strapi, Meilisearch, and **Next.js** editorial platform in the WordPress-to-head
 
 ## Other Work
 
-Also shipped restaurant loyalty/membership apps (React Native), a homebound elderly care app (Flutter), campaign / e-commerce storefronts (Next.js, Shopify **GraphQL**), CMS content sites, and multiple RBAC admin systems.
+Also shipped restaurant loyalty/membership apps (React Native), a homebound elderly care app (Flutter), campaign / e-commerce storefronts (Next.js, Shopify **GraphQL**), CMS content sites, and multiple RBAC admin systems; Backend APIs (Node.js, Hono, Drizzle, Postgres)
 
 <br />
 
@@ -105,11 +105,11 @@ Also shipped restaurant loyalty/membership apps (React Native), a homebound elde
 - **Frontend**: TypeScript, React, Next.js, React Native, Tailwind CSS, shadcn/ui, Figma, Zustand, Redux, TipTap
 - **UI behavior**: TanStack Query, TanStack Form, React Hook Form, XState, TanStack Table, next-intl
 - **Architecture**: state modeling (URL / server / local), design systems, tokens, React composition, component APIs, routing, SSR/ISR, GraphQL, tRPC, OpenAPI, Storybook, Fumadocs
-- **Backend**: Node.js, Hono, Drizzle, Prisma, OpenAPI, tRPC, Postgres, DynamoDB, Better Auth
+- **Backend**: Node.js, Hono, NestJS, Drizzle, Prisma, OpenAPI, tRPC, Postgres, DynamoDB, Better Auth, Python FastAPI, websockets
 - **Auth & security**: OAuth 2.0 / OIDC, JWT, HttpOnly cookies, CORS, RBAC
-- **AI**: Mastra, Vercel AI SDK, LangChain, Pinecone, Strands, AWS Bedrock
+- **AI**: Mastra, Vercel AI SDK, LangChain, Pinecone, Strands, AWS Bedrock, Mem0, Langfuse
 - **AWS & DevOps**: SST, Terraform, Docker, GitHub Actions, AWS, Vercel, Cloudflare, Turborepo
-- **Quality**: Vitest, Playwright, Cypress, React Testing Library, Lighthouse, axe, Sentry
+- **QA**: Vitest, Playwright, Cypress, Lighthouse, axe, Sentry
 - **Mobile**: Expo, FlashList, Reanimated, Moti, Skia, Unistyles, FCM
 
 <br />

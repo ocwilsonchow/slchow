@@ -43,7 +43,7 @@ const Page = async ({ params }: Props) => {
         </Header.Column>
       </Header.Root>
       <div className="p-5">
-        <ListWorks locale={locale} limit={Infinity} showHeading={false} />
+        <ListWorks showHeading={false} />
       </div>
     </PageLayout>
   )

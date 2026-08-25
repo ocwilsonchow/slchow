@@ -1,3 +1,4 @@
+import { ChevronRightIcon, DownloadIcon } from "lucide-react"
 import type { Metadata } from "next"
 import { notFound } from "next/navigation"
 import type { Locale } from "next-intl"
@@ -6,14 +7,14 @@ import { RenderMdxBlockByPath } from "@/features/mdx/components/render-mdx-block
 import {
   isResumeVariant,
   publicResumeVariant,
+  type ResumeVariant,
   resumeVariantParams,
   resumeVariants,
 } from "@/features/resume/variants"
+import { Link } from "@/i18n/navigation"
 import { routing } from "@/i18n/routing"
 import { buildPageMetadata } from "@/lib/metadata"
 import { getMdxContent, getPageLocales } from "@/lib/source"
-import { Link } from "@/i18n/navigation"
-import { ChevronRightIcon, DownloadIcon } from "lucide-react"
 
 type Props = {
   params: Promise<{ locale: Locale; variant: string }>
@@ -53,8 +54,13 @@ const Page = async ({ params }: Props) => {
   if (!getMdxContent("blocks", slug, locale)) notFound()
 
   const t = await getTranslations({ locale, namespace: "resume" })
-  const currentPdfHref =
-    variant === "frontend" ? "/resume-frontend.pdf" : "/resume-full-stack.pdf"
+  const resumePdfHrefs = {
+    frontend: "/resume-frontend.pdf",
+    "full-stack": "/resume-full-stack.pdf",
+    ai: "/resume-ai.pdf",
+    mobile: "/resume-mobile.pdf",
+  } satisfies Record<ResumeVariant, string>
+  const currentPdfHref = resumePdfHrefs[variant]
   const otherVariant =
     variant === "frontend"
       ? { href: "/resume/full-stack" as const, key: "full-stack" as const }

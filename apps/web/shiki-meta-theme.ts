@@ -13,11 +13,7 @@ export const reactDocsDark = {
   },
   settings: [
     {
-      scope: [
-        "comment",
-        "punctuation.definition.comment",
-        "string.comment",
-      ],
+      scope: ["comment", "punctuation.definition.comment", "string.comment"],
       settings: { foreground: "#757575", fontStyle: "italic" },
     },
     {
@@ -43,11 +39,7 @@ export const reactDocsDark = {
       settings: { foreground: "#dfab5c" },
     },
     {
-      scope: [
-        "punctuation",
-        "meta.brace",
-        "meta.delimiter",
-      ],
+      scope: ["punctuation", "meta.brace", "meta.delimiter"],
       settings: { foreground: "#ffffff" },
     },
     {

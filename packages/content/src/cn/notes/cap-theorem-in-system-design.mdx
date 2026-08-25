@@ -1,0 +1,267 @@
+---
+title: System Design 里的 CAP Theorem
+description: 为什么你只能挑两个 —— partition 之下的 consistency vs availability，以及随之而来的设计
+date: 2026-08-25
+category: system-design
+---
+
+**CAP** 不是一张 trivia card。在 distributed system 里，partition tolerance 已经花掉了。面试问的是：replica 看不到最新那次 write 时，你是报错，还是把 stale 的数据端出去？那个答案决定后面的设计。
+
+这篇 note 依 [Hello Interview](https://www.youtube.com/watch?v=VdrEq0cODu4)。不能双卖的座位 inventory 见 [打造 Event-Driven 票务 Backend](/notes/building-an-event-driven-ticketing-backend)。这套 stack 上 strong consistency 住在哪见 [System Design 里的 Data Modeling](/notes/data-modeling-in-system-design)。Stale replicas 与 CDC 见 [System Design 里的 Caching](/notes/caching-in-system-design) 与 [System Design 里的 Message Queues](/notes/message-queues-in-system-design)。这篇 note 讲的是这笔 trade。
+
+<br />
+
+---
+
+## Pattern Map
+
+| Choice | During a partition | Reach for it when |
+| --- | --- | --- |
+| CP | 拒绝或等待，而不是端出 stale read | Double-booking、最后一件、钱 |
+| AP | 继续答；data 可能是 stale 的 | Profile、feed、catalog、search |
+| Mixed | 不同 paths 选不同边 | Booking CP，event CRUD AP |
+
+<br />
+
+---
+
+## 1. CAP 实际在说什么
+
+三个里只能拿两个。把这句话背出来不是面试。
+
+<br />
+
+- **Consistency** 表示每个 user 同一时刻看到同一份 data。在这个语境里那是 **strong consistency**：每一次 read 都反映最新那次 write。
+- **Availability** 表示每一次 request 都有 response —— 成功或不成功。Response 可以是 stale 的。它仍然必须存在。
+- **Partition tolerance** 表示 nodes 彼此说不上话时系统还在工作。一条断掉的 link、一个挂掉的 AZ、一台还没听到那次 write 的 replica。
+
+<br />
+
+**Failure:** 把 CAP 当成「随便挑两个」，然后端出一套 CA system。Distributed 的面试系统已经有 partitions。CA 是一台单机。
+
+<br />
+
+---
+
+## 2. 为什么 P 不是选项
+
+Non-functional requirements 从这里开始。先对齐 features，再对齐 qualities。第一个 quality 问题就是 CAP。
+
+<br />
+
+- 几乎每一场 system design 面试都是 **distributed** system。Nodes、replicas、regions。它们之间的网络会挂。P 已经花掉了。
+- 剩下的是 C versus A。这个产品要不要每个 user 同一时刻看到同一份 state，还是 request 可以继续用可能错一会儿的 data 来答？
+- 那个选择不是装饰。它决定你拿到的是 single writer、replicas、CDC、更高的 latency，还是一页 error 而不是一页内容。
+
+<br />
+
+**Failure:** 在 NFRs 里写「highly available and strongly consistent」，却从不说 replica 黑掉时你丢掉哪一个。
+
+<br />
+
+---
+
+## 3. Partition
+
+两台 servers。一台在 USA，一台在 Europe。User A 在 USA 那台改了公开 profile 的名字。Write 本该 replicate。然后 link 在 Europe 拿到新名字之前死了。User B 从 Europe 读。
+
+<br />
+
+```text
+User A writes name  →  USA
+                         |  replicate  →  Europe  →  User B reads
+                         ×  partition before replicate
+                         |
+                         decide: error (CP) or stale name (AP)
+```
+
+<br />
+
+- **CP.** 停止 serving。返回 error，或等到 replica 能证明它有最新那次 write。User B 看不到旧名字。User B 可能什么都看不到。
+- **AP.** 端出旧名字。系统还在。Data 是错的，直到 link 回来、replica 追上。
+- 这两边对立，因为 nodes 没法同意。你不能既保证最新那次 write，又继续从一台还没见到它的 node 作答。
+
+<br />
+
+**Failure:** 画了两个 regions，却从不说 replication 没完成时一次 read 做什么。那就是整条 theorem。
+
+<br />
+
+---
+
+## 4. 何时 stale 是灾难（CP）
+
+问：如果两个 users 看到不同的 state，产品会不会以一种你道不了歉的方式坏掉？
+
+<br />
+
+- **Tickets.** User A 拿走座位 6A。Partition 在 Europe 听到之前落地。User B 仍看到 6A 空着并订了。两个人来抢一个座位。票务 note 就是这条路径 —— [打造 Event-Driven 票务 Backend](/notes/building-an-event-driven-ticketing-backend)。
+- **Last unit.** 还剩一支牙刷。两笔 checkouts 都以为自己买到了。能超卖的 inventory 不是 inventory。
+- **Money.** 一本 order book、一笔 transfer、一只薄 float 的股票。Stale price 或 stale balance 不是「几秒 lag」。那是一笔错的 trade。
+
+<br />
+
+如果 stale 会是灾难，拒绝这次 read。Consistency over availability。
+
+<br />
+
+**Failure:** 转一个 spinner，读的仍是 stale replica，然后把它叫成 CP。等待只有在 response 不能撒谎时才算数。
+
+<br />
+
+---
+
+## 5. 何时 stale 没问题（AP）
+
+如果 stale 不是灾难，继续答。那是大多数产品。
+
+<br />
+
+- 滞后一分钟的 profile 名字。Europe 还没见到的一条 social post。Yelp listing 里落后一个 revision 的菜单项。Netflix title 的 description 还没到每个 region。
+- Availability 是 **default**。你伸手去拿 CP，是因为替代方案是一个座位两个主人，不是因为「consistency 听起来更 senior」。
+- Eventual consistency 仍是 consistency。系统会收敛。它不是「永远 inconsistent」。它是「在一段有界的窗口里是错的，然后对了」。
+
+<br />
+
+**Failure:** 因为背了 CAP 就给 feed 强上一台 single-node SQL box，一切都挑 C。
+
+<br />
+
+---
+
+## 6. 这个选择怎么长进设计里
+
+NFR 是一个字母。设计是你真正建出来的东西。
+
+<br />
+
+**你选了 CP。**
+
+<br />
+
+- 一个 **single writer**。一台发 atomic transactions 的 Postgres。大家都读同一台 instance，所以没什么要 propagate。Airline-ticket 面试的 default。
+- **Distributed transactions**，当两个 stores 必须同意 —— cache 与 database，或两个 services —— 于是对一个的 write 就是对另一个的 write。贵。如果一个 store 能拥有 truth，就避开它。
+- **更高的 latency。** Replicas 追上时的 spinners，或等到 quorum。Google Spanner。DynamoDB 的 **strong consistency** reads 可以，不是必须。NoSQL 不是「只能 AP」。
+
+<br />
+
+**你选了 AP。**
+
+<br />
+
+- **Read replicas.** Scale out。Propagation lag 是产品，不是 bug。CDC 按定义就是 eventually consistent —— [System Design 里的 Message Queues](/notes/message-queues-in-system-design)。
+- Cassandra。DynamoDB 的 default mode，跨 AZs。一份可能错的 cache —— [System Design 里的 Caching](/notes/caching-in-system-design)。
+- User 总能拿到一页。那一页可能是上一分钟的页。
+
+<br />
+
+**Failure:** 承诺 CP，然后在座位 row 前面放一个 cache-aside Redis。或承诺 AP，却堵住每一次 read 等到 replica 追上。
+
+<br />
+
+---
+
+## 7. 不同 paths，不同边
+
+CAP 是按 path 的，不是按产品的。Senior 面试会点名哪一条。
+
+<br />
+
+- **Ticketmaster.** 订座位是 CP —— 两个 users 不能同时拥有 6A。创建或更新 event description 是 AP —— 人们总能看到 event，比某一行菜单绝对精确更重要。Search 与 browse 继续活着。
+- **Tinder.** Matching 是 CP —— 第二次 swipe 应该看到第一次已经发生，否则你不该显示 "It's a match." Profile photos 是 AP —— 几秒钟的上周照片没问题。
+- 说出来：search 与 profile 走 availability，把稀缺东西分出去的那次 write 走 consistency。
+
+<br />
+
+**Failure:** 因为 prompt 提到了 tickets 就把整套架构盖上 CP，然后让 event search 去等 inventory writer。
+
+<br />
+
+---
+
+## 8. Consistency 是一条光谱
+
+在 CAP 里，「consistency」指的是 **strong**。每一次 read 都反映最新那次 write。那不是你能点名的唯一一层。
+
+<br />
+
+- **Strong.** 所有 users，同一份 state，现在。CP 的那次 read。座位 6A 要么被拿走，要么没有。
+- **Causal.** 相关 events 保持顺序。一条 reply 不能出现在它所回复的 comment 之前。不是每个人都得已经看到每条 comment。没有人看到倒过来的 thread。
+- **Read-your-writes.** 刚存过的那个 user 必须看到自己的 update，否则他们会再点一次。Europe 的 User B 仍可以看见旧名字。Writer 不行。Sticky routing 到 primary，或在 POST 里把写进去的 entity 返回让 client merge。
+- **Eventual.** AP 的地板。Writes 停下来，replicas 收敛。下一次 read 并不被承诺能看到刚落地的那次 write。
+
+<br />
+
+在 path 上点名这一层，不是在公司上。
+
+<br />
+
+**Failure:** 说「我们是 eventually consistent」，然后让刚改了名字的那个人吃一惊。Europe 走 eventual。Writer 走 read-your-writes。
+
+<br />
+
+---
+
+## Recap Q&A
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="cap-what">
+    <AccordionTrigger>1. CAP 实际逼你选的是什么？</AccordionTrigger>
+    <AccordionContent>
+
+      - **C** 是 strong consistency：每一次 read 都反映最新那次 write。**A** 是每一次 request 都有 response，哪怕 stale。**P** 是撑过一次 network split。
+      - 在 distributed system 里 P 已经花掉了。面试是 replica 还没见到那次 write 时的 C versus A。
+      - CA 是一台单机。背「随便挑两个」却不在 partition 之下丢掉一个，是 junior 的信号。
+      - **Failure:** 列出「highly available and strongly consistent」，从不说 link 挂了时哪一个死。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="cap-stale">
+    <AccordionTrigger>2. 怎么决定 CP vs AP？</AccordionTrigger>
+    <AccordionContent>
+
+      - 问：如果两个 users 看到不同的 state，会不会是灾难？
+      - **CP** 当 stale 意味着一个座位两个主人、最后一件卖了两次、或一笔错的 trade。拒绝或等待。不要撒谎。
+      - **AP** 当 stale 是滞后的名字、post、菜单、或 catalog。继续答。那是大多数产品。Availability 是 default。
+      - **Failure:** 给 feed 挑 C，或给 inventory 挑 A，因为那个字母听起来更 senior。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="cap-design">
+    <AccordionTrigger>3. 这个选择会改设计里的什么？</AccordionTrigger>
+    <AccordionContent>
+
+      - **CP：** 一个 single writer（Postgres、atomic transactions），或两个 stores 必须同意时的 distributed transaction，或 quorum 追上时更高的 latency。Spanner。DynamoDB 的 strong-consistency reads 可以。
+      - **AP：** read replicas、CDC、Cassandra、DynamoDB default。一份可能错的 cache。那一页可能是上一分钟的页。
+      - NFR 是一个字母。设计是 writer、replica，以及它们不同意时一次 read 返回什么。
+      - **Failure:** 承诺 CP 却在座位 row 上 cache-aside，或承诺 AP 却堵住每一次 read 等 replica lag。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="cap-mixed">
+    <AccordionTrigger>4. 为什么 CAP 不是整件产品一个字母？</AccordionTrigger>
+    <AccordionContent>
+
+      - 不同 paths 选不同边。Ticketmaster：booking 是 CP，event CRUD 与 search 是 AP。Tinder：matching 是 CP，profile photos 是 AP。
+      - 稀缺的 writes 需要同一份 state。Browse 与 catalog 需要继续活着。
+      - 说哪条 path 是哪一边。不要把架构盖成一个 stamp。
+      - **Failure:** 因为 prompt 提到了 tickets，就让 event search 去等 inventory writer。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="cap-spectrum">
+    <AccordionTrigger>5. 人们说的「consistency」除了 strong 还有什么？</AccordionTrigger>
+    <AccordionContent>
+
+      - 在 CAP 里，consistency 指的是 **strong**：每一次 read 都反映最新那次 write。
+      - **Causal：** 相关 events 保持顺序 —— reply 不能早于 comment。**Read-your-writes：** writer 看到自己的 update；其他 users 可以 lag。**Eventual：** replicas 收敛；下一次 read 不被承诺刚落地的那次 write。
+      - Eventual 是 AP 的地板，不是「永远 inconsistent」。在 path 上点名这一层。
+      - **Failure:** 对刚存过的那个人走 eventual，于是他们再点一次，你现在有两份。
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>

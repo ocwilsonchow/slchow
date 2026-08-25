@@ -1,0 +1,267 @@
+---
+title: CAP Theorem in System Design
+description: Why you pick two — consistency vs availability under a partition, and the design that follows
+date: 2026-08-25
+category: system-design
+---
+
+**CAP** is not a trivia card. In a distributed system, partition tolerance is already spent. The interview is: if a replica cannot see the latest write, do you error, or do you serve stale? That answer decides the rest of the design.
+
+This note follows [Hello Interview](https://www.youtube.com/watch?v=VdrEq0cODu4). Seat inventory that cannot double-sell is [Building an Event-Driven Ticketing Backend](/notes/building-an-event-driven-ticketing-backend). Where strong consistency lives on this stack is [Data Modeling in System Design](/notes/data-modeling-in-system-design). Stale replicas and CDC are [Caching in System Design](/notes/caching-in-system-design) and [Message Queues in System Design](/notes/message-queues-in-system-design). This note is the trade.
+
+<br />
+
+---
+
+## Pattern Map
+
+| Choice | During a partition | Reach for it when |
+| --- | --- | --- |
+| CP | Refuse or wait rather than serve a stale read | Double-booking, last unit, money |
+| AP | Keep answering; data may be stale | Profile, feed, catalog, search |
+| Mixed | Different paths pick different sides | Booking CP, event CRUD AP |
+
+<br />
+
+---
+
+## 1. What CAP actually says
+
+You get two of three. Reciting that is not the interview.
+
+<br />
+
+- **Consistency** means every user sees the same data at the same time. In this context that is **strong consistency**: every read reflects the latest write.
+- **Availability** means every request gets a response — success or not. The response may be stale. It still has to exist.
+- **Partition tolerance** means the system still works when nodes cannot talk to each other. A dropped link, a dead AZ, a replica that has not heard the write.
+
+<br />
+
+**Failure:** treating CAP as "pick any two" and offering a CA system. A distributed interview system already has partitions. CA is a single box.
+
+<br />
+
+---
+
+## 2. Why P is not a choice
+
+Non-functional requirements start here. Align on features, then on qualities. The first quality question is CAP.
+
+<br />
+
+- Almost every system design interview is a **distributed** system. Nodes, replicas, regions. Networks fail between them. P is already spent.
+- What remains is C versus A. Does this product need every user to see the same state at the same time, or can a request keep answering with data that might be wrong for a while?
+- That choice is not decoration. It decides whether you get a single writer, replicas, CDC, higher latency, or an error instead of a page.
+
+<br />
+
+**Failure:** listing "highly available and strongly consistent" in the NFRs and never saying which one you drop when the replica is dark.
+
+<br />
+
+---
+
+## 3. The partition
+
+Two servers. One in the USA, one in Europe. User A updates a public profile name on the USA box. The write is supposed to replicate. Then the link dies before Europe has the new name. User B reads from Europe.
+
+<br />
+
+```text
+User A writes name  →  USA
+                         |  replicate  →  Europe  →  User B reads
+                         ×  partition before replicate
+                         |
+                         decide: error (CP) or stale name (AP)
+```
+
+<br />
+
+- **CP.** Stop serving. Return an error, or wait until the replica can prove it has the latest write. User B does not see the old name. User B may see nothing.
+- **AP.** Serve the old name. The system stayed up. The data is wrong until the link returns and the replica catches up.
+- Those two are at odds because the nodes cannot agree. You cannot both guarantee the latest write and keep answering from a node that has not seen it.
+
+<br />
+
+**Failure:** drawing two regions and never saying what a read does when replication has not finished. That is the whole theorem.
+
+<br />
+
+---
+
+## 4. When stale is catastrophic (CP)
+
+Ask: if two users saw different state, would the product break in a way you cannot apologize for?
+
+<br />
+
+- **Tickets.** User A takes seat 6A. The partition lands before Europe hears it. User B still sees 6A free and books it. Two people arrive for one seat. The ticketing note is this path — [Building an Event-Driven Ticketing Backend](/notes/building-an-event-driven-ticketing-backend).
+- **Last unit.** One toothbrush left. Two checkouts both believe they bought it. Inventory that can oversell is not inventory.
+- **Money.** An order book, a transfer, a stock with a thin float. Stale price or stale balance is not "a few seconds of lag." It is the wrong trade.
+
+<br />
+
+If stale would be catastrophic, refuse the read. Consistency over availability.
+
+<br />
+
+**Failure:** showing a spinner that still reads the stale replica, then calling it CP. Waiting only counts if the response cannot lie.
+
+<br />
+
+---
+
+## 5. When stale is fine (AP)
+
+If stale would not be catastrophic, keep answering. That is most products.
+
+<br />
+
+- A profile name that lags for a minute. A social post that Europe has not seen yet. A Yelp listing whose menu item is one revision behind. A Netflix title whose description has not reached every region.
+- Availability is the **default**. You reach for CP when the alternative is two owners of one seat, not because "consistency sounds senior."
+- Eventual consistency is still consistency. The system converges. It is not "inconsistent forever." It is "wrong for a bounded window, then right."
+
+<br />
+
+**Failure:** forcing a single-node SQL box onto a feed because you recited CAP and picked C for everything.
+
+<br />
+
+---
+
+## 6. How the choice shows up in the design
+
+The NFR is a letter. The design is what you actually build.
+
+<br />
+
+**You chose CP.**
+
+<br />
+
+- A **single writer**. One Postgres that issues atomic transactions. Everyone reads the same instance, so there is nothing to propagate. The airline-ticket interview default.
+- **Distributed transactions** when two stores must agree — cache and database, or two services — so a write to one is a write to both. Expensive. Avoid it if one store can own the truth.
+- **Higher latency.** Spinners while replicas catch up, or while a quorum is reached. Google Spanner. DynamoDB **strong consistency** reads are allowed, not required. NoSQL is not "AP only."
+
+<br />
+
+**You chose AP.**
+
+<br />
+
+- **Read replicas.** Scale out. Propagation lag is the product, not a bug. CDC is eventually consistent by definition — [Message Queues in System Design](/notes/message-queues-in-system-design).
+- Cassandra. DynamoDB in its default mode, across AZs. A cache that may be wrong — [Caching in System Design](/notes/caching-in-system-design).
+- The user always gets a page. The page may be last minute's page.
+
+<br />
+
+**Failure:** promising CP and then putting a cache-aside Redis in front of the seat row. Or promising AP and blocking every read until the replica is caught up.
+
+<br />
+
+---
+
+## 7. Different paths, different sides
+
+CAP is per path, not per product. A senior interview names which.
+
+<br />
+
+- **Ticketmaster.** Booking a seat is CP — two users must not own 6A. Creating or updating an event description is AP — better that people can always see the event than that one menu line is exact. Search and browse stay up.
+- **Tinder.** Matching is CP — the second swipe should see that the first already happened, or you do not show "It's a match." Profile photos are AP — last week's picture for a few seconds is fine.
+- Say it out loud: availability for search and profile, consistency for the write that assigns a scarce thing.
+
+<br />
+
+**Failure:** stamping the whole architecture CP because the prompt mentioned tickets, then making event search wait on the inventory writer.
+
+<br />
+
+---
+
+## 8. Consistency is a spectrum
+
+In CAP, "consistency" means **strong**. Every read reflects the latest write. That is not the only level you can name.
+
+<br />
+
+- **Strong.** All users, same state, now. The CP read. Seat 6A is taken or it is not.
+- **Causal.** Related events stay in order. A reply cannot appear before the comment it replies to. Not everyone has to see every comment yet. Nobody sees the thread inverted.
+- **Read-your-writes.** The user who just saved must see their own update, or they will click again. User B in Europe can still see the old name. The writer cannot. Sticky routing to the primary, or return the written entity in the POST and let the client merge.
+- **Eventual.** AP's floor. Writes stop, replicas converge. The next read is not promised to see the write that just landed.
+
+<br />
+
+Name the level on the path, not on the company.
+
+<br />
+
+**Failure:** saying "we're eventually consistent" and then surprising the person who just edited their name. Eventual for Europe. Read-your-writes for the writer.
+
+<br />
+
+---
+
+## Recap Q&A
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="cap-what">
+    <AccordionTrigger>1. What does CAP actually force you to choose?</AccordionTrigger>
+    <AccordionContent>
+
+      - **C** is strong consistency: every read reflects the latest write. **A** is a response to every request, even if stale. **P** is surviving a network split.
+      - In a distributed system P is already spent. The interview is C versus A when the replica has not seen the write.
+      - CA is a single box. Reciting "pick any two" without dropping one under a partition is the junior tell.
+      - **Failure:** listing "highly available and strongly consistent" and never saying which one dies when the link does.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="cap-stale">
+    <AccordionTrigger>2. How do you decide CP vs AP?</AccordionTrigger>
+    <AccordionContent>
+
+      - Ask: if two users saw different state, would it be catastrophic?
+      - **CP** when stale means two owners of one seat, a last unit sold twice, or the wrong trade. Refuse or wait. Do not lie.
+      - **AP** when stale is a lagged name, post, menu, or catalog. Keep answering. That is most products. Availability is the default.
+      - **Failure:** picking C for a feed, or A for inventory, because the letter sounded senior.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="cap-design">
+    <AccordionTrigger>3. What does the choice change in the design?</AccordionTrigger>
+    <AccordionContent>
+
+      - **CP:** a single writer (Postgres, atomic transactions), or a distributed transaction if two stores must agree, or higher latency while a quorum catches up. Spanner. DynamoDB strong-consistency reads are allowed.
+      - **AP:** read replicas, CDC, Cassandra, DynamoDB default. A cache that may be wrong. The page may be last minute's page.
+      - The NFR is a letter. The design is the writer, the replica, and what a read returns when they disagree.
+      - **Failure:** promising CP with cache-aside on the seat row, or promising AP and blocking every read on replica lag.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="cap-mixed">
+    <AccordionTrigger>4. Why isn't CAP one letter for the whole product?</AccordionTrigger>
+    <AccordionContent>
+
+      - Different paths pick different sides. Ticketmaster: booking is CP, event CRUD and search are AP. Tinder: matching is CP, profile photos are AP.
+      - Scarce writes need the same state. Browse and catalog need to stay up.
+      - Say which path is which. Do not CAP the architecture as one stamp.
+      - **Failure:** making event search wait on the inventory writer because the prompt mentioned tickets.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="cap-spectrum">
+    <AccordionTrigger>5. What do people mean by "consistency" besides strong?</AccordionTrigger>
+    <AccordionContent>
+
+      - In CAP, consistency means **strong**: every read reflects the latest write.
+      - **Causal:** related events stay in order — a reply cannot precede the comment. **Read-your-writes:** the writer sees their own update; other users may lag. **Eventual:** replicas converge; the next read is not promised the write that just landed.
+      - Eventual is AP's floor, not "inconsistent forever." Name the level on the path.
+      - **Failure:** eventual for the person who just saved, so they click again and you now have two.
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>

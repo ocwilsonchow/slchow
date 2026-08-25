@@ -1,0 +1,347 @@
+---
+title: TypeScript Error Handling
+description: throw 從 type 裡消失；Result 把 failure 放進 signature
+date: 2026-08-23
+category: typescript
+---
+
+`throw` 不在 return type 裡。Caller compile 過。Failure 仍然沒被處理。**Result** 把 failure 變成一個 value：success 或 error，兩者之一，寫在 signature。
+
+這篇 note 依 [Kyle 的 walkthrough](https://www.youtube.com/watch?v=ovnyeq-Xxrc)。`Error` subclass 上的 runtime `instanceof` 見 [TypeScript Class 與 Runtime Identity](/notes/typescript-classes-and-runtime-identity)。`never` 見 [TypeScript Infer、Extends 與 Ternaries](/notes/typescript-infer-extends-and-ternaries)。`useUnknownInCatchVariables` 見 [TypeScript Beyond Strict](/notes/typescript-beyond-strict)。這篇是 return-value 那一半。
+
+<br />
+
+---
+
+## 1. 散落的 handlers
+
+一個 Next.js `createProject` action 把 auth、permission、Zod、database 寫在一起。Unauthenticated 就 `redirect` 去 login。Unauthorized 就 `redirect` 去 403。Invalid input 回一個 message。Insert 包在 `try/catch` 裡，回 `"unexpected error"`。
+
+<br />
+
+同一個 create 的 API route 要的是 JSON 和 status codes，不是 `redirect`。把 checks 複製一遍。每個 `redirect` 換成 `NextResponse.json`。兩個 callers、兩套 error policy、同一個 domain。
+
+<br />
+
+**Failure:** 用貼上的方式，在 action 和 route 各自處理同一組 unauthenticated / unauthorized / invalid-data。改一邊。另一邊在說謊。
+
+---
+
+## 2. 會 throw 的 service
+
+把 checks 抽進 `createProjectService`。Throw `UnauthenticatedError` 和 `UnauthorizedError` —— `Error` subclasses。Success 就 return project。Action 和 route 都 call 同一個 function。各自按自己那層該有的方式 map failures：`redirect` vs JSON。
+
+<br />
+
+```ts
+class UnauthenticatedError extends Error {
+  constructor() {
+    super("unauthenticated")
+    this.name = "UnauthenticatedError"
+  }
+}
+
+async function createProjectService(input: unknown): Promise<Project> {
+  const user = await getUser()
+  if (user === null) throw new UnauthenticatedError()
+  // permission, parse, insert — throw or return
+  return project
+}
+
+try {
+  const project = await createProjectService(input)
+  revalidatePath("/projects")
+  redirect(`/projects/${project.id}`)
+} catch (error) {
+  if (error instanceof UnauthenticatedError) redirect("/login")
+  if (error instanceof UnauthorizedError) redirect("/unauthorized")
+  if (error instanceof Error) return { message: error.message }
+  return { message: "unexpected error" }
+}
+```
+
+<br />
+
+`catch` 是 `unknown` —— [TypeScript Beyond Strict](/notes/typescript-beyond-strict)。`instanceof` 是 throw 之後還活著的測試 —— [TypeScript Classes](/notes/typescript-classes-and-runtime-identity)。Next 的 `redirect()` **會 throw**。把它放進 `try`，catch 會把 redirect 吃掉。
+
+<br />
+
+**Failure:** 把自訂 `Error` classes 當成 typed contract。它們是 stack unwind 之後的 runtime test。
+
+---
+
+## 3. Type 上的洞
+
+從 service 刪掉 `UnauthenticatedError`。兩個 callers 仍然 `instanceof UnauthenticatedError`。Dead code。加上 `RandomError`。兩個 callers 仍然 compile。`Promise<Project>` 裡兩個 error 都沒出現。
+
+<br />
+
+同一份檔裡的 Zod `safeParse` 已經是 Result：`{ success: true, data }` 或 `{ success: false, error }`。Insert path 卻在 throw。兩條 channel。沒有一條 exhaustive。
+
+<br />
+
+**Failure:** parse 已經 return 了 Result，`save` 又 throw。Signature 仍然寫 `Project`。
+
+---
+
+## 4. Result tuple
+
+把 failure return 出去。Error 在前，caller 先幫它取名，再碰 data。兩個 slot 永遠有一個是 `null`。
+
+<br />
+
+```ts
+type Result<E, S> = [E, null] | [null, S]
+
+function ok<S>(data: S): Result<never, S> {
+  return [null, data]
+}
+
+function error<E extends { reason: string }>(err: E): Result<E, never> {
+  return [err, null]
+}
+```
+
+<br />
+
+沒用到的那一側的 `never` 是空集合 —— [TypeScript Infer、Extends 與 Ternaries](/notes/typescript-infer-extends-and-ternaries)。`ok(project)` 帶不了 error。`error({ reason })` 帶不了 project。Service 的 return type 是它碰到的每一個 `ok` 和 `error` 的 union。
+
+<br />
+
+```ts
+async function createProjectService(
+  input: unknown
+): Promise<
+  Result<
+    | { reason: "unauthenticated" }
+    | { reason: "unauthorized" }
+    | { reason: "invalid_data"; details: ZodError }
+    | { reason: "unexpected" },
+    Project
+  >
+> {
+  const user = await getUser()
+  if (user === null) return error({ reason: "unauthenticated" as const })
+  if (!can(user, "create", "project")) {
+    return error({ reason: "unauthorized" as const })
+  }
+
+  const parsed = schema.safeParse(input)
+  if (!parsed.success) {
+    return error({ reason: "invalid_data" as const, details: parsed.error })
+  }
+
+  try {
+    const project = await insertProject(parsed.data)
+    return ok(project)
+  } catch {
+    return error({ reason: "unexpected" as const })
+  }
+}
+```
+
+<br />
+
+每個 `reason` 上的 `as const` 才讓這個 field 是 literal，不是 `string`。Action 不再 `try/catch` service。它 destructure。
+
+<br />
+
+```ts
+const [err, project] = await createProjectService(input)
+
+if (err === null) {
+  revalidatePath("/projects")
+  redirect(`/projects/${project.id}`)
+  return
+}
+
+switch (err.reason) {
+  case "unauthenticated":
+    redirect("/login")
+    break
+  case "unauthorized":
+    redirect("/unauthorized")
+    break
+  case "invalid_data":
+    return { message: "invalid data", details: err.details }
+  case "unexpected":
+    return { message: "unexpected error" }
+}
+```
+
+<br />
+
+`err === null` 之後，`project` 是 `Project`。過了 `if`，`err.reason` 是 literal union。Route 用同一個 function：把那些 reasons map 成 status codes，而不是 `redirect`。
+
+<br />
+
+**Failure:** `Result<S>` 配 `error?: string`。兩條 branch 都讀得到。沒有 exhaustiveness。
+
+---
+
+## 5. Exhaustive reasons
+
+一個 `satisfies never` 的 `default` 是觸發線。Service 加一個 reason、忘了 `case`，caller compile 不過。拿掉一個 reason，多出來的 `case` 就是 error。
+
+<br />
+
+```ts
+switch (err.reason) {
+  case "unauthenticated":
+    redirect("/login")
+    break
+  case "unauthorized":
+    redirect("/unauthorized")
+    break
+  case "invalid_data":
+    return { message: "invalid data", details: err.details }
+  case "unexpected":
+    return { message: "unexpected error" }
+  default: {
+    err.reason satisfies never
+    throw new Error(`unhandled: ${err.reason}`)
+  }
+}
+```
+
+<br />
+
+只有 `invalid_data` 這個 variant 有 `details`。Narrow `reason`，extra field 才出現。每個 variant 都放 optional `details`，`unauthenticated` 上也會坐著一份。
+
+<br />
+
+**Failure:** `reason: string`。`switch` 是一連串猜測。`satisfies never` 沒有東西可以 reject。
+
+---
+
+## 6. neverthrow
+
+[neverthrow](https://github.com/supermacro/neverthrow) 是同一個 Result，做成 object，加上 combinators。`ok` / `err` 取代 tuple helpers。Async 是 `okAsync` / `errAsync`。`.match` 吃 success callback 和 error callback。`.andThen` 接上另一步可能失敗的計算，並把 error types **union** 起來。`ResultAsync<Project, E>` 是 success 在前 —— 和 tuple 的 `Result<E, S>` 相反。
+
+<br />
+
+```ts
+import { ok, err, okAsync, ResultAsync } from "neverthrow"
+
+function createProjectService(
+  input: unknown
+): ResultAsync<
+  Project,
+  | { reason: "unauthenticated" }
+  | { reason: "unauthorized" }
+  | { reason: "invalid_data"; details: ZodError }
+  | { reason: "unexpected" }
+> {
+  // err({ reason: "unauthenticated" as const })
+  // okAsync(project)
+}
+
+const result = await createProjectService(input)
+
+return result
+  .andThen((project) => publish(project))
+  .match(
+    (project) => {
+      revalidatePath("/projects")
+      redirect(`/projects/${project.id}`)
+    },
+    (error) => {
+      switch (error.reason) {
+        case "unauthenticated":
+          redirect("/login")
+          break
+        // …
+        default: {
+          error.reason satisfies never
+          throw new Error(`unhandled: ${error.reason}`)
+        }
+      }
+    }
+  )
+```
+
+<br />
+
+reasons 上的 `as const` 仍然要寫。neverthrow 不會幫你 infer literals。Effect 能做這件事，也能做很多別的事。只為了 error handling 它太大。neverthrow 的 ESLint plugin 會標記從來沒被 `match` 或 unwrap 的 Result。重點是那條 rule。不是 config。
+
+<br />
+
+**Failure:** `andThen` 然後在 callback 裡 throw。又變兩條 channel。Error union 不再長大。
+
+---
+
+## Takeaway
+
+`throw` 對 type 是隱形的。Result 把 failure 放進 signature。
+
+1. **Caller 的 policy 跟 service 不同？** Return 一個 Result。在邊緣 map：`redirect` vs JSON vs toast。
+2. **Reason 是 literal union 嗎？** `as const`，然後 `switch` 加 `satisfies never`。`reason: string` 是沒有 type 的 throw，多走幾步。
+3. **在串 fallible steps？** 自製 `ok` / `error` 是 type。neverthrow 是 `.andThen`，error union 會接上去。Effect 是一個 platform。
+
+東西真的被 `throw` 的時候，`Error` subclass 仍然值得留 —— `catch` 之後的 `instanceof`。那套 object model 見 [TypeScript Classes](/notes/typescript-classes-and-runtime-identity)。這篇講的是你不 throw 的時候。
+
+---
+
+## Recap Q&A
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="ts-throw-invisible">
+    <AccordionTrigger>1. 為什麼 `throw` 對 TypeScript 是隱形的？</AccordionTrigger>
+    <AccordionContent>
+
+      - `throw` 是 statement。它不是 return type 的一部分。`Promise<Project>` 不會提到 `UnauthenticatedError`。
+      - 從 service 刪一個 error：callers 仍然在 handle。加一個：callers 仍然 compile。Custom classes 是 runtime `instanceof` test，不是 contract。
+      - `catch` 是 `unknown`。[TypeScript Beyond Strict](/notes/typescript-beyond-strict) 用 `useUnknownInCatchVariables` 打開它。Unwind 之後的測試見 [TypeScript Classes](/notes/typescript-classes-and-runtime-identity)。
+      - **Failure:** 把 comment 裡的 `throws UnauthenticatedError` 當成 type。TypeScript 沒有 `throws` clause。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="ts-throwing-service">
+    <AccordionTrigger>2. Throwing service 買到什麼，又仍然缺什麼？</AccordionTrigger>
+    <AccordionContent>
+
+      - Action 和 route 共用一個 function。Service 不 `redirect`、不寫 JSON。每個 caller 把 `instanceof` map 成自己的 policy。
+      - Next `redirect()` 會 throw。`try` 包住 service，後面再 `redirect`，除非 `redirect` 在 `try` 外面，否則 catch 會吃掉它。
+      - Type 仍然缺席。加或刪一個 `Error` subclass，callers 不會破。
+      - **Failure:** 把 `redirect` 放進 service，API route 就重用不成。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="ts-tuple-never">
+    <AccordionTrigger>3. Tuple + `never` 怎麼讓 `error` / `data` 其中一個消失？</AccordionTrigger>
+    <AccordionContent>
+
+      - `Result<E, S>` 是 `[E, null] | [null, S]`。剛好填一格。
+      - `ok` return `Result<never, S>`。Error 那側是空集合。`error` return `Result<E, never>`。Success 那側是空的。Service 的 type 是這些 return 的 union。
+      - Destructure 然後 `err === null` 把 `project` narrow 成 `S`。`never` 見 [TypeScript Infer、Extends 與 Ternaries](/notes/typescript-infer-extends-and-ternaries)。
+      - **Failure:** `Result<S>` 配 `error?: string`，failure 時仍然讀得到 `data`。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="ts-as-const-never">
+    <AccordionTrigger>4. 為什麼 reasons 要 `as const`，還要 `satisfies never`？</AccordionTrigger>
+    <AccordionContent>
+
+      - `{ reason: "unauthorized" }` 是 `{ reason: string }`，除非 `as const`（或 `satisfies` / annotated literal）把 literal 留住。
+      - 對 `reason` 做 `switch` 要 exhaustive，那個 field 必須是 literals 的 union。`default { reason satisfies never }` 在某個 variant 沒有 `case` 時會失敗。
+      - Extra fields（`invalid_data` 上的 `details`）在 `case` narrow 之後才出現。它們不該當成 optional 坐在每個 variant 上。
+      - **Failure:** `reason: string`。`satisfies never` 沒有東西可以 reject。加一個 reason 是安靜的。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="ts-neverthrow">
+    <AccordionTrigger>5. neverthrow 比 `ok` / `error` 多了什麼？</AccordionTrigger>
+    <AccordionContent>
+
+      - 同一個 Result，做成 object。`ok` / `err`、`okAsync` / `errAsync`。`.match` 切開 success 和 error。`.andThen` 接下一步，並 union error types。
+      - reasons 上的 `as const` 仍然要。有 ESLint plugin 可以強迫 `match` 或 unwrap；config dump 不是這課。
+      - Effect 能做這些，也能做更多。如果你只想要一條 typed error channel，它太大。
+      - **Failure:** `andThen` 然後在 callback 裡 `throw` —— 兩條 channel，沒有一條 exhaustive。
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>

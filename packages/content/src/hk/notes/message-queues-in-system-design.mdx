@@ -7,7 +7,7 @@ category: system-design
 
 Request cycle 不適合放慢、突發、或必須在這個 process 掛掉之後還活著的工作。**Message queue** 是 producer 與 consumer 之間的 durable buffer。HTTP handler 做完 authenticate、persist intent、enqueue，然後返回 **202**。
 
-Typed API 一路到 production 的 protect、monitor 與 recover 見 [用 Hono、Drizzle、Zod OpenAPI 與 SST 打造 Backend APIs](/notes/backend-apis-hono-sst)。Stages 與 deploy loop 見 [用 SST 管理 AWS 基礎設施與 DevOps](/notes/using-sst-for-aws-infra-and-devops)。這篇 note 講的是 queue。
+Typed API 一路到 production 的 protect、monitor 與 recover 見 [用 Hono、Drizzle、Zod OpenAPI 與 SST 打造 Backend APIs](/notes/_backend-apis-hono-sst)。Stages 與 deploy loop 見 [用 SST 管理 AWS 基礎設施與 DevOps](/notes/using-sst-for-aws-infra-and-devops)。具體的 outbox、inbox 與 compensation 流程見 [打造 Event-Driven 票務 Backend](/notes/building-an-event-driven-ticketing-backend)。這篇 note 講的是 queue。
 
 <br />
 
@@ -275,7 +275,7 @@ Broker 是 durability 與 delivery 的合同，不是品牌。這套 stack 上 A
 | --- | --- | --- |
 | **SQS** | Queue，at-least-once，optional FIFO | AWS 上的預設 work queue。Lambda 或 worker fleet 來 consume。 |
 | **RabbitMQ** | Queue + routing | 複雜 routing keys、已有 AMQP ops、還不在 AWS 上。 |
-| **Kafka / Kinesis** | Replayable log | 多個獨立 readers、有序 history、replay。 |
+| [**Kafka / Kinesis**](/notes/kafka-in-system-design) | Replayable log | 多個獨立 readers、有序 history、replay。 |
 | **Redis lists / streams** | Fast，更弱的 durability | Ephemeral jobs、caches、fan-out。不是錢。 |
 
 <br />

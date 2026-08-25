@@ -1,0 +1,353 @@
+---
+title: System Design 裡的 DB Indexing
+description: 為什麼 lookup 要離開 heap —— pages、B-trees、hash、LSM、geospatial、inverted indexes、covering keys，以及隨之而來的 failure modes
+date: 2026-08-24
+category: system-design
+---
+
+**Index** 是 heap 旁邊的結構，把 key 對到持有 matching rows 的 pages。Table 按 insert order 存 rows。Index 存一條更便宜的路徑。本來要讀每一頁的 lookup，現在只讀少數幾頁。
+
+這篇 note 依 [Evan 的 walkthrough](https://www.youtube.com/watch?v=BHCSL_ZifI0)。Planner 與 `EXPLAIN` 見 [SQL 核心概念](/notes/core-sql-concepts)。哪些 columns 要 index 來自 [System Design 裡的 Data Modeling](/notes/data-modeling-in-system-design)。Index 不夠時，reads 離開 database 見 [System Design 裡的 Caching](/notes/caching-in-system-design)。口語 Postgres 答案見 [Full-Stack Q&A](/notes/full-stack-qa)。這篇 note 講的是 access path。
+
+<br />
+
+---
+
+## Pattern Map
+
+| Pattern | Query it answers | Reach for it when |
+| --- | --- | --- |
+| B-tree | Equality、range、sort | Default。幾乎每一個 OLTP filter |
+| Hash | Exact match only | In-memory stores；永遠不是 range |
+| LSM | Sequential ingest 之後的 point lookup | Writes 主導 —— metrics、logs |
+| Geospatial | 靠近一個點 / 在一個 shape 裡 | Proximity、delivery zones |
+| Inverted | Contains this token | Search、tags、arrays、JSON containment |
+
+<br />
+
+B-tree 是 Postgres 上的 production default。其餘的只有在 query 不再是 sortable scalar 時才值得。
+
+<br />
+
+---
+
+## 1. 為什麼需要 index
+
+Heap 是 insert order。沒有 index 的 `WHERE email = 'ada@example.com'` 會一頁一頁讀，直到找到那一行——或證明它不在。
+
+<br />
+
+```text
+no index                         with index
+SELECT WHERE age = 51            SELECT WHERE age = 51
+  page 0 → page 1 → … → page N     root → leaf → heap page 3
+  every page                       a handful of pages
+```
+
+<br />
+
+- 先點名 **query**。`GET /users/{id}/posts` 是 `posts.user_id` 上的 index。欄位存在不是理由。
+- Trade 是真的。每個 index 都是額外 disk，以及每一次 `INSERT`、`UPDATE`、`DELETE` 的額外工作。Hot write table 上五個 indexes，等於每一 row 六次 writes。
+- 500 行的 config table 不需要。99% writes 的 logging table 也不需要。Index 你點得名的 read patterns。其餘等 `EXPLAIN` 來要。
+
+<br />
+
+**Failure:** 每個 column 都 index「以防萬一」。Writes 變慢。Disk 長大。Planner 仍 seq-scan 你從沒點名的 predicates。
+
+<br />
+
+---
+
+## 2. Pages
+
+Databases 讀的不是 rows。它們讀 **pages** —— Postgres 8 KB，InnoDB 16 KB。Index node 按 page 來 size，所以一次 I/O 帶來幾百個 keys，不是兩個。
+
+<br />
+
+```text
+heap page (8 KB)          index page (8 KB)
+[row][row][row]…          [key → child / heap pointer]…
+insert order              sorted keys, high fan-out
+```
+
+<br />
+
+- 就算是 NVMe，disk 仍比 RAM 慢。Random I/O 才是貴的那個。Indexes 存在，是為了把「讀整張表」變成少數 targeted page fetches，再 sequential walk matching leaves。
+- Heap 不知道 `age = 51` 住哪。Index 知道：key → page pointer。Row 仍坐在 heap，除非 index **covers** 這條 query。
+- Fan-out 解釋了為什麼十億 row 的 B-tree 只有三、四層。每個 internal page 持有幾百個 separators。Table 長大，height 幾乎不變。
+
+<br />
+
+**Failure:** 把 indexes 想成一次比一行。Cost 是 pages。碰三頁的 lookup，贏過碰三百萬頁的 scan。
+
+<br />
+
+---
+
+## 3. B-tree
+
+Default。Postgres `CREATE INDEX` 除非你另說，否則就是 B-tree。InnoDB 把 table 本身存成 primary key 上的 clustered B-tree。
+
+B-tree 讓 keys 保持 sorted、保持 balanced，每個 node 塞很多 children。Leaves 在同一深度。常見的 B+ layout 把 leaves 串起來，range 往旁邊走，不必爬回 root。
+
+<br />
+
+```text
+                root  [50 | 90]
+               /       |        \
+         [<50]      [50–90]      [>90]
+        [20, 40]    [55, 70]     [100]
+            |           |
+        heap page    heap page 3
+                     age = 51
+```
+
+<br />
+
+Evan 的 walk，index 在 `users.age`：
+
+- **`WHERE age = 51`。** 載入 root page。51 大於 50、小於 90，所以載入那個 child。51 小於 55，跟著 pointer 到 heap page 3。三頁。不是整張表。
+- **`WHERE age > 51`。** 載入 root。兩個能持有 50 以上的 children 都進來。跟著那一段的每一個 leaf pointer，載入那些 heap pages。Walk 仍然有序。除非大多數 rows 都 match，否則不是 full scan。
+
+<br />
+
+為什麼它是 default：
+
+- Equality 與 range。Indexed column 上的 `=`、`>`、`BETWEEN`、`LIKE 'Ada%'`、`ORDER BY`。
+- Predictable depth。Random inserts 不會讓它 unbalanced。
+- 同一套結構服務 point lookup 與 keyset page。[SQL 核心概念](/notes/core-sql-concepts)。
+
+<br />
+
+**Failure:** 把它叫成 binary tree（fan-out 為二在 disk 上又高又慢），或在 `lat` 上一個 B-tree、`lon` 上另一個，就指望「5 km 內」。兩個 1D indexes 不是 2D index。
+
+<br />
+
+---
+
+## 4. Hash
+
+Hash index 是一張 map：`hash(email) → bucket → row`。Equality 是 O(1)。Range、sort、prefix 不可能——相近的 keys 故意落在不同 buckets。
+
+<br />
+
+```text
+hash("ada@example.com")  →  bucket 42  →  page 7
+hash("bob@example.com")  →  bucket 17  →  page 12
+
+WHERE email = 'ada@example.com'     yes
+WHERE email > 'ada@example.com'     no
+WHERE created_at BETWEEN …          no
+```
+
+<br />
+
+- Redis keys 是 hash table。那才是 production 的家。Postgres `USING hash` 存在；B-tree 已經做 equality 並保住 range，所以很少是對的 extra。
+- Interview 裡，當 access **只**是 exact match 且 in memory 時才提它。不要在 disk 上當 default。
+
+<br />
+
+**Failure:** 一個 hash index，然後 `WHERE created_at BETWEEN …`。這結構走不了 range。你建錯 map。
+
+<br />
+
+---
+
+## 5. LSM
+
+B-trees 就地更新一頁。每秒 100k writes 的 metrics pipeline，就是 100k 次 random page writes。Disk 會飽和。
+
+**LSM tree**（log-structured merge）從不就地更新。Writes append。Reads 稍後付錢。
+
+<br />
+
+```text
+INSERT / UPDATE
+    → WAL (sequential)
+    → memtable (sorted, in RAM)
+         ↓ flush
+    SSTable L0 (immutable)
+         ↓ compact
+    SSTable L1, L2, …
+```
+
+<br />
+
+- Memtable 在 memory 吸收 writes。WAL 讓 append crash-safe。Memtable 滿了就 flush 成 immutable sorted file——一次 sequential write，而不是多次 random 8 KB writes。
+- Point read 可能檢查 memtable 與多個 SSTables。Bloom filters 回答「這個 key 絕對不在那個 file」，不必讀 disk。
+- Compaction 在背景 merge files、丢掉 tombstones，避免 reads 永遠 scan。Compaction stalls 是 tail-latency 的代價。
+- Cassandra、RocksDB、Dynamo-style engines。Writes 主導時才伸手去拿這個 **store** —— metrics、logs、event ingest。不是 Postgres `USING` clause。User-facing p99 read 才是產品時，B-tree 通常贏。
+
+<br />
+
+**Failure:** 因為「LSM 比較快」就給 read-heavy feed 選 Cassandra。Writes 從來不是 bottleneck。Compaction 與 multi-file reads 現在才是。
+
+<br />
+
+---
+
+## 6. Geospatial
+
+Proximity——「5 km 內的 restaurants」——是兩個維度。`lat` 上一個 B-tree 加 `lon` 上一個 B-tree，濾出的矩形遠大於圓。在 Uber / Yelp / Tinder 的 scale，那不是 rounding error。
+
+<br />
+
+```text
+two 1D indexes                 geohash + B-tree
+lat BETWEEN …                  37.77, -122.41
+lon BETWEEN …                       ↓
+  huge rectangle               9q8yyk
+  then filter the circle       prefix scan 9q8yy*
+```
+
+<br />
+
+- **Geohash**（或 S2 / H3）把 lat/lon 壓成 prefix-sortable cell。Nearby points 共用長 prefix。那條 string 上的 plain B-tree range scan 就是 proximity filter。Redis `GEOADD` / `GEOSEARCH` 就是這個。Writes 便宜；你查的是一圈 neighbor cells，不是一個 exact cell。不斷移動的 points——drivers、live users——屬於這裡。
+- **R-tree / PostGIS GiST** 當 data 是 shapes：polygons、roads、delivery zones、containment。Index 懂 geometry。Rebalancing rectangles 是真的 write work。Query 是「這個 zone 蓋不蓋這個 address」時才伸手，不是「誰在附近」。
+- Interview 裡：B-tree 服務不了 2D proximity。能留在 string column 就用 geohash。需要 polygons 就用 PostGIS。
+
+<br />
+
+**Failure:** 兩個 B-trees 上寫 `WHERE lat BETWEEN … AND lon BETWEEN …`，然後稱之為 proximity search。你掃了一個矩形，指望多出來的 rows 很便宜。
+
+<br />
+
+---
+
+## 7. Inverted
+
+B-tree 找得到 email、timestamp range、prefix。它找不到 TEXT column 裡的 `database`。`WHERE content LIKE '%database%'` 是 full scan。Leading wildcard 走不了 sorted keys。
+
+Inverted index 把 map 翻過來：token → 含有它的 documents。
+
+<br />
+
+```text
+doc1: "B-trees are fast"
+doc2: "Hash tables are fast"
+
+b-trees → [doc1]
+fast    → [doc1, doc2]
+hash    → [doc2]
+```
+
+<br />
+
+- Analyzers tokenize、lowercase、丢掉 stop words、stem。`Databases` 與 `database` 塌成一個 term，共用一份 postings list。Elasticsearch / Lucene 在上面疊 BM25。
+- Writes 碰到 document 裡每一個 term。Index 往往很大。Refresh 以秒計，不是跟 heap write 同一個 transaction。所以 search 通常是 write 的 consumer，不是 OLTP table 上的一個 column。[System Design 裡的 Message Queues](/notes/message-queues-in-system-design)。
+- 這套 stack：小 search、arrays、JSONB containment 用 Postgres `GIN` + `to_tsvector`。Search **就是**產品時才上 search cluster。Vector / hybrid retrieval 是另一種 index：[如何搭建一套 RAG 系統](/notes/how-to-build-a-rag-system)。
+
+<br />
+
+**Failure:** TEXT column 上 leading-wildcard `LIKE`，還指望那欄上的 B-tree 救你。Sorted keys 幫不了「contains」。
+
+<br />
+
+---
+
+## 8. Composite 與 covering
+
+從 APIs 往回推。[System Design 裡的 Data Modeling](/notes/data-modeling-in-system-design)。
+
+`GET /users/{id}/posts` 按 recency 排，不是兩個 single-column indexes。是一棵 composite B-tree。
+
+<br />
+
+```sql
+CREATE INDEX posts_user_id_created_at_idx
+  ON posts (user_id, created_at DESC);
+
+-- covering: likes 跟著 index 走；不必 heap fetch
+CREATE INDEX posts_user_id_created_at_likes_idx
+  ON posts (user_id, created_at DESC) INCLUDE (likes);
+```
+
+<br />
+
+```text
+(user_id, created_at)
+
+(1, 2026-01-01)
+(1, 2026-01-02)
+(1, 2026-01-03)   ← user_id = 1 AND created_at > '2026-01-01'
+(2, 2026-01-01)      walks this slice only
+```
+
+<br />
+
+- **Equality 先，range 與 sort 後。** `(user_id, created_at)` 服務 `WHERE user_id = ? ORDER BY created_at DESC`。`(created_at, user_id)` 不行——slice 按 user 不連續。
+- **Leftmost prefix。** `(a, b, c)` 幫 `WHERE a = ?`、`WHERE a = ? AND b = ?`，以及三個都有。它不幫 `WHERE b = ?`。Composite 是有序的承諾，不是三個 indexes 穿一件風衣。
+- **Covering / `INCLUDE`。** Query 只讀 index 已經持有的 columns，Postgres 可以跳過 heap。Index 更大，hot read 更快——feeds、unread counts、leaderboards。不要每個 column 都 `INCLUDE`。證明 heap fetches 才是 bottleneck。
+- 用 `EXPLAIN` 證明。Keyset pagination 騎同一棵 composite。[SQL 核心概念](/notes/core-sql-concepts)。
+
+<br />
+
+**Failure:** 兩個 single-column indexes，指望 planner 發明 feed order；或每條 query 都 `INCLUDE`，讓每一次 write 維護 table 的第二份副本。
+
+<br />
+
+---
+
+## Recap Q&A
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="idx-why">
+    <AccordionTrigger>1. Index 為什麼存在，成本是什麼？</AccordionTrigger>
+    <AccordionContent>
+
+      - Heap 是 insert order。沒有 index，lookup 就是 sequential page scan——幾百 rows 沒問題，幾百萬就致命。
+      - Index 把 key 對到持有 matching rows 的 pages。你用 disk 與 write amplification 換更少 reads。先點名 query。
+      - Tiny tables 與 write-only logs 跳過。Index APIs 真正跑的 access paths。
+      - **Failure:** 每個 column 都 index「以防萬一」，然後納悶為什麼 `INSERT` 慢。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="idx-btree">
+    <AccordionTrigger>2. 為什麼 B-tree 是 default，hash 或 LSM 何時贏？</AccordionTrigger>
+    <AccordionContent>
+
+      - B-tree 是 sorted、balanced、page-sized。Equality、range、prefix 與 `ORDER BY` 騎同一套結構。Postgres `CREATE INDEX` 除非另說就是這個。
+      - **Hash** 只做 exact match——Redis keys，不是 disk default。B-tree 已經做 equality 並保住 range。
+      - **LSM** 是 write-heavy ingest 的 storage engine：memtable、SSTables、compaction。Cassandra / RocksDB。User-facing p99 reads 通常留在 B-tree。
+      - **Failure:** hash index 然後 range query，或給 read-heavy feed 選 Cassandra。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="idx-geo">
+    <AccordionTrigger>3. 「5 km 內」要怎麼 index？</AccordionTrigger>
+    <AccordionContent>
+
+      - `lat` 與 `lon` 上兩棵 B-trees 濾的是矩形，不是圓。那不是 proximity search。
+      - **Geohash**（S2、H3）把點壓成 prefix-sortable cell。Plain B-tree range scan，加上 neighbor cells。Redis `GEO*`。最適合 moving points。
+      - **R-tree / PostGIS GiST** 給 polygons、containment、delivery zones。Query 是 geometry；writes 更貴。
+      - **Failure:** `WHERE lat BETWEEN … AND lon BETWEEN …` 然後當它做完。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="idx-inverted">
+    <AccordionTrigger>4. 什麼時候 inverted index 才是對的結構？</AccordionTrigger>
+    <AccordionContent>
+
+      - B-tree 答不了「contains this token」。`LIKE '%database%'` 是 full scan；leading wildcard 走不了 sorted keys。
+      - Inverted：token → postings list。Analyzers stem，讓 `database` 與 `Databases` 共用一筆。Elasticsearch / Lucene；小 search、arrays、JSONB 用 Postgres `GIN`。
+      - Writes 碰到每一個 term。Search 往往是 queue consumer，不是 OLTP table 上的 column。Vectors 是另一種 index。
+      - **Failure:** TEXT column 上的 B-tree，還指望 contains-search 會用它。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="idx-composite">
+    <AccordionTrigger>5. Composite index 怎麼排，covering 換到什麼？</AccordionTrigger>
+    <AccordionContent>
+
+      - 從 API 往回推。`GET /users/{id}/posts` 按 recency 是 `(user_id, created_at)`——equality 先，range 與 sort 後。
+      - Leftmost prefix：`(a, b, c)` 幫從 `a` 開頭的 filters。它不幫 `WHERE b = ?`。
+      - Covering / `INCLUDE` 從 index 回答 query，不必 heap fetch。Index 更大，hot read 更快。證明 heap I/O 才是 bottleneck。
+      - **Failure:** 兩個 single-column indexes 指望 planner 發明 feed，或每條 query 都 covering。
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>

@@ -2,6 +2,7 @@ export const resumeVariants = {
   frontend: "resume-v4-frontend",
   "full-stack": "resume-v4-full-stack",
   ai: "resume-v4-ai",
+  mobile: "resume-v4-mobile",
 } as const
 
 export type ResumeVariant = keyof typeof resumeVariants

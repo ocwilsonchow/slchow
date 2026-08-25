@@ -1,0 +1,347 @@
+---
+title: TypeScript Error Handling
+description: throws vanish from the type; a Result puts the failure in the signature
+date: 2026-08-23
+category: typescript
+---
+
+A `throw` is not in the return type. Callers compile. The failure is still unhandled. A **Result** makes the failure a value: success or error, one of the two, in the signature.
+
+This note follows [Kyle's walkthrough](https://www.youtube.com/watch?v=ovnyeq-Xxrc). Runtime `instanceof` on an `Error` subclass is [TypeScript Classes and Runtime Identity](/notes/typescript-classes-and-runtime-identity). `never` is [TypeScript Infer, Extends, and Ternaries](/notes/typescript-infer-extends-and-ternaries). `useUnknownInCatchVariables` is [TypeScript Beyond Strict](/notes/typescript-beyond-strict). This note is the return-value half.
+
+<br />
+
+---
+
+## 1. Sprinkled handlers
+
+A Next.js `createProject` action inlines auth, permission, Zod, and the database. Unauthenticated `redirect`s to login. Unauthorized `redirect`s to a 403 page. Invalid input returns a message. The insert sits in a `try/catch` that returns `"unexpected error"`.
+
+<br />
+
+An API route for the same create needs JSON and status codes, not `redirect`. Copy the checks. Swap each `redirect` for `NextResponse.json`. Two callers, two error policies, one domain.
+
+<br />
+
+**Failure:** handling the same unauthenticated / unauthorized / invalid-data cases in the action and the route by pasting. Change one. The other lies.
+
+---
+
+## 2. Service that throws
+
+Pull the checks into `createProjectService`. Throw `UnauthenticatedError` and `UnauthorizedError` — `Error` subclasses. Return the project on success. The action and the route both call one function. Each maps failures the way its layer should: `redirect` vs JSON.
+
+<br />
+
+```ts
+class UnauthenticatedError extends Error {
+  constructor() {
+    super("unauthenticated")
+    this.name = "UnauthenticatedError"
+  }
+}
+
+async function createProjectService(input: unknown): Promise<Project> {
+  const user = await getUser()
+  if (user === null) throw new UnauthenticatedError()
+  // permission, parse, insert — throw or return
+  return project
+}
+
+try {
+  const project = await createProjectService(input)
+  revalidatePath("/projects")
+  redirect(`/projects/${project.id}`)
+} catch (error) {
+  if (error instanceof UnauthenticatedError) redirect("/login")
+  if (error instanceof UnauthorizedError) redirect("/unauthorized")
+  if (error instanceof Error) return { message: error.message }
+  return { message: "unexpected error" }
+}
+```
+
+<br />
+
+`catch` is `unknown` — [TypeScript Beyond Strict](/notes/typescript-beyond-strict). `instanceof` is the test that survives a throw — [TypeScript Classes](/notes/typescript-classes-and-runtime-identity). Next `redirect()` **throws**. Put it in the `try` and the catch eats the redirect.
+
+<br />
+
+**Failure:** treating custom `Error` classes as a typed contract. They are a runtime test after the stack has unwound.
+
+---
+
+## 3. The type hole
+
+Delete `UnauthenticatedError` from the service. Both callers still `instanceof UnauthenticatedError`. Dead code. Add `RandomError`. Both callers still compile. Nothing in `Promise<Project>` mentioned either error.
+
+<br />
+
+Zod `safeParse` in the same file is already a Result: `{ success: true, data }` or `{ success: false, error }`. The insert path throws. Two channels. Neither is exhaustive.
+
+<br />
+
+**Failure:** throwing from `save` after parse already returned a Result. The signature still says `Project`.
+
+---
+
+## 4. Result tuple
+
+Return the failure. Error first, so the caller names it before the data. One of the two slots is always `null`.
+
+<br />
+
+```ts
+type Result<E, S> = [E, null] | [null, S]
+
+function ok<S>(data: S): Result<never, S> {
+  return [null, data]
+}
+
+function error<E extends { reason: string }>(err: E): Result<E, never> {
+  return [err, null]
+}
+```
+
+<br />
+
+`never` on the unused side is the empty set — [TypeScript Infer, Extends, and Ternaries](/notes/typescript-infer-extends-and-ternaries). `ok(project)` cannot carry an error. `error({ reason })` cannot carry a project. The service's return type is the union of every `ok` and `error` it hits.
+
+<br />
+
+```ts
+async function createProjectService(
+  input: unknown
+): Promise<
+  Result<
+    | { reason: "unauthenticated" }
+    | { reason: "unauthorized" }
+    | { reason: "invalid_data"; details: ZodError }
+    | { reason: "unexpected" },
+    Project
+  >
+> {
+  const user = await getUser()
+  if (user === null) return error({ reason: "unauthenticated" as const })
+  if (!can(user, "create", "project")) {
+    return error({ reason: "unauthorized" as const })
+  }
+
+  const parsed = schema.safeParse(input)
+  if (!parsed.success) {
+    return error({ reason: "invalid_data" as const, details: parsed.error })
+  }
+
+  try {
+    const project = await insertProject(parsed.data)
+    return ok(project)
+  } catch {
+    return error({ reason: "unexpected" as const })
+  }
+}
+```
+
+<br />
+
+`as const` on each `reason` is what makes the field a literal, not `string`. The action no longer `try/catch`es the service. It destructures.
+
+<br />
+
+```ts
+const [err, project] = await createProjectService(input)
+
+if (err === null) {
+  revalidatePath("/projects")
+  redirect(`/projects/${project.id}`)
+  return
+}
+
+switch (err.reason) {
+  case "unauthenticated":
+    redirect("/login")
+    break
+  case "unauthorized":
+    redirect("/unauthorized")
+    break
+  case "invalid_data":
+    return { message: "invalid data", details: err.details }
+  case "unexpected":
+    return { message: "unexpected error" }
+}
+```
+
+<br />
+
+After `err === null`, `project` is `Project`. After the `if`, `err.reason` is the literal union. Same function from the route: map those reasons to status codes instead of `redirect`.
+
+<br />
+
+**Failure:** `Result<S>` with `error?: string`. Both branches readable. No exhaustiveness.
+
+---
+
+## 5. Exhaustive reasons
+
+A `default` that `satisfies never` is the tripwire. Add a reason in the service, forget the `case`, the caller does not compile. Remove a reason, the leftover `case` is the error.
+
+<br />
+
+```ts
+switch (err.reason) {
+  case "unauthenticated":
+    redirect("/login")
+    break
+  case "unauthorized":
+    redirect("/unauthorized")
+    break
+  case "invalid_data":
+    return { message: "invalid data", details: err.details }
+  case "unexpected":
+    return { message: "unexpected error" }
+  default: {
+    err.reason satisfies never
+    throw new Error(`unhandled: ${err.reason}`)
+  }
+}
+```
+
+<br />
+
+`invalid_data` is the only variant with `details`. Narrow on `reason` and the extra field appears. A shared optional `details` on every variant would sit on `unauthenticated` too.
+
+<br />
+
+**Failure:** `reason: string`. The `switch` is a chain of guesses. `satisfies never` has nothing to reject.
+
+---
+
+## 6. neverthrow
+
+[neverthrow](https://github.com/supermacro/neverthrow) is the same Result, as an object, with combinators. `ok` / `err` replace the tuple helpers. Async is `okAsync` / `errAsync`. `.match` takes the success callback and the error callback. `.andThen` sequences another fallible step and **unions** the error types. `ResultAsync<Project, E>` is success first — the opposite of the tuple's `Result<E, S>`.
+
+<br />
+
+```ts
+import { ok, err, okAsync, ResultAsync } from "neverthrow"
+
+function createProjectService(
+  input: unknown
+): ResultAsync<
+  Project,
+  | { reason: "unauthenticated" }
+  | { reason: "unauthorized" }
+  | { reason: "invalid_data"; details: ZodError }
+  | { reason: "unexpected" }
+> {
+  // err({ reason: "unauthenticated" as const })
+  // okAsync(project)
+}
+
+const result = await createProjectService(input)
+
+return result
+  .andThen((project) => publish(project))
+  .match(
+    (project) => {
+      revalidatePath("/projects")
+      redirect(`/projects/${project.id}`)
+    },
+    (error) => {
+      switch (error.reason) {
+        case "unauthenticated":
+          redirect("/login")
+          break
+        // …
+        default: {
+          error.reason satisfies never
+          throw new Error(`unhandled: ${error.reason}`)
+        }
+      }
+    }
+  )
+```
+
+<br />
+
+`as const` on reasons is still required. neverthrow will not infer the literals for you. Effect can do this job and a lot of other jobs. It is too big for error handling alone. neverthrow's ESLint plugin flags a Result that is never `match`ed or unwrapped. The rule is the point. The config is not.
+
+<br />
+
+**Failure:** `andThen` then throwing inside the callback. Two channels again. The error union stops growing.
+
+---
+
+## Takeaway
+
+A `throw` is invisible to the type. A Result is the failure in the signature.
+
+1. **Does the caller need a different policy than the service?** Return a Result. Map it at the edge: `redirect` vs JSON vs a toast.
+2. **Is the reason a literal union?** `as const`, then `switch` with `satisfies never`. `reason: string` is an untyped throw with extra steps.
+3. **Are you sequencing fallible steps?** Homemade `ok` / `error` is the type. neverthrow is `.andThen` so the error union concatenates. Effect is a platform.
+
+The `Error` subclass still earns a keep when something is actually `throw`n — `instanceof` after `catch`. That object model is [TypeScript Classes](/notes/typescript-classes-and-runtime-identity). This note is when you do not throw.
+
+---
+
+## Recap Q&A
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="ts-throw-invisible">
+    <AccordionTrigger>1. Why is a `throw` invisible to TypeScript?</AccordionTrigger>
+    <AccordionContent>
+
+      - `throw` is a statement. It is not part of the return type. `Promise<Project>` does not mention `UnauthenticatedError`.
+      - Delete an error from the service: callers still handle it. Add one: callers still compile. Custom classes are a runtime `instanceof` test, not a contract.
+      - `catch` is `unknown`. [TypeScript Beyond Strict](/notes/typescript-beyond-strict) turns that on with `useUnknownInCatchVariables`. The test after the unwind is [TypeScript Classes](/notes/typescript-classes-and-runtime-identity).
+      - **Failure:** reading `throws UnauthenticatedError` in a comment as a type. TypeScript has no `throws` clause.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="ts-throwing-service">
+    <AccordionTrigger>2. What does a throwing service buy, and what does it still miss?</AccordionTrigger>
+    <AccordionContent>
+
+      - One function for the action and the route. The service does not `redirect` or write JSON. Each caller maps `instanceof` to its own policy.
+      - Next `redirect()` throws. A `try` around the service plus a later `redirect` will catch the redirect unless it sits outside the `try`.
+      - It still misses the type. Adding or removing an `Error` subclass does not break callers.
+      - **Failure:** putting `redirect` inside the service so the API route cannot reuse it.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="ts-tuple-never">
+    <AccordionTrigger>3. How do the tuple + `never` make one of `error` / `data` disappear?</AccordionTrigger>
+    <AccordionContent>
+
+      - `Result<E, S>` is `[E, null] | [null, S]`. Exactly one slot is filled.
+      - `ok` returns `Result<never, S>`. The error side is the empty set. `error` returns `Result<E, never>`. The success side is empty. The service's type is the union of those returns.
+      - Destructuring then `err === null` narrows `project` to `S`. `never` is [TypeScript Infer, Extends, and Ternaries](/notes/typescript-infer-extends-and-ternaries).
+      - **Failure:** `Result<S>` with `error?: string`, which lets you read `data` on failure.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="ts-as-const-never">
+    <AccordionTrigger>4. Why `as const` reasons and `satisfies never`?</AccordionTrigger>
+    <AccordionContent>
+
+      - `{ reason: "unauthorized" }` is `{ reason: string }` unless `as const` (or a `satisfies` / annotated literal) keeps the literal.
+      - The `switch` on `reason` is exhaustive only if that field is a union of literals. `default { reason satisfies never }` fails when a variant has no `case`.
+      - Extra fields (`details` on `invalid_data`) show up after the `case` narrows. They do not belong on every variant as optionals.
+      - **Failure:** `reason: string`. `satisfies never` has nothing to reject. Adding a reason is silent.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="ts-neverthrow">
+    <AccordionTrigger>5. What does neverthrow add over `ok` / `error`?</AccordionTrigger>
+    <AccordionContent>
+
+      - The same Result as an object. `ok` / `err`, `okAsync` / `errAsync`. `.match` splits success and error. `.andThen` sequences another step and unions the error types.
+      - `as const` on reasons is still required. An ESLint plugin exists to force `match` or unwrap; the config dump is not the lesson.
+      - Effect can do this and much more. It is too big if all you wanted was a typed error channel.
+      - **Failure:** `andThen` then `throw` inside the callback — two channels, none exhaustive.
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>

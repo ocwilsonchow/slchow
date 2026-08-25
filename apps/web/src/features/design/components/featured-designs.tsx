@@ -374,7 +374,7 @@ export function FeaturedStack() {
   return (
     <div ref={inViewRef} className="mt-8 space-y-3">
       <Link href="/design" className="block group">
-        <h2 className="text-content-ink font-semibold text-sm flex items-center gap-2">
+        <h2 className="text-content-ink font-semibold flex items-center gap-2">
           {tNav("designs")}{" "}
           <sup className="text-content-subdued">{assetCount}</sup>
           <ChevronBadge />

@@ -1,0 +1,252 @@
+---
+title: "Full-Stack Q&A: Backend"
+description: Backend engineering 问题的口语长度答案
+category: full-stack
+---
+
+## Backend Engineering
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="be-event-loop">
+    <AccordionTrigger>1. 走一遍 Node.js event loop 的 phases。setTimeout、setImmediate、process.nextTick 与已 resolve 的 promises 分别在哪跑？</AccordionTrigger>
+    <AccordionContent>
+
+      - Node 不是 browser。一次 **libuv** iteration 大致是 **timers**、pending callbacks、idle/prepare、**poll**、**check**，然后 close callbacks。`process.nextTick` 与已 resolve 的 Promises 坐在额外的 queues 上，在那些 phases 之间、**当前 operation 之后** 排空。
+      - **`setTimeout` / `setInterval`**：**timers** phase，delay 到了之后——下界，不是「现在」。**`setImmediate`**：**check** phase，在 **poll** 之后。**`process.nextTick`**：在 Promise jobs **之前** 排空；nextTick loop 会 **饿死 I/O**。Promise `.then` / `queueMicrotask`：`nextTick` **之后** 的 microtask queue。
+      - 从 main module 出发，`setTimeout(fn, 0)` 对上 `setImmediate` 出名地不保证顺序。从 I/O callback 里，`setImmediate` 通常赢，因为同一轮 iteration 里 check 紧跟 poll。
+      - Production 默认是绝不靠空转 `nextTick` 来「yield」。Promise 或 `queueMicrotask` 才是这段 stack 之后的选择，而且不会插队 Promise queue。
+      - **失败：** 把 browser 的排序谜题搬到 Node，然后相信那份 log。完整地图：[深入理解 JavaScript Event Loop](/notes/javascript-event-loop-in-depth)。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="be-nodejs-wrong">
+    <AccordionTrigger>2. 什么时候不该选 Node.js？Node service 里怎么处理 CPU-bound 工作？</AccordionTrigger>
+    <AccordionContent>
+
+      - Node 是 **I/O-bound** APIs 的强默认。当 **event-loop thread** 本身就是产品时，它是错的默认：热 `while`、sync hash、巨大的 JSON parse、或 in-process image pipeline，会卡住那个 process 上的 **每一条** connection。
+      - 多加 replicas 修不了一个打满一核的 handler。如果领域是 CPU-first——transcode、ML inference、紧密 crypto——选匹配的 runtime 或 worker fleet，而不是在 Express facade 后面藏一个 thread pool。
+      - Node service **内部** 的 CPU-bound 工作：HTTP handlers 保持 **短**；用 **`worker_threads`** 或带 **pool cap** 的 child process；更好的是 **enqueue** 这份 job，让 workers 拥有它。看 **event-loop delay**，不只看 request rate。
+      - Production 看起来像「202 加一个 job id」，不是「在 POST 里 await 那些 pixels」。`async` 不会让算术变成 concurrent。
+      - **失败：** 把 CPU 当成 `await tightLoop()` 运出去，因为 framework 是 async 就叫它 scalable。那个 process 上的 health checks 会撒谎，直到 loop 再跑起来。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="be-stateless">
+    <AccordionTrigger>3. 「stateless service」是什么意思，为什么它对 load balancer 后面的 horizontal scaling 重要？</AccordionTrigger>
+    <AccordionContent>
+
+      - **Stateless service** 指任何 replica 都能处理任何 request，不必在本地记得上一次。Session、uploads、cart、job progress 住在 **Postgres、Redis、S3 或 token** 里，不在 process 里。JIT、pools、LRU 用的 RAM 必须是 **可丢弃的**。
+      - 在 load balancer 后面，fleet 可以用 round-robin **scale out**、deploy 时替换 tasks、跳过 sticky sessions。Sticky sessions 等于承认有东西存在了那台机器上。
+      - Production 里，sessions 住在 Redis 或 signed JWT，files 在 object storage，rate-limit counters 在 Redis，WebSocket fan-out 走 pub/sub backplane。Local cache 是 performance hint，不是 source of truth。
+      - **失败：** 半 stateless——auth 在 Redis，但 uploads 在 `/tmp`，或 in-memory 的 socket id maps。一台 ECS task 能跑，两台就挂。Sticky sessions 把 bug 藏到 balancer 在 session 中途 drain 一台 task。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="be-async-queue">
+    <AccordionTrigger>4. 什么时候该把 request 经 queue 异步处理，而不是在 request cycle 里同步做完？</AccordionTrigger>
+    <AccordionContent>
+
+      - 工作离开 request cycle，当 **HTTP response 不需要做完的结果**，或工作慢、突发、必须 **在这个 process 消失之后还能 retry**。Email、outbound webhooks、thumbnails、invoices、search indexing、flaky third parties——那就是 **queue**。Authenticate、persist intent、enqueue、返回 **202**。
+      - 用户没有答案就无法继续时，它保持同步：password check、屏幕上的 price、UI 马上要展示的 payment **authorization**。即便如此 handler 也保持薄。
+      - Production 规则：enqueue 上的 **idempotency key**、能大声失败的 worker、以及用户能读到的 status row。如果 queue 挂了也必须发生，**request 里的 database write** 才是 source of truth；queue 只是 relay。
+      - **失败：** **sync-over-async** —— enqueue 然后堵住 socket 等到 worker 做完。另一个是 enqueue 还没有被 durable 记下来的工作——crash 等于 lost intent。完整地图：[System Design 里的 Message Queues](/notes/message-queues-in-system-design)。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="be-delivery-semantics">
+    <AccordionTrigger>5. 解释 at-least-once 与 at-most-once delivery。给定 at-least-once semantics，怎么做一个 idempotent consumer？</AccordionTrigger>
+    <AccordionContent>
+
+      - **At-most-once** 是 send and forget：duplicates 少见，**允许 loss**。**At-least-once** 是 retry until ack：**允许 duplicates**，不允许 loss。Production 里大多数 brokers 是 at-least-once。Application space 里的「exactly-once」通常是 at-least-once **加上 idempotent consumer**。
+      - 给定 at-least-once：稳定的 **event id**、带 unique constraint 的 **inbox** 表、**database effects 与 inbox insert 在同一笔 transaction**。对 Stripe 或 email，ack **之前** persist 一条 outbox/operation row，并带上 provider 的 idempotency key。Side effects 做成 **upserts**，不要盲 increment。Durable write **之后** 再 **ack**。
+      - Publishers 保持无聊：同一把 key，同一份 payload，write 侧用 **outbox**。Consumers 仍然保持 idempotent，因为 retries 还是会发生。
+      - **失败：** 在 side effect 之前 ack，或做了 side effect 却不记录 id——retry 就会 double-charge。Catch 了 errors 仍然 ack，于是 poison message 消失。At-least-once 只有在 failure **nack**、success **idempotent** 时才有用。完整地图：[System Design 里的 Message Queues](/notes/message-queues-in-system-design)。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="be-retry-strategy">
+    <AccordionTrigger>6. 给一个失败的 worker 设计 retry 策略：exponential backoff、jitter、max attempts 与 dead-letter queues。</AccordionTrigger>
+    <AccordionContent>
+
+      - 先分类。Timeouts、503s、lock contention、「connection reset」——**retry**。Validation errors、400s、未知 event types——**不要 retry**；它们不会自愈，却会永远占着 consumer。
+      - 四个控制：**exponential backoff**（`base * 2^attempt`，带 cap）、**jitter** 让一万个 workers 不会在同一毫秒醒来、**max attempts** 让 poison 不能转一整夜、天花板之后进 **dead-letter queue**，DLQ depth 上升时要有 metric 与 page。
+      - Retry 住在 **queue** 里（visibility timeout、内建 backoff）或同形状的 library——不是 handler 里的 `while`。只 retry **idempotent** handlers。
+      - **失败：** retry 一个非 idempotent 的 POST，或永远 retry 且没有 DLQ，于是一份坏 JSON 坐在热 partition 上。共享 outage 之后 **没有 jitter** 的 backoff 是 thundering herd。沉默的 DLQ 是多了几步的 lost business event。完整地图：[System Design 里的 Message Queues](/notes/message-queues-in-system-design)。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="be-caching">
+    <AccordionTrigger>7. 比较 cache-aside、read-through、write-through 与 write-behind caching。什么是 cache stampede，怎么防止？</AccordionTrigger>
+    <AccordionContent>
+
+      - **Cache-aside**：app 读 Redis，miss 时 load DB 再填 cache。这是常见的 production 选择；app 拥有 TTL 与 invalidation。**Read-through**：cache library 在 miss 时 load——方便，控制更少。**Write-through**：每次 write 在 success 之前打到 cache 和 DB。**Write-behind**：写 cache，稍后 flush DB——fast writes；**durability** 是代价。
+      - **Cache stampede** 是一把热 key 过期，一千条 requests 一起 miss。预防：**singleflight** 或一把 lock 让一次 request 去填；**stale-while-revalidate**；probabilistic early expiry；hottest keys 前面再加一层 tiny in-process cache。
+      - Production 默认是 cache-aside，配明确的 TTLs、versioned keys，以及 freshness 重要时在 write 上 invalidation。Permission decision 绝不 cache 在一把漏掉 user 或 tenant 的 key 下。
+      - **失败：** stampede 再加上把 **transient failures** cache 很久，或把 dependency 的 500 当成 cached「not found」。在钱上用 write-behind 是另一个。Stampede 就是「每个 client 都在 expiry 上同步了」。完整地图：[System Design 里的 Caching](/notes/caching-in-system-design)。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="be-saga-outbox">
+    <AccordionTrigger>8. 没有 distributed transactions，怎么让两个 services 的 state 保持 consistent？解释 saga 与 outbox patterns。</AccordionTrigger>
+    <AccordionContent>
+
+      - Distributed transactions 不跨 services 跑。Two-phase commit **堵在 in-doubt transactions 上**，并把每个 participant 的 availability 绑在一起。每个 service 的 database 保持 transactional；协调靠 messages。
+      - **Saga** 是一串 local transactions。第三步失败，就对第一步和第二步跑 **compensations**。Choreography：每个 service emit events。Orchestration：一个 coordinator 驱动 steps 并握着可见 state——graph 很长、你需要「这笔 order 卡在哪」时更好。
+      - **Outbox** 修掉 dual-write：在 **同一笔 Postgres transaction** 里写入 business row 与 outbox row。Relay 再 publish 到 broker。Delivery 仍然是 at-least-once，所以 consumers 保持 idempotent。
+      - **失败：** 把 compensation 当成 undo。Payment compensation 是一笔 **refund**，有自己的 audit——compensation 本身也必须 durable 且 retryable。跳过 outbox，指望 `COMMIT` 之后再 send 就够了，第一次 crash 就会失败。完整地图：[System Design 里的 Message Queues](/notes/message-queues-in-system-design)。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="be-eventual-consistency">
+    <AccordionTrigger>9. 什么是 eventual consistency，怎么在它上面给用户 read-your-writes 行为？</AccordionTrigger>
+    <AccordionContent>
+
+      - **Eventual consistency** 指 writes 停下来之后，replicas 或 services 会 **收敛**；它不表示下一次 read 能看到刚落地的 write。面向用户的 bug 是：POST 创建了 resource，GET list 却错过它，于是用户再点一次，现在有两份。
+      - 刚 mutate 的那个 actor 的 **read-your-writes**：随后的 reads 在短窗口内打到 **primary**；在 **POST response** 里返回刚写入的 entity，让 client merge；一把 client 带上的 **version**，read path 等到它；需要时 sticky routing 到 writer。
+      - 产品的大部分可以稍微 stale——feeds、counts、search。刚 save 的那个人不行。Production 选择是按 endpoint 显式决定，而不是承诺「the system is consistent」。
+      - **失败：** 用 spinner 把 replica lag 藏起来，spinner 却 refetch **同一份 replica**。用户 duplicate orders。在 replica 前面 cache 那个 GET，于是连 primary-read 的修复也永远落不下来。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="be-locking">
+    <AccordionTrigger>10. Application code 里的 optimistic vs pessimistic locking——各给一个具体例子。</AccordionTrigger>
+    <AccordionContent>
+
+      - **Optimistic locking** 假定 conflict 少见。带着 `version` 读 row，write 用 `WHERE id = $1 AND version = $2`，再 bump version。零行更新表示别人赢了。具体例子：两个人在存一份 **settings document**。他们盯着 form 时并不握着 lock。
+      - **Pessimistic locking** 假定 conflict 很可能发生。在 transaction 里 `SELECT ... FOR UPDATE`，然后 write。具体例子：最后一个 SKU 的 **inventory decrement**、订一个 unique seat、分配一个 sequential invoice number。
+      - Production 默认是 application 层 optimistic——可编辑 rows 上的 version column——少数热 invariants 在 **短** transaction 里用 pessimistic。
+      - **失败：** 热 row 上用 optimistic 会变成 retry storm。Pessimistic 还在开着的 transaction 里打 Stripe，locks 握几百毫秒，pool 就死了。永远按同一 id 顺序 lock rows。Pessimistic lock 绝不跨一次 HTTP call 握着。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="be-connection-pool">
+    <AccordionTrigger>11. Database connection pool 怎么定大小？为什么 serverless / ECS-scale-out 架构会打爆 naive pooling，PgBouncer 怎么帮？</AccordionTrigger>
+    <AccordionContent>
+
+      - Pool 是 **Postgres sessions 的上限**，不是拧到 100 的 performance 旋钮。从 **database** 往回算：`max_connections` 减去 superuser 余量，再除以峰值时会有 **多少个 app processes**。每个 Node process 典型起步大约 **10–20**。看 pool wait time。硬约束在 server。
+      - **Serverless 与 ECS scale-out** 打爆 naive pooling，因为 **每个 task 或 Lambda execution environment** 都会开自己的 pool。五十个 tasks 乘二十条 connections，流量还没意思之前就已经一千个 sessions。
+      - **PgBouncer**（或 RDS Proxy）做 **multiplex**。Transaction pooling：很多 app connections 共享少数 server connections，transaction 结束就释放。
+      - **失败：** 从 blog 抄 `pool_size = 100` 进一个会 autoscales 到 30 的 service。用了 transaction pooling 却还在用 session features——temp tables、`SET`、某些 prepared-statement modes——然后出现神秘的 cross-talk。Pool 是跟每一份 replica 共享的预算。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="be-graceful-shutdown">
+    <AccordionTrigger>12. Graceful shutdown 时发生什么？SIGTERM 上怎么 drain in-flight requests 与 queue consumers？</AccordionTrigger>
+    <AccordionContent>
+
+      - **Graceful shutdown** 是：停止接手 **新** 工作，做完 **in-flight** 工作，关掉 resources，然后 exit。在 ECS 或 Kubernetes 上，**SIGTERM** 先到，然后一段 grace period，然后 **SIGKILL**。
+      - 收到 SIGTERM：标成 **not ready** 让 load balancer 摘掉；停止 HTTP server listening，并在短于 grace period 的 **deadline** 内等完 open requests；queue consumers **停止 fetch**，做完当前 messages，deadline 到了就 **nack**；最后才关 DB pool。
+      - Deadline 是显式的、会 log 的，而且短于 `terminationGracePeriodSeconds`。测试是 staging 里的 SIGTERM，不只是笔记本上的 SIGINT。
+      - **失败：** 一收到 SIGTERM 立刻 exit——in-flight POSTs 死掉，brokers redeliver，用户看到 502。Drain 了 HTTP 却 **一直跑 consumers** 直到 kill。Readiness 从不变 false，于是 balancer 在 process 关闭时还在送。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="be-observability">
+    <AccordionTrigger>13. 解释 observability 的三根支柱。Correlation IDs 怎么跨 services 与 queue hops 工作？</AccordionTrigger>
+    <AccordionContent>
+
+      - 三根支柱：**logs**（能 grep 的 events）、**metrics**（给 SLOs 与 alerts 的廉价 aggregates）、**traces**（request 作为 spans 的树）。Metrics 叫醒 on-call，traces 指出在哪，logs 说明为什么。
+      - **Correlation id** 是一条在边缘诞生的 string——或从 inbound header 取来——并复制到这条 request 去的每个地方。每一行 log 带上它。每一次 outbound HTTP call 送出它。每一条 queue message 把它放进 **attributes**，不只是可能被剥掉的 JSON body。**W3C `traceparent`** 是结构化形式。
+      - 缺了就生成，绝不拿它做 auth，并且给它建 index。用户说「14:02 失败了」，就能从 gateway span 跳到处理那次 SQS hop 的 worker。
+      - **失败：** 只有 HTTP 的 ids——consumer log 一个新 uuid，轨迹在 queue 处断掉。把 **user ids 放上 metric labels**（cardinality explosion），或把带 PII 的 payloads 放进 trace attributes。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="be-probes">
+    <AccordionTrigger>14. Liveness vs readiness probes：各自该查什么？如果 readiness 去查 database 会出什么问题？</AccordionTrigger>
+    <AccordionContent>
+
+      - **Liveness** 问：platform 该不该 **restart** 这个 process？检查的是 event loop 还活着——廉价的 in-process heartbeat——不是 Postgres 是否起来。Database blip 不是 liveness failure。Restart 每个 pod 治不好 database。
+      - **Readiness** 问：balancer 该不该 **送流量**？检查的是 process 在 listening、warmed、而且不在 shutting down。廉价的 DB ping 只有在没有那台 database 就无法提供有用流量时才合理，并且要有 hysteresis，免得一次 blip 清空整个 fleet。Optional dependencies 两边 probes 都不放。
+      - **失败：** 同一个 `/health` 给两个 probes 用。慢 DB 看起来像死掉的 process；kube 在 blip 期间杀掉健康 replicas——**restart storm**。Liveness 保持笨且本地；dependency health 住在 dashboards 与 SLOs 上。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="be-cron-once">
+    <AccordionTrigger>15. 你在 4 个 ECS tasks 上跑 nightly cron job——怎么保证它 exactly once？</AccordionTrigger>
+    <AccordionContent>
+
+      - 四个 ECS tasks 加上 app **内部** 的 nightly cron，意味着会跑四次，除非被挡住。Web fleets 是给 request fan-out 的。Schedules 不是。Schedulers 通常是 **at-least-once**，所以「start one task」不够。
+      - **最好**：不要在 web fleet 里 cron。EventBridge、CloudWatch rule，或 Kubernetes `CronJob` 启动 desired count 为 1 的 dedicated worker，而且 **effect** 仍然 idempotent。Fallback：带 `(job_name, scheduled_period)` unique key 的 durable `job_runs` row，或用 Redis lease / Postgres **advisory lock** 加 fencing 做 **leader election**。
+      - Alerts 在当天 **零** 次 run 时响，不只是有一次抛了。
+      - **失败：** 四个都在午夜开火，没有 lock。一把 **没有 TTL** 的 lock：leader 死了，lock 还在，job 再也跑不起来。「Exactly once」是 **一次成功的 execution**，不是一次在 side effect 之后 crash 的 attempt。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="be-secrets">
+    <AccordionTrigger>16. Production 里 secrets 与 config 该怎么管理和 rotate？为什么纯 env vars 有时不够？</AccordionTrigger>
+    <AccordionContent>
+
+      - Secrets 是 **会 rotate 的 credentials**；config 是 **随 deploy 走的行为**。Secrets 不烤进 images、git 或 AMI snapshots。Production 选择：一个 manager——Secrets Manager、SSM、Vault——以及 **IAM roles**，这样 task 启动时不必带一把长寿命的 cloud key。RDS IAM auth 或 short-lived tokens 胜过环境里的 password。
+      - Rotation：在 manager 里改 secret，然后 **recycle** tasks 让它们 fetch 新值。对 DB passwords，用 dual-value rotation——窗口期内同时接受新旧——再丢掉旧的。
+      - 纯 **env vars** 会漏：同用户的 `/proc` 与 crash dumps、debug「print env」、child-process inheritance、CI logs、ECS task-definition diffs。没有 versioning，没有细粒度 access，没有强制 rotation。
+      - **失败：** `DATABASE_URL` 带着 plaintext env 里的 password，或 rotate 了 Secrets Manager 却 **从不 restart** process，于是它握着旧 password 直到凌晨 3 点。另一个：因为 local DX 方便就 commit `.env`。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="be-testing">
+    <AccordionTrigger>17. 描述你的 backend testing 策略：unit vs integration vs e2e 各放什么，mocking 边界画在哪？</AccordionTrigger>
+    <AccordionContent>
+
+      - **Unit**：纯 domain——pricing rules、state machines、mapping、policy。没有 I/O。Mock **time** 与 randomness，不要 mock 这个 module 自己的 getters。
+      - **Integration**：这个 process 对着 **真正的 Postgres**（testcontainers），也许再加真正的 Redis。SQL、transactions、migrations 与 unique constraints 在这里失败。在 adapter 边界 mock **third-party HTTP**，不要 mock repository。**E2E**：少量 journeys 以 client 身份走 HTTP——signup、一条 money path、一次 permission denial。
+      - Mocking 边界：**process edges**——network、clock、vendor SDKs——不是每一个 internal function。那个为了抓住错 column 而存在的 test 不去 mock ORM。如果 bug 只会在 SQL 里出现，test 就必须说 SQL。
+      - **失败：** 一套 90% mocked units 的 suite，仍然抓不到漏掉的 `WHERE tenant_id`。另一个是每个 branch 都 e2e，四十分钟，没人跑。Mocks 是给这个 service 并不拥有的东西。Database 它拥有。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="be-multi-tenancy">
+    <AccordionTrigger>18. 比较 shared-schema（tenant_id column）、schema-per-tenant 与 database-per-tenant multi-tenancy。到 1,000 个 tenants 时，operations 上会破什么？</AccordionTrigger>
+    <AccordionContent>
+
+      - **Shared schema，`tenant_id` column**：一个 DB、一条 migration train，每条 tenant-owned row 打标。跑起来最快。Isolation 是纪律加上 **Postgres RLS**。这就是配 Hono、Better Auth organizations 与 Drizzle 的 production 模型——[用 Hono、Better Auth、Drizzle 与 Postgres RLS 打造 Multi-Tenant 后端](/notes/multi-tenant-backend-drizzle-hono-better-auth)。
+      - **Schema-per-tenant**：`tenant_abc.orders`。更强 isolation，**N 次 migrations**，`search_path` 游戏，每个 request 的 connection routing。**Database-per-tenant**：更强 isolation 与 noisy-neighbor 控制；**N 份 backups、N 次 failovers、N 套 connection setups**。同一 cluster 上分开的 logical databases 仍然共享 compute；最强 isolation 是 tenant 付钱时分开的 infrastructure。
+      - 到 **1,000 tenants**，schema-per-tenant 与 database-per-tenant 变成一个 **operations product**：migration fan-out、pool explosion、provisioning time、monitoring cardinality。Shared schema 仍然能跑，如果 indexes 以 `tenant_id` 打头、jobs 永远带 tenant context，并且有 quotas。
+      - **失败：** shared schema **没有** RLS，再加一个忘了 tenant filter 的 background worker——那就是 data leak。在 1,000 时每个 tenant 开一个 pool，然后先撞上 `max_connections`。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="be-realtime-fanout">
+    <AccordionTrigger>19. WebSockets vs SSE vs long polling——tradeoffs，以及怎么跨多个 server instances broadcast events？</AccordionTrigger>
+    <AccordionContent>
+
+      - **Long polling**：client 问，server 等，client 再问。Vanilla HTTP 后面好做。浪费；latency 是每条 message 一次 round trip。**SSE**：HTTP 上的 server-to-client stream。Auto-reconnect，简单，**单向**。关掉 proxy buffering，送 heartbeats。**WebSockets**：双向，起来之后 overhead 最低。Heartbeats、backpressure，以及 **stateful connections**。Naive Layer-7 timeouts 后面更难。
+      - 跨 **多个 instances** broadcast：一条 connection 住在 **一个** process 上。Events publish 到 **Redis pub/sub**（或 NATS）。每个 instance subscribe，再转给 **它自己的** local connections。Sticky sessions 帮 reconnects；它们不是 bus 的替代。
+      - Production 偏好：client 只听就用 SSE；两边都说话用 WebSockets。给每个 instance 的 connections 设 cap，然后扩 fleet。
+      - **失败：** 只在 in-process emit——一台机器能跑，另外三台沉默。没有 ping，于是 load balancer 杀掉 idle sockets。没有 pub/sub 的 scale-out 是 demo。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="be-design-webhook-ingest">
+    <AccordionTrigger>20. 设计练习：一个 webhook ingestion endpoint，必须扛住 10x traffic spike，既不丢 events 也不倒下。</AccordionTrigger>
+    <AccordionContent>
+
+      - **Acknowledge 要快，persist 要 durable，process 要 async。** Ingest endpoint 是 shock absorber，不是 business workflow。10x spike 是一个早就该存在的 queue 问题。
+      - `POST /webhooks/:source` 先 verify **signature**。把 provider 的 **delivery id** 当成 idempotency key。在 request 里把 **raw body** 写到 durable 的地方——SQS、Kinesis，或一条 `webhook_events` row——**然后** 返回 **2xx**。Workers parse、validate、apply、再标记 processed；apply 是 **idempotent**。
+      - 10x spike 时，ingest 水平扩，**queue** 吸收；workers 跟 queue depth 扩，不是 inbound RPS。Durable write 自己挂了就 fail closed：返回 503 让 provider 稍后 retry，绝不在 in-memory buffer 上返回 200。
+      - **失败：** persist **之前** 返回 200——crash 等于 lost events。在 request 里做 CRM sync、emails 与 domain workflows，于是 spike 打垮 API，provider 的 retries 再把它放大。Ingest 是 write-ahead log。其他都是 consumer。
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>
+
+<br />

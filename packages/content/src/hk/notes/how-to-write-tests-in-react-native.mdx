@@ -1,0 +1,808 @@
+---
+title: 如何在 React Native 寫 Tests
+description: 一份實用的 Expo testing playbook：Jest、React Native Testing Library、MSW、Expo Router、native-module mocks，以及精簡的 Maestro journeys
+date: 2026-08-23
+category: frontend
+---
+
+React Native test 應該在能真正觀察到行為的最便宜層，證明一項產品行為。Reducer 可以證明 rollback logic。React Native Testing Library 可以證明一個人按下 control 後看到 error。只有 device 能證明 keyboard 沒有蓋住 button、Android Back 回到正確畫面，或 camera permission sheet 行為正確。
+
+錯誤不是「unit tests 太少」或「E2E tests 太少」。是要求一個 test environment 去證明它看不見的事。
+
+```text
+pure function       domain transition
+rendered component  semantics + local interaction + async UI
+router harness      route contract + deep-link entry
+device binary       native integration + operating-system behavior
+human               usability + assistive technology + visual quality
+```
+
+這篇 note 對準 **Expo SDK 57**、React Native **0.86.2**、React **19.2**，以及 New Architecture——與 [深入理解 React Native](/notes/understanding-react-native-in-depth) 同一條 baseline。要覆蓋的 UX risks 見 [如何改善 Mobile Development 的 User Experience](/notes/how-to-improve-user-experience-in-mobile-development)。Red–Green–Refactor 見 [Frontend Engineering 中的 Test-Driven Development](/notes/test-driven-development-in-frontend)。這篇是 React Native 的實作 playbook：Jest 與 React Native Testing Library 做快速 behavior tests，MSW 守 HTTP boundary，精簡的 Maestro suite 打可安裝的 app。
+
+---
+
+## 1. 給每一層一個工作
+
+從 claim 出發，再選能拒絕壞實作的最小 environment。
+
+| Claim                                                     | Cheapest useful layer    | What it cannot prove                      |
+| --------------------------------------------------------- | ------------------------ | ----------------------------------------- |
+| Rejecting a mutation restores the previous favorite value | Pure unit                | What the screen renders                   |
+| Pressing Favorite exposes busy, success, and error states | RNTL component           | Native animation, pixels, or real network |
+| `/orders/42` opens the order route                        | Expo Router harness      | Universal/App Link association            |
+| Android Back returns from detail to the order list        | Maestro on Android       | Whether the task makes sense to a person  |
+| Camera denial leaves a manual-upload path                 | Device test              | Whether the explanation earns trust       |
+| VoiceOver can complete checkout                           | Human accessibility pass | Nothing smaller can replace it            |
+
+Suite 的中心應該是 **behavior tests**：
+
+- Pure domain rules 用直接的 unit tests。
+- 多數 feature 信心來自 render 畫面，再用 roles、names、text、state 去操作它。
+- 少量 device journeys 證明 native seams。
+
+不要在每一層重複同一個 assertion。如果 unit test 已經徹底證明 currency formatter，Maestro flow 只需要看到 price 存在——不必用 device 重算每一個 rounding case。
+
+**Failure:** 一座有幾千個 mocked hook tests 和三個 device tests 的金字塔，卻沒有任何 test 曾經 render 使用者看到的 states。
+
+---
+
+## 2. 最小的 Expo Test Setup
+
+用 Expo 的 version resolver，讓 Jest 與 React Native dependencies 對上已安裝的 SDK。
+
+```sh
+npx expo install jest jest-expo @types/jest @testing-library/react-native --dev
+npm install --save-dev msw
+```
+
+`jest-expo` 提供 React Native transforms，並 mock Expo SDK 的 native 那一半。React Native Testing Library 提供 `render`、queries、user interactions，以及內建 Jest matchers。不要再加已棄用的 `@testing-library/jest-native`；現在的 RNTL 在 import package 時就暴露 matchers。
+
+一小段 config 就夠開始：
+
+```js title="jest.config.js"
+module.exports = {
+  preset: "jest-expo",
+  setupFilesAfterEnv: ["<rootDir>/test/setup.ts"],
+  clearMocks: true,
+}
+```
+
+```json title="package.json"
+{
+  "scripts": {
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:ci": "jest --ci --runInBand"
+  }
+}
+```
+
+當 app 有明確的 TypeScript `types` list 時，把 `"jest"` 加進 `compilerOptions.types`。把 tests 留在 Expo Router 的 `app/` 目錄外；`app/` 裡每個 file 都會被當成 route。
+
+只有在已安裝的 dependency 真的 transform 失敗時，才加 `transformIgnorePatterns`。Expo 為 npm、pnpm、Bun 各自文件了 patterns，它們不可互換。一段把整個 `node_modules` 都 transpile 的複製 regex，可以把十秒的 suite 變成一分鐘。
+
+官方 setup 參考是 [Expo unit testing](https://docs.expo.dev/develop/unit-testing/) 與 [RNTL quick start](https://callstack.github.io/react-native-testing-library/docs/start/quick-start)。
+
+**Failure:** 用手工 web/JSDOM config 取代 `jest-expo`。React Native 不 render DOM，test environment 就不再對上 app 用的 host components。
+
+---
+
+## 3. 一個 Feature，四個可觀察 States
+
+用一個 order detail 當 throughline：
+
+1. Order 載入時 Favorite 是關的。
+2. 按下 Favorite 立刻更新 control。
+3. 成功的 request 讓它維持開，並顯示 Saved。
+4. 失敗的 request 把它滾回去，並露出 Retry。
+
+Component 應該用 semantics 表達那些 states，而不只靠顏色。
+
+```tsx
+<>
+  <Pressable
+    accessibilityRole="switch"
+    accessibilityLabel="Favorite order"
+    accessibilityState={{
+      checked: favorite,
+      disabled: saving,
+      busy: saving,
+    }}
+    disabled={saving}
+    onPress={toggleFavorite}
+    testID="favorite-toggle"
+  >
+    <Text>{favorite ? "Favorited" : "Favorite"}</Text>
+  </Pressable>
+
+  {message ? <Text accessibilityRole="alert">{message}</Text> : null}
+</>
+```
+
+`accessibilityRole`、label、state 構成 component 的公開 interaction contract。RNTL 可以 query 它。VoiceOver 與 TalkBack 可以 announce 它。Maestro 可以在 localized build 用穩定的 `testID`。一個 accessible component 服務三者，而不是創造繞過 user interface 的 test-only API。
+
+這個 `testID` 是刻意的，因為這個 control 坐在關鍵 device journey 上。它不是把 `testID` 放到每個 wrapper `View` 的理由。
+
+**Failure:** 在 hook 裡測 `favorite === true`，可見 control 仍然寫 Favorite，並暴露 `checked: false`。
+
+---
+
+## 4. 把確定的 Transitions 放進 Pure Functions
+
+Optimistic UI 有一段獨立於 React Native 的 state transition。那一部分不用 render 就能測。
+
+```ts
+type FavoriteState = {
+  favorite: boolean
+  previous: boolean | null
+  status: "idle" | "saving"
+}
+
+export function beginFavoriteChange(state: FavoriteState): FavoriteState {
+  return {
+    favorite: !state.favorite,
+    previous: state.favorite,
+    status: "saving",
+  }
+}
+
+export function rejectFavoriteChange(state: FavoriteState): FavoriteState {
+  return {
+    favorite: state.previous ?? state.favorite,
+    previous: null,
+    status: "idle",
+  }
+}
+```
+
+```ts
+describe("favorite transition", () => {
+  test("rolls back to the value before the optimistic change", () => {
+    const initial: FavoriteState = {
+      favorite: false,
+      previous: null,
+      status: "idle",
+    }
+
+    const saving = beginFavoriteChange(initial)
+    const rejected = rejectFavoriteChange(saving)
+
+    expect(saving).toEqual({
+      favorite: true,
+      previous: false,
+      status: "saving",
+    })
+    expect(rejected).toEqual(initial)
+  })
+})
+```
+
+這個 test 快，因為它不擁有 renderer、provider、network、clock。如果 transition 更豐富，為 starting on、starting off、invalid events 加 table-driven cases。
+
+不要只為了增加 unit-test 數量而抽出 function。抽出時機是 function 命名一段 domain transition、拿掉不可能的 states，或被共享。一行 `setFavorite(!favorite)` wrapper 不是有用的 module。
+
+**Failure:** mock `useState`、直接呼叫 component function，然後 assert setter 收到 `true`。那測的是 React wiring，不是產品行為。
+
+---
+
+## 5. 透過與 Production 相同的 Providers Render
+
+Feature tests 應該用一個小的 render harness，每個 test 建立新鮮的 providers。共享的 global query client 會在 tests 之間洩漏 cache 與 mutation state。
+
+```tsx
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { render } from "@testing-library/react-native"
+
+export async function renderOrder(orderId = "42") {
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+      mutations: { retry: false },
+    },
+  })
+
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <OrderScreen orderId={orderId} />
+    </QueryClientProvider>
+  )
+}
+```
+
+Retries 在 production 有用，在確定的 error test 裡有害：assertion 會等過它沒有要求驗證的 policies。在 harness 關掉它們，如果 retry behavior 本身是產品承諾，再寫另一個 test。
+
+Provider wrappers 應該保住 production behavior，只替換外面的 boundaries：
+
+- 保留真實的 component tree、state machine、query client、formatter。
+- 在 seams 替換 network responses、time、secure storage、OS capabilities。
+- 每個 test 建立新鮮的 mutable stores 與 caches。
+
+如果每個 test 都手動 nest 五個 providers，把它們放進 `renderApp`。如果 `renderApp` 有二十個 options 能創造不可能的 production states，它已經變成第二個 application。
+
+**Failure:** mock `useOrder()` 回傳每個 state。Test 證明四個 hardcoded objects 會 render，但不證明 screen 從真實 requests 與 interactions 到達那些 states。
+
+---
+
+## 6. 用 MSW 控制 HTTP Boundary
+
+Mock Service Worker 攔截 request，而不是替換 API hook。Screen 仍然 serialize 真實 request、parse 真實 response、更新真實 cache，再 render 結果。
+
+對隔離的 Jest/RNTL tests，用 MSW 的 Node integration：
+
+```ts title="test/server.ts"
+import { http, HttpResponse } from "msw"
+import { setupServer } from "msw/node"
+
+export const handlers = [
+  http.get("https://api.example.com/orders/:orderId", ({ params }) => {
+    return HttpResponse.json({
+      id: params.orderId,
+      title: "Order 42",
+      favorite: false,
+    })
+  }),
+
+  http.put(
+    "https://api.example.com/orders/:orderId/favorite",
+    async ({ request }) => {
+      const body = await request.json()
+      return HttpResponse.json(body)
+    }
+  ),
+]
+
+export const server = setupServer(...handlers)
+```
+
+```ts title="test/setup.ts"
+import { server } from "./server"
+
+beforeAll(() => server.listen({ onUnhandledRequest: "error" }))
+afterEach(() => server.resetHandlers())
+afterAll(() => server.close())
+```
+
+`onUnhandledRequest: "error"` 把意外的真實 request 變成 test failure。`resetHandlers()` 拿掉 per-test overrides，讓 offline test 不能毒害它之後的 test。
+
+MSW 有兩個 environments：
+
+- **Jest/RNTL:** `msw/node`，因為 test 在 Jest process 執行。
+- **正在跑的 React Native app:** `msw/native`，配 React Native polyfills，當 development build 刻意打 mock handlers。
+
+不要把 `msw/node` import 進 app bundle；Node 的 `http` module 在 device 上不存在。這個區分見 [MSW's React Native integration](https://mswjs.io/docs/integrations/react-native/)。
+
+**Failure:** 在 file 頂部 `jest.mock("../use-order")`。每個 test 現在都繞過 request shape、response parsing、cache updates，以及最可能漂掉的那條 boundary。
+
+---
+
+## 7. 測這個人做什麼、看到什麼
+
+RNTL 的 `userEvent` 發出逼真的 host interaction sequence。當它支援該 action 時，優先於 `fireEvent`。
+
+```tsx
+import { screen, userEvent, waitFor } from "@testing-library/react-native"
+import { delay, http, HttpResponse } from "msw"
+import { server } from "../test/server"
+
+test("favorites an order and confirms the save", async () => {
+  server.use(
+    http.put("https://api.example.com/orders/:orderId/favorite", async () => {
+      await delay(250)
+      return HttpResponse.json({ favorite: true })
+    })
+  )
+
+  await renderOrder()
+  const user = userEvent.setup()
+  const favorite = await screen.findByRole("switch", {
+    name: "Favorite order",
+  })
+
+  expect(favorite).not.toBeChecked()
+
+  await user.press(favorite)
+
+  expect(favorite).toBeChecked()
+  expect(favorite).toBeDisabled()
+  expect(await screen.findByText("Saved")).toBeOnTheScreen()
+
+  await waitFor(() => expect(favorite).toBeEnabled())
+})
+```
+
+Delayed handler 在不伸進 component 的情況下，創造可觀察的 saving state。Test 斷言 interaction contract：
+
+- Control 能用 role 與 accessible name 找到。
+- Optimistic state 出現。
+- Saving 期間禁止重複提交。
+- Server confirmation 變得可見。
+- Control 再次可用。
+
+`user.press()` 是 asynchronous。要 await。現在的 RNTL user events 會重現 `pressIn`、`pressOut`，以及 native 最短 press duration；直接 `fireEvent.press()` 只呼叫 handler。
+
+**Failure:** `fireEvent(toggle, "onPress")`，然後檢查 `toggle.props.style.opacity`。Test 繞過 host interaction，把自己鎖在視覺 implementation detail。
+
+---
+
+## 8. 讓 Failure 與 Offline 成為一等 Tests
+
+Error path 不是換了 status code 的 success test。它有自己的產品承諾：滾回、保住 context、解釋失敗了什麼、提供 recovery。
+
+```tsx
+test("rolls back and exposes retry when saving fails", async () => {
+  server.use(
+    http.put("https://api.example.com/orders/:orderId/favorite", () =>
+      HttpResponse.error()
+    )
+  )
+
+  await renderOrder()
+  const user = userEvent.setup()
+  const favorite = await screen.findByRole("switch", {
+    name: "Favorite order",
+  })
+
+  await user.press(favorite)
+
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Could not update favorite. Try again."
+  )
+  expect(favorite).not.toBeChecked()
+  expect(screen.getByRole("button", { name: "Try again" })).toBeEnabled()
+})
+```
+
+不同 failure classes 用不同 MSW responses：
+
+```ts
+server.use(
+  http.get("https://api.example.com/orders/:orderId", () => {
+    return new HttpResponse(null, { status: 401 })
+  })
+)
+
+server.use(
+  http.get("https://api.example.com/orders/:orderId", async () => {
+    await delay(5_000)
+    return HttpResponse.json(order)
+  })
+)
+
+server.use(
+  http.get("https://api.example.com/orders/:orderId", () => {
+    return HttpResponse.error()
+  })
+)
+```
+
+那些代表 unauthorized、slow、network failure。它們不該全部 render「Something went wrong。」
+
+現在就存在的東西用 `getBy*`，斷言不存在用 `queryBy*`，會異步出現的用 `findBy*`。當 assertion 不能自然寫成一個 `findBy` query 時才用 `waitFor`，例如 control 變成 enabled。
+
+永遠不要加 `await new Promise(resolve => setTimeout(resolve, 1000))` 來「讓 React settle」。等可見結果。Fake timers 屬於實際 timer policy 的 tests，或作為 `userEvent.setup` 的 clock；它們不是未知異步工作的解藥。
+
+**Failure:** 把 suite-wide timeout 調大，直到一個沒有 await 的 mutation 不再常常失敗。
+
+---
+
+## 9. 把 Routes 當 Routes 測
+
+Expo Router 的 `expo-router/testing-library` 建立 in-memory file system，並加上 route matchers。它可以證明一次 press 改變 route，以及 deep link 解析到預期畫面。
+
+```tsx
+import { renderRouter, screen } from "expo-router/testing-library"
+import { Link } from "expo-router"
+import { Text } from "react-native"
+import { userEvent } from "@testing-library/react-native"
+
+test("opens an order from the list", async () => {
+  await renderRouter(
+    {
+      index: () => <Link href="/orders/42">Open Order 42</Link>,
+      "orders/[orderId]": () => <Text>Order detail</Text>,
+    },
+    { initialUrl: "/" }
+  )
+
+  const user = userEvent.setup()
+  await user.press(screen.getByRole("link", { name: "Open Order 42" }))
+
+  expect(screen).toHavePathname("/orders/42")
+  expect(screen.getByText("Order detail")).toBeOnTheScreen()
+})
+```
+
+Deep-link entry 是同一條 route，只是起始 URL 不同：
+
+```tsx
+test("resolves a direct order URL", async () => {
+  await renderRouter(
+    {
+      index: () => <Text>Orders</Text>,
+      "orders/[orderId]": () => <Text>Order detail</Text>,
+    },
+    { initialUrl: "/orders/42" }
+  )
+
+  expect(screen).toHavePathname("/orders/42")
+  expect(screen.getByText("Order detail")).toBeOnTheScreen()
+})
+```
+
+這證明 JavaScript route contract。它不證明 `https://example.com/orders/42` 與 iOS app 關聯、Android 驗證了 domain，或其他 app 不能佔領 custom scheme。那些需要已安裝的 binary 與 operating-system configuration。
+
+小的 navigation contract 用 inline routes。當 layouts、auth guards、nested groups 是行為的一部分時，用 fixture directory。把 test files 留在 `app/` 外。見 [Expo Router testing](https://docs.expo.dev/router/reference/testing/)。
+
+**Failure:** mock `router.push` 並 assert 它被叫了一個 string。Destination 可能不存在、可能在錯誤 layout 下解析，或立刻 redirect。
+
+---
+
+## 10. 在 Capability Seam Mock Native Modules
+
+Jest 打不開 Keychain、顯示不了 iOS permission sheet、也無法把 app 移到 background。Mock capability 來測周圍的 JavaScript policy，然後為 native contract 保留 device coverage。
+
+```tsx
+import * as SecureStore from "expo-secure-store"
+
+jest.mock("expo-secure-store", () => ({
+  getItemAsync: jest.fn(),
+  setItemAsync: jest.fn(),
+  deleteItemAsync: jest.fn(),
+}))
+
+test("restores a refresh token into the session flow", async () => {
+  jest.mocked(SecureStore.getItemAsync).mockResolvedValue("refresh-token")
+
+  await renderSessionGate()
+
+  expect(await screen.findByText("Orders")).toBeOnTheScreen()
+  expect(SecureStore.getItemAsync).toHaveBeenCalledWith("auth.refresh")
+})
+```
+
+那個 test 證明 app 問了預期的 key，並處理回傳的 token。它不證明 Keychain accessibility class、Android Keystore behavior、backup policy、biometric prompts，或 process death 之後的 persistence。
+
+Permissions 用同一條 boundary：
+
+```ts
+type CameraCapability = {
+  getStatus(): Promise<"undetermined" | "granted" | "denied" | "blocked">
+  request(): Promise<"granted" | "denied">
+  openSettings(): Promise<void>
+}
+```
+
+Inject 或 mock `CameraCapability` 來證明：
+
+- Undetermined 只在這個人點 Scan receipt 之後才問。
+- Granted 打開 scanner。
+- Denied 留下 manual upload。
+- Blocked 提供 Settings action，而不是永遠 request。
+
+然後安裝 app，證明真實的 system sheet、從 Settings 回來的 path，以及平台特定的 status mapping。
+
+Expo Modules 可以從 module 的 `mocks/` directory 出貨 mocks，`jest-expo` 會為 `requireNativeModule` resolve 它們。App-owned adapters 仍然有用，因為它們命名產品 capability，而不是在整個 feature 暴露 vendor API。
+
+**Failure:** 永遠回 Granted 的 native mock。Permission code「被覆蓋了」，但每個 denial 與 recovery branch 都是死的。
+
+---
+
+## 11. 透過 Public Interface 選 Elements
+
+Selector 品質決定 refactor 是因為產品理由還是 tree-shape 理由而弄壞 tests。
+
+用這個順序：
+
+1. **Role + accessible name:** `getByRole("button", { name: "Try again" })`。
+2. **Role + state:** `getByRole("switch", { checked: true })`。
+3. **Visible text 或 display value:** 這個人讀或打的內容。
+4. **Placeholder 或 accessibility hint:** 只有當那就是實際 interface。
+5. **`testID`:** 穩定的 device-automation seam，或沒有有用 public selector 的 element。
+6. **Props/tree traversal:** 最後手段。
+
+RNTL role queries 需要 accessibility element。`Text`、`TextInput`、`Switch` 是 accessible hosts。`Pressable` 提供 accessible host。普通 `View` 需要 `accessible`。
+
+```tsx
+expect(
+  screen.getByRole("switch", {
+    name: "Favorite order",
+    checked: true,
+  })
+).toBeChecked()
+```
+
+失敗的 role query 可以揭露真正的 accessibility defect。失敗的 `getByTestId("button-7")` 通常只揭露 implementation identifier 變了。
+
+Maestro 有不同壓力：localized visible text 會隨語言變，所以穩定的 `testID` 值適合放在關鍵 journey boundaries。用 `favorite-toggle`、`checkout-submit` 這種名字，不是 `blue-button-right` 這種 styling 或位置。
+
+除非座標本身就是被測的行為，永遠不要用 screen coordinates 選。Device size、font scale、keyboard、localization 會把它移走。
+
+**Failure:** 給每個 nested `View` 加 `testID`，並對 React Native 可能在 mount 前 flatten 的 component tree 建 tests。
+
+---
+
+## 12. Snapshot Contracts，不是 Screens
+
+寬的 React Native snapshot 會 serialize host nodes、styles、wrapper views、provider output、implementation details。Screen 變大它就變大。Reviewers 不再讀它。更新它變成用按鍵批准。
+
+優先明確行為：
+
+```tsx
+expect(screen.getByRole("heading", { name: "Order 42" })).toBeVisible()
+expect(screen.getByRole("switch", { checked: false })).toBeEnabled()
+expect(screen.queryByRole("alert")).not.toBeOnTheScreen()
+```
+
+當 serialization 本身就是 contract 時，窄的 snapshot 可以佔一個位置：
+
+```ts
+expect(orderRoute("42")).toMatchInlineSnapshot(`
+  {
+    "params": {
+      "orderId": "42",
+    },
+    "pathname": "/orders/[orderId]",
+  }
+`)
+```
+
+即使那樣，`toEqual` 可能更清楚。規則不是「snapshots 被禁止」。規則是人必須能解釋 snapshot 保護了什麼語意變化。
+
+Screenshots 與 visual regression 是另一回事。Device screenshot 可以抓住 clipping、overlap、platform rendering changes，serialized React tree 做不到。視覺主張用視覺工具。
+
+**Failure:** 一份 2,000 行的 screen snapshot，唯一有意義的變化是 Retry 消失了。
+
+---
+
+## 13. 讓 Maestro 保持 Thin 與 Native
+
+Maestro 透過 native accessibility layer 驅動已安裝的 app。它證明 JavaScript、Fabric、native views、navigation、operating system 一起工作。它不需要 app 裡的 npm dependency。
+
+只在 journey 需要的地方暴露穩定 ids：
+
+```tsx
+<Pressable
+  accessibilityRole="button"
+  accessibilityLabel={`Open ${order.title}`}
+  onPress={() => router.push(`/orders/${order.id}`)}
+  testID={`order-${order.id}`}
+>
+  <OrderSummary order={order} />
+</Pressable>
+```
+
+完整的關鍵 journey 保持短：
+
+```yaml title=".maestro/order-favorite.yaml"
+appId: ${APP_ID}
+---
+- launchApp:
+    clearState: true
+- assertVisible: "Orders"
+- tapOn:
+    id: "order-42"
+- assertVisible: "Order 42"
+- tapOn:
+    id: "favorite-toggle"
+- assertVisible: "Saved"
+```
+
+對平台特定 app ids 跑同一條 flow：
+
+```sh
+maestro test -e APP_ID=com.example.orders .maestro/order-favorite.yaml
+```
+
+Assertions 是 outcomes，不是 sleeps。Maestro 等 UI 變穩定；固定 delays 通常讓 flow 更慢，而且仍然 flaky。
+
+用聚焦的 flow 證明已安裝的 deep link：
+
+```yaml title=".maestro/order-deep-link.yaml"
+appId: ${APP_ID}
+---
+- launchApp:
+    clearState: true
+- openLink: "https://example.com/orders/42"
+- assertVisible:
+    id: "order-detail-screen"
+- assertVisible: "Order 42"
+```
+
+App-only 的 `order-detail-screen` id 避免 URL 打開也寫「Order 42」的 browser page 時 flow 通過。那跨越 `renderRouter` 看不見的 OS link association。
+
+把 Android Back 放在聚焦的 Android-only flow：
+
+```yaml title=".maestro/order-android-back.yaml"
+appId: ${APP_ID}
+---
+- launchApp
+- tapOn:
+    id: "order-42"
+- assertVisible:
+    id: "order-detail-screen"
+- back
+- assertVisible: "Orders"
+```
+
+平台特定 flows 只在它們描述的 host 上跑。Maestro 的 `back` command 行使 Android 真實 back path；iOS navigation 應該用可見的 back control，或另做 gesture-focused test。
+
+優先用 native modules 對上 production 的 development 或 internal distribution build。Expo Go 對開發有用，但跑在 Expo 的 container 裡，所以不能用 app 自己的 id launch，也不能證明最終 native surface。
+
+Maestro 是這裡的 default，因為它是 black-box、cross-platform、便宜採用。**Detox** 是有更深 synchronization 與 programmatic control 的 instrumented 替代。當 app 的複雜度需要那種 control 時才選它——不是因為維護兩套 E2E stacks 看起來全面。
+
+**Failure:** 把每個 unit 與 component case 重建成 Maestro flow。Suite 變慢、data-heavy、無法診斷。
+
+---
+
+## 14. Device Tests 擁有 Native Seams
+
+RNTL render 一棵 React Native tree。它不 boot UIKit 或 Android Views。為失敗點在 JavaScript 外的行為保留 device evidence：
+
+- Keyboard appearance、dismissal、input accessories、inset adjustment。
+- iOS edge swipe、Android hardware/predictive Back、互相競爭的 gestures。
+- Camera、photos、notifications、biometrics、permission recovery。
+- Universal Links、App Links、custom schemes、push-open routing。
+- Secure storage persistence、logout cleanup、process death。
+- Background/resume、interrupted uploads、reconnect。
+- Reduced motion、dynamic type、TalkBack、VoiceOver focus。
+- Native crashes、ANRs、startup、image decode、UI-thread performance。
+
+其中一些可以 device-automated。有些仍需要手動測試。「在 simulator 上跑」不等於「在實體裝置上與 screen reader 一起工作」。
+
+完整 condition matrix 見 [如何改善 Mobile Development 的 User Experience](/notes/how-to-improve-user-experience-in-mobile-development)。可安裝 builds、signing、release gates 見 [React 與 React Native 的 Frontend CI/CD](/notes/frontend-ci-cd-for-react-and-react-native)。這篇 note 的 device suite 專注 test design。
+
+**Failure:** assert `KeyboardAvoidingView` 存在，就稱 keyboard bug 被測過。
+
+---
+
+## 15. 把 Flakes 當成 Test System 的 Defects
+
+Flaky test 有不受控的 input：time、state、network、animation、data、order、device，或與產品賽跑的 assertion。
+
+這樣 triage：
+
+1. 單獨重現失敗，以及在前一個 test 之後重現。
+2. 找出不受控的 boundary。
+3. 用可觀察 outcome 取代固定等待。
+4. Reset server handlers、caches、storage、app state。
+5. Seed 確定的 account 或 API fixture。
+6. 失敗時捕捉 device logs 與 screenshots。
+7. 只有帶 owner、reason、expiry 才 quarantine。
+
+Retries 可以暴露機率。它們不能讓壞訊號變得可信。第三次 attempt 才通過的 release gate，教團隊忽略紅燈。
+
+對 device journeys：
+
+- 給每條 flow 獨立 setup；不要依賴執行順序。
+- 對 localized 或 dynamic controls 用穩定 ids。
+- Keyboard 佔住畫面時，明確 hide 或 handle。
+- 透過 API 或 fixture boundary 控制 test data，不是透過十個 setup screens。
+- 每次重要 mutation 之後 assert 產品結果。
+
+**Failure:** 全域加 `retry: 3`，然後把最後一次綠燈當成證據。
+
+---
+
+## 16. Coverage 是地圖，不是目標
+
+Line coverage 說 code 執行了。它不說 assertion 能偵測到 bug。
+
+有用的 review 問：
+
+- 哪些 money、identity、authorization、privacy、data-loss paths 變了？
+- 這個 feature 能進入哪些可見 states？
+- 哪些 transitions 能失敗或被打斷？
+- 哪些 claims 屬於 JavaScript，哪些屬於 native host？
+- 每個 test 會不會因為 title 裡那個 bug 而失敗？
+
+用 coverage reports 找沒被造訪的 branches。不要寫空 tests 把百分比變綠。一個 rollback transition 的直接 test，比 render 十個 screens 只 assert 它們不 throw 更有價值。
+
+Test names 應該陳述產品承諾：
+
+```text
+rolls back favorite when the save fails
+opens a blocked permission path in Settings
+preserves the draft after an unauthorized refresh
+returns to the order list with Android Back
+```
+
+不是：
+
+```text
+calls handler
+updates state
+renders correctly
+works
+```
+
+更廣的 regression strategy——blast radius、layer selection、什麼賺到 E2E coverage——見 [Frontend Regression Tests](/notes/_frontend-regression-test)。
+
+**Failure:** 提高 coverage threshold，而沒測到的 branch 正是唯一能弄丟使用者 draft 的那條。
+
+---
+
+## Takeaway
+
+React Native testing strategy 是一組 boundaries。
+
+1. **規則能否在沒有 React 的情況下跑？** 直接測 pure transition。
+2. **Claim 能否透過 rendered interface 看見？** 用 RNTL、semantic queries、`userEvent`、可觀察的 async states。
+3. **Feature 有沒有跨 HTTP？** 用 MSW 攔截 request，而不是 mock hook。
+4. **Navigation 是不是行為本身？** Render Expo Router file system，並 assert route。
+5. **JavaScript 是否依賴 OS capability？** Mock capability 測 policy；用 device 測 capability。
+6. **Claim 是否需要 UIKit、Android Views，或 OS？** 放進小型 Maestro journey 或手動 device pass。
+7. **Test 在等時間還是等行為？** 等行為。
+8. **Assertion 能否撐過保住產品的 refactor？** 如果不能，它耦合了 implementation。
+
+目標不是最大的 suite。是讓壞掉的產品承諾很難出貨的最小 suite。
+
+---
+
+## Recap Q&A
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="rn-test-layers">
+    <AccordionTrigger>1. 哪個 React Native test layer 該擁有一段行為？</AccordionTrigger>
+    <AccordionContent>
+
+      - 用能觀察 claim 的最便宜層：pure units 給 domain transitions，RNTL 給 rendered interaction，Router tests 給 route contracts，Maestro 給 native/OS seams。
+      - 把多數 feature 信心放在行為密集的 RNTL tests，讓 device journeys 保持薄。
+      - 不要在每一層複製同一套 exhaustive assertion。
+      - **Failure:** 要求 mocked component test 證明 keyboard、permission-sheet，或 Android Back 行為。
+
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="rn-test-rntl">
+    <AccordionTrigger>2. 怎樣才算強的 React Native Testing Library test？</AccordionTrigger>
+    <AccordionContent>
+
+      - 透過 roles、accessible names、text、display values、state 操作畫面。支援的 interactions 優先用 `userEvent`。
+      - 異步出現的 outcomes 用 `findBy*`；只有一個 query 表達不了 transition 時才用 `waitFor`。
+      - 用新鮮 mutable state render 真實 providers；只替換外部 boundaries。
+      - **Failure:** mock 一個 hook、觸發它的 callback，然後 assert 內部 prop 或 setter call。
+
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="rn-test-msw">
+    <AccordionTrigger>3. 為什麼用 MSW 而不是 mock API hook？</AccordionTrigger>
+    <AccordionContent>
+
+      - MSW 把 request serialization、response parsing、query caching、screen state 留在 test 裡，同時控制 success、delay、status errors、network failure。
+      - 隔離的 Jest tests 用 `msw/node`，每個 test 後 reset handlers。只有正在跑的 React Native app 自己啟用 handlers 時才用 `msw/native`。
+      - 對 unhandled requests 失敗，讓 tests 永遠不要意外打到真實 network。
+      - **Failure:** 一個全域 hook mock 繞過 transport boundary，並在 cases 之間洩漏 state。
+
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="rn-test-maestro">
+    <AccordionTrigger>4. 什麼該放在 Maestro 而不是 Jest？</AccordionTrigger>
+    <AccordionContent>
+
+      - 需要已安裝 binary、native views、OS links、keyboard、permissions、Back behavior、lifecycle，或真實 native modules 的關鍵 journeys。
+      - 用 `testID` 選穩定 journey boundaries、assert 可見 outcomes，並讓每條 flow 能獨立 seed。
+      - Maestro 是這裡的 black-box default；當更深的 instrumentation 與 control 值得成本時，Detox 是替代。
+      - **Failure:** 把每個 unit 與 RNTL case 重建成慢的 device flow。
+
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="rn-test-flakes">
+    <AccordionTrigger>5. 團隊該如何處理 snapshots、coverage、flaky tests？</AccordionTrigger>
+    <AccordionContent>
+
+      - 避免寬的 screen snapshots。只保留 serialization 本身就是穩定 contract 的窄 snapshots。
+      - 用 coverage 找出沒被造訪的風險，不是當成 assertions 有意義的證明。
+      - 拿掉不受控的 time、state、data、network inputs。只有帶 owner、reason、expiry 才 quarantine。
+      - **Failure:** 全域 retries 與 snapshot updates 把紅燈變綠，卻沒解釋產品變化。
+
+    </AccordionContent>
+
+  </AccordionItem>
+</Accordion>

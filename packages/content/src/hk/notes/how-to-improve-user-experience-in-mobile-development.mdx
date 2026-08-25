@@ -1,0 +1,652 @@
+---
+title: 如何改善 Mobile Development 的 User Experience
+description: 資深 React Native 工程師如何打造快速、accessible、resilient，並且在 iOS 與 Android 上像 native 的體驗
+date: 2026-08-23
+category: frontend
+---
+
+Mobile user experience 不是 features 能跑之後再疊上去的那一層。它是產品在拇指移動、鍵盤打開、網絡慢、權限被拒、文字放大，或 process 剛從 background 回來時的行為。
+
+React Native 給 iOS 與 Android 的是同一個產品表面，不是同一個 host。產品 intent 應該共享。互動應該尊重各自平台。一個 screen 可以用同一套 domain model 與 design tokens，同時保留 iOS navigation、Android back、native accessibility，以及使用者手上那台裝置的限制。
+
+這篇 note 把 UX 當成一份 engineering contract：
+
+```text
+useful task
+  + clear state
+  + immediate feedback
+  + recoverable failure
+  + native conventions
+  + accessible interaction
+  + performance on a real device
+  = mobile user experience
+```
+
+這份 contract 背後的 React Native runtime 見 [深入理解 React Native](/notes/understanding-react-native-in-depth)。這篇從 renderer 結束的地方開始：這個人能理解什麼、能成功做成什麼。
+
+---
+
+## 1. 設計一個產品，不是一張 Screenshot
+
+錯誤的 cross-platform 目標是像素相等。iOS 與 Android 的 navigation model、system controls、typography metrics、permission surfaces、back behavior 本來就不一樣。把兩邊硬塞進同一張 screenshot，通常會讓兩邊都覺得陌生。
+
+共享表達產品的部分：
+
+- Content hierarchy、domain language、brand、color roles、spacing scale、task flow。
+- Validation rules、loading 與 error states、analytics events、accessibility intent。
+- Business components，例如 membership card、order summary、transfer form。
+
+改寫 host 擁有的部分：
+
+- Back navigation、system sheets、日期時間選擇、share surfaces、permissions。
+- Haptics、keyboard behavior、status 與 navigation bars、platform typography。
+- 螢幕邊緣的 gesture competition，以及 Android 的 hardware back。
+
+平台差異應該坐在刻意的 seams，而不是從每個 component 漏出來。
+
+```tsx
+import { Platform } from "react-native"
+
+const presentation = Platform.select({
+  ios: "formSheet",
+  android: "modal",
+  default: "modal",
+})
+
+<Stack.Screen
+  name="edit-profile"
+  options={{ presentation }}
+/>
+```
+
+`Platform.select` 在行為有平台理由時有用。它不是 design system 的替代品。如果每個 margin 都按 `Platform.OS` 分支，缺的是共享抽象。
+
+**Failure：** 對上了 Figma frame，卻弄壞 Android system back，或把 iOS sheet 換成自製全螢幕仿製品。
+
+---
+
+## 2. 讓主要動作容易按到
+
+一個 control 不是看起來大就可用。它的 interactive bounds 必須夠大、與競爭目標分開，並且單手搆得到。
+
+實用的共享下限是 **48 × 48 logical pixels**。這覆蓋 Android 的 48 dp 建議，也超過常見的 44 pt iOS target。可見 icon 可以維持 20–24 points；包住它的 pressable 才擁有 target。
+
+```tsx
+import { Pressable, StyleSheet, Text } from "react-native"
+
+type IconButtonProps = {
+  label: string
+  disabled?: boolean
+  onPress: () => void
+}
+
+export function IconButton({
+  label,
+  disabled = false,
+  onPress,
+}: IconButtonProps) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ disabled }}
+      disabled={disabled}
+      hitSlop={8}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.button,
+        pressed && styles.pressed,
+        disabled && styles.disabled,
+      ]}
+    >
+      <Text aria-hidden>⋯</Text>
+    </Pressable>
+  )
+}
+
+const styles = StyleSheet.create({
+  button: {
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 48,
+    minWidth: 48,
+  },
+  pressed: { opacity: 0.6 },
+  disabled: { opacity: 0.35 },
+})
+```
+
+`hitSlop` 擴大觸控區域，但不創造視覺間距。兩個相距八 points 的 icons 仍然可以 overlapping 或含糊。Layout 必須把它們分開。
+
+其餘是 hierarchy：
+
+- 把常用動作放在拇指舒服的區域。不要因為 desktop canvas 看起來平衡，就把主任務藏進右上角 icon。
+- 把 destructive actions 遠離 primary action；只有操作昂貴或不可逆時才要求確認。
+- 按下要立刻有視覺回饋。Request 可能要幾秒；pressed state 應該只要一 frame。
+- 禁止意外重複提交，不是禁止這個人離開畫面。
+
+**Failure：** 一個 16-point icon 掛著 `onPress`，沒有 pressed state，旁邊再放第二個 icon。技術上可互動，實際上不友善。
+
+---
+
+## 3. 把 Insets、Keyboards、Text 當成動態輸入
+
+Mobile viewport 在畫面活著時會變。裝置可以旋轉。通話指示可以改 top inset。鍵盤可以蓋住半個畫面。使用者可以放大文字。Foldable 可以在不 relaunch app 的情況下 resize window。
+
+用 runtime layout 資訊。不要把某一台裝置的 status bar 或 screen height 寫死。
+
+```tsx
+import { ScrollView, StyleSheet, View } from "react-native"
+import { useSafeAreaInsets } from "react-native-safe-area-context"
+
+export function ProfileForm() {
+  const insets = useSafeAreaInsets()
+
+  return (
+    <View style={styles.screen}>
+      <ScrollView
+        automaticallyAdjustKeyboardInsets
+        contentContainerStyle={[
+          styles.content,
+          { paddingBottom: insets.bottom + 24 },
+        ]}
+        keyboardDismissMode="on-drag"
+        keyboardShouldPersistTaps="handled"
+      >
+        {/* Fields and submit action */}
+      </ScrollView>
+    </View>
+  )
+}
+
+const styles = StyleSheet.create({
+  screen: { flex: 1 },
+  content: { flexGrow: 1, paddingHorizontal: 20 },
+})
+```
+
+`automaticallyAdjustKeyboardInsets` 讓 iOS 隨鍵盤變化更新 scroll insets。在 Android，設定並測試 activity 的 resize behavior。較舊的 targets 可能需要 `KeyboardAvoidingView`；不要疊多種 avoidance strategies，意外把 inset 加倍。如果某個畫面真的需要 `keyboardVerticalOffset`，從它實際的 header 與 accessory layout 推導——沒有萬用數字。
+
+文字也是動態的：
+
+- 讓 body copy 與 controls 跟隨系統 font scale。修 layout，不是修使用者的偏好。
+- 只有 truncation 屬於 content contract 時才用 `numberOfLines`。法律警告或 validation error 不是裝飾性 overflow。
+- 避免在文字外面包固定高度。偏好 `minHeight`、padding、彈性 rows。
+- 測試長德文 labels、混合 scripts、right-to-left layout，以及支援的最大 accessibility size。
+
+**Failure：** `height: 48` 包住一個在 200% 文字大小時變成三行的 label。Button 符合 touch-target 規則，仍然把自己的名字藏起來。
+
+---
+
+## 4. Navigation 必須保住位置
+
+Navigation 不只是換可見 component。它回答四個問題：
+
+1. 我在哪？
+2. 我怎麼到這裡？
+3. 我怎麼回去？
+4. 回來時什麼 state 還在？
+
+用 native stack 做畫面轉場。保住 Android hardware 與 predictive back。除非畫面有充分理由攔截，否則保留 iOS edge-swipe。從左緣開始的自訂 gesture，即使單獨運作完美，也會跟 navigation 競爭。
+
+State ownership 決定回來時是否連續：
+
+- **Navigation state** 擁有 route 與可序列化參數，例如 item id。
+- **Server state** 擁有可以 refetch 與 cache 的資料。
+- **Screen state** 擁有暫時 filters、scroll position、應該撐過 detail push 的 draft input。
+- **Ephemeral state** 擁有 pressed highlight 或 open tooltip，可以消失。
+
+把 ids 傳進 routes，不是整份可變 records。Deep link 與 in-app tap 應該經過同一套 validation，解析成同一條 route。
+
+```ts
+type OrderRoute = {
+  pathname: "/orders/[orderId]"
+  params: { orderId: string }
+}
+
+function orderRoute(orderId: string): OrderRoute {
+  return {
+    pathname: "/orders/[orderId]",
+    params: { orderId },
+  }
+}
+```
+
+切 tab 通常應該保住每個 tab 的 stack 與 scroll position。成功建立之後，可以刻意 replace form，讓 Back 不要重新打開已提交的 draft。那些是產品決定，不是 router defaults。
+
+**Failure：** 每次成功 login、save、redirect 都 `router.push`。Stack 變長，Back 回到過期的 transactional screens，使用者對 navigation 失去信任。
+
+---
+
+## 5. 每個 Screen 都是 State Machine
+
+Happy path 是一個 state。Production 還有更多：
+
+```text
+idle → loading → content
+             ├→ empty
+             ├→ recoverable error → retrying
+             └→ blocking error
+
+content → refreshing
+        → mutating
+        → stale or offline
+```
+
+把 states model 成難以 render 出不可能組合。三個無關的 booleans——`isLoading`、`hasError`、`data`——可以同時產出 loading spinner、error、舊 content。
+
+```tsx
+type ScreenState<T> =
+  | { status: "loading" }
+  | { status: "empty" }
+  | { status: "content"; data: T; refreshing: boolean }
+  | { status: "error"; message: string; canRetry: boolean }
+
+function OrdersScreen({ state }: { state: ScreenState<Order[]> }) {
+  switch (state.status) {
+    case "loading":
+      return <OrdersSkeleton />
+    case "empty":
+      return <EmptyOrders />
+    case "content":
+      return (
+        <OrderList
+          orders={state.data}
+          refreshing={state.refreshing}
+        />
+      )
+    case "error":
+      return (
+        <ErrorState
+          message={state.message}
+          canRetry={state.canRetry}
+        />
+      )
+  }
+}
+```
+
+每個 state 都應該幫這個人決定下一步：
+
+- **Loading：** 當 skeleton 能減少 layout 移動時，保住目的地的形狀。沒有有用形狀時才用 spinner。
+- **Empty：** 說明是還沒有資料、沒有搜尋結果，還是沒有連線。下一步不一樣。
+- **Refreshing：** 保住現有 content。Pull-to-refresh 不該把有用的 list 換成空白畫面。
+- **Error：** 說清楚失敗了什麼，並提供本地 recovery。沒有 Retry 的「出了點問題」是死路。
+- **Offline：** 分清無法進行的工作與可以排隊的工作。不要把 airplane mode 顯示成 generic server error。
+
+小 mutations 不要用全螢幕 loaders。儲存一個 favorite 應該更新那一行，不是擋住整個 tab。
+
+**Failure：** 一個全域 `isLoading`，把每次 network request 都變成白畫面加 spinner。
+
+---
+
+## 6. 只有可逆時才用 Optimism
+
+Optimistic UI 在 server 確認之前先顯示預期結果，縮短 perceived latency。它適合低風險、可逆的動作，例如 favoriting、following、reordering。對付款、destructive operations，以及 client 無法預測結果的 response，它很危險。
+
+```tsx
+async function toggleFavorite() {
+  if (saving) return
+
+  const previous = favorite
+  const next = !previous
+
+  setFavorite(next)
+  setSaving(true)
+
+  try {
+    await api.setFavorite({
+      itemId,
+      favorite: next,
+    })
+  } catch {
+    setFavorite(previous)
+    setMessage("Could not update favorite. Try again.")
+  } finally {
+    setSaving(false)
+  }
+}
+```
+
+Production contract 不只是翻 state：
+
+- Mutation 是 idempotent，或帶有 idempotency key。
+- 失敗的 request 把 UI 滾回去，並留下可見的 retry path。
+- 重複點擊不能重排 acknowledgements，產出錯誤的最終 state。
+- App 決定 request 期間 background 或斷線時發生什麼。
+- Assistive technology 被告知何時發生了無聲的 visual rollback。
+
+對能離線的工作，把真相露出來：「已儲存在這台裝置」與「已同步」是不同 states。只有 conflict 與 authentication expiry 有定義行為時，才 queue 持久操作。
+
+**Failure：** 因為按鈕感覺慢，就樂觀地顯示「Payment complete」。
+
+---
+
+## 7. Performance 就是互動品質
+
+技術上正確但來得晚的 frame 是 UX bug。React Native 有分開的 JS 與 UI-thread failure modes：長 React render 延遲 JavaScript work；昂貴的 native layout 或 drawing 延遲 UI thread。這個區分見 [深入理解 React Native](/notes/understanding-react-native-in-depth)。
+
+先從使用者看得見的 budgets 開始：
+
+- Press 在下一 frame 得到回饋。
+- Navigation 立刻開始，不等非必要資料。
+- 在代表性的低階 Android 裝置上，scrolling 保持可回應。
+- 回到 warm screen 時還原有用 content，不 blocking refetch。
+- Images 預留 layout space，並使用適當大小的 sources。
+
+Lists 是這些規則變得可見的地方。
+
+```tsx
+import { memo, useCallback } from "react"
+import { FlatList } from "react-native"
+
+const OrderRow = memo(function OrderRow({
+  order,
+  onOpen,
+}: {
+  order: Order
+  onOpen: (id: string) => void
+}) {
+  return (
+    <Pressable onPress={() => onOpen(order.id)}>
+      <OrderSummary order={order} />
+    </Pressable>
+  )
+})
+
+export function OrderList({ orders }: { orders: Order[] }) {
+  const openOrder = useCallback((id: string) => {
+    router.push(`/orders/${id}`)
+  }, [])
+
+  const renderOrder = useCallback(
+    ({ item }: { item: Order }) => (
+      <OrderRow order={item} onOpen={openOrder} />
+    ),
+    [openOrder]
+  )
+
+  return (
+    <FlatList
+      data={orders}
+      keyExtractor={(order) => order.id}
+      renderItem={renderOrder}
+    />
+  )
+}
+```
+
+Stable keys 保護 row identity。Memoization 只有在 props 穩定、而且 row 貴到值得時才有幫助。`getItemLayout` 在 row dimensions 真的固定時有用。Virtualization knobs 應該被量度，不是從 blog post 複製。
+
+資深 workflow 是先有證據：
+
+1. 在 release build 上重現；development instrumentation 會改 timing。
+2. 判斷延遲是 JS、UI、network、image decode，還是 startup。
+3. Profile 那個慢的互動，不是整個 app。
+4. 修最大的 blocking unit of work。
+5. 在暴露問題的 device class 上再量一次。
+
+**Failure：** 到處加 `useMemo`，同時每一 row 都在 decode 一張全解析度 image。
+
+---
+
+## 8. Motion 與 Haptics 解釋因果
+
+Animation 應該回答一個問題：什麼變了、它去了哪、或我繼續會發生什麼？延遲下一個任務的 motion，是向使用者收費的裝飾。
+
+用 motion 做 continuity：
+
+- 讓被選中的物件在空間上連到它的 detail view。
+- 為 insertion 與 removal 做動畫，讓 list 變化可以被跟上。
+- 讓 gesture 跟著手指，並以物理上連貫的終態停下。
+- 常用操作把 durations 保持短。
+
+尊重系統的 reduced-motion preference。拿掉移動之後，state change 仍然必須可理解。
+
+```tsx
+import { AccessibilityInfo } from "react-native"
+import { useEffect, useState } from "react"
+
+export function useReduceMotion() {
+  const [reduceMotion, setReduceMotion] = useState(false)
+
+  useEffect(() => {
+    void AccessibilityInfo.isReduceMotionEnabled().then(setReduceMotion)
+
+    const subscription = AccessibilityInfo.addEventListener(
+      "reduceMotionChanged",
+      setReduceMotion
+    )
+
+    return () => subscription.remove()
+  }, [])
+
+  return reduceMotion
+}
+```
+
+Haptics 是確認，不是資訊。只為成功 commit、selection boundary，或值得觸覺加強的警告少量使用。它們不能是唯一訊號，而且應該跟在已完成的動作之後，而不是在 server 確認前聲稱成功。
+
+用適當的 animation 與 gesture tooling，把 gesture-driven work 跑在 UI thread。每個 drag event 都更新 React state，會讓視覺回應等 JS thread。
+
+**Failure：** 每次 tab press 都 600 ms spring，mutation 還沒回來就發 success haptic。
+
+---
+
+## 9. Accessibility 是操作同一產品的另一種方式
+
+Accessibility 不是 release 前的 label pass。VoiceOver 與 TalkBack 使用者需要同一套任務、state、recovery path，而不依賴空間位置、顏色或動畫。
+
+一個 control 需要 semantic role、accessible name，以及當前 state。
+
+```tsx
+<Pressable
+  accessibilityRole="switch"
+  accessibilityLabel="Order notifications"
+  accessibilityHint="Notifies you when the order status changes"
+  accessibilityState={{ checked: notificationsEnabled }}
+  onPress={toggleNotifications}
+>
+  <SwitchVisual enabled={notificationsEnabled} />
+</Pressable>
+```
+
+跟互動一起建 semantics：
+
+- 用描述行為的 roles：button、link、switch、header、image。
+- 優先用同時能當 accessible name 的可見 label。Icon 沒有文字時再加 custom label。
+- 暴露 selected、checked、disabled、busy、expanded state。
+- 讓 focus order 對齊 reading order。Absolute positioning 可以讓畫面看起來正確，accessibility order 卻是胡話。
+- Navigation 或重大 content replacement 之後，刻意移動 focus。宣告否則只會是視覺的非同步失敗。
+- 不要只用顏色編碼 status。把顏色配上文字、icon 形狀或 state。
+- 測試 screen-reader 操作、大文字、粗體、提高對比、reduced motion，以及平台支援的 switch 或 keyboard navigation。
+
+Automated checks 可以找到缺 properties 與低對比。它們不能告訴你 checkout flow 被讀出來時是否合理。必須有人用 VoiceOver 與 TalkBack 完成任務。
+
+**Failure：** 給沒有 label 的 icon 加上 `accessibilityLabel="button"`。Role 被重複了；目的仍然未知。
+
+---
+
+## 10. Permissions 與 Security 是 Trust UX
+
+Permission dialog 是作業系統控制的中斷。在價值可見時才問，用產品語言解釋為什麼需要這項能力，並且在這個人說不時仍保留可用路徑。
+
+好的 timing 是 contextual：
+
+```text
+User taps "Scan receipt"
+  → explain camera use in product language
+  → request camera permission
+  → granted: open scanner
+  → denied: offer manual upload or Settings path
+```
+
+壞的 timing 是 launch 時一連串 camera、notifications、contacts、tracking prompts，產品還沒展示任何價值。
+
+Permission states 是持久的產品 states：
+
+- **Not determined：** app 可以 request。
+- **Granted：** 繼續使用該能力。
+- **Denied but requestable：** 解釋，並讓這個人選擇要不要再問一次。
+- **Blocked：** OS 不會再 prompt；提供 Settings path。
+- **Limited：** 使用 OS 授予的子集，例如 selected photos。
+
+Trust 也取決於誠實的資料處理。不要 log 私人 form fields、把 session material 放進 AsyncStorage，或暗示本地 UI check 就是 authorization。Device threat model 與 storage 邊界見 [React Native 裡的 Security](/notes/security-in-react-native)。
+
+**Failure：** 第一次 launch 就 request notifications，然後在這個人拒絕後再用自訂 pre-prompt 施壓。
+
+---
+
+## 11. Error Messages 應該放在動作旁邊
+
+Error message 應該指出失敗的動作、保住這個人的工作，並提供下一步。
+
+比較：
+
+```text
+Something went wrong.
+```
+
+與：
+
+```text
+Your comment was not posted. The draft is still here.
+[Try again]
+```
+
+第二句回答失敗了什麼、input 怎麼了、如何恢復。
+
+按範圍選擇呈現方式：
+
+- **Field error：** 放在 field 旁邊，語意上連到它。
+- **Row mutation error：** 在那一行，或附近的 retry surface。
+- **Screen load error：** 在畫面 body，帶 Retry。
+- **Background sync issue：** 持久但不擋路的 status。
+- **Destructive 或帳戶級失敗：** 只有這個人必須先決定才能繼續時，才用 modal。
+
+Toasts 適合結果已經可見的確認。它們不適合長 errors、recovery controls，或必須撐過 screen-reader announcement 的資訊。
+
+在可恢復失敗中保住 drafts。如果長表單期間 process 可能被殺，決定 draft 是否屬於 local storage，以及敏感 fields 如何被排除。
+
+**Failure：** request 成功前先清掉 form，再用會消失的 toast 報告失敗。
+
+---
+
+## 12. 測條件，不只測 Screens
+
+帶著快速 Wi-Fi、預設文字、warm development bundle 的 simulator，是 app 會見到最輕鬆的環境。Release 信心需要從真實風險建出的 matrix。
+
+| Dimension | 最低有用覆蓋 |
+| --- | --- |
+| Device | 小 iPhone、現行 iPhone、低階 Android、現行 Android |
+| Input | Touch、鍵盤打開、screen reader、大文字 |
+| Network | Fast、high latency、packet loss、offline、reconnect |
+| Lifecycle | Cold start、warm start、background 與 resume、process death |
+| Account | New、active、expired session、restricted permission |
+| Content | Empty、一項、數百項、長 localized strings |
+
+每一層用來證明它能證明的事：
+
+- Unit tests 保護 formatting、validation、state transitions。
+- Component tests 保護 semantics 與本地互動。
+- Device tests 保護 navigation、keyboard、permissions、deep links、native integration。
+- Manual exploratory testing 找到尷尬的 timing 與 gesture conflicts。
+- Production telemetry 顯示逃掉了什麼。
+
+Delivery path 應該產出可安裝的 iOS 與 Android test builds，不只對 JavaScript 跑 Jest。[React 與 React Native 的 Frontend CI/CD](/notes/frontend-ci-cd-for-react-and-react-native) 覆蓋那條 pipeline。
+
+量 outcomes，不是 vanity：
+
+- 按步驟的 task completion 與 abandonment。
+- 從 intent 到有用 content 的時間，不只 process startup。
+- 按 device class 的 input latency 與慢畫面轉場。
+- Crash-free sessions 與 app-not-responding rate。
+- Retry success、offline recovery，以及 contextual education 之後的 permission conversion。
+- Release 前找到的、以及之後由使用者回報的 accessibility defects。
+
+Analytics 應該回答產品問題，並避免收集敏感 content。Funnel 可以顯示人們從哪裡離開。它不能解釋為什麼。把 telemetry 配上 support reports、usability sessions、直接觀察。
+
+**Failure：** 因為最新 iPhone 以 60 fps render，就宣稱畫面很快，同時 API 讓低階 Android 使用者卡在 blocking spinner 四秒。
+
+---
+
+## Takeaway
+
+強的 React Native 體驗共享產品 intent，並改寫 host behavior。
+
+1. **主任務能否單手搆到並按到？** 用真實 touch targets、可見 pressed states、清楚 hierarchy。
+2. **Layout 能否撐過底下裝置改變？** 把 safe areas、keyboards、orientation、text scale 當成輸入。
+3. **每個非同步 state 是否解釋下一步？** 保住有用 content，分清 empty 與 error，讓失敗可恢復。
+4. **Navigation 是否像該平台？** 保住 Back、gestures、stack history、screen state。
+5. **Performance 是否被量成互動延遲？** 在代表性裝置上 profile release builds。
+6. **同一任務能否用 VoiceOver 與 TalkBack 完成？** Semantics、focus、state、recovery 是 component 的一部分。
+7. **App 是否贏得信任？** 在 context 中問 permissions、保護資料、從不提早聲稱成功。
+8. **團隊有沒有測過惡劣條件？** 慢網絡、process death、被拒的 permissions、長 content、低階硬件，是正常 production states。
+
+資深工程動作不是加更多 polish。是拿掉 intent 與 result 之間的不確定性。
+
+---
+
+## Recap Q&A
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="mobile-ux-shared-vs-native">
+    <AccordionTrigger>1. iOS 與 Android 應該看起來、運作得完全一樣嗎？</AccordionTrigger>
+    <AccordionContent>
+
+      - 共享產品的 hierarchy、language、design tokens、domain rules、state model。
+      - 把 navigation、back behavior、sheets、system controls、permissions、keyboards、haptics 改寫成 host 的樣子。
+      - 像素相等不是一致性。一致性是同一套 intent 與 outcome，透過每個平台使用者理解的行為達成。
+      - **Failure：** 把 `Platform.OS` 灑進每個 component，而不是定義一小條 platform seam。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="mobile-ux-async-state">
+    <AccordionTrigger>2. 怎樣的 loading 與 error states 才是好 UX？</AccordionTrigger>
+    <AccordionContent>
+
+      - 把 loading、empty、content、refreshing、offline、error model 成明確 states，而不是無關的 booleans。
+      - Refresh 與小 mutations 期間保住有用 content。不要把整個畫面換成 spinner。
+      - Error 說清楚失敗了什麼、保住這個人的工作，並提供本地 recovery。
+      - **Failure：** 會消失的 toast 裡寫「出了點問題」，沒有 Retry。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="mobile-ux-performance">
+    <AccordionTrigger>3. React Native 團隊該如何對待 performance？</AccordionTrigger>
+    <AccordionContent>
+
+      - 從 release build 上一個慢的使用者互動開始，再判斷是 JS、UI、network、image，還是 startup work。
+      - 在代表性硬件上量，尤其是低階 Android。修最大的 blocking unit，再 profile 一次。
+      - Stable list keys、適當大小的 images、cached server state、立刻的 press feedback，通常比一律 memoization 更重要。
+      - **Failure：** 優化 component renders，卻沒量主導體驗的 image decode 或 API wait。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="mobile-ux-accessibility">
+    <AccordionTrigger>4. Accessible 的 mobile 互動需要什麼？</AccordionTrigger>
+    <AccordionContent>
+
+      - Controls 需要 role、name、當前 state、足夠的 target、合理的 focus order。
+      - Layout 必須撐過大文字；state 不能只靠顏色、motion 或 haptics。
+      - 用 VoiceOver 與 TalkBack 完成真實任務。Automated checks 無法驗證流程被讀出來時是否合理。
+      - **Failure：** 實作後才加 generic labels，focus order 與 recovery 仍然不可用。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="mobile-ux-release-confidence">
+    <AccordionTrigger>5. Release 前該測什麼？</AccordionTrigger>
+    <AccordionContent>
+
+      - 測小與大裝置、低階 Android、keyboard states、大文字、screen readers、慢與離線網絡、被拒的 permissions、backgrounding、process death。
+      - 覆蓋 empty、長、localized、stale、高量 content——不只為 screenshot 準備的 fixture data。
+      - 經 CI 送出可安裝的 test builds，再用 production telemetry 量 task completion、latency、recovery、crashes、ANRs。
+      - **Failure：** 把 simulator、預設 accessibility settings、快速本地 Wi-Fi 當成 production test matrix。
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>

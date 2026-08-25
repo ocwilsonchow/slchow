@@ -1,0 +1,357 @@
+---
+title: System Design 裡的 Disaster Recovery
+description: 為什麼 snapshot 不是 failover —— RTO、RPO、backup vs HA vs DR，以及隨之而來的 AWS strategies
+date: 2026-08-25
+category: system-design
+---
+
+**Disaster recovery** 是 region、account、或 datastore 沒了之後，產品怎麼回來。它是被量的。**RTO** 是產品可以掛多久。**RPO** 是你可以丟掉多少最近的 data。那些數字是產品承諾。它們不是 AWS SKU。
+
+這篇 note 依 [AWS Well-Architected Reliability](https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/rel_planning_for_recovery_disaster_recovery.html) 的 disaster recovery strategies。Stages 與 deploy 見 [用 SST 管理 AWS 基礎設施與 DevOps](/notes/using-sst-for-aws-infra-and-devops)。一份具體的 warm-standby runbook 見 [打造 Event-Driven 票務 Backend](/notes/building-an-event-driven-ticketing-backend)。必須在 process 掛掉之後還活著的 queue 見 [System Design 裡的 Message Queues](/notes/message-queues-in-system-design)。這篇 note 講的是 backup versus failover。
+
+Default workload 是 **compute + RDS Postgres + S3 + 一條 queue**。Compute 從 IaC 重建。要 recover 的是 data、DNS、與 secrets。
+
+<br />
+
+---
+
+## Pattern Map
+
+| Pattern | What you pay for while healthy | Reach for it when |
+| --- | --- | --- |
+| Backup and restore | Storage | RTO 數小時到數天。最便宜。先 redeploy，再 restore |
+| Pilot light | Replicated data + 一丁點 core | RTO 數十分鐘。Data 是 live 的；compute 不是 |
+| Warm standby | 第二個 region 裡縮小版的完整 stack | RTO 數分鐘。票務 note 就是這個 |
+| Active/active | 兩個 regions 都在 serving | RTO ~秒。幾乎永遠不要 |
+
+<br />
+
+這些不是 DR：
+
+| What people buy | What it survives | What it is |
+| --- | --- | --- |
+| Multi-AZ | 一個 AZ | **HA**。Region 還在 |
+| Snapshots / PITR | Dropped table、bad deploy、ransomware | **Backup**。Region 還在 |
+
+<br />
+
+---
+
+## 1. 為什麼需要 DR
+
+AZ fail 是常態。Region fail 很少見。週五的 `DROP TABLE` 兩者都不是——卻是你真正會跑的 incident。
+
+<br />
+
+- **RTO** 是從「掛了」到「買家還能買」的時鐘。DNS TTL、restore time、scale-up、以及 runbook 都坐在那根時鐘上。AWS 不保證你的數字。
+- **RPO** 是你願意丟掉的最新那次 write。跨 Region 的 asynchronous replication 是 lag，不是 zero。真正的 RPO 是更差的 observed lag，再加上任何還沒 durable 的東西。
+- 先點名這兩個數字，再點名 strategy。能掛到週一的 blog 是 backup and restore。不能雙賣一個座位的 onsale 是帶 fencing 的 warm standby。數字決定花費。
+
+<br />
+
+**Failure:** 因為「我們需要 DR」就買 Aurora Global Database，然後從不量 lag、也不跑 failover。你買到的是 replica。你沒買到 recovery。
+
+<br />
+
+---
+
+## 2. Backup vs HA vs DR
+
+三種不同的 failure。一個 AWS console。所以它們會被揉成一團。
+
+<br />
+
+```text
+Dropped table / ransomware  →  backup (PITR, versioning, vaults)
+One AZ gone                 →  HA     (Multi-AZ, three subnets)
+Region or account gone      →  DR     (another Region, another account)
+```
+
+<br />
+
+- **Backup** 是從「region 還健康、data 已經死了」裡恢復。Cluster 還在。Rows 是錯的。你 rewind。
+- **HA** 是 Multi-AZ：第二個 writer-standby、三個 subnets、同一個 Region 裡的 automatic failover。產品還留在 `us-east-1`。AZ 不是 Region。
+- **DR** 是 site recovery。另一個 Region，常常是另一個 account。Compute 重建很便宜。Data、KMS keys、與 DNS 不是。
+
+<br />
+
+一台 Multi-AZ RDS、七天 PITR，是很好的週一。它不是 regional outage 計劃。攻擊者已經拿到的同一個 account 裡的 snapshots，不是 ransomware 計劃。
+
+<br />
+
+**Failure:** 把 Multi-AZ 叫成「我們的 DR strategy」，然後發現掛掉的是 Region 的 control plane——或 restore 一份用同一場 incident 刪掉的 key 加密的 snapshot。
+
+<br />
+
+---
+
+## 3. Backup plans（logical failure）
+
+Backup 不是 failover。它是 `DROP TABLE`、bad migration、或 ransomware 發生時，`us-east-1` 還好好的，你怎麼活下來。
+
+<br />
+
+**RDS.** Automated backups 打開 [point-in-time recovery](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_PIT.html)。Transaction logs 大約每五分鐘進 S3。Restore 會建立一台 **新** instance。它不會 rewind 正在著火的那一台。
+
+<br />
+
+```bash title="cli"
+aws rds modify-db-instance \
+  --db-instance-identifier app-prod \
+  --backup-retention-period 7
+
+aws rds restore-db-instance-to-point-in-time \
+  --source-db-instance-identifier app-prod \
+  --target-db-instance-identifier app-prod-rewind \
+  --restore-time 2026-08-25T10:15:00Z
+```
+
+<br />
+
+Retention 是 0–35 天。`LatestRestorableTime` 才是真正的 RPO，不是日曆上的 backup window。
+
+<br />
+
+**S3.** Versioning 把 overwrite 與 delete 變成新 versions 與 delete markers。[Object Lock](https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-lock.html) 讓一個 version 變成 WORM：governance 可以用 permission bypass；compliance 不行，包括 root，直到 retention 過期。
+
+<br />
+
+```bash title="cli"
+aws s3api put-bucket-versioning \
+  --bucket app-uploads \
+  --versioning-configuration Status=Enabled
+```
+
+<br />
+
+**AWS Backup.** 一份覆蓋 RDS、S3 與其餘的 [backup plan](https://docs.aws.amazon.com/aws-backup/latest/devguide/about-backup-plans.html)。把 recovery points copy 到 **另一個 account** 的 vault。Compliance mode 的 Vault Lock 阻止 copies 被刪。[Logically air-gapped vault](https://docs.aws.amazon.com/aws-backup/latest/devguide/logicallyairgappedvault.html) 是現在的名字：一個你可以 share、並從中 restore、而不必信任 workload account 的 vault。RDS *continuous* backups 的 cross-account copies 會變成 snapshots——copy 上沒有 PITR。
+
+<br />
+
+**Forgotten state.** Secrets Manager、KMS、與 IaC state。CMK 被刪的 encrypted backups 是廢紙。Replicate secrets 與 keys，或留一條不需要 production account 的 restore path。SST 把 state 留在本地加上 backup bucket——[用 SST 管理 AWS 基礎設施與 DevOps](/notes/using-sst-for-aws-infra-and-devops)。
+
+<br />
+
+Queue 通常不是「被 backed up」。Restore 之後從 Postgres 裡的 **outbox** replay。這就是 outbox 存在的原因——[System Design 裡的 Message Queues](/notes/message-queues-in-system-design)。
+
+<br />
+
+**Failure:** 從未 restore 過的 backups。Ransomware 已經拿到的同一個 account 裡的 vault。Retention 只有一天、PITR 夠不到 bad migration 之前。
+
+<br />
+
+---
+
+## 4. Backup and restore
+
+最便宜的 DR。Data copy 到另一個 Region（或另一個 account）。Compute 在 incident 之前並不存在。
+
+<br />
+
+```text
+Healthy:   us-east-1 serves
+           backups copy → us-west-2 (storage only)
+
+Disaster:  deploy IaC in us-west-2
+           restore RDS + S3
+           point DNS
+```
+
+<br />
+
+- RTO 是數小時到一天：deploy、restore、等 RDS 從 S3 把 blocks load 完、smoke-test、然後 DNS。RPO 是 backup interval，除非開了 continuous backups，否則常常是數小時。
+- Infrastructure as code 讓這事不會變成 console 考古。Recovery Region 應該是一次 `sst deploy` / `terraform apply`，不是一條記得的 click path。
+- 產品可以掛到 restore 完再上時才用。Internal tools。Content site。不是 onsale。
+
+<br />
+
+**Failure:** backups 只在 source Region。掛掉的 Region 握著唯一一份 copy。先 copy，再叫它 DR。
+
+<br />
+
+---
+
+## 5. Pilot light
+
+Data 在 recovery Region 是 live 的。Compute 不是。你為 replication 與一丁點 core 付錢——databases、object storage，也許一台 replica。Application servers 是可以 deploy 的 configuration，不是已經開著的 fleet。
+
+<br />
+
+```text
+us-east-1                 us-west-2
+  API  API  API             (not deployed)
+  RDS ──────replicate────→  RDS (on)
+  S3  ──────replicate────→  S3  (on)
+```
+
+<br />
+
+- Replication 連續時，RPO 在分鐘級。RTO 在數十分鐘：deploy 或 scale compute、promote database、然後 DNS。
+- 「關掉」的 servers 應該是 **沒 deploy**、IaC 隨時能建立——不是你希望還能 boot 的 stopped instances。
+- Recovery Region 裡仍然要有 backups。Replication 也會拷 corruption。PITR 是 replica 上也落到的 logical failure 怎麼 rewind。
+
+<br />
+
+**Failure:** pilot light 的 AMI、secret、或 schema 已經跟 production drift，incident 時才發現。Data 是 live 的。App 是去年的。
+
+<br />
+
+---
+
+## 6. Warm standby
+
+Recovery Region 裡已經跑著一份縮小、但 **功能完整** 的 copy。它能吃一點 traffic。Scale 之前吃不下 production。Fully scaled 時，AWS 叫它 *hot standby*。
+
+<br />
+
+跟 pilot light 的差別是 code 已經在上面。你跳過 deploy。你仍然要 scale、promote、fence、切 DNS。
+
+<br />
+
+這就是票務架構：隨時可 promote 的 Aurora Global Database secondary、MSK Replicator、低數量 ECS、Route 53 failover。Runbook、region epoch、與 Terraform 住在 [打造 Event-Driven 票務 Backend](/notes/building-an-event-driven-ticketing-backend)。不要把那個 module 抄到這裡。Strategy 是：為小小一份 live stack 付錢，好讓 RTO 是分鐘，不是一次 deploy。
+
+<br />
+
+Replication 是 asynchronous。RPO 是 lag，加上還在 primary outbox 裡的任何東西。兩個健康的 writers 比一個掛掉的 writer 更糟。
+
+<br />
+
+**Failure:** 還沒 fence 舊 Region 就切 DNS。沒有 fence 的 warm standby 是兩個 primaries。
+
+<br />
+
+---
+
+## 7. Active/active
+
+兩個 Regions 都 serve。RTO 可以接近 zero。Writes 才是問題。
+
+<br />
+
+- 最近 Region 上的 read 很容易。兩個 Regions 對同一行 write 是 conflict。Last-writer-wins 是你必須當真的產品決定。DynamoDB Global Tables 是這種 trade，不是免費的「zero RPO」按鈕。
+- Postgres 不會因為你想要就變成 multi-primary。Aurora Global Database 只有一個 writer。帶著單一 writer 的 active/active，是多了 DNS 的 active/passive。
+- Split-brain 比 downtime 更糟。兩個 Regions 都接 purchases，座位會雙賣。每次 write 上單調遞增的 **region epoch**——票務 note——就是 fence。不要在這裡設計 dual-write。
+
+<br />
+
+只在業務已經有 conflict story 時伸手（CRDTs、immutable events、或單一 writer 加 regional reads）。幾乎永遠不要當 interview default。
+
+<br />
+
+**Failure:** 把 asynchronous replicas 叫成「active/active」，並讓兩個 Regions 都接 writes。你買到的是 split-brain。
+
+<br />
+
+---
+
+## 8. DNS、fencing、failback
+
+Failover 是一份有順序的 runbook。DNS 是最後一步，不是第一步。
+
+<br />
+
+```text
+1. Fence the old Region (epoch, disable writes, stop admission)
+2. Declare the recovery point (lag, LatestRestorableTime)
+3. Promote / restore data
+4. Scale compute, smoke-test
+5. Switch Route 53
+6. Failback later — another migration, not "flip DNS back"
+```
+
+<br />
+
+- [Route 53 failover](https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/routing-policy-failover.html) 是 active/passive DNS：一條 primary record 與一條 secondary，加上 health checks。TTL 坐在 RTO 時鐘上。Clients cache。切換不是瞬間。
+- 只 ping load balancer 的 health checks，會在你還沒 fence 的 database 仍是 primary 時就切 DNS。Check 產品：買家能不能完成一次 write？
+- Failback 是反方向 replicate、reconcile、再挪 traffic。「回來」的舊 Region 在你 fence 它之前是 zombie。
+
+<br />
+
+**Failure:** 把 TTL 降到 60 秒，就叫 DNS 是 DR plan。沒有 fencing 的 DNS 是帶 delay 的兩個 writers。
+
+<br />
+
+---
+
+## 9. 證明它
+
+從未 restore 過的 backup 是傳聞。從未跑過的 failover 是 blog post。
+
+<br />
+
+- **Restore drill.** 選一個 point in time。把 RDS restore 到一台新 instance。從先前 version restore 一個 S3 prefix。對著那份 data 打開 app。計時。那段時間是 RTO 的一塊。AWS Backup [restore testing](https://docs.aws.amazon.com/aws-backup/latest/devguide/restore-testing.html) 存在，就是為了讓這事是 schedule，不是週末英雄主義。
+- **Failover drill.** Game day 裡 promote pilot light 或 warm standby。記錄實際 RPO（cutover 時的 lag）與實際 RTO（fence → healthy writes）。Well-Architected 的數字是一條帶。你的是秒表。
+- 也要 drill forgotten path：restore 一個 secret、用 replica KMS key、在 recovery account 把 SST/Terraform state 拉起來。
+
+<br />
+
+**Failure:** `us-east-1` 的 dashboard 是綠的，而唯一的 restore test 是「snapshot job succeeded」。Jobs 成功不是 recovery。
+
+<br />
+
+---
+
+## Recap Q&A
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="dr-when">
+    <AccordionTrigger>1. RTO 與 RPO 是什麼，誰來定？</AccordionTrigger>
+    <AccordionContent>
+
+      - **RTO** 是產品可以掛多久。**RPO** 是你可以丟掉多少最近的 data。它們是產品承諾，不是 AWS 保證。
+      - 先點名這兩個數字，再點名 strategy。數字決定你為 storage、replica、warm fleet、還是兩個 live Regions 付錢。
+      - 跨 Region 的 asynchronous replication 是 lag。真正的 RPO 是 observed lag 加上任何還沒 durable 的東西。
+      - **Failure:** 買了 replica，從不量 lag、也不跑 failover。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="dr-not">
+    <AccordionTrigger>2. 為什麼 Multi-AZ 不是 DR，為什麼 snapshot 不是 failover？</AccordionTrigger>
+    <AccordionContent>
+
+      - **Multi-AZ** 撐過一個 AZ。產品還留在這個 Region。那是 HA。
+      - **Snapshots / PITR** 在 Region 還健康時 rewind dropped table、bad deploy、或 ransomware。那是 backup。Restore 建立一台新 RDS instance；它不會 rewind 正在著火的那一台。
+      - **DR** 是 site recovery：另一個 Region，常常是另一個 account。Compute 從 IaC 重建。Data、keys、與 DNS 才是你要 recover 的。
+      - **Failure:** 把 Multi-AZ 叫成「我們的 DR strategy」，或把唯一的 backups 留在 incident 已經拿到的那個 account。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="dr-backup">
+    <AccordionTrigger>3. Backup plan 裡該有什麼？</AccordionTrigger>
+    <AccordionContent>
+
+      - RDS automated backups + PITR。S3 versioning，以及 delete 必須不可能時的 Object Lock。AWS Backup vaults，copy 到另一個 account、Vault Lock、restore tests。
+      - Forgotten state：Secrets Manager、KMS、IaC state。Key 被刪的 encrypted backups 是廢紙。從 Postgres outbox replay queues。
+      - 從未 restore 過的 backup 是傳聞。`LatestRestorableTime` 才是真正的 RPO。
+      - **Failure:** 一天的 retention 夠不到 bad migration 之前，或 vault 與 ransomware 在同一個 account。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="dr-strategies">
+    <AccordionTrigger>4. Backup-and-restore、pilot light、warm standby，還是 active/active？</AccordionTrigger>
+    <AccordionContent>
+
+      - **Backup and restore：** recovery Region 只有 storage；先 deploy 再 restore。數小時。最便宜。
+      - **Pilot light：** data live，compute 沒 deploy。數十分鐘。讓 IaC 就緒；不要指望 stopped instances 還能 boot。
+      - **Warm standby：** 縮小版的 live stack。數分鐘。票務 note 是 runbook。DNS 之前先 fence。
+      - **Active/active：** 兩個 Regions 都 serve。Writes 會 conflict。Split-brain 比 downtime 更糟。幾乎永遠不要當 default。
+      - **Failure:** 還沒 fence 就切 DNS，或把 async replicas 當成兩個 writers。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="dr-prove">
+    <AccordionTrigger>5. 你怎麼知道計劃有效？</AccordionTrigger>
+    <AccordionContent>
+
+      - 按 schedule restore 一台 database 與一個 object prefix。計時。那段時間是 RTO 的一部分。
+      - 跑 failover game day。記錄實際 lag（RPO）與實際 fence-to-healthy-writes（RTO）。
+      - 在 recovery account 裡 drill secrets、KMS、與 IaC state，不只是 RDS。
+      - **Failure:** 把「snapshot job succeeded」當成 recovery。
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>

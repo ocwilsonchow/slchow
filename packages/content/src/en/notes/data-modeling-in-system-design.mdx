@@ -61,7 +61,7 @@ APIs
 
 <br />
 
-- **Relational.** Tables, foreign keys, ACID. Users, posts, likes. `JOIN` is how "posts by people I follow" is a query, not a product. Strong consistency — payments, inventory, a unique email — is why this stack stays on Postgres. Scale is replicas, pooling, caching, then sharding — not a different database.
+- **Relational.** Tables, foreign keys, ACID. Users, posts, likes. `JOIN` is how "posts by people I follow" is a query, not a product. Strong consistency — payments, inventory, a unique email — is why this stack stays on Postgres. The trade that sentence is making is [CAP Theorem in System Design](/notes/cap-theorem-in-system-design). Scale is replicas, pooling, caching, then sharding — not a different database.
 - **Document.** JSON blobs, flexible fields. Embed posts inside the user so one load returns both. Joins are weaker, so you denormalize. The usual reason is an evolving schema. A scoped design has already frozen the requirements. Unless the interviewer names rapid field change, skip it.
 - **Key-value.** Exact match. `user:123`, `feed:123`. Fast, blind. You duplicate values across keys because you cannot join. Redis in front of Postgres is the production use. DynamoDB is a key-value store with document features — still not the default source of truth here.
 - **Wide-column.** Rows with different columns, append-heavy. Telemetry, IoT, time-series. A queue and a batch into Postgres often beat reaching for Cassandra in an interview.
@@ -169,7 +169,7 @@ Store each fact in one place. Duplicate only for a named read that indexes canno
 
 ## 7. Indexes
 
-An index makes a lookup cheap and a write a little more expensive. Work backwards from the APIs.
+An index makes a lookup cheap and a write a little more expensive. Work backwards from the APIs. The types and trade-offs are [DB Indexing in System Design](/notes/db-indexing-in-system-design).
 
 <br />
 

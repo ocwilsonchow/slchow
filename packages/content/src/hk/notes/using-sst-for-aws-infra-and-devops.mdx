@@ -13,7 +13,7 @@ category: devops
 
 1. **目前已部署** — `sst.config.ts` 只 import Next.js / OpenNext stack。
 2. **已在 repo 裡定義，但尚未 import** — container API infra（`Vpc` → `Cluster` → `Service` + `Router`）放在 `packages/infra`，並在 `run()` 裡保持註解，直到該 stack 需要部署。
-3. **其他地方的相關模式** — 用 Lambda + API Gateway 做 Hono API 見 [用 Hono、Drizzle、Zod OpenAPI 與 SST 打造 Backend APIs](/notes/backend-apis-hono-sst)。那篇筆記並不是本站 `sst.config.ts` 正在跑的內容。
+3. **其他地方的相關模式** — 用 Lambda + API Gateway 做 Hono API 見 [用 Hono、Drizzle、Zod OpenAPI 與 SST 打造 Backend APIs](/notes/_backend-apis-hono-sst)。那篇筆記並不是本站 `sst.config.ts` 正在跑的內容。
 
 <br />
 
@@ -49,7 +49,7 @@ SST 讓開發者可以用 **Components** 定義應用功能，而不必親手組
 
 - SST components 編碼常見 app patterns，仍允許在需要更低階控制時使用 [`transform`](https://sst.dev/docs/components#transforms) 加上 [150+ providers](https://sst.dev/docs/all-providers#directory)。
 - Linking 補上 Terraform 或 CDK 通常靠手寫 env vars 與 IAM 填補的 runtime 缺口。`sst dev` 是產品功能，而不是自己組裝的本地 stack。
-- SST 仍然有 state——本地加上 backup bucket——所以 managed resources 不應在 Console 人手編輯（[Basics](https://sst.dev/docs/basics/)）。
+- SST 仍然有 state——本地加上 backup bucket——所以 managed resources 不應在 Console 人手編輯（[Basics](https://sst.dev/docs/basics/)）。那份 state 的 backup，以及何時 snapshot 不是 failover，見 [System Design 裡的 Disaster Recovery](/notes/disaster-recovery-in-system-design)。
 
 當 platform team 已經用 Terraform 或 OpenTofu 擁有 shared networking、當 Pulumi 或 Terraform 是團隊多雲 control planes 的語言，或當 CloudFormation-native CDK construct libraries 是招聘與 review 表面時，SST 並不適合。
 
@@ -144,7 +144,7 @@ export const nextjs = new sst.aws.Nextjs("Web", {
 - Production 保留一個 warm server instance；非 prod 用 `warm: 0`。`edge` prop 接上非 prod Basic Auth。`dev` block 告訴 `sst dev` 如何啟動本地 Next process。
 - Secrets 是 first-class resources，不是鬆散的 `.env` 檔案：`sst.Secret("Username")`、`Password`、`DatabaseUrl`、`BetterAuthSecret`、`AiGatewayApiKey`。
 - 當 API module 被 import 時，路徑是 `Vpc` → `Cluster` → `Service`，再用 `Router` 做 `api.example.com` 或 `{stage}.api.example.com`。在啟用 `await import("./infra/api")` 之前，那個 stack 不會部署。
-- 另一種形狀——Lambda 在 API Gateway 後面，加上 Lambda authorizer——是 [用 Hono、Drizzle、Zod OpenAPI 與 SST 打造 Backend APIs](/notes/backend-apis-hono-sst) 裡的模式。那用 `sst.aws.Function` 與 `sst.aws.ApiGatewayV2`。它不是本站 config 目前載入的基礎設施。
+- 另一種形狀——Lambda 在 API Gateway 後面，加上 Lambda authorizer——是 [用 Hono、Drizzle、Zod OpenAPI 與 SST 打造 Backend APIs](/notes/_backend-apis-hono-sst) 裡的模式。那用 `sst.aws.Function` 與 `sst.aws.ApiGatewayV2`。它不是本站 config 目前載入的基礎設施。
 
 <br />
 
@@ -258,7 +258,7 @@ ci: checks → tests → build → sst deploy --stage …
 
 <br />
 
-SST 讓 AWS infrastructure 成為可 review 的 TypeScript，並放在應用旁邊。當問題是組織級 platform ownership 時，Terraform、CDK 或 Pulumi 仍然更合適。目前的 component 與 CLI 細節，從 [SST docs](https://sst.dev/docs/) 開始。關於 Lambda 或 Fargate 上的 Hono API，繼續看 [用 Hono、Drizzle、Zod OpenAPI 與 SST 打造 Backend APIs](/notes/backend-apis-hono-sst)。
+SST 讓 AWS infrastructure 成為可 review 的 TypeScript，並放在應用旁邊。當問題是組織級 platform ownership 時，Terraform、CDK 或 Pulumi 仍然更合適。目前的 component 與 CLI 細節，從 [SST docs](https://sst.dev/docs/) 開始。關於 Lambda 或 Fargate 上的 Hono API，繼續看 [用 Hono、Drizzle、Zod OpenAPI 與 SST 打造 Backend APIs](/notes/_backend-apis-hono-sst)。
 
 ---
 

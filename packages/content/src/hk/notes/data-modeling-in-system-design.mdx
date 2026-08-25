@@ -61,7 +61,7 @@ APIs
 
 <br />
 
-- **Relational.** Tables、foreign keys、ACID。Users、posts、likes。`JOIN` 讓「我 follow 的人發的 posts」是一條 query，不是一個產品。Strong consistency —— payments、inventory、unique email —— 是這套 stack 留在 Postgres 的原因。Scale 是 replicas、pooling、caching，然後 sharding —— 不是換一個 database。
+- **Relational.** Tables、foreign keys、ACID。Users、posts、likes。`JOIN` 讓「我 follow 的人發的 posts」是一條 query，不是一個產品。Strong consistency —— payments、inventory、unique email —— 是這套 stack 留在 Postgres 的原因。那句話在做的 trade 見 [System Design 裡的 CAP Theorem](/notes/cap-theorem-in-system-design)。Scale 是 replicas、pooling、caching，然後 sharding —— 不是換一個 database。
 - **Document.** JSON blobs，fields 靈活。把 posts embed 進 user，一次 load 兩邊都有。Joins 更弱，所以你 denormalize。常見理由是 evolving schema。Scoped design 已經凍住了 requirements。除非 interviewer 點名字段會狂變，否則跳過。
 - **Key-value.** Exact match。`user:123`、`feed:123`。快，看不見關係。不能 join，所以同一份 value 會在多個 keys 上重複。Postgres 前面的 Redis 才是 production 用法。DynamoDB 是帶 document 能力的 key-value —— 仍不是這裡的預設 source of truth。
 - **Wide-column.** 每行可以有不同 columns，append-heavy。Telemetry、IoT、time-series。Queue 再 batch 進 Postgres，面試裡往往比伸手去拿 Cassandra 更合適。
@@ -169,7 +169,7 @@ Schema 就是 API。Application 的 `WHERE` clauses 是習慣，不是保證。
 
 ## 7. Indexes
 
-Index 讓 lookup 變便宜，write 稍微變貴。從 APIs 往回推。
+Index 讓 lookup 變便宜，write 稍微變貴。從 APIs 往回推。種類與 trade-offs 見 [System Design 裡的 DB Indexing](/notes/db-indexing-in-system-design)。
 
 <br />
 

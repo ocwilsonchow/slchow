@@ -1,0 +1,1767 @@
+---
+title: Building an Event-Driven Ticketing Backend
+description: Hold, authorize, confirm, capture, and issue on Hono and AWS — without overselling a seat or losing an order between Postgres and Kafka
+date: 2026-08-24
+category: backend
+---
+
+A ticket purchase is not one request. It is a state machine crossing inventory, a payment provider, and ticket issuance while clients, workers, brokers, and regions fail independently.
+
+The stack here is **Hono** on **ECS Fargate**, **Drizzle** with **Aurora PostgreSQL**, **Kafka** on **Amazon MSK**, **Stripe PaymentIntents**, and **Terraform**. It targets 100,000 concurrent buyers and a 10,000-attempt-per-second onsale without making "exactly once" promises the network cannot keep.
+
+The typed HTTP foundation is [Backend APIs with Hono, Drizzle, Zod OpenAPI, and SST](/notes/_backend-apis-hono-sst). The reliability patterns are [Message Queues in System Design](/notes/message-queues-in-system-design). Partitioning, offsets, and replay are [Kafka in System Design](/notes/kafka-in-system-design). The schema starts in [Data Modeling in System Design](/notes/data-modeling-in-system-design). Hold versus event catalog is [CAP Theorem in System Design](/notes/cap-theorem-in-system-design). This note is the purchase path.
+
+<br />
+
+---
+
+## Pattern Map
+
+| Stage | Synchronous truth | Event-driven continuation |
+| --- | --- | --- |
+| Admit | Signed admission token | Waiting room releases buyers at a measured rate |
+| Hold | Postgres transaction owns the seats | `HoldCreated` asks payment to prepare |
+| Authorize | Stripe reserves funds | Webhook emits `PaymentAuthorized` |
+| Confirm | Postgres freezes the hold | `CaptureRequested` asks Stripe to collect |
+| Issue | Unique ticket rows prove ownership | Notifications and analytics fan out |
+| Compensate | Release seats or record a refund | Cancellation/refund events finish the saga |
+
+<br />
+
+Kafka is not the seat lock. Redis is not the seat lock. **Aurora PostgreSQL is the authoritative inventory boundary.** Kafka moves durable facts between stages. Redis protects that boundary from an onsale stampede.
+
+<br />
+
+---
+
+## 1. Start with invariants, not services
+
+The architecture is correct only if these stay true during retries and failures:
+
+1. One seat has at most one active hold.
+2. One confirmed seat has at most one ticket.
+3. An order is never confirmed without a live hold and an authorized payment.
+4. An HTTP retry returns the original order for the same user and idempotency key.
+5. A Kafka or Stripe event can arrive twice without producing a second effect.
+6. A committed business write is eventually published, even if Kafka was down at commit time.
+7. A late authorization or capture is compensated; it is not silently attached to an expired order.
+
+<br />
+
+```text
+availability may be stale
+ownership may not
+
+cached green seat → invitation to attempt a hold
+committed hold     → temporary ownership
+issued ticket      → final ownership
+```
+
+<br />
+
+The client sees a workflow, not a distributed transaction:
+
+<br />
+
+```text
+waiting → held → payment_required → authorized → confirming
+        → paid → ticketed
+
+failure branches:
+held → expired
+payment_required → failed
+authorized → canceled
+paid but unrecoverable → refunding → refunded
+```
+
+<br />
+
+**Failure:** treating a green seat on a cached map as a promise. It is a hint. Only the hold transaction can say yes.
+
+<br />
+
+---
+
+## 2. AWS architecture
+
+The primary Region spans three Availability Zones. Public traffic ends at CloudFront, WAF, and an Application Load Balancer. API and worker tasks run in private subnets. Aurora, MSK, and ElastiCache have no public endpoints.
+
+<br />
+
+```text
+Buyer
+  → Route 53
+  → CloudFront + WAF
+  → ALB
+  → Hono API tasks ──────────────┐
+          │                      │
+          ├→ ElastiCache         │ admission / cached reads only
+          └→ RDS Proxy → Aurora  │ authoritative writes
+                              │
+                              └→ outbox
+                                   ↓
+                              Outbox relay
+                                   ↓
+                           MSK, three AZs
+                     ┌─────────────┼──────────────┐
+                     ↓             ↓              ↓
+                Saga worker   Payment worker  Ticket worker
+                                   ↕
+                                 Stripe
+                                   ↓ webhook
+                                Hono API
+```
+
+<br />
+
+Separate ECS services have separate scaling and failure domains:
+
+- **API service:** admission verification, hold creation, status, and Stripe webhook ingress.
+- **Outbox relay:** claims unpublished rows and writes them to Kafka.
+- **Saga orchestrator:** applies valid order-state transitions and emits the next command.
+- **Payment worker:** creates, captures, cancels, and refunds PaymentIntents.
+- **Expiry worker:** releases timed-out holds in bounded batches.
+- **Ticket worker:** issues the unique ticket after capture.
+
+Run at least two tasks for every critical service, spread across three AZs. The ALB health check removes unhealthy API tasks. Kafka consumer groups move partitions when a worker dies. RDS Proxy absorbs connection churn during task scaling and database failover.
+
+Use the Aurora writer endpoint for holds, saga transitions, and read-after-write status. Reader instances serve catalog and reporting queries that tolerate replica lag. [Caching in System Design](/notes/caching-in-system-design) covers the read path; the sell path bypasses stale cache state.
+
+<br />
+
+**Failure:** calling three API tasks "highly available" while every task, broker, and database instance sits in one AZ — or letting a reader endpoint decide whether a just-held seat is still available.
+
+<br />
+
+---
+
+## 3. The waiting room protects the invariant
+
+Autoscaling the API does not autoscale one Aurora writer without limit. During a major onsale, a **virtual waiting room** shapes 10,000 hold attempts per second into the rate the purchase cell has proved it can sustain.
+
+<br />
+
+```text
+10,000 attempts/s
+  → WAF bot and per-IP controls
+  → waiting room
+  → release R admitted buyers/s
+  → signed, short-lived admission token
+  → hold endpoint
+```
+
+<br />
+
+The release controller reads:
+
+- Aurora commit latency, lock waits, connection saturation, and deadlocks.
+- Outbox age and Kafka producer errors.
+- Consumer lag for purchase topics.
+- Active holds and expiry-worker delay.
+
+It lowers `R` before the database falls over. Redis stores queue position, rate buckets, and token revocation. It does **not** store authoritative seat ownership.
+
+<br />
+
+```ts title="src/admission/claims.ts"
+export type AdmissionClaims = {
+  jti: string
+  userId: string
+  eventId: string
+  purchaseCell: string
+  issuedAt: number
+  expiresAt: number
+}
+
+export async function requireAdmission(
+  token: string,
+  expected: { userId: string; eventId: string },
+) {
+  const claims = await verifySignedToken<AdmissionClaims>(token)
+
+  if (
+    claims.userId !== expected.userId ||
+    claims.eventId !== expected.eventId ||
+    claims.expiresAt <= Date.now()
+  ) {
+    throw new HTTPException(403, { message: "Invalid admission token" })
+  }
+
+  return claims
+}
+```
+
+<br />
+
+The token is bound to user, event, purchase cell, and expiry. It proves the buyer was admitted; it does not prove seats remain. Retries reuse the token and the HTTP idempotency key.
+
+<br />
+
+**Failure:** consuming an admission token exactly once. If the response is lost, the retry is rejected before it can recover the already-created order. Admission is time-bounded; purchase creation is idempotent.
+
+<br />
+
+---
+
+## 4. PostgreSQL is the inventory ledger
+
+Model seat identity separately from temporary ownership. An active `hold_seat` row owns a seat temporarily. A `ticket` row owns it finally.
+
+<br />
+
+```ts title="src/db/schema/ticketing.ts"
+import { sql } from "drizzle-orm"
+import {
+  index,
+  integer,
+  jsonb,
+  pgEnum,
+  pgTable,
+  primaryKey,
+  text,
+  timestamp,
+  uniqueIndex,
+  uuid,
+} from "drizzle-orm/pg-core"
+
+export const holdStatus = pgEnum("hold_status", [
+  "active",
+  "authorized",
+  "confirmed",
+  "expired",
+  "released",
+])
+
+export const orderStatus = pgEnum("order_status", [
+  "pending_payment",
+  "authorized",
+  "capture_pending",
+  "paid",
+  "ticketed",
+  "failed",
+  "refunding",
+  "refunded",
+])
+
+export const events = pgTable("events", {
+  id: uuid("id").primaryKey(),
+  name: text("name").notNull(),
+  startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
+  purchaseCell: text("purchase_cell").notNull(),
+})
+
+export const seats = pgTable(
+  "seats",
+  {
+    id: uuid("id").primaryKey(),
+    eventId: uuid("event_id")
+      .notNull()
+      .references(() => events.id),
+    label: text("label").notNull(),
+    priceMinor: integer("price_minor").notNull(),
+    currency: text("currency").notNull(),
+  },
+  (t) => [
+    uniqueIndex("seat_event_label_uq").on(t.eventId, t.label),
+    index("seat_event_idx").on(t.eventId),
+  ],
+)
+
+export const orders = pgTable(
+  "orders",
+  {
+    id: uuid("id").primaryKey(),
+    userId: uuid("user_id").notNull(),
+    eventId: uuid("event_id").notNull(),
+    status: orderStatus("status").notNull(),
+    amountMinor: integer("amount_minor").notNull(),
+    currency: text("currency").notNull(),
+    version: integer("version").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [index("order_user_idx").on(t.userId, t.createdAt)],
+)
+
+export const holds = pgTable(
+  "holds",
+  {
+    id: uuid("id").primaryKey(),
+    orderId: uuid("order_id")
+      .notNull()
+      .unique()
+      .references(() => orders.id),
+    status: holdStatus("status").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [index("hold_expiry_idx").on(t.status, t.expiresAt)],
+)
+
+export const holdSeats = pgTable(
+  "hold_seats",
+  {
+    holdId: uuid("hold_id")
+      .notNull()
+      .references(() => holds.id),
+    seatId: uuid("seat_id")
+      .notNull()
+      .references(() => seats.id),
+    releasedAt: timestamp("released_at", { withTimezone: true }),
+  },
+  (t) => [
+    primaryKey({ columns: [t.holdId, t.seatId] }),
+    index("hold_seat_lookup_idx").on(t.seatId),
+  ],
+)
+
+export const payments = pgTable("payments", {
+  orderId: uuid("order_id")
+    .primaryKey()
+    .references(() => orders.id),
+  stripePaymentIntentId: text("stripe_payment_intent_id").unique(),
+  clientSecret: text("client_secret"),
+  status: text("status").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+})
+
+export const tickets = pgTable(
+  "tickets",
+  {
+    id: uuid("id").primaryKey(),
+    orderId: uuid("order_id").notNull(),
+    seatId: uuid("seat_id").notNull(),
+    issuedAt: timestamp("issued_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("ticket_seat_uq").on(t.seatId),
+    uniqueIndex("ticket_order_seat_uq").on(t.orderId, t.seatId),
+  ],
+)
+
+export const idempotencyKeys = pgTable(
+  "idempotency_keys",
+  {
+    userId: uuid("user_id").notNull(),
+    key: text("key").notNull(),
+    requestHash: text("request_hash").notNull(),
+    resourceId: uuid("resource_id"),
+    response: jsonb("response"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.key] })],
+)
+
+export const outbox = pgTable(
+  "outbox",
+  {
+    id: uuid("id").primaryKey(),
+    topic: text("topic").notNull(),
+    messageKey: text("message_key").notNull(),
+    eventType: text("event_type").notNull(),
+    payload: jsonb("payload").notNull(),
+    claimedBy: text("claimed_by"),
+    claimExpiresAt: timestamp("claim_expires_at", { withTimezone: true }),
+    publishedAt: timestamp("published_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [index("outbox_pending_idx").on(t.publishedAt, t.createdAt)],
+)
+
+export const inbox = pgTable(
+  "inbox",
+  {
+    consumer: text("consumer").notNull(),
+    eventId: uuid("event_id").notNull(),
+    processedAt: timestamp("processed_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.consumer, t.eventId] })],
+)
+
+export const stripeEvents = pgTable("stripe_events", {
+  id: text("id").primaryKey(),
+  type: text("type").notNull(),
+  receivedAt: timestamp("received_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+})
+```
+
+<br />
+
+The most important constraint is clearer as a migration:
+
+<br />
+
+```sql title="drizzle/0042_active_hold_per_seat.sql"
+CREATE UNIQUE INDEX hold_seat_active_uq
+ON hold_seats (seat_id)
+WHERE released_at IS NULL;
+```
+
+<br />
+
+Two application processes may both think a seat is available. PostgreSQL lets only one commit an unreleased ownership row. The database constraint is the final guard, not a preflight query.
+
+Encrypt Aurora, snapshots, and connections. Treat `client_secret` as sensitive: owner-only response, never logs, short retention after payment. An alternative is retrieving it from Stripe rather than persisting it.
+
+<br />
+
+**Failure:** storing only `seats.status = "held"` with no owner, expiry, or unique ownership record. Recovery cannot explain who owns the seat or safely release it.
+
+<br />
+
+---
+
+## 5. Hold all requested seats in one transaction
+
+The hold route authenticates, validates the signed admission token, requires an `Idempotency-Key`, and calls one transaction. Seat IDs are sorted before locking so two multi-seat orders acquire locks in the same order.
+
+<br />
+
+```ts title="src/services/reserve-seats.ts"
+import { and, eq, inArray, isNull, lt } from "drizzle-orm"
+
+type ReserveInput = {
+  userId: string
+  eventId: string
+  seatIds: string[]
+  idempotencyKey: string
+  requestHash: string
+  correlationId: string
+}
+
+export async function reserveSeats(input: ReserveInput) {
+  const seatIds = [...new Set(input.seatIds)].sort()
+  const now = new Date()
+  const expiresAt = new Date(now.getTime() + 5 * 60_000)
+
+  return db.transaction(
+    async (tx) => {
+      const [existing] = await tx
+        .select()
+        .from(idempotencyKeys)
+        .where(
+          and(
+            eq(idempotencyKeys.userId, input.userId),
+            eq(idempotencyKeys.key, input.idempotencyKey),
+          ),
+        )
+        .limit(1)
+
+      if (existing) {
+        if (existing.requestHash !== input.requestHash) {
+          throw new IdempotencyConflict()
+        }
+        return existing.response as HoldResponse
+      }
+
+      const claimed = await tx
+        .insert(idempotencyKeys)
+        .values({
+          userId: input.userId,
+          key: input.idempotencyKey,
+          requestHash: input.requestHash,
+          expiresAt: new Date(now.getTime() + 24 * 60 * 60_000),
+        })
+        .onConflictDoNothing()
+        .returning()
+
+      if (claimed.length === 0) {
+        throw new RetryTransaction()
+      }
+
+      const lockedSeats = await tx
+        .select()
+        .from(seats)
+        .where(
+          and(eq(seats.eventId, input.eventId), inArray(seats.id, seatIds)),
+        )
+        .orderBy(seats.id)
+        .for("update")
+
+      if (lockedSeats.length !== seatIds.length) throw new SeatUnavailable()
+
+      // Reclaim only expired holds while the seat rows are locked.
+      await tx
+        .update(holdSeats)
+        .set({ releasedAt: now })
+        .where(
+          and(
+            inArray(holdSeats.seatId, seatIds),
+            isNull(holdSeats.releasedAt),
+            inArray(
+              holdSeats.holdId,
+              tx
+                .select({ id: holds.id })
+                .from(holds)
+                .where(lt(holds.expiresAt, now)),
+            ),
+          ),
+        )
+
+      const active = await tx
+        .select({ seatId: holdSeats.seatId })
+        .from(holdSeats)
+        .where(
+          and(
+            inArray(holdSeats.seatId, seatIds),
+            isNull(holdSeats.releasedAt),
+          ),
+        )
+
+      const sold = await tx
+        .select({ seatId: tickets.seatId })
+        .from(tickets)
+        .where(inArray(tickets.seatId, seatIds))
+
+      if (active.length > 0 || sold.length > 0) throw new SeatUnavailable()
+
+      const orderId = crypto.randomUUID()
+      const holdId = crypto.randomUUID()
+      const amountMinor = lockedSeats.reduce((sum, s) => sum + s.priceMinor, 0)
+
+      await tx.insert(orders).values({
+        id: orderId,
+        userId: input.userId,
+        eventId: input.eventId,
+        status: "pending_payment",
+        amountMinor,
+        currency: lockedSeats[0].currency,
+      })
+
+      await tx.insert(holds).values({
+        id: holdId,
+        orderId,
+        status: "active",
+        expiresAt,
+      })
+
+      await tx.insert(holdSeats).values(
+        seatIds.map((seatId) => ({ holdId, seatId })),
+      )
+
+      const event = makeEvent("HoldCreated", orderId, input.correlationId, {
+        orderId,
+        holdId,
+        eventId: input.eventId,
+        seatIds,
+        expiresAt: expiresAt.toISOString(),
+        amountMinor,
+        currency: lockedSeats[0].currency,
+      })
+
+      await tx.insert(outbox).values(toOutbox(event))
+
+      const response = {
+        orderId,
+        holdId,
+        status: "pending_payment",
+        expiresAt: expiresAt.toISOString(),
+      }
+
+      await tx
+        .update(idempotencyKeys)
+        .set({ resourceId: orderId, response })
+        .where(
+          and(
+            eq(idempotencyKeys.userId, input.userId),
+            eq(idempotencyKeys.key, input.idempotencyKey),
+          ),
+        )
+
+      return response
+    },
+    { isolationLevel: "read committed", accessMode: "read write" },
+  )
+}
+```
+
+<br />
+
+The unique partial index still catches a mistake or an unexpected lock path. Retry serialization/deadlock failures with bounded jitter around the **whole transaction**, using the same idempotency key.
+
+No Kafka or Stripe call runs inside the transaction.
+
+<br />
+
+```ts title="src/routes/holds.ts"
+const HoldBody = z.object({
+  seatIds: z.array(z.string().uuid()).min(1).max(8),
+})
+
+app.post("/events/:eventId/holds", requireUser, async (c) => {
+  const user = c.get("user")
+  const eventId = c.req.param("eventId")
+  const idempotencyKey = c.req.header("idempotency-key")
+  const admissionToken = c.req.header("x-admission-token")
+
+  if (!idempotencyKey || !admissionToken) {
+    return c.json({ error: "Missing idempotency or admission token" }, 400)
+  }
+
+  await requireAdmission(admissionToken, { userId: user.id, eventId })
+
+  const body = HoldBody.parse(await c.req.json())
+  const result = await reserveSeats({
+    userId: user.id,
+    eventId,
+    seatIds: body.seatIds,
+    idempotencyKey,
+    requestHash: sha256(JSON.stringify(body)),
+    correlationId: c.get("requestId"),
+  })
+
+  return c.json(result, 202, {
+    Location: `/orders/${result.orderId}`,
+  })
+})
+```
+
+<br />
+
+**Failure:** select availability, call Stripe, then update the seats. A second request buys the same seats during the network call. Locks protect a short database transaction, never an external request.
+
+<br />
+
+---
+
+## 6. Events are versioned facts and commands
+
+Every event has stable identity, aggregate identity, schema version, and trace context. The Kafka key is `orderId`, so one order's saga remains ordered without putting every purchase for one concert on one hot partition.
+
+<br />
+
+```ts title="src/events/types.ts"
+export type EventEnvelope<TType extends string, TPayload> = {
+  eventId: string
+  eventType: TType
+  schemaVersion: 1
+  aggregateType: "order"
+  aggregateId: string
+  occurredAt: string
+  correlationId: string
+  causationId?: string
+  payload: TPayload
+}
+
+export const topics = {
+  purchase: "ticketing.purchase.v1",
+  retry5s: "ticketing.purchase.retry-5s.v1",
+  retry1m: "ticketing.purchase.retry-1m.v1",
+  deadLetter: "ticketing.purchase.dlq.v1",
+} as const
+
+export type TicketingEvent =
+  | EventEnvelope<"HoldCreated", HoldCreated>
+  | EventEnvelope<"PaymentAuthorizationRequested", PaymentRequest>
+  | EventEnvelope<"PaymentIntentCreated", PaymentIntentCreated>
+  | EventEnvelope<"PaymentAuthorized", PaymentAuthorized>
+  | EventEnvelope<"OrderConfirmed", OrderConfirmed>
+  | EventEnvelope<"CaptureRequested", CaptureRequested>
+  | EventEnvelope<"PaymentCaptured", PaymentCaptured>
+  | EventEnvelope<"TicketIssueRequested", TicketIssueRequested>
+  | EventEnvelope<"TicketIssued", TicketIssued>
+  | EventEnvelope<"HoldExpired", HoldExpired>
+  | EventEnvelope<"AuthorizationCancelRequested", CancelAuthorization>
+  | EventEnvelope<"RefundRequested", RefundRequested>
+```
+
+<br />
+
+- Add fields compatibly within version 1; consumers ignore unknown fields.
+- Publish version 2 beside version 1 for a breaking change.
+- Do not put card data, Stripe client secrets, or personal profiles in Kafka.
+- Use an Avro/Protobuf/JSON Schema registry in production; the TypeScript union is compile-time help, not runtime governance.
+
+<br />
+
+**Failure:** keying by `eventId` because it sounds domain-correct. One stadium onsale then serializes through one Kafka partition. Inventory safety belongs to Postgres; saga ordering belongs to `orderId`.
+
+<br />
+
+---
+
+## 7. The transactional outbox closes the dual-write gap
+
+The hold and `HoldCreated` outbox row commit together. A relay publishes later. If Kafka is unavailable, the order remains durable and outbox age rises.
+
+Do not hold a database transaction open while publishing. Claim rows with a lease, commit the claim, publish, then mark them sent.
+
+<br />
+
+```ts title="src/workers/outbox-relay.ts"
+const workerId = `${process.env.ECS_TASK_ID}:${process.pid}`
+
+async function claimBatch(limit = 200) {
+  return db.execute<OutboxRow>(sql`
+    WITH picked AS (
+      SELECT id
+      FROM outbox
+      WHERE published_at IS NULL
+        AND (claim_expires_at IS NULL OR claim_expires_at < now())
+      ORDER BY created_at
+      FOR UPDATE SKIP LOCKED
+      LIMIT ${limit}
+    )
+    UPDATE outbox AS o
+    SET claimed_by = ${workerId},
+        claim_expires_at = now() + interval '30 seconds'
+    FROM picked
+    WHERE o.id = picked.id
+    RETURNING o.*
+  `)
+}
+
+async function publish(row: OutboxRow) {
+  await producer.send({
+    topic: row.topic,
+    acks: -1,
+    messages: [
+      {
+        key: row.messageKey,
+        value: JSON.stringify(row.payload),
+        headers: {
+          "event-id": row.id,
+          "event-type": row.eventType,
+        },
+      },
+    ],
+  })
+
+  await db
+    .update(outbox)
+    .set({
+      publishedAt: new Date(),
+      claimedBy: null,
+      claimExpiresAt: null,
+    })
+    .where(and(eq(outbox.id, row.id), eq(outbox.claimedBy, workerId)))
+}
+
+for (;;) {
+  for (const row of await claimBatch()) await publish(row)
+  await sleep(100)
+}
+```
+
+<br />
+
+```ts title="src/kafka/producer.ts"
+const producer = kafka.producer({
+  idempotent: true,
+  maxInFlightRequests: 1,
+  retry: { retries: 8, initialRetryTime: 100 },
+})
+```
+
+<br />
+
+If Kafka accepts the event and the relay dies before `publishedAt`, the lease expires and another relay publishes it again. Kafka producer idempotence helps with ambiguous retries inside one producer session; it does not deduplicate a new process after a crash. Consumers still need the event ID.
+
+Monitor the oldest unpublished row. **Outbox age** is the business's event-delivery latency.
+
+<br />
+
+**Failure:** marking the row published before Kafka acknowledges it loses the event. Publishing before marking can duplicate it. Choose at-least-once and make duplicate delivery safe.
+
+<br />
+
+---
+
+## 8. The inbox makes consumers replay-safe
+
+Each consumer owns a unique `(consumer, event_id)` record. Insert that record and apply the business effect in one PostgreSQL transaction. Commit the Kafka offset only afterward.
+
+<br />
+
+```ts title="src/kafka/run-consumer.ts"
+export async function handleOnce(
+  consumerName: string,
+  event: TicketingEvent,
+  handler: (tx: DbTransaction, event: TicketingEvent) => Promise<void>,
+) {
+  return db.transaction(async (tx) => {
+    const firstDelivery = await tx
+      .insert(inbox)
+      .values({ consumer: consumerName, eventId: event.eventId })
+      .onConflictDoNothing()
+      .returning({ eventId: inbox.eventId })
+
+    if (firstDelivery.length === 0) return "duplicate" as const
+
+    try {
+      await handler(tx, event)
+    } catch (error) {
+      if (isPermanent(error)) {
+        await tx.insert(outbox).values(
+          toOutbox(
+            makeDeadLetter(event, {
+              reason: publicErrorCode(error),
+              consumer: consumerName,
+            }),
+          ),
+        )
+        return "dead-lettered" as const
+      }
+      throw error // rolls back inbox + business effect; Kafka retries
+    }
+
+    return "processed" as const
+  })
+}
+
+await consumer.run({
+  autoCommit: false,
+  eachBatchAutoResolve: false,
+  eachBatch: async ({
+    batch,
+    resolveOffset,
+    heartbeat,
+    isRunning,
+    isStale,
+  }) => {
+    for (const message of batch.messages) {
+      if (!isRunning() || isStale()) break
+
+      const event = TicketingEventSchema.parse(
+        JSON.parse(message.value!.toString()),
+      )
+
+      await handleOnce("purchase-saga-v1", event, applySagaEvent)
+
+      resolveOffset(message.offset)
+      await consumer.commitOffsets([
+        {
+          topic: batch.topic,
+          partition: batch.partition,
+          offset: (BigInt(message.offset) + 1n).toString(),
+        },
+      ])
+      await heartbeat()
+    }
+  },
+})
+```
+
+<br />
+
+If the database commits and offset commit fails, Kafka replays. The inbox turns the replay into a no-op, then the consumer advances. If the handler fails transiently, its inbox insert rolls back and the offset stays behind.
+
+Use retry topics for delayed backoff. A permanent invalid schema goes to the DLQ with enough context to repair and replay. Do not let one poison record busy-loop at the head of a partition.
+
+<br />
+
+**Failure:** inserting the inbox row, committing, and then applying the effect in another transaction. A crash between them permanently labels unfinished work as processed.
+
+<br />
+
+---
+
+## 9. Orchestrate the purchase saga
+
+The orchestrator owns legal transitions. Workers own external actions. Every transition uses optimistic versioning or a row lock, writes the new state, and emits the next command through the outbox.
+
+<br />
+
+```text
+HoldCreated
+  → PaymentAuthorizationRequested
+  → PaymentIntentCreated
+  → customer confirms payment
+  → PaymentAuthorized
+  → OrderConfirmed
+  → CaptureRequested
+  → PaymentCaptured
+  → TicketIssueRequested
+  → TicketIssued
+```
+
+<br />
+
+Stripe manual capture separates **reserve funds** from **collect funds**. The saga confirms the still-live seat hold before asking Stripe to capture. Stripe documents this as [separate authorization and capture](https://docs.stripe.com/payments/place-a-hold-on-a-payment-method).
+
+<br />
+
+```ts title="src/saga/on-payment-authorized.ts"
+export async function onPaymentAuthorized(
+  tx: DbTransaction,
+  event: PaymentAuthorizedEvent,
+) {
+  const [order] = await tx
+    .select()
+    .from(orders)
+    .where(eq(orders.id, event.payload.orderId))
+    .for("update")
+
+  const [hold] = await tx
+    .select()
+    .from(holds)
+    .where(eq(holds.orderId, order.id))
+    .for("update")
+
+  if (order.status === "capture_pending" || order.status === "paid") return
+
+  if (
+    order.status !== "pending_payment" ||
+    hold.status !== "active" ||
+    hold.expiresAt <= new Date()
+  ) {
+    await tx.insert(outbox).values(
+      toOutbox(
+        makeEvent(
+          "AuthorizationCancelRequested",
+          order.id,
+          event.correlationId,
+          {
+            orderId: order.id,
+            paymentIntentId: event.payload.paymentIntentId,
+            reason: "hold_expired",
+          },
+          event.eventId,
+        ),
+      ),
+    )
+    return
+  }
+
+  await tx
+    .update(holds)
+    .set({ status: "confirmed" })
+    .where(eq(holds.id, hold.id))
+
+  await tx
+    .update(orders)
+    .set({
+      status: "capture_pending",
+      version: sql`${orders.version} + 1`,
+    })
+    .where(eq(orders.id, order.id))
+
+  await tx.insert(outbox).values([
+    toOutbox(makeOrderConfirmed(event, order.id)),
+    toOutbox(makeCaptureRequested(event, order.id)),
+  ])
+}
+```
+
+<br />
+
+Compensations are forward actions:
+
+| Failure | Compensation |
+| --- | --- |
+| Hold expires before authorization | Release `hold_seats`; cancel PaymentIntent if one exists |
+| Authorization arrives after expiry | Cancel the uncaptured PaymentIntent |
+| Capture fails | Release confirmed hold; mark order failed |
+| Capture succeeds but ticket issue retries | Keep seats confirmed; replay ticket issue |
+| Capture succeeds after the order was released | Record incident; refund idempotently |
+
+<br />
+
+Do not release a confirmed hold merely because ticket issuance is slow. Once captured, keep retrying the idempotent ticket insert or refund explicitly.
+
+<br />
+
+**Failure:** calling a refund "rollback." Money moved. A refund is another durable, observable, retryable business operation.
+
+<br />
+
+---
+
+## 10. Stripe is another at-least-once system
+
+The payment worker creates a PaymentIntent outside a database transaction. The event ID is Stripe's idempotency key. If Stripe succeeds and the worker crashes before persisting, replaying the event retrieves the same logical operation instead of creating another authorization.
+
+<br />
+
+```ts title="src/workers/payment-authorize.ts"
+const intent = await stripe.paymentIntents.create(
+  {
+    amount: event.payload.amountMinor,
+    currency: event.payload.currency,
+    capture_method: "manual",
+    automatic_payment_methods: { enabled: true },
+    metadata: {
+      orderId: event.payload.orderId,
+      holdId: event.payload.holdId,
+    },
+  },
+  { idempotencyKey: `authorize:${event.eventId}` },
+)
+
+await db.transaction(async (tx) => {
+  await tx
+    .insert(payments)
+    .values({
+      orderId: event.payload.orderId,
+      stripePaymentIntentId: intent.id,
+      clientSecret: intent.client_secret,
+      status: intent.status,
+    })
+    .onConflictDoUpdate({
+      target: payments.orderId,
+      set: {
+        stripePaymentIntentId: intent.id,
+        clientSecret: intent.client_secret,
+        status: intent.status,
+        updatedAt: new Date(),
+      },
+    })
+
+  await tx.insert(outbox).values(
+    toOutbox(makePaymentIntentCreated(event, intent)),
+  )
+})
+```
+
+<br />
+
+The authenticated order-status endpoint returns the client secret only to the order owner while payment is pending. Never put it in logs, Kafka, analytics, or URLs.
+
+The webhook must verify Stripe's signature against the **raw body** before parsing. Hono runs on Web-standard requests, so read the body once and do not place a JSON-body parser in front of this route.
+
+<br />
+
+```ts title="src/routes/stripe-webhook.ts"
+app.post("/webhooks/stripe", async (c) => {
+  const signature = c.req.header("stripe-signature")
+  if (!signature) return c.text("Missing signature", 400)
+
+  const rawBody = await c.req.text()
+
+  let stripeEvent: Stripe.Event
+  try {
+    stripeEvent = stripe.webhooks.constructEvent(
+      rawBody,
+      signature,
+      env.STRIPE_WEBHOOK_SECRET,
+    )
+  } catch {
+    return c.text("Invalid signature", 400)
+  }
+
+  await db.transaction(async (tx) => {
+    const inserted = await tx
+      .insert(stripeEvents)
+      .values({ id: stripeEvent.id, type: stripeEvent.type })
+      .onConflictDoNothing()
+      .returning({ id: stripeEvents.id })
+
+    if (inserted.length === 0) return
+
+    const domainEvent = mapStripeEvent(stripeEvent)
+    if (domainEvent) await tx.insert(outbox).values(toOutbox(domainEvent))
+  })
+
+  return c.json({ received: true })
+})
+```
+
+<br />
+
+Map `payment_intent.amount_capturable_updated` to `PaymentAuthorized`; a manually captured PaymentIntent reaches `requires_capture`. Map `payment_intent.succeeded` to `PaymentCaptured`. Webhooks can be delayed, duplicated, and reordered; retrieve the PaymentIntent from Stripe when local state and event payload disagree.
+
+Capture and compensation also use stable keys:
+
+<br />
+
+```ts
+await stripe.paymentIntents.capture(
+  paymentIntentId,
+  {},
+  { idempotencyKey: `capture:${orderId}` },
+)
+
+await stripe.refunds.create(
+  { payment_intent: paymentIntentId, metadata: { orderId } },
+  { idempotencyKey: `refund:${orderId}` },
+)
+```
+
+<br />
+
+Return 2xx only after the webhook event and outbox continuation are durable. Do not wait for the whole saga.
+
+<br />
+
+**Failure:** updating the order directly from an unverified webhook, or returning 200 before recording it. The first accepts forged payment; the second asks Stripe to stop retrying work you have not saved.
+
+<br />
+
+---
+
+## 11. Expiry and ticket issuance are idempotent workers
+
+An expiry worker claims timed-out holds in small batches. `SKIP LOCKED` lets several tasks work without claiming the same rows.
+
+<br />
+
+```sql title="src/workers/expire-holds.sql"
+WITH expired AS (
+  SELECT id, order_id
+  FROM holds
+  WHERE status = 'active'
+    AND expires_at < now()
+  ORDER BY expires_at
+  FOR UPDATE SKIP LOCKED
+  LIMIT 500
+)
+UPDATE holds AS h
+SET status = 'expired'
+FROM expired AS e
+WHERE h.id = e.id
+RETURNING h.id, h.order_id;
+```
+
+<br />
+
+For each returned hold, the same transaction:
+
+1. Sets `hold_seats.released_at`.
+2. Moves `orders.status` to `failed` if still pending.
+3. Inserts `HoldExpired` and, when needed, `AuthorizationCancelRequested` into the outbox.
+
+Ticket issuance inserts one ticket per held seat. `ticket_seat_uq` makes replay safe. The inbox makes the entire consumer effect safe.
+
+<br />
+
+```ts title="src/workers/issue-tickets.ts"
+await tx
+  .insert(tickets)
+  .values(
+    seatIds.map((seatId) => ({
+      id: stableTicketId(orderId, seatId),
+      orderId,
+      seatId,
+    })),
+  )
+  .onConflictDoNothing()
+
+await tx
+  .update(holdSeats)
+  .set({ releasedAt: new Date() })
+  .where(eq(holdSeats.holdId, holdId))
+
+await tx
+  .update(orders)
+  .set({ status: "ticketed" })
+  .where(eq(orders.id, orderId))
+
+await tx.insert(outbox).values(toOutbox(makeTicketIssued(event)))
+```
+
+<br />
+
+The status API reads order, hold, payment, and ticket state from Postgres. The client polls, uses SSE, or receives a push notification. It never waits on a Kafka reply inside the original HTTP socket.
+
+<br />
+
+**Failure:** using an in-process timer for hold expiry. Deploys, crashes, and autoscaling erase timers. Expiry is durable data plus a repeatable query.
+
+<br />
+
+---
+
+## 12. Kafka and database capacity
+
+Start with the admitted write rate, not the crowd size.
+
+<br />
+
+```text
+attempt rate                     10,000/s
+waiting-room admission rate R       800/s   measured, not guessed
+seats per order                       2.4
+seat lock attempts                 1,920/s
+purchase events per successful order    8
+successful orders                    500/s
+Kafka event rate                   4,000/s
+```
+
+<br />
+
+These are example numbers. Load test until Aurora lock latency, WAL, CPU, I/O, and connections define the real `R`. Keep a safety margin and lower admission automatically when p99 or outbox age crosses it.
+
+Kafka partition count must cover both throughput and consumer parallelism:
+
+<br />
+
+```text
+partitions ≥ max(
+  peak_topic_bytes_per_second / tested_partition_bytes_per_second,
+  desired_parallel_consumers
+)
+```
+
+<br />
+
+Use replication factor 3, `acks=all`, and `min.insync.replicas=2`. Disable unclean leader election. Producers use IAM authentication, TLS, and KMS-backed storage. The purchase topic key is `orderId`.
+
+Retention is a recovery requirement:
+
+<br />
+
+```text
+stored bytes
+  ≈ events/sec × average bytes × retention seconds × replication factor
+```
+
+Keep enough history to rebuild projections and replay after a bad deployment. Archive long-lived audit records to S3; Kafka is not the financial ledger.
+
+Connection math matters too:
+
+<br />
+
+```text
+maximum open DB connections
+  = API tasks × pool size
+  + all worker tasks × pool size
+  + migrations and operations
+```
+
+RDS Proxy smooths task churn, but it does not make unlimited concurrent transactions free. Cap per-task work and scale on useful signals: ALB p99 for API, Kafka lag for consumers, expiry delay for expiry workers.
+
+<br />
+
+**Failure:** autoscaling consumers beyond the number of partitions, or API tasks beyond the database connection budget. More compute then creates less throughput.
+
+<br />
+
+---
+
+## 13. Scale by purchase cell
+
+Partitioning a table by `event_id` helps pruning and maintenance. It does not add another Aurora writer. When one cluster is no longer enough, assign events to **purchase cells**.
+
+<br />
+
+```text
+event directory
+  event A → cell 1 → Aurora 1 + API/worker pool 1
+  event B → cell 2 → Aurora 2 + API/worker pool 2
+  event C → cell 3 → Aurora 3 + API/worker pool 3
+```
+
+<br />
+
+The admission token includes the cell. CloudFront/ALB routing or the API gateway sends the buyer to that cell. One celebrity onsale can receive a dedicated cell. Failure in cell 2 does not stop sales in cells 1 and 3.
+
+Keep one order inside one cell. Cross-cell reporting consumes Kafka or S3 projections. Do not join purchase databases on the request path. [Sharding in System Design](/notes/sharding-in-system-design) covers the key, routing, and rebalance cost.
+
+Within a single hot event, assigned seats still distribute lock contention across seat rows. The waiting room controls total writer pressure. A global order guarantee would destroy that parallelism and is not required.
+
+<br />
+
+**Failure:** calling PostgreSQL table partitioning horizontal scale. The partitions still share one writer, one WAL path, and one connection ceiling.
+
+<br />
+
+---
+
+## 14. Terraform: primary Region
+
+This repository uses SST. The following Terraform is a standalone architecture example, not infrastructure that already exists here. Pin and test the provider version in a real platform repository.
+
+Use aliased providers for primary and DR Regions:
+
+<br />
+
+```hcl title="infra/providers.tf"
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 6.33"
+    }
+  }
+}
+
+provider "aws" {
+  alias  = "primary"
+  region = var.primary_region
+}
+
+provider "aws" {
+  alias  = "dr"
+  region = var.dr_region
+}
+```
+
+<br />
+
+The API service runs in private subnets with no public IP. Its target group is attached to the public ALB; its security group accepts traffic only from the ALB.
+
+<br />
+
+```hcl title="infra/ecs.tf"
+resource "aws_ecs_service" "api" {
+  provider                         = aws.primary
+  name                             = "ticketing-api"
+  cluster                          = aws_ecs_cluster.purchase.id
+  task_definition                  = aws_ecs_task_definition.api.arn
+  desired_count                    = 6
+  launch_type                      = "FARGATE"
+  availability_zone_rebalancing    = "ENABLED"
+  deployment_minimum_healthy_percent = 100
+  deployment_maximum_percent         = 200
+  enable_execute_command           = false
+
+  network_configuration {
+    assign_public_ip = false
+    subnets          = module.vpc.private_subnets
+    security_groups  = [aws_security_group.api.id]
+  }
+
+  load_balancer {
+    target_group_arn = aws_lb_target_group.api.arn
+    container_name   = "api"
+    container_port   = 4111
+  }
+
+  health_check_grace_period_seconds = 30
+}
+
+resource "aws_appautoscaling_target" "api" {
+  max_capacity       = 100
+  min_capacity       = 6
+  resource_id        = "service/${aws_ecs_cluster.purchase.name}/${aws_ecs_service.api.name}"
+  scalable_dimension = "ecs:service:DesiredCount"
+  service_namespace  = "ecs"
+}
+```
+
+<br />
+
+Create separate task definitions, services, IAM roles, autoscaling targets, and alarms for relay, saga, payment, expiry, and ticket workers. Grant each the minimum Kafka topic, Secrets Manager, KMS, and CloudWatch permissions it needs.
+
+Aurora uses one writer and at least two readers across AZs. Manage the master password in Secrets Manager, require TLS, enable Performance Insights, export PostgreSQL logs, protect deletion, and retain backups.
+
+<br />
+
+```hcl title="infra/aurora.tf"
+resource "aws_rds_global_cluster" "ticketing" {
+  provider                  = aws.primary
+  global_cluster_identifier = "ticketing-global"
+  engine                    = "aurora-postgresql"
+  engine_version            = var.aurora_postgres_version
+  database_name             = "ticketing"
+  storage_encrypted         = true
+}
+
+resource "aws_rds_cluster" "primary" {
+  provider                    = aws.primary
+  cluster_identifier          = "ticketing-primary"
+  global_cluster_identifier   = aws_rds_global_cluster.ticketing.id
+  engine                      = "aurora-postgresql"
+  engine_version              = var.aurora_postgres_version
+  db_subnet_group_name        = aws_db_subnet_group.primary.name
+  vpc_security_group_ids      = [aws_security_group.aurora.id]
+  manage_master_user_password = true
+  storage_encrypted           = true
+  backup_retention_period     = 35
+  deletion_protection         = true
+  enabled_cloudwatch_logs_exports = ["postgresql"]
+}
+
+resource "aws_rds_cluster_instance" "primary" {
+  provider             = aws.primary
+  count                = 3
+  identifier           = "ticketing-primary-${count.index}"
+  cluster_identifier   = aws_rds_cluster.primary.id
+  instance_class       = var.aurora_instance_class
+  engine               = aws_rds_cluster.primary.engine
+  engine_version       = aws_rds_cluster.primary.engine_version
+  db_subnet_group_name = aws_db_subnet_group.primary.name
+  performance_insights_enabled = true
+}
+```
+
+<br />
+
+MSK uses one broker per AZ at minimum. Production sizing may use more, but broker count must remain a multiple of the AZ count.
+
+<br />
+
+```hcl title="infra/msk.tf"
+resource "aws_msk_configuration" "purchase" {
+  provider       = aws.primary
+  name           = "ticketing-purchase"
+  kafka_versions = [var.kafka_version]
+
+  server_properties = <<-PROPERTIES
+    auto.create.topics.enable=false
+    default.replication.factor=3
+    min.insync.replicas=2
+    unclean.leader.election.enable=false
+    num.partitions=48
+  PROPERTIES
+}
+
+resource "aws_msk_cluster" "primary" {
+  provider               = aws.primary
+  cluster_name           = "ticketing-primary"
+  kafka_version          = var.kafka_version
+  number_of_broker_nodes = 3
+
+  broker_node_group_info {
+    instance_type  = var.msk_instance_type
+    client_subnets = slice(module.vpc.private_subnets, 0, 3)
+    security_groups = [aws_security_group.msk.id]
+
+    storage_info {
+      ebs_storage_info {
+        volume_size = 1000
+      }
+    }
+  }
+
+  client_authentication {
+    sasl {
+      iam = true
+    }
+  }
+
+  encryption_info {
+    encryption_at_rest_kms_key_arn = aws_kms_key.msk.arn
+    encryption_in_transit {
+      client_broker = "TLS"
+      in_cluster    = true
+    }
+  }
+
+  configuration_info {
+    arn      = aws_msk_configuration.purchase.arn
+    revision = aws_msk_configuration.purchase.latest_revision
+  }
+}
+```
+
+<br />
+
+ElastiCache should be Multi-AZ with automatic failover and encryption. Losing it pauses new admission or degrades cached reads; it does not release or sell a seat.
+
+<br />
+
+**Failure:** placing tasks in private subnets but giving Aurora or MSK public access "for debugging." Use Session Manager, controlled tooling, and audited break-glass access.
+
+<br />
+
+---
+
+## 15. Warm cross-Region disaster recovery
+
+Multi-AZ handles an AZ failure. It is not regional disaster recovery. The strategy map — backup versus HA versus DR — is [Disaster Recovery in System Design](/notes/disaster-recovery-in-system-design). The objective here is **RPO under one minute** and **RTO under fifteen minutes**. Those are measured objectives, not AWS product guarantees.
+
+The warm Region contains:
+
+- An Aurora Global Database secondary cluster with instances ready for promotion.
+- A three-broker MSK target cluster.
+- MSK Replicator copying selected topics and consumer-group offsets.
+- ECR image replication, Secrets Manager replicas, KMS keys, VPC, ALB, and low-count ECS services.
+- Route 53 failover records and health checks.
+
+Aurora Global Database replication is asynchronous. MSK replication is asynchronous. The real RPO is the worse observed lag plus any event not yet copied from the outbox.
+
+<br />
+
+```hcl title="infra/dr.tf"
+resource "aws_rds_cluster" "dr" {
+  provider                  = aws.dr
+  cluster_identifier        = "ticketing-dr"
+  global_cluster_identifier = aws_rds_global_cluster.ticketing.id
+  engine                    = "aurora-postgresql"
+  engine_version            = var.aurora_postgres_version
+  db_subnet_group_name      = aws_db_subnet_group.dr.name
+  vpc_security_group_ids    = [aws_security_group.aurora_dr.id]
+  storage_encrypted         = true
+
+  lifecycle {
+    ignore_changes = [replication_source_identifier]
+  }
+}
+
+resource "aws_rds_cluster_instance" "dr" {
+  provider           = aws.dr
+  count              = 2
+  identifier         = "ticketing-dr-${count.index}"
+  cluster_identifier = aws_rds_cluster.dr.id
+  instance_class     = var.aurora_instance_class
+  engine             = aws_rds_cluster.dr.engine
+  engine_version     = aws_rds_cluster.dr.engine_version
+}
+
+resource "aws_msk_replicator" "dr" {
+  provider                   = aws.dr
+  replicator_name            = "ticketing-primary-to-dr"
+  service_execution_role_arn = aws_iam_role.msk_replicator.arn
+
+  kafka_cluster {
+    amazon_msk_cluster {
+      msk_cluster_arn = aws_msk_cluster.primary.arn
+    }
+    vpc_config {
+      subnet_ids     = slice(module.vpc.private_subnets, 0, 3)
+      security_groups = [aws_security_group.msk_replicator_source.id]
+    }
+  }
+
+  kafka_cluster {
+    amazon_msk_cluster {
+      msk_cluster_arn = aws_msk_cluster.dr.arn
+    }
+    vpc_config {
+      subnet_ids     = slice(module.vpc_dr.private_subnets, 0, 3)
+      security_groups = [aws_security_group.msk_replicator_target.id]
+    }
+  }
+
+  replication_info_list {
+    source_kafka_cluster_arn = aws_msk_cluster.primary.arn
+    target_kafka_cluster_arn = aws_msk_cluster.dr.arn
+    target_compression_type  = "ZSTD"
+
+    topic_replication {
+      topics_to_replicate           = ["ticketing\\..*"]
+      detect_and_copy_new_topics    = true
+      copy_topic_configurations     = true
+      copy_access_control_lists_for_topics = false
+
+      starting_position {
+        type = "EARLIEST"
+      }
+
+      topic_name_configuration {
+        type = "IDENTICAL"
+      }
+    }
+
+    consumer_group_replication {
+      consumer_groups_to_replicate         = ["ticketing-.*"]
+      detect_and_copy_new_consumer_groups   = true
+      synchronise_consumer_group_offsets    = true
+    }
+  }
+}
+```
+
+<br />
+
+Treat this as representative. The current [MSK Replicator requirements](https://docs.aws.amazon.com/msk/latest/developerguide/msk-replicator-prepare-clusters.html) require IAM access control; cross-Region provisioned sources require IAM multi-VPC private connectivity and a resource policy. Source and target need at least three brokers. Validate the exact provider schema and network policy in the platform repository.
+
+Failover is an ordered runbook:
+
+1. Stop waiting-room admission and fence primary writes with a monotonically increasing **region epoch**.
+2. Confirm the primary is unavailable or deliberately isolated. Never permit two writers.
+3. Record Aurora and MSK replication lag; declare the recovery point.
+4. Promote the Aurora secondary and update Secrets Manager/RDS Proxy endpoints.
+5. Activate DR ECS services with the new epoch.
+6. Point consumers at DR MSK; replay from replicated offsets and let inbox dedupe.
+7. Switch Route 53 only after synthetic hold and webhook tests pass.
+8. Reconcile Stripe PaymentIntents created near the cutover against local payment rows.
+
+The region epoch is checked by every write transaction. It prevents an old primary that returns from accepting stale writes after promotion.
+
+Failback is another migration. Replicate and reconcile back; do not simply reverse DNS.
+
+<br />
+
+**Failure:** failing over DNS before fencing the old Region. Two healthy writers are worse than one unavailable writer: both can sell the same logical inventory.
+
+<br />
+
+---
+
+## 16. Observe the business timeline
+
+Infrastructure metrics are necessary. Order-level evidence explains the incident.
+
+Every request and event carries:
+
+- `correlationId`: one buyer journey.
+- `eventId`: one immutable message.
+- `causationId`: the event that caused this one.
+- `orderId`, `holdId`, and Stripe PaymentIntent ID.
+- `region`, `purchaseCell`, Kafka topic, partition, and offset.
+
+Never log client secrets, card data, admission tokens, or full webhook bodies.
+
+<br />
+
+| Signal | Alarm when |
+| --- | --- |
+| Hold endpoint p99 and conflict rate | Latency exceeds SLO or conflicts jump unexpectedly |
+| Postgres lock wait / deadlock / connections | Admission rate is above safe capacity |
+| Oldest unpublished outbox row | Events are not reaching Kafka |
+| Consumer lag by partition | A worker or hot key is behind |
+| Expired hold processing delay | Seats remain unavailable past TTL |
+| DLQ depth | A permanent event failure needs action |
+| Stripe/local status mismatch | Payment reconciliation found drift |
+| Ticket uniqueness violation | An invariant or replay handler is wrong |
+| Aurora/MSK cross-Region lag | RPO objective is at risk |
+
+<br />
+
+Run drills:
+
+- Kill one API task, one consumer, one broker, and one AZ.
+- Fail the database writer and record reconnect time through RDS Proxy.
+- Block Kafka publishing and verify outbox accumulation and recovery.
+- Deliver the same Stripe event ten times.
+- Pause the expiry worker, then catch up without a lock storm.
+- Promote the warm Region in a game day and record actual RPO/RTO.
+
+<br />
+
+**Failure:** a dashboard that says Kafka is healthy while orders have sat in the outbox for twenty minutes. Measure the business boundary, not only the managed service.
+
+<br />
+
+---
+
+## 17. Test the properties that prevent overselling
+
+Unit tests are not enough. Run these against real PostgreSQL in integration tests; row locks and unique indexes are the behavior under test.
+
+<br />
+
+```ts title="test/integration/purchase-concurrency.test.ts"
+it("allows one active hold for one seat", async () => {
+  const attempts = await Promise.allSettled(
+    Array.from({ length: 100 }, (_, i) =>
+      reserveSeats({
+        userId: users[i].id,
+        eventId,
+        seatIds: [seatId],
+        idempotencyKey: crypto.randomUUID(),
+        requestHash: hash([seatId]),
+        correlationId: crypto.randomUUID(),
+      }),
+    ),
+  )
+
+  expect(attempts.filter((x) => x.status === "fulfilled")).toHaveLength(1)
+  expect(await countActiveHolds(seatId)).toBe(1)
+})
+
+it("returns one order for an HTTP retry", async () => {
+  const input = holdInput({ idempotencyKey: "same-key" })
+  const [a, b] = await Promise.all([reserveSeats(input), reserveSeats(input)])
+
+  expect(a.orderId).toBe(b.orderId)
+  expect(await countOrdersForKey(input.userId, "same-key")).toBe(1)
+})
+
+it("applies a duplicate Kafka event once", async () => {
+  await handleOnce("purchase-saga-v1", paymentAuthorized, applySagaEvent)
+  await handleOnce("purchase-saga-v1", paymentAuthorized, applySagaEvent)
+
+  expect(await countOutbox("CaptureRequested", orderId)).toBe(1)
+  expect(await orderStatus(orderId)).toBe("capture_pending")
+})
+
+it("compensates authorization after hold expiry", async () => {
+  await expireHold(orderId)
+  await handleOnce("purchase-saga-v1", lateAuthorization, applySagaEvent)
+
+  expect(await orderStatus(orderId)).toBe("failed")
+  expect(
+    await countOutbox("AuthorizationCancelRequested", orderId),
+  ).toBe(1)
+  expect(await countActiveHolds(seatId)).toBe(0)
+})
+```
+
+<br />
+
+Also prove:
+
+- Crash after Kafka publish but before `publishedAt` creates a duplicate, not a second effect.
+- Crash after database effect but before offset commit replays into the inbox no-op.
+- Different payloads with the same idempotency key return `409`.
+- Expiry and authorization racing under locks pick one legal state.
+- Capture retry uses one Stripe operation.
+- Ticket issuance retry leaves one ticket per seat.
+- A regional promotion rejects the old region epoch.
+
+Use fault injection around every boundary: before call, after remote success, before local commit, after local commit, before acknowledgment.
+
+<br />
+
+**Failure:** testing only the happy path. The oversell lives in two requests, two workers, or one crash between successful steps.
+
+<br />
+
+---
+
+## Recap Q&A
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="ticketing-hold">
+    <AccordionTrigger>1. What actually prevents two buyers from holding the same seat?</AccordionTrigger>
+    <AccordionContent>
+
+      - PostgreSQL is authoritative. The transaction locks requested seat rows in deterministic order, checks active holds and tickets, then inserts ownership rows.
+      - A partial unique index permits at most one unreleased `hold_seat` per seat. A unique ticket index permits one final owner.
+      - Redis availability and the seat map are hints. They never grant ownership.
+      - **Failure:** check-then-insert without a lock or constraint. Both requests observe "available" and both continue.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="ticketing-outbox">
+    <AccordionTrigger>2. Why use both an outbox and an inbox?</AccordionTrigger>
+    <AccordionContent>
+
+      - The outbox makes the business write and intent-to-publish one PostgreSQL transaction. Kafka downtime delays publication instead of losing it.
+      - Publishing then marking can duplicate after a crash. The inbox makes each consumer's business effect idempotent.
+      - Commit the Kafka offset only after the inbox and effect commit. Replay is then safe.
+      - **Failure:** calling Kafka producer idempotence end-to-end exactly once. It cannot make a database transaction atomic with Kafka or survive every new producer session.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="ticketing-payment">
+    <AccordionTrigger>3. Why authorize before capture?</AccordionTrigger>
+    <AccordionContent>
+
+      - A manual-capture PaymentIntent reserves eligible funds without collecting them.
+      - After `PaymentAuthorized`, the saga rechecks the live hold, confirms it in PostgreSQL, and requests capture.
+      - Late authorization is canceled. Late capture is refunded. Stripe calls and webhook ingestion use stable idempotency keys.
+      - **Failure:** capture money before durable inventory confirmation, then hide the mismatch instead of running a refund compensation.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="ticketing-scale">
+    <AccordionTrigger>4. How does the system survive a 10,000-attempt-per-second onsale?</AccordionTrigger>
+    <AccordionContent>
+
+      - WAF removes obvious abuse. The waiting room releases only the measured safe hold rate and signs short-lived event/user/cell admission tokens.
+      - Cached reads and reader replicas serve browsing. The writer handles only authoritative holds and saga transitions.
+      - API tasks scale on latency; consumers scale on lag; Kafka keys by `orderId`. For the next ceiling, assign events to independent purchase cells.
+      - **Failure:** sending all attempts to Aurora and hoping autoscaling adds write capacity before lock latency collapses.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="ticketing-dr">
+    <AccordionTrigger>5. What makes the warm Region safe to promote?</AccordionTrigger>
+    <AccordionContent>
+
+      - Aurora Global Database and MSK Replicator copy state asynchronously. Their observed lag defines the recovery point.
+      - Stop admission, fence the old writer with a region epoch, promote Aurora, activate DR services, replay through inboxes, test, then change Route 53.
+      - Reconcile Stripe because an external payment may have succeeded near the cutover even when its local continuation did not.
+      - **Failure:** treating asynchronous replicas as zero-RPO or allowing both Regions to accept purchase writes.
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>

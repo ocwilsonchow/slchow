@@ -9,7 +9,7 @@ Multi-tenancy fails in production when isolation is only a `WHERE organization_i
 
 A production-grade service needs three layers that agree: **identity / membership** (Better Auth organization plugin), **request context** (every protected Hono handler receives a verified `userId` and `organizationId`, never from a client-controlled header alone), and a **data boundary** (PostgreSQL row-level security denies cross-tenant rows even if application code forgets a filter).
 
-This note assumes the typed stack in [Backend APIs with Hono, Drizzle, Zod OpenAPI, and SST](/notes/backend-apis-hono-sst). Here the focus is **tenant isolation**.
+This note assumes the typed stack in [Backend APIs with Hono, Drizzle, Zod OpenAPI, and SST](/notes/_backend-apis-hono-sst). Here the focus is **tenant isolation**.
 
 <br />
 
@@ -518,7 +518,7 @@ If step 6 or 7 fails, the system is not multi-tenant yet. It is a single-tenant 
 
 - Start with a shared schema, static roles, and RLS on every tenant-owned table.
 - Add teams or dynamic access control when a real product requirement appears.
-- Keep deploy, OpenAPI, and Lambda details in the [backend API note](/notes/backend-apis-hono-sst); keep this note about the isolation contract.
+- Keep deploy, OpenAPI, and Lambda details in the [backend API note](/notes/_backend-apis-hono-sst); keep this note about the isolation contract.
 
 The production bar is simple: forgetting a `WHERE` clause must not become a cross-tenant incident.
 

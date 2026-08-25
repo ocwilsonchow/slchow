@@ -7,7 +7,7 @@ category: backend
 
 TypeScript 會 erase types。Java 把它們留在 **JVM** 上。一個 duck-typed、「有 `id` 與 `email`」的 object 是 TypeScript 習慣。在 Java 裡那不是一個 type。Compiler 與 runtime 都要一個 named class、record，或 interface。
 
-這篇 note 是以 **Hono** developer 身分讀 **Spring Boot 3** API 時用的 mapping。Samples 對準 **Java 21**：records、sealed types、pattern matching，virtual threads 提一次。不是把這個 site 重寫成 Java。Typed Hono stack 見 [用 Hono、Drizzle、Zod OpenAPI 與 SST 打造 Backend APIs](/notes/backend-apis-hono-sst)。你已有的 object model 見 [TypeScript Class 與 Runtime Identity](/notes/typescript-classes-and-runtime-identity)。
+這篇 note 是以 **Hono** developer 身分讀 **Spring Boot 3** API 時用的 mapping。Samples 對準 **Java 21**：records、sealed types、pattern matching，virtual threads 提一次。不是把這個 site 重寫成 Java。Typed Hono stack 見 [用 Hono、Drizzle、Zod OpenAPI 與 SST 打造 Backend APIs](/notes/_backend-apis-hono-sst)。Types 是 annotations 直到 HTTP boundary 的 Python 兄弟篇是 [以 TypeScript Developer 身分學 Python](/notes/learning-python-as-a-typescript-developer)。Types 活過 compilation、interfaces 是 structural、且沒有 container 的 Go 兄弟篇是 [以 TypeScript Developer 身分學 Go](/notes/learning-go-as-a-typescript-developer)。你已有的 object model 見 [TypeScript Class 與 Runtime Identity](/notes/typescript-classes-and-runtime-identity)。
 
 <br />
 
@@ -391,8 +391,10 @@ public interface UserRepository extends JpaRepository<UserEntity, String> {}
 
 Java 是 **這個 JVM** 如何 type 一個 value。Spring 是 **這個 process** 如何接收 request。兩者都不取代 authorization、SQL，或 session。
 
+- Interpreter 兄弟篇：[以 TypeScript Developer 身分學 Python](/notes/learning-python-as-a-typescript-developer)
+- Go 兄弟篇：[以 TypeScript Developer 身分學 Go](/notes/learning-go-as-a-typescript-developer)
 - TypeScript 的 runtime identity：[TypeScript Class 與 Runtime Identity](/notes/typescript-classes-and-runtime-identity)
 - JS 何時執行：[JavaScript 核心概念](/notes/core-javascript-concepts)
-- Hono analog：[用 Hono、Drizzle、Zod OpenAPI 與 SST 打造 Backend APIs](/notes/backend-apis-hono-sst)
+- Hono analog：[用 Hono、Drizzle、Zod OpenAPI 與 SST 打造 Backend APIs](/notes/_backend-apis-hono-sst)
 - Statement：[SQL 核心概念](/notes/core-sql-concepts)
 - Identity、membership，以及那一行：[用 Hono、Better Auth、Drizzle 與 Postgres RLS 打造 Multi-Tenant 後端](/notes/multi-tenant-backend-drizzle-hono-better-auth)

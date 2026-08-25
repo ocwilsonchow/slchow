@@ -7,7 +7,7 @@ category: system-design
 
 The **API** is how clients name work. Pick a protocol, name the resources, say how data goes in and comes back. Gateways, caches, and retries believe those names. Draw the contract before the boxes.
 
-This note follows [Evan's walkthrough](https://www.youtube.com/watch?v=DQ57zYedMdQ). The typed Hono path is [Backend APIs with Hono, Drizzle, Zod OpenAPI, and SST](/notes/backend-apis-hono-sst). This note is the contract.
+This note follows [Evan's walkthrough](https://www.youtube.com/watch?v=DQ57zYedMdQ). The typed Hono path is [Backend APIs with Hono, Drizzle, Zod OpenAPI, and SST](/notes/_backend-apis-hono-sst). This note is the contract.
 
 <br />
 
@@ -205,7 +205,7 @@ APIs evolve. Clients do not, on your schedule — especially mobile.
 - Prefer **additive** change: new optional fields, new endpoints. A version cut is a product you then run twice.
 - When a cut is real, **URL versioning** (`/v1/events`) is the explicit default. Easy to route, easy to explain, easy to test in a browser.
 - Header versioning keeps URLs clean and is less obvious. Skip it unless the interviewer or the platform already lives there.
-- This stack's OpenAPI contract is the version you actually ship — [Backend APIs with Hono, Drizzle, Zod OpenAPI, and SST](/notes/backend-apis-hono-sst).
+- This stack's OpenAPI contract is the version you actually ship — [Backend APIs with Hono, Drizzle, Zod OpenAPI, and SST](/notes/_backend-apis-hono-sst).
 
 <br />
 

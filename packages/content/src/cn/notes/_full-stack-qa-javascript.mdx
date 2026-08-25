@@ -1,0 +1,275 @@
+---
+title: "Full-Stack Q&A: JavaScript"
+description: JavaScript 与 TypeScript 问题的口语长度答案
+category: full-stack
+---
+
+## JavaScript (TypeScript)
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="js-scope-tdz">
+    <AccordionTrigger>1. var vs let vs const：hoisting、temporal dead zone，以及为什么 const 不是 deep immutability。</AccordionTrigger>
+    <AccordionContent>
+
+      - 三种声明都是 **hoisted**。`var` 是 function-scoped，在该 function 顶部被初始化成 `undefined`。`let` 与 `const` 是 **block-scoped**，并被 hoist 进 **temporal dead zone**：绑定已经存在，但在声明之前读或写都会 throw。
+      - `const` 只冻住 **绑定**。变量不能被 reassign。值仍然可以 mutate：一个 `const` object 或 array 接受 property writes 与 `push`。Deep immutability 需要 `Object.freeze`（浅）、structured copies，或一个 library。
+      - Production 默认是 `const`，直到需要 reassignment 才改用 `let`。`var` 在新 modules 里没有位置：它会漏出 `for` blocks，并在 loop iterations 之间共享同一个绑定。
+      - **失败：** 把 `const user = fetchUser()` 当成一份冻住的 record，然后纳闷为什么一份共享的 reference 会改掉两个 screens。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="js-closures">
+    <AccordionTrigger>2. 什么是 closure？给一个 production 用法和一个 leak。</AccordionTrigger>
+    <AccordionContent>
+
+      - **Closure** 是一个 function 加上它被创建时的 lexical environment。外层 function return 之后，内层 function 仍能读和写那些绑定。它不是值的副本；它是对 scope 的活引用。
+      - Production 用法：**partial application**（`fetchWithAuth(baseUrl)`）、**private state**（一份 module-level cache）、仍能看见订阅那次 render 的 `roomId` 的 **event handlers**。
+      - Leak 是同一套机制。一个 listener、timer 或 subscription close over 一棵大 tree、一份 10 MB JSON payload，或一个不断增长的 `Map`，会在 UI 消失之后仍把那张 graph 留活。
+      - Production 默认是：只 close over **最小** 的所需值（`id`，不是整行 row），在同一段 lifetime 里 unsubscribe，并给 caches 一个 max size 或 TTL。
+      - **失败：** 一个 `setInterval` 捕获了 `this` 和一个 store，unmount 时从不 `clearInterval` —— interval 是 root，closure 是被 retain 的 heap。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="js-this">
+    <AccordionTrigger>3. this 如何确定？Function vs arrow、call/apply/bind，以及 class fields vs prototype methods。</AccordionTrigger>
+    <AccordionContent>
+
+      - 对一个 **function**（包括 prototype 上的 class method），`this` 由 **call site** 决定。`obj.method()` —— `this` 是 `obj`。`fn()` —— strict mode 下是 `undefined`。`call` / `apply` / `bind` 显式设置 `this`。`new Fn()` —— `this` 是新 instance。
+      - **Arrow function** 没有自己的 `this` 绑定。它从 enclosing lexical scope 读 `this`。`call` 与 `bind` 无法重新绑定它。Arrows 适合做 React callbacks，作为期望 `this` 是 instance 的 prototype methods 则会失败。
+      - Class **prototype methods** 是普通 functions：抽出 `const { save } = instance` 后 `this` 会丢，除非 method 已经被 bind。作为 arrows 的 **instance fields** close over instance；每个 object 拿到自己的 function，这会耗 memory 并弄坏 `super.save`。
+      - Production 默认是 prototype methods，再加一次显式 `bind` 或在 call site 用 arrow。[TypeScript Class 与 Runtime Identity](/notes/typescript-classes-and-runtime-identity) 是这份 object model。
+      - **失败：** 把 `obj.handler` 传给 `addEventListener` 或 `setTimeout`，然后 debug 出 `this` 是 `undefined`。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="js-prototype">
+    <AccordionTrigger>4. Prototype chain vs class syntax。instanceof 何时失败？</AccordionTrigger>
+    <AccordionContent>
+
+      - JavaScript `class` 是盖在 **constructor** 与 **prototype** object 上的语法。Methods 住在 `Class.prototype` 上。`new` 创建一个普通 object，把 `[[Prototype]]` 设成 `Class.prototype`，再跑 constructor。Runtime 里没有单独的「class object」。模型：[TypeScript Class 与 Runtime Identity](/notes/typescript-classes-and-runtime-identity)。
+      - `instanceof` 沿 prototype chain 走，问 `Ctor.prototype` 是否出现在上面。
+      - 它会 **失败** 于 **`Object.create(null)`**（没有 `Object.prototype`）、**cross-realm** 值（iframe / vm `Array.prototype` —— 用 `Array.isArray`）、instances 已经存在之后被 **replaced 的 prototype**，以及 **primitives**（`"hi" instanceof String` 是 false；boxed 的 `new String("hi")` 是 true）。
+      - Production code 在需要 `instanceof` 或一份共享的可变 lifetime 时，把 `class` 当成 **runtime identity**。否则用 types 与 functions。
+      - **失败：** 一次 `data instanceof Map` 检查在跨 worker 边界 `structuredClone` 之后炸掉，或信任从另一个 bundle 的 library 副本 throw 出来的值上的 `instanceof Error`。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="js-equality">
+    <AccordionTrigger>5. == vs === vs Object.is。NaN、-0 与 boxed primitives 如何表现？</AccordionTrigger>
+    <AccordionContent>
+
+      - **`===`** 是 SameValueX：没有 coercion。不同类型不相等。`NaN === NaN` 是 **false**。`+0 === -0` 是 **true**。
+      - **`==`** 会 coerce。`null == undefined` 是 true。`"1" == 1` 与 `[] == false` 是面试陷阱。Production code 不用 `==`，除了刻意的 `== null` 检查 `null` 或 `undefined`。
+      - **`Object.is`** 是 SameValue：`Object.is(NaN, NaN)` 是 **true**，`Object.is(+0, -0)` 是 **false**。这就是 `Map`/`Set` 给 `NaN` keying 用的比较。
+      - Boxed primitives（`new Number(1)`、`new Boolean(false)`）是 **objects**。`new Number(1) === 1` 是 false。`new Boolean(false)` 是 truthy，因为每个 object 都是。
+      - Production 默认是 `===`，当 `NaN` 与 signed zero 要紧时用 `Object.is`。**失败：** `if (error.score === NaN)` —— 那个条件永远不会 true —— 或对一个以 `""` 到来的 query param 用 `==`，并把它当成 `0`。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="js-coercion">
+    <AccordionTrigger>6. ToBoolean 与 ToPrimitive 如何在 APIs 里藏 bug —— plus、if (value)，以及 query params？</AccordionTrigger>
+    <AccordionContent>
+
+      - **ToBoolean** 决定 `if`、`&&`、`||` 与 ternary。Falsy 值是 `false`、`0`、`-0`、`0n`、`""`、`null`、`undefined` 与 `NaN`。其他都是 truthy，包括 `[]`、`{}`、`"0"` 与 `new Boolean(false)`。**ToPrimitive** 是 `+`、`>` 与 template concatenation 把 objects 变成 scalars 的方式。
+      - **`if (value)`** 会把合法的 `0` 剂量、`""` 空 note，或 `false` flag 当成 missing。Optional fields 需要 `value == null` 或显式的 `=== undefined`。
+      - **`+`** 是 add 或 concat。缺 param 时 `+req.query.page` 是 `NaN`。`"2" + 1` 是 `"21"`。**Query params 与 form fields 是 strings。** `"false"` 是 truthy。`"0"` 是 truthy。**`||` defaults** 会替换掉 `0` 与 `""`。`??` 只替换 `null` 与 `undefined`。
+      - Production 默认是在边界 parse，然后用 typed values 工作。
+      - **失败：** `limit = req.query.limit || 20` 让发送 `0`（什么都不显示）的 client 拿到 20，或 `if (patient.mrn)` 跳过一个合法的 zero-padded id，它以 number 到来并变成了 `0`。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="js-tasks-microtasks">
+    <AccordionTrigger>7. 语言里的 task vs microtask。queueMicrotask、Promise jobs 与 setTimeout 跑在哪里？</AccordionTrigger>
+    <AccordionContent>
+
+      - 这是 **language 与 HTML** 模型，不是 Node 的 libuv phases。一个 **task** 跑到完成，然后 engine 排空 **所有 microtasks**，然后 host 也许 render，然后下一个 task。Node 里 `nextTick` 与 `setImmediate` 的位置在 Backend Engineering 的 event-loop 答案，以及 [深入理解 JavaScript Event Loop](/notes/javascript-event-loop-in-depth)。
+      - **Tasks**（macrotasks）：`setTimeout`、`setInterval`、I/O callbacks、UI events、`postMessage`。Delay `0` 是下限，不是「现在」。**Microtasks**：Promise `.then` / `.catch` / `.finally`、`queueMicrotask`、`MutationObserver`。`await` continuation 是 microtask。Drain 期间排上的嵌套 microtasks 仍会在下一个 task 之前跑。
+      - 口头顺序：sync work，然后每一个 microtask，然后一个 timer。那就是 [深入理解 JavaScript Event Loop](/notes/javascript-event-loop-in-depth) 里的 `5 1 3 4 2` 谜题。Microtask loop 会饿死 rendering 与 input。
+      - Production 默认是：用 Promises 做「这个 stack 之后、paint 之前」；当页面必须拿到一轮时，用 `setTimeout` 或 `scheduler.yield`。
+      - **失败：** 在紧密 loop 里 `await` 并称之为 concurrency —— 那些仍是一条 thread 上的 microtasks —— 或假设 `setTimeout(fn, 0)` 会在 `Promise.resolve().then(fn)` 之前跑。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="js-promises">
+    <AccordionTrigger>8. Promise.all vs allSettled vs race vs any。Unhandled rejection 会发生什么？</AccordionTrigger>
+    <AccordionContent>
+
+      - **`Promise.all`** 在每个 input 都 fulfill 时，按 input 顺序 fulfill 一个 values array。**在第一次 rejection 时 reject。** 剩下的工作仍会跑，除非被 cancel。任何失败都应让整批失败时用它。
+      - **`Promise.allSettled`** 永远 fulfill，每个 input 一个 `{ status, value | reason }`。UI 必须展示 partial success 时用它。**`Promise.race`** 以 **先 settle 的那个** settle。**`Promise.any`** 在 **第一次 fulfillment** 时 fulfill；只有每个 input 都 reject 时才以 `AggregateError` reject。
+      - **Unhandled rejection** 是一个被 reject 的 Promise，到 microtask turn 结束时仍没有 `catch`（也没有 try 里的 `await`）。Browsers 与 Node 发出 `unhandledrejection` / `unhandledRejection`。在较新的 Node 里，这可以 crash process。
+      - Production 默认是必需要的集合用 `all`，dashboards 用 `allSettled`，race timeouts 上加 abort。
+      - **失败：** 对一串独立的 optional calls 用 `all`，于是一次 404 空白了整页，或 fire `all` 却没有在组合后的 promise 上挂 `.catch`。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="js-async-await">
+    <AccordionTrigger>9. Sequential await vs Promise.all。Error handling、waterfalls 与 AbortSignal。</AccordionTrigger>
+    <AccordionContent>
+
+      - `async` functions 返回一个 Promise。`await` 暂停 function，并在 thenable settle 时把其余部分排成 **microtask**。`await` 外包 `try/catch` 是 `.catch` 的可读形式。忘了 `await` 是静默的 fire-and-forget —— errors 变成 unhandled rejections。
+      - **Sequential `await`** 是 waterfall：每个 request 等上一个结束后才开始。当第二步需要第一步的 id 时这是对的。当 calls 彼此独立时这是 latency bug。先启动工作，再 `await Promise.all`。
+      - **`for` loop 里的 `await`** 按设计是 sequential。Map 成一个 promises array 再 `all` / `allSettled` 是并行形式。Loop 会打开 10,000 个 sockets 时，用 pool 限制 concurrency。
+      - **Cancellation** 没有内建进 `await`。`fetch` 上的 `AbortSignal` 是 production handle。Abort 以 `AbortError` reject；在 UI 里把它当成非 error。
+      - **失败：** 在 Server Component 或 client effect 里写 sequential waterfall，或忽略 abort 让一份过期 response 覆盖更新的那份。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="js-iterables">
+    <AccordionTrigger>10. Iterables、for...of vs for...in、generators，以及何时 async generator 是对的形状。</AccordionTrigger>
+    <AccordionContent>
+
+      - **Iterable** 实现 `Symbol.iterator`，返回一个 iterator `{ next() }`，yield `{ value, done }`。Arrays、Maps、Sets、strings 以及大多数 typed collections 都是 iterable。Plain objects 不是，除非给一个 iterator。
+      - **`for...of`** 通过该 protocol 走 values。**`for...in`** 走 object 及其 prototype 上的 **enumerable string keys**。它对 arrays 是错工具，对 `Map` 也是错工具。Production 遍历 objects 用 `Object.keys` / `Object.entries`，或在 `Map` 上 `for...of`。
+      - **Generator**（`function*`）是 iterators 的 factory。用于 lazy sequences、自定义 `Symbol.iterator`，或不该一次性 allocate 整份 list 的 state machine。**Async generator**（`async function*`、`for await...of`）yield Promises：paginated APIs、file streams、event batches。当 consumer 应 pull 下一页时这是对的形状，而不是已知 URLs 的一次 `all` 就够时。
+      - **失败：** 在 ids array 上用 `for...in`，或把一个巨大 generator spread 进 array 从而毁掉 laziness。[JavaScript 核心概念](/notes/core-javascript-concepts) 把 generators 放在 promises 旁边，作为暂停工作的两种方式。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="js-modules">
+    <AccordionTrigger>11. ESM vs CommonJS：live bindings、default export interop、circular imports 与 tree-shaking。</AccordionTrigger>
+    <AccordionContent>
+
+      - **ESM**（`import` / `export`）是 static 的，并且有 **live bindings**：importer 看到的是 export 的当前值，不是一份 snapshot。求值是 hoisted 且 cycle-aware：绑定在 exporting module 完成 initializing 之前处于 TDZ。
+      - **CommonJS**（`require` / `module.exports`）是一次 runtime function call。Export 是 `require` 时拷贝的一份 **value**。Cycles 拿到一份 partial `exports` object。`require` 是 synchronous 的，不能以同样方式被 tree-shaken。
+      - **Default export interop** 是乱的中间地带。CJS `module.exports = fn` 对 ESM 常常表现为 `import foo from` 或 `import * as foo`，取决于 bundler 与 `esModuleInterop`。TypeScript `nodenext` 加上显式 `exports` field 是 production 形状。
+      - **Tree-shaking** 需要 ESM、无 side-effect 的 modules（`package.json` 里的 `sideEffects`），以及 static import paths。`require(variable)` 以及把 `export default { manyFns }` 做成一个 object 会打败 shaking。
+      - **失败：** 一个 circular ESM import 在 exporter 完成之前就在 module body 里读绑定 —— `undefined` 或 TDZ throw —— 或一份经过两层 interop wrappers 之后变成 `mod.default.default` 的 CJS default。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="js-copy">
+    <AccordionTrigger>12. Shallow vs deep copy：spread、structuredClone，以及 JSON.parse(JSON.stringify) 的失败模式。</AccordionTrigger>
+    <AccordionContent>
+
+      - **Shallow copy**（`{ ...obj }`、`Object.assign`、`[...arr]`）只复制一层。Nested objects 与 arrays 仍是共享 references。mutate `copy.address.city` 会 mutate `original`。当下一层被整份替换时这就够了。
+      - **`structuredClone`** 是平台 deep copy：Dates、Maps、Sets、ArrayBuffers、cyclic graphs 能活下来。它在 functions、DOM nodes 以及某些 host objects 上 throw。在现代 runtimes 需要真正 clone 时，它是默认。
+      - **`JSON.parse(JSON.stringify(x))`** 不是 deep clone。它 **丢掉** `undefined`、functions 与 symbols；把 `NaN` / `Infinity` **塌成** `null`；把 `Date` 变成 ISO **string**；拒绝 cycles。它是一次 serialization round-trip，对 JSON-shaped data 有用，对 domain objects 危险。
+      - Production 默认是 immutable state 用 shallow updates，隔离（web workers、undo stacks）用 `structuredClone`，JSON 只出现在 JSON 边界。
+      - **失败：** spread 一行 Redux row 然后 mutate 嵌套的 `items` array，或用 `JSON` clone 一个 `Date` 然后纳闷为什么 `instanceof Date` 是 false。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="js-memory">
+    <AccordionTrigger>13. 常见 JavaScript memory leaks：closures、timers、listeners 与无界 Maps。</AccordionTrigger>
+    <AccordionContent>
+
+      - JavaScript 是 garbage-collected。Leak 是从 GC root（window、一个正在跑的 timer、一个 module singleton、一个 worker）到产品不再需要的 memory 的一条 **retained path**。
+      - 常见 roots：只需要一个 id 却捕获整份 props object 或一份 5 MB response 的 **closures**；没有 `clear` 的 **timers**；挂在 `window` 或长寿 bus 上却没有 `removeEventListener` 的 **listeners**（同一个 function reference）；没有 LRU 或 TTL 的 **无界 `Map` / object caches**；仍被 handler 引用的 **detached DOM**。
+      - WeakMap 与 WeakSet 不会把 keys 留活；当 lifetime 应跟随 object 时，它们是对的 store。它们不是通用 cache：非 object keys 非法，也没有 iteration。
+      - Production 默认是 subscribe 与 unsubscribe 成对、给 caches 设上限，并在 navigation 之后 retained size 仍增长时拍一份 heap snapshot。
+      - **失败：** 一个 global event bus 每次 mount 都堆积 handlers，或一份 abort controllers 的 `Map` 在 settle 时从不 delete。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="ts-structural">
+    <AccordionTrigger>14. Structural typing vs nominal typing。Excess property checks，以及为什么经变量赋值会接受多余 fields。</AccordionTrigger>
+    <AccordionContent>
+
+      - TypeScript 是 **structural**。若值 `x` 至少有 type `T` 所需的 properties，`x` 就是一个 `T`。Types 的名字不重要。Java、C# 与 Rust classes 更接近 **nominal**。
+      - **Excess property checks** 是 **fresh object literals** 上的特例。`const u: User = { id: "1", extra: true }` 会 error。经变量赋值，多余 field 被允许：`u` 是一个 `User`；`extra` 在 runtime 仍在 object 上。
+      - 一个 function `fn(user: User)` 会接受一个碰巧有 `id` 的 `Admin`。区分 brands 需要一个 **nominal trick** —— 一个独特的 `readonly __brand: "UserId"` field，或一个真正被 constructed 的 class。Excess property checks 不会在 `fetch` 来的 JSON 上跑。
+      - Production 默认是 props 与 DTOs 用 structural types，不能混用的 ids 用 brands（`UserId` vs `OrderId`），并在边界做 runtime parse。
+      - **失败：** 把 type annotation 当成会剥掉多余 keys —— compiler 不会从一个被当成 `PublicUser` 传入的 object 上删掉 `passwordHash`。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="ts-unknown-any-never">
+    <AccordionTrigger>15. unknown vs any vs never vs void。</AccordionTrigger>
+    <AccordionContent>
+
+      - **`any`** 对该值关掉 type system。每个 property access 都被允许。`any` 会流进其他 variables 并毒化 inference。它是 escape hatch，不是一个 type。
+      - **`unknown`** 是 type-safe 的 top。任何东西都可以赋给 **`unknown`**。在 narrowing 之前，几乎不能用它做任何事。JSON、`catch` 绑定，以及 user input 应从 `unknown` 开始。
+      - **`never`** 是空 type：不存在任何值。永远 throw 的 function 返回 `never`。穷尽的 `switch` 在 default 里用 `const _x: never = x`，这样新 variant 会变成 compile error。**`void`** 的意思是「caller 必须忽略 return。」`() => void` 可以从一个返回值的 function assignable。`void` 不是作为 value type 的 `undefined`。
+      - Production 默认是 IO 处用 `unknown`，穷尽性用 `never`，callbacks 用 `void`，`any` 只出现在有 tracked comment 的后面。
+      - **失败：** `catch (e: any)` 再加 `e.message`，或把 function 标成 `Promise<void>` 然后返回一个 callers 看不见的有用值。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="ts-narrowing">
+    <AccordionTrigger>16. TypeScript 如何 narrow：typeof、in、discriminated unions、type predicates 与 asserts？</AccordionTrigger>
+    <AccordionContent>
+
+      - Narrowing 是 control flow：检查之后，一个绑定的 type 会 **缩小**。除非检查是真正的 JavaScript，否则它不是 runtime validation。
+      - **`typeof`** 适用于 primitive tags。它不区分 arrays 与 objects（`typeof [] === "object"`），也看不见 `null`（`typeof null === "object"`）。**`in`** 按 property name 缩小 object unions。**Discriminated unions** 共享一个 literal tag；`switch (shape.kind)` 会缩小其余 fields。
+      - **Type predicates** —— `function isCat(x: Animal): x is Cat` —— 告诉 checker 一个 boolean return 意味着什么。Function body 必须真正证明它。**`asserts x is T`** 在值不是 `T` 时 throw。`assertUser(x)` 之后，`x` 是 `User`。用在边界；不要静默 `as`。
+      - Production 默认是每个 event 与 error union 上都有 discriminant，arrays 用 predicates（`Array.isArray` 加上 element guard），数据跨过 network 时用 Zod。
+      - **失败：** `typeof x === "object"` 之后 `as User`，或一个只检查 `"id" in x` 的 predicate。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="ts-generics">
+    <AccordionTrigger>17. Generics、constraints、infer —— 以及何时 generic 不加任何安全。</AccordionTrigger>
+    <AccordionContent>
+
+      - **Generic** 是 caller（或 inference）填入的 type parameter。`function first<T>(xs: T[]): T | undefined` 把 output 绑到 input。没有 `T`，这段关系就丢了。
+      - **Constraints**（`T extends { id: string }`）点名最小 shape。`keyof T` 与 indexed access（`T[K]`）随后保持准确。**`infer`** 出现在 conditional types 里：`T extends Promise<infer U> ? U : T` unwrap 一个 Promise。`ReturnType` 与 `Awaited` 是标准库里的同一模式。完整地图：[TypeScript Infer、Extends 与 Ternaries](/notes/typescript-infer-extends-and-ternaries)。
+      - Generic **不加任何安全** 当它未被使用、立刻被 widen，或 unconstrained：`function wrap<T>(x: T): T { return x as T }`；`function log<T>(x: T): void` —— `unknown` 会更诚实；`T extends any`；一个从不从 usage infer 的 component prop `T extends string = string`。
+      - Production 默认是：当两个位置必须保持同步时才加 `T`（input key 与 output value，action 与 payload）。在 call site infer；不要让 callers 写 `<HugeDto>`。
+      - **失败：** 一个把 JSON cast 掉的 generic repository `get<T>(id: string): Promise<T>` —— 这个 generic 是虚构的，Zod 加上一个 named type 才是诚实的 API。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="ts-type-vs-interface">
+    <AccordionTrigger>18. type vs interface、declaration merging，以及 mapped 或 conditional types。</AccordionTrigger>
+    <AccordionContent>
+
+      - **`interface`** 给 object shape 取名，并且可以 **declaration-merge**：同一 scope 里两个 `interface User` blocks 变成一个。`@types` packages 就是这样长出来的，library 也这样让 apps augment `Window`。
+      - **`type`** 给任何 type 起 alias：unions、tuples、mapped types、primitives、`typeof` values。Types 不会 merge；第二个 `type User` 是冲突。Unions 与 intersections 是组合工具（`A | B`、`A & B`）。
+      - Production 默认是可能被 augment 的公开 object contracts 用 `interface`；unions、function types 与 computed types 用 `type`。对一个封闭的 app repo 差别很小 —— consistency 比教条更重要。
+      - 只有 `type` 能干净表达的面试钩子：**mapped types**（`Pick`、`Readonly`、`Record`）、**conditional types**（`T extends Foo ? A : B`，常带 `infer`）、**template literal types**（`` `org:${string}` ``）。完整地图：[TypeScript Infer、Extends 与 Ternaries](/notes/typescript-infer-extends-and-ternaries)。
+      - **失败：** 把 declaration merging 当成意外 —— `.d.ts` 里第二个 `interface` 静默加 fields —— 或用 `interface` 表示 events 的 union。Events 更适合 discriminated `type` union。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="ts-erasure">
+    <AccordionTrigger>19. TypeScript 在 compile time 擦掉什么，为什么 HTTP 边界需要 Zod？</AccordionTrigger>
+    <AccordionContent>
+
+      - TypeScript **擦掉** types。经过 `tsc` 或 bundler 之后，没有 interfaces、没有 generics、没有 parameter types。剩下的是 JavaScript。`as User`、return type，以及 generic `T` 都不会跑。`instanceof` 与 `typeof` 是留下来的 JS。
+      - Type 是共享一次 build 的 modules 之间的 **compile-time contract**。Network、`localStorage`、query strings 与 `JSON.parse` 是 untyped。Handler 写 `const body: CreateOrder = await req.json()` 是 asserted，不是 validated。
+      - **Zod**（或 Valibot、ArkType、一个 JSON Schema validator）是 type 的 runtime 孪生。`safeParse` 产出一个 typed value **或** 一份结构化失败。同一份 schema 可以 emit TypeScript type（`z.infer<typeof schema>`）。
+      - Production 默认是 edge 上放 schemas，向内用 inferred types，不对 `fetch` JSON 做 `as`。
+      - **失败：** mobile client 与 server 共享一份已经漂移的 `interface` —— 两边都 compile，production 500s —— 或开了 `strict` 却仍在 cast request body。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="ts-design-result">
+    <AccordionTrigger>20. Design exercise：一个 typed Result / Either，用于会失败的 parse-and-save path，带 exhaustive switch 且没有 any。</AccordionTrigger>
+    <AccordionContent>
+
+      - Path 是：parse 一份 unknown payload，然后 persist。若 UI 与 log 需要不同处理，两次失败不得塌进 `throw new Error(string)`。一份 **discriminated `Result`** 把 success 与 failure 留在 type 里，`E` 本身是 discriminant（`parse` vs `save`）。
+
+      ```ts
+      type Result<T, E> =
+        | { ok: true; value: T }
+        | { ok: false; error: E }
+      ```
+
+      - Composition：若 `parse` 不是 `ok`，把它 return。若 `save` 不是 `ok`，把它 return。Callers 对 `ok` `switch`，再对 `error.type` / `error.code`。一个 `never` default 让新的 error variant 变成 compile error。没有 `any`，error 分支上没有 optional `value`。
+      - `input` 从 `unknown` 开始。Zod 产出 `RxDraft` 或 `ParseErr`。Database 把 unique violations 映射成 `conflict`，connection faults 映射成 `unavailable`。HTTP mapping 是单独的 function：parse → 422，conflict → 409，unavailable → 503，success → 201。Throws 留给真正意外的 bugs。
+      - **失败：** 带 `error?: string` 的 `Result<T>`，让 callers 在失败时仍能读 `value`，或 parse 已经用了 `Result` 之后 `save` 再 throw —— 两条 error channels，没有一条是 exhaustive。
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>
+
+<br />

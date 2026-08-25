@@ -34,7 +34,7 @@ export const Info = async ({ ...props }: ComponentProps<"div">) => {
         <h1>
           <Link href="/">Wilson Chow</Link>
         </h1>
-        <h2 className="text-content-subdued font-medium text-sm">
+        <h2 className="text-content-subdued font-medium">
           {t("role")}
         </h2>
       </div>
@@ -43,13 +43,23 @@ export const Info = async ({ ...props }: ComponentProps<"div">) => {
   )
 }
 
-const HeaderLink = ({ className, ...props }: ComponentProps<typeof Link>) => {
+const HeaderLink = ({
+  className,
+  disabled,
+  ...props
+}: ComponentProps<typeof Link> & { disabled?: boolean }) => {
   return (
     <li>
-      <Link
-        {...props}
-        className={cn("transition-colors hover:text-content-ink", className)}
-      />
+      {disabled ? (
+        <span className={cn("text-content-subdued", className)}>
+          {props.children}
+        </span>
+      ) : (
+        <Link
+          {...props}
+          className={cn("transition-colors hover:text-content-ink", className)}
+        />
+      )}
     </li>
   )
 }
@@ -76,7 +86,10 @@ export const Links = async ({ className, ...props }: ComponentProps<"div">) => {
           {t("designs")}{" "}
           <sup className="text-content-subdued">{designsCount}</sup>
         </HeaderLink>
-        <HeaderLink href="/components">{t("components")}</HeaderLink>
+        {/* <HeaderLink href="/components" disabled>
+          {t("components")}{" "}
+          <sup className="text-content-subdued">({t("comingSoon")})</sup>
+        </HeaderLink> */}
         <HeaderLink href="/contact">{t("contact")}</HeaderLink>
       </ul>
       <ul className="flex flex-col gap-px">

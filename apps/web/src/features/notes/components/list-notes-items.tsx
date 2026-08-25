@@ -31,7 +31,7 @@ type ListNotesItemsProps = {
   notesLabel: string
 }
 
-const NOTES_PREVIEW_MOBILE = 3
+const NOTES_PREVIEW_MOBILE = 5
 const NOTES_PREVIEW_DESKTOP = 5
 
 export function ListNotesItems({
@@ -68,7 +68,7 @@ export function ListNotesItems({
             <Link href={`/notes/${page.slug}`} className={linkClassName}>
               <span>{page.title}</span>
               {page.category ? (
-                <span className="inline-block font-semibold text-content-body/80 text-[11px] bg-surface-alpha px-1.25 py-px rounded-md">
+                <span className="inline-block font-semibold text-content-body/80 text-[12px] bg-surface-alpha px-1.25 py-px rounded-md">
                   {t(`categories.${page.category}`)}
                 </span>
               ) : null}

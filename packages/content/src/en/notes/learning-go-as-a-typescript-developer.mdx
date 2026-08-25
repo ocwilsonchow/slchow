@@ -1,0 +1,471 @@
+---
+title: Learning Go as a TypeScript Developer
+description: How Go types, goroutines, and net/http map onto TypeScript, Node, and Hono — and where the analogy breaks
+date: 2026-08-21
+category: backend
+---
+
+TypeScript erases types. **Go keeps them.** A duck-typed object that "has `id` and `email`" is a TypeScript habit. In Go the compiler wants a named struct or an interface — and that interface is a method set, not a bag of fields. A **`net/http`** handler that decodes JSON into a struct is the same instinct as a Zod-validated Hono route — the check lives in a type the binary still knows, not in a schema that vanished at `tsc`.
+
+This note is the mapping used when reading a **Go 1.22+** API as a **Hono** developer. Samples target the standard library: method-aware `ServeMux`, `encoding/json`, `database/sql`. **sqlc** and **go-playground/validator** appear once, as the Drizzle and Zod cousins. **chi** appears once, as the middleware-composition cousin. It is not a rewrite of this site in Go, and it is not Gin. The typed Hono stack is [Backend APIs with Hono, Drizzle, Zod OpenAPI, and SST](/notes/_backend-apis-hono-sst). The Python sibling, where the types are annotations until the HTTP boundary, is [Learning Python as a TypeScript Developer](/notes/learning-python-as-a-typescript-developer). The Java sibling, where the types survive but interfaces are nominal, is [Learning Java as a TypeScript Developer](/notes/learning-java-as-a-typescript-developer). The object model you already have is [TypeScript Classes and Runtime Identity](/notes/typescript-classes-and-runtime-identity).
+
+<br />
+
+```text
+TS / Node:  .ts → tsc/bun erase types → V8, one event loop
+Go / gc:    .go → gc keep types → native binary, goroutines
+```
+
+<br />
+
+Four kinds of statements:
+
+- A **TypeScript contract**, such as an interface that vanishes at runtime, or `throw` with no type.
+- A **Go language rule**, such as implicit interface satisfaction, or `(User, error)`.
+- A **runtime observation**, such as the M:N scheduler, or a race on a map. Application code must not depend on scheduler internals beyond that.
+- A **`net/http` convention**, such as a `ServeMux` pattern and a struct with `json` tags.
+
+<br />
+
+---
+
+## 1. What This Note Is
+
+A TypeScript engineer already has the right abstractions: a request in, JSON out, a validated body, a query against Postgres, a session. Go remaps each of those onto a different runtime.
+
+- **Types survive compilation.** The binary still knows the struct. An interface value is a type plus a value. A TypeScript `interface` is gone.
+- **The unit of code is a package.** Functions are first-class. There is no `class`, no `export`, and no one-type-per-file rule. Capitalization is visibility.
+- **The host is a native process**, not V8 and not a JVM. Many goroutines share a heap. Blocking I/O is normal. There is no event loop draining microtasks.
+- **`net/http` is a router you assemble.** Hono is a router you assemble with Zod. Spring is a container that constructs the router for you. Go is the Hono instinct: you wire the mux.
+
+The throughline is a small **users** resource: fetch by id, list, create. Enough to read a handler, a struct, and a query.
+
+<br />
+
+---
+
+## 2. Interfaces Are Structural and Survive
+
+TypeScript is structural at compile time and erased after. Java is nominal at both. Go is the third shape: **structural at compile time, real at runtime.** If the method set matches, it implements. You never write `implements`.
+
+<br />
+
+```ts
+interface UserLike {
+  id: string
+  email: string
+}
+
+function greet(u: UserLike): string {
+  return u.email
+}
+
+greet({ id: "1", email: "a@b.c" }) // fields are the contract
+```
+
+<br />
+
+```go
+type UserLike interface {
+	Email() string
+}
+
+func greet(u UserLike) string {
+	return u.Email()
+}
+
+type User struct {
+	ID    string
+	email string
+}
+
+func (u User) Email() string { return u.email }
+```
+
+<br />
+
+- A Go interface is a **method set**, not a bag of fields. `{ id, email }` is not a type. The methods are. That is where the TypeScript analogy breaks first.
+- Satisfaction is implicit. `User` implements `UserLike` because `Email()` exists. There is no `implements UserLike` and no `extends`. Add a method to the interface and every implementer must grow it, or the build fails.
+- At runtime an interface value is a **type and a value**. Type assertion (`u.(User)`) and a type switch are facts. Stance: [TypeScript Classes and Runtime Identity](/notes/typescript-classes-and-runtime-identity) — `instanceof` on a TypeScript interface is a lie; `u.(User)` is not.
+- **`any`** is `interface{}`. It is the escape, not the default. A function that takes `any` has given the compiler nothing.
+
+**Failure:** treating a Go interface like a TypeScript `interface { id: string }`. There is no field-shaped interface. Put a method on the type, or pass the struct.
+
+<br />
+
+---
+
+## 3. nil, Zero Values, Pointers
+
+TypeScript has `null` and `undefined`. Go has **`nil`** for pointers, slices, maps, channels, functions, and interfaces — and **zero values** for everything else. A `string` is `""`. An `int` is `0`. A `User` is `User{}`. There is no hole you forgot to initialize.
+
+<br />
+
+```ts
+function emailOf(user: User | null): string | undefined {
+  return user?.email
+}
+```
+
+<br />
+
+```go
+func emailOf(user *User) *string {
+	if user == nil {
+		return nil
+	}
+	return &user.Email
+}
+```
+
+<br />
+
+- **`nil` is not `undefined`.** An uninitialized `*User` is `nil`. An uninitialized `User` is zeros. Calling a method on a nil pointer can panic; calling one on a zero struct usually does not.
+- **Pointers are a copy rule**, not C. `func f(u User)` copies the struct. `func f(u *User)` shares it. Use a pointer receiver to mutate; use a value receiver when the method is a read.
+- JSON `omitempty` on a `string` hides `""`. On a `*string` it hides `nil` and keeps `""`. The zero value and "missing" are different facts. Pick the type that matches the JSON you mean.
+- An interface holding a typed nil is not `nil`. `var p *User; var u UserLike = p` then `u == nil` is false. The interface has a type.
+
+**Failure:** `if user != nil` on a `User` value. It is never nil. Check the pointer, or check a field you actually care about.
+
+<br />
+
+---
+
+## 4. Structs, Methods, No Classes
+
+In TypeScript a class is a constructor you usually avoid. In Java a class is how code is organized. In Go there is **no class**. A **struct** is data. A **method** is a function with a receiver. A **constructor** is a function named `NewUser` by convention.
+
+<br />
+
+```go
+type User struct {
+	ID    string
+	Email string
+}
+
+func NewUser(id, email string) User {
+	return User{ID: id, Email: email}
+}
+
+func (u User) Greet() string {
+	return u.Email
+}
+
+func (u *User) SetEmail(email string) {
+	u.Email = email
+}
+```
+
+<br />
+
+- The receiver is `(u User)` or `(u *User)`. It is `this` you wrote down. Mixing them on the same type works; the compiler will take the address when it must. Pick one for the method set you want to expose.
+- **Embedding** is composition. `type Admin struct { User }` promotes `User`'s methods. It is not inheritance. There is no `super`, no virtual dispatch beyond the interface you already wrote.
+- There is no `new` that runs a constructor. `User{}` is valid and zero. `NewUser` exists because you wanted a rule, not because the language required one.
+
+**Failure:** a `UserService` struct with one method and no state. That is a package-level function with extra steps. Methods earn their receiver.
+
+<br />
+
+---
+
+## 5. Generics
+
+TypeScript generics invent types: `extends`, conditionals, `infer`. Go generics **parameterize** a function or a type. They do not branch on the type.
+
+<br />
+
+```ts
+function idsOf<T extends { id: string }>(xs: T[]): string[] {
+  return xs.map((x) => x.id)
+}
+```
+
+<br />
+
+```go
+func Map[T, U any](xs []T, f func(T) U) []U {
+	out := make([]U, len(xs))
+	for i, x := range xs {
+		out[i] = f(x)
+	}
+	return out
+}
+```
+
+<br />
+
+- **`any` as a constraint** means no constraint. A real constraint is an interface: `func Sum[T int64 | float64](xs []T) T`. Approximate types (`~int`) include defined aliases.
+- There is no `extends { id: string }` on a field. Constraint the method set, or pass a function that reads the field. The compiler will not walk a struct for you.
+- No variance, no conditional types, no mapped types. If you are writing a `T extends ... ? A : B`, you are still in TypeScript. In Go, write two functions or an interface.
+
+**Failure:** a generic `Repository[T]` that uses `any` and reflection to insert a row. sqlc already generated the typed function. Use it.
+
+<br />
+
+---
+
+## 6. Slices, Maps, Arrays
+
+JavaScript has `Array` and `object`. Go splits that into a **slice**, a **map**, and a rare **array**. A JSON list arrives as a slice. A JSON object arrives as a struct you decode, or a `map[string]any` you should not return.
+
+<br />
+
+```ts
+const ids = users.map((u) => u.id).filter(Boolean)
+```
+
+<br />
+
+```go
+ids := make([]string, 0, len(users))
+for _, u := range users {
+	if u.ID != "" {
+		ids = append(ids, u.ID)
+	}
+}
+```
+
+<br />
+
+- A **slice** is a view: pointer, length, capacity. `append` may allocate a new backing array. `var s []string` is nil. `s := []string{}` is empty. `json.Marshal` of nil is `null`; of empty is `[]`. That is the 2 a.m. bug.
+- A **map** is `Record<string, V>`. It is not ordered. It is not safe for concurrent write. `var m map[string]User` is nil; assignment panics until `make`. Lookup returns the zero value and a bool: `u, ok := m[id]`.
+- An **array** `[3]string` is a value. It is not a slice. You almost never want it at an API boundary.
+
+**Failure:** returning `map[string]any` from a handler because `json.Marshal` accepts it. That is the untyped `dict` from the Python note. Decode into a struct.
+
+<br />
+
+---
+
+## 7. Errors, Not Exceptions
+
+TypeScript `throw` is untyped. Java has checked exceptions. Go **returns** `(T, error)`. There is no stack unwind for a missing user. `panic` is for "this process is wrong," not for 404.
+
+<br />
+
+```go
+var ErrNotFound = errors.New("user not found")
+
+func require(users Store, id string) (User, error) {
+	user, err := users.FindByID(id)
+	if err != nil {
+		return User{}, err
+	}
+	return user, nil
+}
+```
+
+<br />
+
+```go
+user, err := require(users, id)
+if err != nil {
+	if errors.Is(err, ErrNotFound) {
+		http.Error(w, "user not found", http.StatusNotFound)
+		return
+	}
+	http.Error(w, "internal error", http.StatusInternalServerError)
+	return
+}
+```
+
+<br />
+
+- The idiom is `if err != nil { return ..., err }`. It is noisy on purpose. Swallowing `err` is the Java `catch (Exception)`.
+- **`errors.Is` / `errors.As`** unwrap. A sentinel (`ErrNotFound`) is a value you compare. A typed error is a struct you `As`. Wrap with `%w` so the sentinel survives.
+- Do not return a zero `User` and `nil` for a miss, and also return `ErrNotFound` for the same miss. One miss, one signal. The handler maps that signal to a status.
+
+**Failure:** `panic(err)` in a handler because "it looks like throw." The process dies, or a `recover` middleware turns every bug into a 500 with no type. Return the error.
+
+<br />
+
+---
+
+## 8. Packages, go.mod, Export
+
+A TypeScript file is a module. A Go file is a member of a **package**. The directory is the package. Capitalization is `export`.
+
+<br />
+
+```text
+module github.com/example/api
+
+go 1.22
+
+cmd/api/main.go          // package main
+internal/users/users.go  // package users
+go.mod
+go.sum
+```
+
+<br />
+
+- **`User` is exported. `user` is not.** There is no `export` keyword and no `public`. The compiler enforces the case. Cross-package tests cannot reach `user`.
+- **`go.mod`** is `package.json`. The module path is the import prefix. **`go.sum`** is the lock. The module cache is not `node_modules` next to the binary; it is a shared cache the compiler reads at build.
+- **`internal/`** is a visibility wall the compiler honors. Only the tree above it can import it. That is stronger than a leading underscore in Python.
+- `package main` plus `func main` is the entry. Everything else is a library package. There is no `index.ts` barrel you re-export from unless you want one.
+
+**Failure:** `package users` in two directories, or exporting `type user struct` and wondering why the handler cannot name it. The directory is the package. The case is the export.
+
+<br />
+
+---
+
+## 9. Goroutines vs Node
+
+Node is one thread for JavaScript, plus a pool for I/O. The model is [Core JavaScript Concepts](/notes/core-javascript-concepts). Go is **many goroutines, one process**, multiplexed by an M:N scheduler onto OS threads.
+
+<br />
+
+```text
+Node:  stack (JS) → microtasks → one macrotask → poll I/O
+Go:    M:N scheduler
+       goroutines multiplexed onto OS threads
+       blocking I/O blocks that goroutine, not the process
+```
+
+<br />
+
+- **`go f()`** starts a goroutine. It is not `void f()` and it is not `Promise`. The caller does not wait. In a handler, the request returns when the handler returns — a stray `go` can outlive the request, or lose the `context.Context` cancel. Pass `r.Context()` and wait, or do not spawn.
+- A blocking `QueryRow` is fine. That goroutine waits. Others run. You do not `async`/`await` a database call. You pass a context with a deadline.
+- **Shared mutable state** is the crash. A `map` written from two goroutines without a mutex is a data race. `go test -race` is the tool. Channels and `select` coordinate; they are not a substitute for "do not share the map."
+
+**Failure:** `go users.Create(...)` inside a handler so the response feels fast. The client got 201. The insert failed. The context was already canceled. Do the work, then write the status.
+
+<br />
+
+---
+
+## 10. Build
+
+`package.json` plus a lockfile is the TypeScript habit. Go splits a **module file** from a **static binary**.
+
+| | TypeScript / bun | Go |
+| --- | --- | --- |
+| Manifest | `package.json` | `go.mod` |
+| Lock | `bun.lock` | `go.sum` |
+| Install | `node_modules` | module cache (`$GOPATH/pkg/mod`) |
+| Ship | a server process, or a bundle | a **static binary** |
+| Entry | `src/index.ts` | `func main` in `package main` |
+
+<br />
+
+- **`go build`** emits one file. Production ships that file, usually in a scratch or distroless image. There is no interpreter and no `node_modules` in the container. `CGO_ENABLED=0` keeps it static.
+- Cross-compile is a pair of env vars: `GOOS=linux GOARCH=arm64 go build`. There is no separate "target" toolchain to install for that.
+- `cmd/api` is the process. `internal/` is the library. Tests live next to the code as `*_test.go`. There is no `src/main/java` ceremony.
+
+**Failure:** copying the module cache into the image because "that is `node_modules`." The binary already linked what it needs. Ship the binary.
+
+<br />
+
+---
+
+## 11. net/http as Hono
+
+Hono is a function you call with a request. `net/http` is the same instinct: a **mux** of patterns, each a function of `ResponseWriter` and `*Request`. Go 1.22 gave the stdlib method-and-path patterns. You do not need a framework to get `/users/{id}`.
+
+<br />
+
+```ts
+app.get("/users/:id", async (c) => {
+  const id = c.req.param("id")
+  const user = await users.require(id)
+  return c.json(user)
+})
+```
+
+<br />
+
+```go
+mux := http.NewServeMux()
+
+mux.HandleFunc("GET /users/{id}", func(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	user, err := users.Require(r.Context(), id)
+	if err != nil {
+		http.Error(w, "user not found", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(user)
+})
+
+http.ListenAndServe(":8080", mux)
+```
+
+<br />
+
+- **`"GET /users/{id}"`** is `app.get("/users/:id")`. `r.PathValue("id")` is `c.req.param("id")`. There is no decorator and no bean. You registered a function.
+- **Middleware** is `func(http.Handler) http.Handler`. Wrap the mux. **chi** is that wrapper with a nicer `Use` and subrouters. It is still `net/http`. It is not a container. Start with the mux; take chi when the nesting gets noisy.
+- `http.Error` is the typed exit you write yourself. There is no `HTTPException` type in the language. Map `err` at the handler, or write one helper and reuse it.
+- `func main` is `index.ts`. `ListenAndServe` is the process. There is no Spring scan and no FastAPI `app` object beyond the mux you built.
+
+**Failure:** a global `users` map mutated from handlers, or `ListenAndServe` without a `Server` that honors shutdown. The mux is fine. The process still needs a deadline.
+
+<br />
+
+---
+
+## 12. encoding/json and sqlc
+
+Zod is a schema you parse. Go's schema is the **struct tag**. Drizzle is SQL in TypeScript. **sqlc** is SQL in a `.sql` file that generates the Go. `database/sql` is the pool.
+
+<br />
+
+```ts
+const UserCreate = z.object({
+  email: z.string().email(),
+})
+
+await db.insert(users).values({ email }).returning()
+```
+
+<br />
+
+```go
+type UserCreate struct {
+	Email string `json:"email"`
+}
+
+if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	http.Error(w, "invalid body", http.StatusBadRequest)
+	return
+}
+```
+
+<br />
+
+```sql
+-- name: GetUser :one
+SELECT id, email FROM users WHERE id = $1;
+```
+
+<br />
+
+```go
+user, err := q.GetUser(ctx, id)
+```
+
+<br />
+
+- **`json` tags** name the wire fields. `Decode` fills the struct. Unknown JSON keys are dropped unless you `DisallowUnknownFields`. That is not Zod: there is no `.email()` in the type. **go-playground/validator** (`validate:"required,email"`) is the cousin that runs after decode. Use it at the HTTP edge, not on the SQL row.
+- **sqlc** is Drizzle's closest cousin. You write the statement. It generates `GetUser(ctx, id)`. The row type is generated. There is no ORM session and no lazy graph. Postgres still evaluates the statement: [Core SQL Concepts](/notes/core-sql-concepts). Tenant filters still belong in the query and in RLS: [Building a Multi-Tenant Backend with Hono, Better Auth, Drizzle, and Postgres RLS](/notes/multi-tenant-backend-drizzle-hono-better-auth).
+- **`database/sql`** (or `pgx` as the driver) is a pool. Pass `context.Context`. Do not hold a `*sql.Tx` across requests. Map the sqlc row → JSON struct at the handler if they ever diverge.
+
+**Failure:** scanning into `map[string]any` or returning the sqlc row with a `password_hash` column because "it already has json tags." Map at the boundary, same instinct as entity → record in the Java note.
+
+<br />
+
+---
+
+## 13. Where It Sits
+
+Go is how **this binary** types a value. `net/http` is how **this process** receives a request. Neither replaces authorization, SQL, or the session.
+
+- The interpreter sibling: [Learning Python as a TypeScript Developer](/notes/learning-python-as-a-typescript-developer)
+- The JVM sibling: [Learning Java as a TypeScript Developer](/notes/learning-java-as-a-typescript-developer)
+- Runtime identity in TypeScript: [TypeScript Classes and Runtime Identity](/notes/typescript-classes-and-runtime-identity)
+- When JS runs: [Core JavaScript Concepts](/notes/core-javascript-concepts)
+- The Hono analog: [Backend APIs with Hono, Drizzle, Zod OpenAPI, and SST](/notes/_backend-apis-hono-sst)
+- The statement: [Core SQL Concepts](/notes/core-sql-concepts)
+- Identity, membership, and the row: [Building a Multi-Tenant Backend with Hono, Better Auth, Drizzle, and Postgres RLS](/notes/multi-tenant-backend-drizzle-hono-better-auth)

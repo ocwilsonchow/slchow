@@ -210,7 +210,7 @@ try {
 <br />
 
 - 额外 fields —— `code`、HTTP status、`cause` —— 骑在 instance 上。Plain object `{ message, code }` 被 throw 之后做不了那个测试。
-- Failure 是 **return** value 时，result type 上的 string union 往往更好。
+- Failure 是 **return** value 时，result type 上的 string union 往往更好。那一半见 [TypeScript Error Handling](/notes/typescript-error-handling)。
 - **Failure:** throw 一个 plain object。一旦被 `throw`，能活下来的测试是 prototype chain。
 
 ---
@@ -287,7 +287,7 @@ displayName(user) // "Ada"
 
 - React class components 把 state 存在 `this` 上，并亲手 rebind event handlers。Hooks 把那份 state 挪到 Fiber。这个 stack 里的新 UI 是 function。Rendering model 见 [深入理解 React](/notes/understanding-react-in-depth)。
 - 跨网络的 DTO 是 type。`JSON.parse` 返回 plain object。挂在 `class User` 上的 methods 不会在，`instanceof User` 会是 false。
-- Hono handler 是从 context 到 response 的 function。Nest 风格的 controller classes 属于另一套 stack。[用 Hono 打造 Backend APIs](/notes/backend-apis-hono-sst) 把 routes 保持为 functions。
+- Hono handler 是从 context 到 response 的 function。Nest 风格的 controller classes 属于另一套 stack。[用 Hono 打造 Backend APIs](/notes/_backend-apis-hono-sst) 把 routes 保持为 functions。
 - **Failure:** 为明天就会变成 JSON 的 data 发明一套 class hierarchy。
 
 ---
@@ -352,7 +352,7 @@ TypeScript `class` 是 constructor 加上 prototype。Instance fields 活在 obj
 
       - `catch` 得到的是 `unknown`。`instanceof` 把 domain failure 与 programmer error 分开，也把一种 domain failure 与另一种分开。
       - 额外 fields —— `code`、status、`cause` —— 骑在 instance 上。Plain `{ message, code }` 被 throw 之后做不了那个测试。
-      - Failure 是 **return** value 时，result type 上的 string union 往往更好。一旦被 `throw`，能活下来的测试是 prototype chain。
+      - Failure 是 **return** value 时，result type 上的 string union 往往更好。那一半见 [TypeScript Error Handling](/notes/typescript-error-handling)。一旦被 `throw`，能活下来的测试是 prototype chain。
       - TypeScript 程序里的大多数 classes 并不是在那里写的：`SyntaxError`、`Map`、`Response`、DOM nodes。Application code 在边界继承这个选择。
 
     </AccordionContent>

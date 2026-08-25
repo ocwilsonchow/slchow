@@ -1,0 +1,570 @@
+---
+title: Handling Accessibility in Web
+description: A practical React and Next.js guide to accessible forms, live regions, overlays, controls, reading order, and testing
+date: 2026-08-23
+category: frontend
+---
+
+Accessibility is whether a person can complete the same task with the device and settings they have. Alt text and semantic HTML are the baseline. The work most sites still miss is what happens when a field becomes invalid, a toast appears, a drawer moves off-screen, the DOM disagrees with the layout, or the mouse is unavailable.
+
+This note follows [Kyle's walkthrough](https://www.youtube.com/watch?v=Y7nhXvJ7yH8). Tests that exercise controls through roles and names are [Test-Driven Development in Frontend](/notes/test-driven-development-in-frontend). Automated checks at the preview gate are [Frontend CI/CD for React and React Native](/notes/frontend-ci-cd-for-react-and-react-native). VoiceOver and TalkBack on the native host belong to [How to Improve User Experience in Mobile Development](/notes/how-to-improve-user-experience-in-mobile-development). This note is the web surface.
+
+<br />
+
+---
+
+## 1. Tie the Error to the Field
+
+Visible proximity is not a programmatic relationship. A red message under an input looks associated, but a screen reader needs the input to reference that message.
+
+`aria-describedby` adds supporting text to the field's accessible description. Keep the visible `<label>` as the accessible name. Use `aria-invalid` to expose the state, and only reference the error while it exists.
+
+<br />
+
+```tsx title="profile-name-field.tsx"
+"use client"
+
+import { useId, useState } from "react"
+
+export function ProfileNameField() {
+  const inputId = useId()
+  const errorId = useId()
+  const [name, setName] = useState("")
+
+  const error =
+    name.length > 0 && !name.startsWith("Ky")
+      ? "Name must start with Ky."
+      : undefined
+
+  return (
+    <div>
+      <label htmlFor={inputId}>First name</label>
+      <input
+        id={inputId}
+        name="givenName"
+        value={name}
+        aria-describedby={error ? errorId : undefined}
+        aria-invalid={error ? true : undefined}
+        onChange={(event) => setName(event.target.value)}
+      />
+      {error ? <p id={errorId}>{error}</p> : null}
+    </div>
+  )
+}
+```
+
+<br />
+
+The error should say what happened and how to recover. `"Invalid input"` is technically attached and still useless. If the form is submitted with several invalid fields, move focus to an error summary or the first invalid field; `aria-describedby` does not decide focus for you.
+
+**Failure:** rendering red text beside an input without a relationship, then assuming the screen reader will infer the layout.
+
+---
+
+## 2. Announce What Changed
+
+The browser announces focus changes. It does not announce every DOM change. A validation message, saved status, cart update, or toast can appear visually without telling a screen-reader user anything.
+
+A live region lets content announce without stealing focus:
+
+- `polite` waits until the current announcement finishes. It is the default choice for almost every status update.
+- `assertive` interrupts. Reserve it for information that cannot wait, not routine validation or success.
+- `aria-atomic="false"` announces the changed node. `true` announces the whole region so the update keeps its context.
+- `aria-relevant` selects additions, removals, or text changes. Its default is `additions text`.
+
+Mount the empty region before the update. If the live region and its first message appear in the same render, some browser and screen-reader combinations never observe a change.
+
+<br />
+
+```tsx title="notification-region.tsx"
+"use client"
+
+import { useEffect, useRef, useState } from "react"
+
+export function NotificationRegion() {
+  const regionRef = useRef<HTMLDivElement>(null)
+  const [message, setMessage] = useState("")
+
+  useEffect(() => {
+    function focusNotifications(event: KeyboardEvent) {
+      if (event.altKey && event.key.toLowerCase() === "t") {
+        event.preventDefault()
+        regionRef.current?.focus()
+      }
+    }
+
+    window.addEventListener("keydown", focusNotifications)
+    return () => window.removeEventListener("keydown", focusNotifications)
+  }, [])
+
+  return (
+    <>
+      <button type="button" onClick={() => setMessage("Profile saved.")}>
+        Save profile
+      </button>
+
+      <div
+        ref={regionRef}
+        tabIndex={-1}
+        aria-label="Notifications. Press Alt+T to focus."
+        aria-live="polite"
+        aria-atomic="true"
+        aria-relevant="additions text"
+      >
+        {message}
+      </div>
+    </>
+  )
+}
+```
+
+<br />
+
+Do not announce every keystroke and every state transition. A chat log, search result count, upload progress, and form error have different urgency. Start with the smallest useful message, test it with a screen reader, and remove duplicate announcements.
+
+A shortcut can make a notification region reachable after it is announced. Document it in the region's name, avoid collisions with product and assistive-technology shortcuts, and treat `Alt+T` as an application convention—not a portable browser standard.
+
+**Failure:** putting `aria-live="assertive"` on a toast container, then interrupting the person for `"Added to cart"` and `"Preferences saved"`.
+
+---
+
+## 3. Tell the Browser What the Field Is
+
+A label tells a person what a field means. `autocomplete` tells the browser what kind of data it accepts. That enables password managers, address completion, and mobile keyboards to fill a form with less typing.
+
+Use the standard token that describes the value, not a guess based on the field name. `name` means a full name; `given-name` means the first or given name.
+
+<br />
+
+```tsx title="contact-fields.tsx"
+export function ContactFields() {
+  return (
+    <>
+      <label htmlFor="given-name">First name</label>
+      <input id="given-name" name="givenName" autoComplete="given-name" />
+
+      <label htmlFor="email">Work email</label>
+      <input
+        id="email"
+        name="email"
+        type="email"
+        inputMode="email"
+        autoComplete="email"
+      />
+
+      <label htmlFor="password">Current password</label>
+      <input
+        id="password"
+        name="password"
+        type="password"
+        autoComplete="current-password"
+      />
+    </>
+  )
+}
+```
+
+<br />
+
+`autocomplete`, `type`, and `inputMode` solve different parts of the interaction:
+
+- `autocomplete` identifies the data.
+- `type` gives the browser validation and control semantics.
+- `inputMode` hints at the on-screen keyboard.
+
+Do not disable autocomplete to make a form look cleaner. For authentication, use `current-password`, `new-password`, and `one-time-code` so browsers and password managers can help without parsing the page.
+
+**Failure:** setting `autoComplete="off"` on every field, then making people retype names, addresses, and credentials the browser already knows.
+
+---
+
+## 4. Take Hidden UI Out of the Tree
+
+Moving a drawer outside the viewport does not hide it from the keyboard or the accessibility tree. Its links remain in DOM order, so focus appears to disappear while it walks through controls no one can see.
+
+`inert` removes a subtree from sequential focus, hit testing, text selection, and the accessibility tree. A closed drawer is inert. When it opens, the rest of the page becomes inert so focus cannot escape behind the overlay.
+
+<br />
+
+```tsx title="navigation-drawer.tsx"
+"use client"
+
+import { useState } from "react"
+
+export function NavigationDrawer() {
+  const [open, setOpen] = useState(false)
+
+  return (
+    <>
+      <div inert={open}>
+        <button
+          type="button"
+          aria-expanded={open}
+          aria-controls="navigation-drawer"
+          onClick={() => setOpen(true)}
+        >
+          Open menu
+        </button>
+        <main>{/* Page content */}</main>
+      </div>
+
+      <aside
+        id="navigation-drawer"
+        aria-label="Site navigation"
+        inert={!open}
+        data-open={open}
+      >
+        <button type="button" onClick={() => setOpen(false)}>
+          Close menu
+        </button>
+        <nav>{/* Navigation links */}</nav>
+      </aside>
+    </>
+  )
+}
+```
+
+<br />
+
+CSS can animate `[data-open="false"]` off-screen; `inert` is what makes that visual state honest to other input methods. Return focus to the opener when the drawer closes, and put initial focus on a useful control when it opens.
+
+For a modal, prefer the native `<dialog>` element and call `showModal()`. The browser places it in the top layer, makes the outside document inert, supports <kbd>Escape</kbd>, and provides modal semantics. The component still owns its accessible name, initial focus, close controls, and focus-return test.
+
+`aria-hidden="true"` is not a substitute for `inert`. It hides a subtree from assistive technology but does not prevent keyboard focus from entering it.
+
+**Failure:** translating a drawer to `left: -100%` while its links remain between the menu button and the page's first control in the tab order.
+
+---
+
+## 5. Hit the Control That Is There
+
+A control needs both a usable target and native behavior. The target should be at least 24 × 24 CSS pixels. For touch-heavy interfaces, aim for 44 × 44 so the visible icon can stay small while the button around it is easy to hit.
+
+Use a real `<button>` for an action. It already participates in the tab order, responds to <kbd>Enter</kbd> and <kbd>Space</kbd>, exposes button semantics, and supports `disabled`. A `div` with `role="button"` only changes what assistive technology calls it; the team must recreate every interaction.
+
+<br />
+
+```tsx title="close-button.tsx"
+type CloseButtonProps = {
+  onClose: () => void
+}
+
+export function CloseButton({ onClose }: CloseButtonProps) {
+  return (
+    <button
+      type="button"
+      className="icon-button"
+      aria-label="Close navigation"
+      onClick={onClose}
+    >
+      <svg aria-hidden="true" viewBox="0 0 24 24">
+        <path d="M6 6 18 18M18 6 6 18" />
+      </svg>
+    </button>
+  )
+}
+```
+
+```css title="close-button.css"
+.icon-button {
+  display: inline-grid;
+  min-width: 44px;
+  min-height: 44px;
+  place-items: center;
+}
+
+.icon-button svg {
+  width: 20px;
+  height: 20px;
+}
+
+.icon-button:focus-visible {
+  outline: 3px solid currentColor;
+  outline-offset: 3px;
+}
+```
+
+<br />
+
+The accessible name says what the button does, not what the icon looks like. `"Close navigation"` survives a redesigned icon. `"X button"` exposes implementation and repeats the role.
+
+**Failure:** adding `role="button"` and `tabIndex={0}` to a `div`, then supporting mouse clicks but not <kbd>Space</kbd>, disabled state, or form behavior.
+
+---
+
+## 6. Skip to the Work
+
+The first keyboard stop on a repeated page shell should be a link that bypasses the header and navigation. Without it, a keyboard or switch user pays for every navigation item before reaching the page they asked for.
+
+Keep the link in the DOM, visually hide it until it receives focus, and point it at the page's `<main>`.
+
+<br />
+
+```tsx title="app-layout.tsx"
+export function AppLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <>
+      <a className="skip-link" href="#main-content">
+        Skip to main content
+      </a>
+      <header>{/* Brand and repeated navigation */}</header>
+      <main id="main-content" tabIndex={-1}>
+        {children}
+      </main>
+    </>
+  )
+}
+```
+
+```css title="skip-link.css"
+.skip-link {
+  position: fixed;
+  inset-block-start: 1rem;
+  inset-inline-start: 1rem;
+  z-index: 100;
+  transform: translateY(-200%);
+}
+
+.skip-link:focus {
+  transform: translateY(0);
+}
+```
+
+<br />
+
+`tabIndex={-1}` lets script or browser focus reach `<main>` without adding it to the normal tab sequence. Test the actual route transition: client-side navigation, sticky headers, and scroll restoration can change where focus and the viewport land.
+
+**Failure:** using `display: none` for the skip link until focus. An element removed from layout and the accessibility tree cannot receive the focus needed to reveal it.
+
+---
+
+## 7. Use Type People Can Read
+
+Typography is an input constraint, not decoration. A readable default has distinct characters, enough spacing, and stable shapes at the sizes the product actually uses. Atkinson Hyperlegible and Lexend are reasonable defaults because legibility is part of their design.
+
+No font is universally best for dyslexia. Offer a preference such as OpenDyslexic when the audience benefits from it, but do not silently replace the user's choice or present one typeface as a cure.
+
+<br />
+
+```css title="typography.css"
+:root {
+  --font-readable:
+    "Atkinson Hyperlegible Next", "Atkinson Hyperlegible", system-ui, sans-serif;
+}
+
+html {
+  font-family: var(--font-readable);
+  line-height: 1.5;
+  text-size-adjust: 100%;
+}
+
+html[data-readable-font="dyslexic"] {
+  --font-readable: "OpenDyslexic", system-ui, sans-serif;
+}
+
+p {
+  max-inline-size: 70ch;
+}
+```
+
+<br />
+
+Font choice cannot repair 12-pixel body copy, low contrast, clipped text, justified rivers, or a layout that breaks at 200% zoom. Test the type system as a whole: size, line height, line length, weight, fallback, localization, and reflow.
+
+**Failure:** adding a font toggle while fixed-height cards still clip text when the user zooms or increases their default font size.
+
+---
+
+## 8. Keep DOM Order Honest
+
+Keyboard order and screen-reader reading order follow the DOM, not the pixels. CSS Grid and Flexbox can place an item somewhere that contradicts its source position.
+
+Start with the logical order that works in a single column. Apply visual variation at the wider breakpoint where the relationship remains understandable. Do not use `tabIndex` values greater than zero to patch a dishonest DOM; that creates a second focus order the team must maintain.
+
+<br />
+
+```tsx title="feature-list.tsx"
+export function FeatureList() {
+  return (
+    <div className="feature-list">
+      <article className="feature">
+        <div>
+          <h2>Review changes</h2>
+          <p>Compare the proposed result before publishing it.</p>
+          <a href="/review">Review now</a>
+        </div>
+        <img src="/review.webp" alt="" />
+      </article>
+
+      <article className="feature feature--flipped">
+        <div>
+          <h2>Publish safely</h2>
+          <p>Release the approved version with a recovery path.</p>
+          <a href="/publish">Publish now</a>
+        </div>
+        <img src="/publish.webp" alt="" />
+      </article>
+    </div>
+  )
+}
+```
+
+```css title="feature-list.css"
+.feature {
+  display: flex;
+  flex-direction: column;
+}
+
+@media (min-width: 48rem) {
+  .feature {
+    flex-direction: row;
+  }
+
+  .feature--flipped {
+    flex-direction: row-reverse;
+  }
+}
+```
+
+<br />
+
+Both mobile articles keep heading, explanation, action, then decorative image in the DOM. The wide layout may alternate sides without changing which action follows which heading.
+
+Absolute positioning, CSS `order`, and `*-reverse` are not automatically inaccessible. The defect is a meaningful mismatch between visual sequence and programmatic sequence. Tab the responsive layout at every breakpoint where it changes.
+
+**Failure:** writing image-first markup to satisfy one desktop row, reversing it on mobile, and making focus jump down, back up, then down again.
+
+---
+
+## 9. Test What a Keyboard and a Tool Can See
+
+Accessibility is behavior, so verification starts by operating the product—not by reading JSX.
+
+First, put the mouse away:
+
+1. Start at the address bar and press <kbd>Tab</kbd>.
+2. Confirm the skip link appears.
+3. Reach and operate every control with the expected keys.
+4. Open and close overlays; focus stays inside while open and returns afterward.
+5. Submit invalid and valid forms; focus, descriptions, and announcements make sense.
+6. Repeat at each responsive layout where visual order changes.
+
+Then use browser tooling to expose states that are easy to forget. Chrome's Rendering panel can emulate color scheme, forced colors, increased contrast, reduced motion, reduced transparency, and vision deficiencies. Zoom text and the page to 200%. Content must reflow without losing controls or meaning.
+
+<br />
+
+```css title="user-preferences.css"
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@media (forced-colors: active) {
+  .icon-button {
+    border: 1px solid ButtonText;
+  }
+}
+```
+
+<br />
+
+Run Lighthouse's accessibility audit and inspect contrast with the color picker. Add axe to representative rendered states in CI. These tools are fast at finding missing names, invalid ARIA, contrast failures, and structural mistakes.
+
+A perfect automated score is not proof that the task works. Automation cannot decide whether focus moved to the right place, an announcement is useful rather than noisy, the reading order makes sense, or every workflow can be completed without a mouse. Finish critical journeys with a screen reader on the browsers the product supports.
+
+**Failure:** shipping because Lighthouse says 100 while the closed drawer is still tabbable and the save confirmation is never announced.
+
+---
+
+## Takeaway
+
+The accessibility tree, focus order, visual layout, and dynamic state should describe the same product.
+
+1. Attach supporting errors with `aria-describedby`; expose invalid state with `aria-invalid`.
+2. Put dynamic status in a persistent `aria-live="polite"` region; interrupt only when waiting would be harmful.
+3. Give applicable fields the correct `autocomplete`, `type`, and `inputMode`.
+4. Make off-screen UI `inert`; use native `<dialog>` for modal behavior when it fits.
+5. Use native controls with at least 24 × 24 CSS-pixel targets, aiming for 44 × 44 on touch.
+6. Make a skip link the first keyboard stop and send it to `<main>`.
+7. Choose legible type, preserve user preferences, and verify reflow at 200%.
+8. Keep the DOM in logical reading order before rearranging it for wide layouts.
+9. Combine keyboard and screen-reader journeys with Rendering tools, Lighthouse, contrast checks, and axe.
+
+Kyle's [accessibility checklist](https://webdevsimplified.com/accessibility-checklist.html) extends this pass across more than 80 checks. Use it as review coverage, not as a substitute for completing a real task with assistive technology.
+
+---
+
+## Recap Q&A
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="web-a11y-errors-live">
+    <AccordionTrigger>1. When does a form error need `aria-describedby`, `aria-live`, or both?</AccordionTrigger>
+    <AccordionContent>
+
+      - `aria-describedby` associates supporting text with one field. It makes the message part of that field's accessible description.
+      - `aria-live` announces a message that appeared while focus stayed elsewhere. Use `polite` for ordinary validation and status.
+      - A dynamic inline error can need both: description for later inspection, live announcement when it first appears.
+      - **Failure:** using `assertive` for every keystroke and repeatedly interrupting the person before they can finish the field.
+
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="web-a11y-inert-dialog">
+    <AccordionTrigger>2. What do `inert` and native `dialog` solve?</AccordionTrigger>
+    <AccordionContent>
+
+      - `inert` removes an off-screen or blocked subtree from focus, pointer interaction, selection, and the accessibility tree.
+      - `showModal()` puts a native `<dialog>` in the top layer and makes the outside document inert.
+      - The component still owns a useful accessible name, initial focus, an obvious close control, and focus return.
+      - **Failure:** replacing `inert` with `aria-hidden` while keyboard focus can still enter the hidden subtree.
+
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="web-a11y-native-control">
+    <AccordionTrigger>3. Why is a real button more than `role="button"`?</AccordionTrigger>
+    <AccordionContent>
+
+      - A native button receives focus, responds to Enter and Space, exposes disabled state, and participates in forms.
+      - `role="button"` changes semantics only. A custom element must recreate the keyboard and state contract.
+      - Keep the target at least 24 × 24 CSS pixels; aim for 44 × 44 on touch while the visible icon may remain smaller.
+      - **Failure:** a clickable `div` that works with a pointer and has no Space-key behavior.
+
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="web-a11y-dom-order">
+    <AccordionTrigger>4. When does CSS reordering become an accessibility defect?</AccordionTrigger>
+    <AccordionContent>
+
+      - Focus and reading order follow the DOM. Visual order follows CSS.
+      - Reordering becomes a defect when those sequences communicate different relationships or make focus appear to jump around.
+      - Start with logical single-column markup, then alternate presentation at a wide breakpoint.
+      - **Failure:** fixing visual order with positive `tabIndex` values and creating a second sequence to maintain.
+
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="web-a11y-testing">
+    <AccordionTrigger>5. What can Lighthouse and axe not prove?</AccordionTrigger>
+    <AccordionContent>
+
+      - They find many structural, naming, ARIA, and contrast violations quickly.
+      - They cannot decide whether focus moves to the useful place, an announcement has the right timing, reading order makes sense, or the workflow is understandable.
+      - Verify critical journeys with only a keyboard and with a supported screen reader. Repeat responsive layouts and user-preference states.
+      - **Failure:** treating an automated score as evidence that a person can complete the task.
+
+    </AccordionContent>
+
+  </AccordionItem>
+</Accordion>

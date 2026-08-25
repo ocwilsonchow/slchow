@@ -1,0 +1,808 @@
+---
+title: How to Write Tests in React Native
+description: A practical Expo testing playbook with Jest, React Native Testing Library, MSW, Expo Router, native-module mocks, and thin Maestro journeys
+date: 2026-08-23
+category: frontend
+---
+
+A React Native test should prove a product behavior at the cheapest layer that can actually observe it. A reducer can prove rollback logic. React Native Testing Library can prove that a person presses a control and sees an error. Only a device can prove that the keyboard does not cover the button, Android Back returns to the right screen, or the camera permission sheet behaves correctly.
+
+The mistake is not “too few unit tests” or “too few E2E tests.” It is asking one test environment to prove something it cannot see.
+
+```text
+pure function       domain transition
+rendered component  semantics + local interaction + async UI
+router harness      route contract + deep-link entry
+device binary       native integration + operating-system behavior
+human               usability + assistive technology + visual quality
+```
+
+This note targets **Expo SDK 57**, React Native **0.86.2**, React **19.2**, and the New Architecture—the same baseline as [Understanding React Native in Depth](/notes/understanding-react-native-in-depth). The UX risks to cover are in [How to Improve User Experience in Mobile Development](/notes/how-to-improve-user-experience-in-mobile-development). Red–Green–Refactor is [Test-Driven Development in Frontend](/notes/test-driven-development-in-frontend). This note is the React Native implementation playbook: Jest and React Native Testing Library for fast behavior tests, MSW at the HTTP boundary, and a thin Maestro suite against an installable app.
+
+---
+
+## 1. Give Each Layer One Job
+
+Start from the claim, then choose the smallest environment that can reject a broken implementation.
+
+| Claim                                                     | Cheapest useful layer    | What it cannot prove                      |
+| --------------------------------------------------------- | ------------------------ | ----------------------------------------- |
+| Rejecting a mutation restores the previous favorite value | Pure unit                | What the screen renders                   |
+| Pressing Favorite exposes busy, success, and error states | RNTL component           | Native animation, pixels, or real network |
+| `/orders/42` opens the order route                        | Expo Router harness      | Universal/App Link association            |
+| Android Back returns from detail to the order list        | Maestro on Android       | Whether the task makes sense to a person  |
+| Camera denial leaves a manual-upload path                 | Device test              | Whether the explanation earns trust       |
+| VoiceOver can complete checkout                           | Human accessibility pass | Nothing smaller can replace it            |
+
+The center of the suite should be **behavior tests**:
+
+- Pure domain rules get direct unit tests.
+- Most feature confidence comes from rendering the screen and operating it through roles, names, text, and state.
+- A small number of device journeys prove the native seams.
+
+Do not repeat the same assertion at every layer. If a unit test exhaustively proves a currency formatter, the Maestro flow only needs to see that a price is present—not recalculate every rounding case through a device.
+
+**Failure:** a pyramid with thousands of mocked hook tests and three device tests, while no test ever renders the states the user sees.
+
+---
+
+## 2. Minimal Expo Test Setup
+
+Use Expo's version resolver so Jest and React Native dependencies match the installed SDK.
+
+```sh
+npx expo install jest jest-expo @types/jest @testing-library/react-native --dev
+npm install --save-dev msw
+```
+
+`jest-expo` supplies the React Native transforms and mocks the native half of the Expo SDK. React Native Testing Library supplies `render`, queries, user interactions, and built-in Jest matchers. Do not add the deprecated `@testing-library/jest-native`; current RNTL exposes its matchers when the package is imported.
+
+A small config is enough to start:
+
+```js title="jest.config.js"
+module.exports = {
+  preset: "jest-expo",
+  setupFilesAfterEnv: ["<rootDir>/test/setup.ts"],
+  clearMocks: true,
+}
+```
+
+```json title="package.json"
+{
+  "scripts": {
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:ci": "jest --ci --runInBand"
+  }
+}
+```
+
+Add `"jest"` to `compilerOptions.types` when the app has an explicit TypeScript `types` list. Keep tests outside Expo Router's `app/` directory; every file inside `app/` is treated as a route.
+
+Only add `transformIgnorePatterns` when an installed dependency actually fails to transform. Expo documents patterns for npm, pnpm, and Bun, and they are not interchangeable. A copied regex that transpiles all of `node_modules` can turn a ten-second suite into a minute.
+
+The official setup references are [Expo unit testing](https://docs.expo.dev/develop/unit-testing/) and the [RNTL quick start](https://callstack.github.io/react-native-testing-library/docs/start/quick-start).
+
+**Failure:** replacing `jest-expo` with a hand-built web/JSDOM config. React Native does not render a DOM, and the test environment stops matching the host components the app uses.
+
+---
+
+## 3. One Feature, Four Observable States
+
+Use one order detail as the throughline:
+
+1. The order loads with Favorite off.
+2. Pressing Favorite updates the control immediately.
+3. A successful request leaves it on and shows Saved.
+4. A failed request rolls it back and exposes Retry.
+
+The component should express those states semantically, not only with color.
+
+```tsx
+<>
+  <Pressable
+    accessibilityRole="switch"
+    accessibilityLabel="Favorite order"
+    accessibilityState={{
+      checked: favorite,
+      disabled: saving,
+      busy: saving,
+    }}
+    disabled={saving}
+    onPress={toggleFavorite}
+    testID="favorite-toggle"
+  >
+    <Text>{favorite ? "Favorited" : "Favorite"}</Text>
+  </Pressable>
+
+  {message ? <Text accessibilityRole="alert">{message}</Text> : null}
+</>
+```
+
+The `accessibilityRole`, label, and state form the component's public interaction contract. RNTL can query it. VoiceOver and TalkBack can announce it. Maestro can use the stable `testID` in a localized build. One accessible component serves all three instead of creating a test-only API that bypasses the user interface.
+
+The `testID` is deliberate because this control sits on a critical device journey. It is not a reason to put `testID` on every wrapper `View`.
+
+**Failure:** testing `favorite === true` inside a hook while the visible control still says Favorite and exposes `checked: false`.
+
+---
+
+## 4. Put Deterministic Transitions in Pure Functions
+
+Optimistic UI has a state transition independent of React Native. Test that part without rendering.
+
+```ts
+type FavoriteState = {
+  favorite: boolean
+  previous: boolean | null
+  status: "idle" | "saving"
+}
+
+export function beginFavoriteChange(state: FavoriteState): FavoriteState {
+  return {
+    favorite: !state.favorite,
+    previous: state.favorite,
+    status: "saving",
+  }
+}
+
+export function rejectFavoriteChange(state: FavoriteState): FavoriteState {
+  return {
+    favorite: state.previous ?? state.favorite,
+    previous: null,
+    status: "idle",
+  }
+}
+```
+
+```ts
+describe("favorite transition", () => {
+  test("rolls back to the value before the optimistic change", () => {
+    const initial: FavoriteState = {
+      favorite: false,
+      previous: null,
+      status: "idle",
+    }
+
+    const saving = beginFavoriteChange(initial)
+    const rejected = rejectFavoriteChange(saving)
+
+    expect(saving).toEqual({
+      favorite: true,
+      previous: false,
+      status: "saving",
+    })
+    expect(rejected).toEqual(initial)
+  })
+})
+```
+
+This test is fast because it owns no renderer, provider, network, or clock. Add table-driven cases for starting on, starting off, and invalid events if the transition is richer.
+
+Do not extract a function merely to increase unit-test count. Extract when the function names a domain transition, removes impossible states, or is shared. A one-line `setFavorite(!favorite)` wrapper is not a useful module.
+
+**Failure:** mocking `useState`, calling a component function directly, and asserting that the setter received `true`. That tests React wiring, not the product behavior.
+
+---
+
+## 5. Render Through the Same Providers as Production
+
+Feature tests should use a small render harness that creates fresh providers per test. A shared global query client leaks cache and mutation state between tests.
+
+```tsx
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { render } from "@testing-library/react-native"
+
+export async function renderOrder(orderId = "42") {
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+      mutations: { retry: false },
+    },
+  })
+
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <OrderScreen orderId={orderId} />
+    </QueryClientProvider>
+  )
+}
+```
+
+Retries are useful in production and harmful in a deterministic error test: the assertion waits through policies it did not ask to verify. Disable them in the harness, then write a separate test if retry behavior is itself a product promise.
+
+Provider wrappers should preserve production behavior while replacing only outside boundaries:
+
+- Keep the real component tree, state machine, query client, and formatter.
+- Replace network responses, time, secure storage, and OS capabilities at their seams.
+- Create fresh mutable stores and caches for every test.
+
+If every test manually nests five providers, put those providers in `renderApp`. If `renderApp` has twenty options that can create impossible production states, it has become a second application.
+
+**Failure:** mocking `useOrder()` to return each state. The test proves four hardcoded objects render, but not that the screen reaches them from real requests and interactions.
+
+---
+
+## 6. Control the HTTP Boundary with MSW
+
+Mock Service Worker intercepts the request instead of replacing the API hook. The screen still serializes a real request, parses a real response, updates the real cache, and renders the result.
+
+For isolated Jest/RNTL tests, use MSW's Node integration:
+
+```ts title="test/server.ts"
+import { http, HttpResponse } from "msw"
+import { setupServer } from "msw/node"
+
+export const handlers = [
+  http.get("https://api.example.com/orders/:orderId", ({ params }) => {
+    return HttpResponse.json({
+      id: params.orderId,
+      title: "Order 42",
+      favorite: false,
+    })
+  }),
+
+  http.put(
+    "https://api.example.com/orders/:orderId/favorite",
+    async ({ request }) => {
+      const body = await request.json()
+      return HttpResponse.json(body)
+    }
+  ),
+]
+
+export const server = setupServer(...handlers)
+```
+
+```ts title="test/setup.ts"
+import { server } from "./server"
+
+beforeAll(() => server.listen({ onUnhandledRequest: "error" }))
+afterEach(() => server.resetHandlers())
+afterAll(() => server.close())
+```
+
+`onUnhandledRequest: "error"` turns an accidental real request into a test failure. `resetHandlers()` removes per-test overrides so an offline test cannot poison the test after it.
+
+MSW has two environments:
+
+- **Jest/RNTL:** `msw/node`, because the test executes in the Jest process.
+- **A running React Native app:** `msw/native`, with React Native polyfills, when a development build intentionally runs against mock handlers.
+
+Do not import `msw/node` into the app bundle; Node's `http` module does not exist on the device. The distinction is documented in [MSW's React Native integration](https://mswjs.io/docs/integrations/react-native/).
+
+**Failure:** `jest.mock("../use-order")` at the top of the file. Every test now bypasses request shape, response parsing, cache updates, and the exact boundary most likely to drift.
+
+---
+
+## 7. Test What the Person Does and Sees
+
+RNTL's `userEvent` emits a realistic host interaction sequence. Prefer it over `fireEvent` when it supports the action.
+
+```tsx
+import { screen, userEvent, waitFor } from "@testing-library/react-native"
+import { delay, http, HttpResponse } from "msw"
+import { server } from "../test/server"
+
+test("favorites an order and confirms the save", async () => {
+  server.use(
+    http.put("https://api.example.com/orders/:orderId/favorite", async () => {
+      await delay(250)
+      return HttpResponse.json({ favorite: true })
+    })
+  )
+
+  await renderOrder()
+  const user = userEvent.setup()
+  const favorite = await screen.findByRole("switch", {
+    name: "Favorite order",
+  })
+
+  expect(favorite).not.toBeChecked()
+
+  await user.press(favorite)
+
+  expect(favorite).toBeChecked()
+  expect(favorite).toBeDisabled()
+  expect(await screen.findByText("Saved")).toBeOnTheScreen()
+
+  await waitFor(() => expect(favorite).toBeEnabled())
+})
+```
+
+The delayed handler creates an observable saving state without reaching inside the component. The test asserts the interaction contract:
+
+- The control is discoverable by role and accessible name.
+- The optimistic state appears.
+- Duplicate submission is disabled while saving.
+- The server confirmation becomes visible.
+- The control becomes available again.
+
+`user.press()` is asynchronous. Await it. Current RNTL user events reproduce `pressIn`, `pressOut`, and the native minimum press duration; direct `fireEvent.press()` invokes only the handler.
+
+**Failure:** `fireEvent(toggle, "onPress")`, then inspecting `toggle.props.style.opacity`. The test bypasses the host interaction and locks itself to a visual implementation detail.
+
+---
+
+## 8. Make Failure and Offline First-Class Tests
+
+The error path is not the success test with a different status code. It has its own product promises: roll back, preserve context, explain what failed, and offer recovery.
+
+```tsx
+test("rolls back and exposes retry when saving fails", async () => {
+  server.use(
+    http.put("https://api.example.com/orders/:orderId/favorite", () =>
+      HttpResponse.error()
+    )
+  )
+
+  await renderOrder()
+  const user = userEvent.setup()
+  const favorite = await screen.findByRole("switch", {
+    name: "Favorite order",
+  })
+
+  await user.press(favorite)
+
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Could not update favorite. Try again."
+  )
+  expect(favorite).not.toBeChecked()
+  expect(screen.getByRole("button", { name: "Try again" })).toBeEnabled()
+})
+```
+
+Use different MSW responses for different failure classes:
+
+```ts
+server.use(
+  http.get("https://api.example.com/orders/:orderId", () => {
+    return new HttpResponse(null, { status: 401 })
+  })
+)
+
+server.use(
+  http.get("https://api.example.com/orders/:orderId", async () => {
+    await delay(5_000)
+    return HttpResponse.json(order)
+  })
+)
+
+server.use(
+  http.get("https://api.example.com/orders/:orderId", () => {
+    return HttpResponse.error()
+  })
+)
+```
+
+Those mean unauthorized, slow, and network failure. They should not all render “Something went wrong.”
+
+Use `getBy*` for something present now, `queryBy*` to assert absence, and `findBy*` for something that will appear asynchronously. Use `waitFor` when the assertion is not naturally expressed as one `findBy` query, such as a control becoming enabled.
+
+Never add `await new Promise(resolve => setTimeout(resolve, 1000))` to “let React settle.” Wait for the visible outcome. Fake timers belong in tests of actual timer policy, or as the clock supplied to `userEvent.setup`; they are not a cure for unknown asynchronous work.
+
+**Failure:** increasing the suite-wide timeout until an un-awaited mutation stops failing often enough.
+
+---
+
+## 9. Test Routes as Routes
+
+Expo Router's `expo-router/testing-library` creates an in-memory file system and adds route matchers. It can prove that a press changes the route and that a deep link resolves to the intended screen.
+
+```tsx
+import { renderRouter, screen } from "expo-router/testing-library"
+import { Link } from "expo-router"
+import { Text } from "react-native"
+import { userEvent } from "@testing-library/react-native"
+
+test("opens an order from the list", async () => {
+  await renderRouter(
+    {
+      index: () => <Link href="/orders/42">Open Order 42</Link>,
+      "orders/[orderId]": () => <Text>Order detail</Text>,
+    },
+    { initialUrl: "/" }
+  )
+
+  const user = userEvent.setup()
+  await user.press(screen.getByRole("link", { name: "Open Order 42" }))
+
+  expect(screen).toHavePathname("/orders/42")
+  expect(screen.getByText("Order detail")).toBeOnTheScreen()
+})
+```
+
+A deep-link entry is the same route with a different starting URL:
+
+```tsx
+test("resolves a direct order URL", async () => {
+  await renderRouter(
+    {
+      index: () => <Text>Orders</Text>,
+      "orders/[orderId]": () => <Text>Order detail</Text>,
+    },
+    { initialUrl: "/orders/42" }
+  )
+
+  expect(screen).toHavePathname("/orders/42")
+  expect(screen.getByText("Order detail")).toBeOnTheScreen()
+})
+```
+
+This proves the JavaScript route contract. It does not prove that `https://example.com/orders/42` is associated with the iOS app, that Android verified the domain, or that another app cannot claim a custom scheme. Those require an installed binary and operating-system configuration.
+
+Use inline routes for a small navigation contract. Use a fixture directory when layouts, auth guards, and nested groups are part of the behavior. Keep test files outside `app/`. See [Expo Router testing](https://docs.expo.dev/router/reference/testing/).
+
+**Failure:** mocking `router.push` and asserting it was called with a string. The destination may not exist, may resolve under the wrong layout, or may immediately redirect.
+
+---
+
+## 10. Mock Native Modules at the Capability Seam
+
+Jest cannot open Keychain, display an iOS permission sheet, or move an app to the background. Mock the capability to test the JavaScript policy around it, then keep device coverage for the native contract.
+
+```tsx
+import * as SecureStore from "expo-secure-store"
+
+jest.mock("expo-secure-store", () => ({
+  getItemAsync: jest.fn(),
+  setItemAsync: jest.fn(),
+  deleteItemAsync: jest.fn(),
+}))
+
+test("restores a refresh token into the session flow", async () => {
+  jest.mocked(SecureStore.getItemAsync).mockResolvedValue("refresh-token")
+
+  await renderSessionGate()
+
+  expect(await screen.findByText("Orders")).toBeOnTheScreen()
+  expect(SecureStore.getItemAsync).toHaveBeenCalledWith("auth.refresh")
+})
+```
+
+That test proves the app asks for the expected key and handles the returned token. It does not prove Keychain accessibility class, Android Keystore behavior, backup policy, biometric prompts, or persistence after process death.
+
+Use the same boundary for permissions:
+
+```ts
+type CameraCapability = {
+  getStatus(): Promise<"undetermined" | "granted" | "denied" | "blocked">
+  request(): Promise<"granted" | "denied">
+  openSettings(): Promise<void>
+}
+```
+
+Inject or mock `CameraCapability` to prove:
+
+- Undetermined asks only after the person taps Scan receipt.
+- Granted opens the scanner.
+- Denied leaves manual upload available.
+- Blocked offers a Settings action instead of requesting forever.
+
+Then install the app and prove the real system sheet, return-from-Settings path, and platform-specific status mapping.
+
+Expo Modules can ship mocks from a module's `mocks/` directory, which `jest-expo` resolves for `requireNativeModule`. App-owned adapters are still useful because they name the product capability rather than exposing a vendor API throughout the feature.
+
+**Failure:** a native mock that always returns Granted. The permission code is “covered,” but every denial and recovery branch is dead.
+
+---
+
+## 11. Select Elements Through the Public Interface
+
+Selector quality determines whether a refactor breaks tests for a product reason or a tree-shape reason.
+
+Use this order:
+
+1. **Role + accessible name:** `getByRole("button", { name: "Try again" })`.
+2. **Role + state:** `getByRole("switch", { checked: true })`.
+3. **Visible text or display value:** content the person reads or types.
+4. **Placeholder or accessibility hint:** only when that is the actual interface.
+5. **`testID`:** a stable device-automation seam or an element with no useful public selector.
+6. **Props/tree traversal:** last resort.
+
+RNTL role queries require an accessibility element. `Text`, `TextInput`, and `Switch` are accessible hosts. `Pressable` supplies an accessible host. A plain `View` needs `accessible`.
+
+```tsx
+expect(
+  screen.getByRole("switch", {
+    name: "Favorite order",
+    checked: true,
+  })
+).toBeChecked()
+```
+
+A failing role query can reveal a real accessibility defect. A failing `getByTestId("button-7")` usually reveals only that an implementation identifier changed.
+
+Maestro has a different pressure: localized visible text changes between languages, so stable `testID` values are appropriate at critical journey boundaries. Use names such as `favorite-toggle` and `checkout-submit`, not styling or positions such as `blue-button-right`.
+
+Never select by screen coordinates unless the coordinate itself is the behavior under test. Device size, font scale, keyboard, and localization will move it.
+
+**Failure:** adding `testID` to every nested `View` and building tests against the component tree that React Native may flatten before mount.
+
+---
+
+## 12. Snapshot Contracts, Not Screens
+
+A broad React Native snapshot serializes host nodes, styles, wrapper views, provider output, and implementation details. It grows when the screen grows. Reviewers stop reading it. Updating it becomes approval by keystroke.
+
+Prefer explicit behavior:
+
+```tsx
+expect(screen.getByRole("heading", { name: "Order 42" })).toBeVisible()
+expect(screen.getByRole("switch", { checked: false })).toBeEnabled()
+expect(screen.queryByRole("alert")).not.toBeOnTheScreen()
+```
+
+A narrow snapshot can earn a place when the serialization itself is the contract:
+
+```ts
+expect(orderRoute("42")).toMatchInlineSnapshot(`
+  {
+    "params": {
+      "orderId": "42",
+    },
+    "pathname": "/orders/[orderId]",
+  }
+`)
+```
+
+Even there, `toEqual` may be clearer. The rule is not “snapshots are forbidden.” The rule is that a human must be able to explain what semantic change the snapshot protects.
+
+Screenshots and visual regression are different. A device screenshot can catch clipping, overlap, and platform rendering changes that a serialized React tree cannot. Use the visual tool for visual claims.
+
+**Failure:** a 2,000-line screen snapshot whose only meaningful change is that Retry disappeared.
+
+---
+
+## 13. Keep Maestro Thin and Native
+
+Maestro drives the installed app through the native accessibility layer. It proves that JavaScript, Fabric, native views, navigation, and the operating system work together. It does not need an npm dependency inside the app.
+
+Expose stable ids only where the journey needs them:
+
+```tsx
+<Pressable
+  accessibilityRole="button"
+  accessibilityLabel={`Open ${order.title}`}
+  onPress={() => router.push(`/orders/${order.id}`)}
+  testID={`order-${order.id}`}
+>
+  <OrderSummary order={order} />
+</Pressable>
+```
+
+A complete critical journey stays short:
+
+```yaml title=".maestro/order-favorite.yaml"
+appId: ${APP_ID}
+---
+- launchApp:
+    clearState: true
+- assertVisible: "Orders"
+- tapOn:
+    id: "order-42"
+- assertVisible: "Order 42"
+- tapOn:
+    id: "favorite-toggle"
+- assertVisible: "Saved"
+```
+
+Run the same flow against platform-specific app ids:
+
+```sh
+maestro test -e APP_ID=com.example.orders .maestro/order-favorite.yaml
+```
+
+The assertions are outcomes, not sleeps. Maestro waits for the UI to become stable; fixed delays usually make a flow slower and still flaky.
+
+Use a focused flow to prove an installed deep link:
+
+```yaml title=".maestro/order-deep-link.yaml"
+appId: ${APP_ID}
+---
+- launchApp:
+    clearState: true
+- openLink: "https://example.com/orders/42"
+- assertVisible:
+    id: "order-detail-screen"
+- assertVisible: "Order 42"
+```
+
+The app-only `order-detail-screen` id prevents the flow from passing if the URL opened a browser page that also says “Order 42.” That crosses the OS link association that `renderRouter` cannot see.
+
+Keep Android Back in a focused Android-only flow:
+
+```yaml title=".maestro/order-android-back.yaml"
+appId: ${APP_ID}
+---
+- launchApp
+- tapOn:
+    id: "order-42"
+- assertVisible:
+    id: "order-detail-screen"
+- back
+- assertVisible: "Orders"
+```
+
+Run platform-specific flows only on the host they describe. Maestro's `back` command exercises Android's real back path; iOS navigation should use its visible back control or a separate gesture-focused test.
+
+Prefer a development or internal distribution build whose native modules match production. Expo Go is useful for development but runs inside Expo's container, so it cannot be launched under the app's own id and cannot prove the final native surface.
+
+Maestro is the default here because it is black-box, cross-platform, and cheap to adopt. **Detox** is an instrumented alternative with deeper synchronization and programmatic control. Choose it when the app's complexity requires that control—not because maintaining two E2E stacks looks comprehensive.
+
+**Failure:** rebuilding every unit and component case as a Maestro flow. The suite becomes slow, data-heavy, and impossible to diagnose.
+
+---
+
+## 14. Device Tests Own the Native Seams
+
+RNTL renders a React Native tree. It does not boot UIKit or Android Views. Keep device evidence for behavior whose failure sits outside JavaScript:
+
+- Keyboard appearance, dismissal, input accessories, and inset adjustment.
+- iOS edge swipe, Android hardware/predictive Back, and competing gestures.
+- Camera, photos, notifications, biometrics, and permission recovery.
+- Universal Links, App Links, custom schemes, and push-open routing.
+- Secure storage persistence, logout cleanup, and process death.
+- Background/resume, interrupted uploads, and reconnect.
+- Reduced motion, dynamic type, TalkBack, and VoiceOver focus.
+- Native crashes, ANRs, startup, image decode, and UI-thread performance.
+
+Some of those can be device-automated. Some still require manual testing. “Runs on a simulator” is not the same as “works with a screen reader on a physical device.”
+
+The complete condition matrix lives in [How to Improve User Experience in Mobile Development](/notes/how-to-improve-user-experience-in-mobile-development). Installable builds, signing, and release gates live in [Frontend CI/CD for React and React Native](/notes/frontend-ci-cd-for-react-and-react-native). Keep this note's device suite focused on test design.
+
+**Failure:** asserting that `KeyboardAvoidingView` exists and calling the keyboard bug tested.
+
+---
+
+## 15. Treat Flakes as Defects in the Test System
+
+A flaky test has an uncontrolled input: time, state, network, animation, data, order, device, or an assertion that races the product.
+
+Triage it:
+
+1. Reproduce the failure alone and after the preceding test.
+2. Identify the uncontrolled boundary.
+3. Replace fixed waiting with an observable outcome.
+4. Reset server handlers, caches, storage, and app state.
+5. Seed a deterministic account or API fixture.
+6. Capture device logs and screenshots on failure.
+7. Quarantine only with an owner, reason, and expiry.
+
+Retries can expose a probability. They do not make a broken signal trustworthy. A release gate that passes on attempt three teaches the team to ignore red.
+
+For device journeys:
+
+- Give each flow independent setup; do not depend on execution order.
+- Use stable ids for localized or dynamic controls.
+- Hide or handle the keyboard explicitly when it owns the screen.
+- Control test data through an API or fixture boundary, not through ten setup screens.
+- Assert the product result after every important mutation.
+
+**Failure:** adding `retry: 3` globally, then reporting the final green run as evidence.
+
+---
+
+## 16. Coverage Is a Map, Not the Target
+
+Line coverage says code executed. It does not say an assertion could detect the bug.
+
+A useful review asks:
+
+- Which money, identity, authorization, privacy, and data-loss paths changed?
+- Which visible states can this feature enter?
+- Which transitions can fail or be interrupted?
+- Which claims belong to JavaScript, and which belong to the native host?
+- Would each test fail for the bug named in its title?
+
+Use coverage reports to find unvisited branches. Do not write empty tests to make the percentage green. A direct test of one rollback transition is worth more than rendering ten screens and asserting only that they do not throw.
+
+Test names should state the product promise:
+
+```text
+rolls back favorite when the save fails
+opens a blocked permission path in Settings
+preserves the draft after an unauthorized refresh
+returns to the order list with Android Back
+```
+
+Not:
+
+```text
+calls handler
+updates state
+renders correctly
+works
+```
+
+The broader regression strategy—blast radius, layer selection, and what earns E2E coverage—is [Frontend Regression Tests](/notes/_frontend-regression-test).
+
+**Failure:** raising the coverage threshold while the untested branch is the only one that can lose the user's draft.
+
+---
+
+## Takeaway
+
+A React Native testing strategy is a set of boundaries.
+
+1. **Can the rule run without React?** Test the pure transition directly.
+2. **Is the claim visible through the rendered interface?** Use RNTL, semantic queries, `userEvent`, and observable async states.
+3. **Does the feature cross HTTP?** Intercept the request with MSW instead of mocking the hook.
+4. **Is navigation the behavior?** Render an Expo Router file system and assert the route.
+5. **Does JavaScript depend on an OS capability?** Mock the capability to test policy; use a device to test the capability.
+6. **Does the claim require UIKit, Android Views, or the OS?** Put it in a small Maestro journey or a manual device pass.
+7. **Is the test waiting for time or for behavior?** Wait for behavior.
+8. **Would the assertion survive a refactor that preserves the product?** If not, it is coupled to implementation.
+
+The goal is not the largest suite. It is the smallest suite that makes a broken product promise difficult to ship.
+
+---
+
+## Recap Q&A
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="rn-test-layers">
+    <AccordionTrigger>1. Which React Native test layer should own a behavior?</AccordionTrigger>
+    <AccordionContent>
+
+      - Use the cheapest layer that can observe the claim: pure units for domain transitions, RNTL for rendered interaction, Router tests for route contracts, and Maestro for native/OS seams.
+      - Keep most feature confidence in behavior-heavy RNTL tests and keep device journeys thin.
+      - Do not duplicate the same exhaustive assertion at every layer.
+      - **Failure:** asking a mocked component test to prove keyboard, permission-sheet, or Android Back behavior.
+
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="rn-test-rntl">
+    <AccordionTrigger>2. What makes a strong React Native Testing Library test?</AccordionTrigger>
+    <AccordionContent>
+
+      - Operate the screen through roles, accessible names, text, display values, and state. Prefer `userEvent` for supported interactions.
+      - Use `findBy*` for outcomes that appear asynchronously and `waitFor` only when one query cannot express the transition.
+      - Render real providers with fresh mutable state; replace only external boundaries.
+      - **Failure:** mocking a hook, firing its callback, and asserting an internal prop or setter call.
+
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="rn-test-msw">
+    <AccordionTrigger>3. Why use MSW instead of mocking the API hook?</AccordionTrigger>
+    <AccordionContent>
+
+      - MSW keeps request serialization, response parsing, query caching, and screen state in the test while controlling success, delay, status errors, and network failure.
+      - Use `msw/node` in isolated Jest tests and reset handlers after every test. Use `msw/native` only when the running React Native app itself enables handlers.
+      - Fail on unhandled requests so tests never reach the real network accidentally.
+      - **Failure:** one global hook mock that bypasses the transport boundary and leaks state across cases.
+
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="rn-test-maestro">
+    <AccordionTrigger>4. What belongs in Maestro rather than Jest?</AccordionTrigger>
+    <AccordionContent>
+
+      - Critical journeys that require the installed binary, native views, OS links, keyboard, permissions, Back behavior, lifecycle, or real native modules.
+      - Select stable journey boundaries with `testID`, assert visible outcomes, and make each flow independently seedable.
+      - Maestro is the black-box default here; Detox is an alternative when deeper instrumentation and control justify its cost.
+      - **Failure:** rebuilding every unit and RNTL case as a slow device flow.
+
+    </AccordionContent>
+
+  </AccordionItem>
+
+  <AccordionItem value="rn-test-flakes">
+    <AccordionTrigger>5. How should a team handle snapshots, coverage, and flaky tests?</AccordionTrigger>
+    <AccordionContent>
+
+      - Avoid broad screen snapshots. Keep only narrow snapshots whose serialization is itself a stable contract.
+      - Use coverage to locate unvisited risk, not as proof that assertions are meaningful.
+      - Remove uncontrolled time, state, data, and network inputs. Quarantine only with an owner, reason, and expiry.
+      - **Failure:** global retries and snapshot updates turning a red signal green without explaining the product change.
+
+    </AccordionContent>
+
+  </AccordionItem>
+</Accordion>
