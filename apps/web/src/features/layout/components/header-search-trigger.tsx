@@ -22,7 +22,7 @@ export function HeaderSearchTrigger() {
         type="button"
         aria-label={t("trigger")}
         onClick={() => setOpenSearch(true)}
-        className="hidden lg:block text-content-subdued text-xs"
+        className="hidden lg:block text-content-subdued text-sm"
       >
         {t.rich("headerHint", {
           modifier: (chunks) => (

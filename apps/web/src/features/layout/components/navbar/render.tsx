@@ -112,7 +112,7 @@ function SocialLinks() {
 
   return (
     <Navbar.StaggerItem className="space-y-1 mb-10">
-      <div className="text-xs text-content-body-on-popover/50 mt-1.5">
+      <div className="text-sm text-content-body-on-popover/50 mt-1.5">
         {t("socials")}
       </div>
       <div className="flex items-center flex-wrap gap-x-2">
@@ -158,7 +158,7 @@ function NavbarTriggerLabel() {
       />
       <div className="flex items-center gap-1.5 font-semibold">
         <div>wilson</div>
-        <div aria-hidden className="text-content-body-on-popover text-xs">
+        <div aria-hidden className="text-content-body-on-popover text-sm">
           /
         </div>
         <div className="text-content-body-on-popover lowercase">

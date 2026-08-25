@@ -38,7 +38,7 @@ function Label({ className, ...props }: ComponentProps<"div">) {
   return (
     <div
       className={cn(
-        "text-xs text-content-body-on-popover/50 my-1.5",
+        "text-sm text-content-body-on-popover/50 my-1.5",
         className
       )}
       {...props}
@@ -125,7 +125,7 @@ function Swatch({
           className={cn(
             "pointer-events-none absolute bottom-full left-1/2 z-10 mb-2 -translate-x-1/2",
             "whitespace-nowrap rounded-full bg-content-ink-on-popover px-2 py-1",
-            "text-xs leading-none text-surface-popover",
+            "text-sm leading-none text-surface-popover",
             "opacity-0 transition-opacity duration-150",
             "group-hover:opacity-100 group-focus-visible:opacity-100"
           )}

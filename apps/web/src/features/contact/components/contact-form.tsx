@@ -173,7 +173,7 @@ export function ContactForm({ requireTurnstile }: Props) {
               <p
                 id={ERROR_ID}
                 role="alert"
-                className="text-xs text-content-error"
+                className="text-sm text-content-error"
               >
                 {errorMessage}
               </p>

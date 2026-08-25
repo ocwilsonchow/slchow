@@ -64,7 +64,7 @@ const Page = async ({ params }: Props) => {
             </h1>
 
             {page?.data.category ? (
-              <div className="w-fit font-semibold text-content-body/80 text-[11px] bg-surface-alpha px-1.25 py-px rounded-md">
+              <div className="w-fit font-semibold text-content-body/80 text-[12px] bg-surface-alpha px-1.25 py-px rounded-md">
                 {t(`categories.${page?.data.category}`)}
               </div>
             ) : null}

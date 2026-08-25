@@ -53,7 +53,7 @@ export function Pre({
     <div className="mb-3 w-full min-w-0 max-w-full overflow-hidden rounded-xl border border-stroke-soft bg-surface-alpha/50">
       {label ? (
         <div className="border-b border-stroke-soft px-4 py-2">
-          <span className="block truncate font-mono text-xs text-content-subdued">
+          <span className="block truncate font-mono text-sm text-content-subdued">
             {label}
           </span>
         </div>
@@ -63,7 +63,7 @@ export function Pre({
         <div className="shiki min-w-0 max-w-full overflow-x-auto outline-none">
           <pre
             className={cn(
-              "min-w-0 px-4 py-3 text-xs leading-tight [counter-reset:line] [&_code]:grid [&_.line]:before:mr-4 [&_.line]:before:inline-block [&_.line]:before:w-4 [&_.line]:before:text-right [&_.line]:before:text-foreground [&_.line]:before:opacity-25 [&_.line]:before:content-[counter(line)] [&_.line]:before:[counter-increment:line]",
+              "min-w-0 px-4 py-3 text-sm leading-tight [counter-reset:line] [&_code]:grid [&_.line]:before:mr-4 [&_.line]:before:inline-block [&_.line]:before:w-4 [&_.line]:before:text-right [&_.line]:before:text-foreground [&_.line]:before:opacity-25 [&_.line]:before:content-[counter(line)] [&_.line]:before:[counter-increment:line]",
               className
             )}
             {...props}

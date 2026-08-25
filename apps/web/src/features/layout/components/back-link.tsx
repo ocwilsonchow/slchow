@@ -22,7 +22,7 @@ export const BackLink = async ({ href }: Props) => {
         />
         {t("back")}
       </Link>
-      <div className="hidden md:inline-flex items-center gap-1 text-xs text-content-subdued">
+      <div className="hidden md:inline-flex items-center gap-1 text-sm text-content-subdued">
         <kbd className="bg-surface-alpha rounded-md px-1 py-px">⌘</kbd>+
         <kbd className="bg-surface-alpha rounded-md px-1 py-px h-4.5 flex items-center justify-center">
           <ArrowBigLeft size={10} aria-hidden />

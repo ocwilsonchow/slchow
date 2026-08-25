@@ -80,7 +80,7 @@ export function ContactTextField({
               />
               <p
                 id={countId}
-                className="text-xs tabular-nums text-content-subdued"
+                className="text-sm tabular-nums text-content-subdued"
               >
                 {t("characterCount", {
                   count: field.state.value.length,

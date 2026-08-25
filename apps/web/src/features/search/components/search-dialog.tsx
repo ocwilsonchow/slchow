@@ -117,7 +117,7 @@ function SearchFooterHints() {
   const t = useTranslations("search")
 
   return (
-    <SearchDialogFooter className="flex items-center justify-between border-stroke-soft/75 px-4 py-3 text-xs text-content-body-on-popover">
+    <SearchDialogFooter className="flex items-center justify-between border-stroke-soft/75 px-4 py-3 text-sm text-content-body-on-popover">
       <span className="inline-flex flex-wrap items-center gap-1">
         {t.rich("navigateHint", {
           up: (label) => (
@@ -205,7 +205,7 @@ export function SiteSearchDialog(props: SharedProps) {
             autoFocus
             className="text-content-ink-on-popover placeholder:text-content-body-on-popover"
           />
-          <SearchDialogClose className="inline-flex h-4.5 items-center justify-center rounded-md border-0 bg-surface-alpha px-1 py-px text-xs text-content-body-on-popover hover:text-content-ink-on-popover">
+          <SearchDialogClose className="inline-flex h-4.5 items-center justify-center rounded-md border-0 bg-surface-alpha px-1 py-px text-sm text-content-body-on-popover hover:text-content-ink-on-popover">
             {t("closeShort")}
           </SearchDialogClose>
         </SearchDialogHeader>
