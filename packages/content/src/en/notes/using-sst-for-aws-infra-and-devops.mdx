@@ -49,7 +49,7 @@ All of these tools share **infrastructure as code**. SST is framed for **develop
 
 - SST components encode common app patterns and still allow [`transform`](https://sst.dev/docs/components#transforms) plus [150+ providers](https://sst.dev/docs/all-providers#directory) when lower-level control is required.
 - Linking closes the runtime gap that Terraform or CDK usually fill with hand-wired env vars and IAM. `sst dev` is a product feature rather than an assemble-yourself local stack.
-- SST still has state — local plus a backup bucket — so managed resources should not be edited by hand in the Console ([Basics](https://sst.dev/docs/basics/)).
+- SST still has state — local plus a backup bucket — so managed resources should not be edited by hand in the Console ([Basics](https://sst.dev/docs/basics/)). Backup of that state, and when a snapshot is not a failover, is [Disaster Recovery in System Design](/notes/disaster-recovery-in-system-design).
 
 SST is a poor fit when a platform team already owns shared networking in Terraform or OpenTofu, when Pulumi or Terraform is the team language for multi-cloud control planes, or when CloudFormation-native CDK construct libraries are the hiring and review surface.
 

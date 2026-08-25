@@ -9,7 +9,7 @@ category: backend
 
 這套 stack 是跑在 **ECS Fargate** 上的 **Hono**、**Drizzle** 配 **Aurora PostgreSQL**、**Amazon MSK** 上的 **Kafka**、**Stripe PaymentIntents**，以及 **Terraform**。目標是 100,000 並發買家與每秒 10,000 次 onsale 嘗試，但不承諾網絡給不了的 exactly once。
 
-Typed HTTP 基礎見 [用 Hono、Drizzle、Zod OpenAPI 與 SST 打造 Backend APIs](/notes/_backend-apis-hono-sst)。可靠性 pattern 見 [System Design 裡的 Message Queues](/notes/message-queues-in-system-design)。Partitioning、offsets 與 replay 見 [System Design 裡的 Kafka](/notes/kafka-in-system-design)。Schema 從 [System Design 裡的 Data Modeling](/notes/data-modeling-in-system-design) 開始。這篇 note 講的是購票路徑。
+Typed HTTP 基礎見 [用 Hono、Drizzle、Zod OpenAPI 與 SST 打造 Backend APIs](/notes/_backend-apis-hono-sst)。可靠性 pattern 見 [System Design 裡的 Message Queues](/notes/message-queues-in-system-design)。Partitioning、offsets 與 replay 見 [System Design 裡的 Kafka](/notes/kafka-in-system-design)。Schema 從 [System Design 裡的 Data Modeling](/notes/data-modeling-in-system-design) 開始。Hold versus event catalog 見 [System Design 裡的 CAP Theorem](/notes/cap-theorem-in-system-design)。這篇 note 講的是購票路徑。
 
 <br />
 
@@ -1459,7 +1459,7 @@ ElastiCache 應 Multi-AZ，帶 automatic failover 與 encryption。丟掉它會�
 
 ## 15. Warm cross-Region disaster recovery
 
-Multi-AZ 處理 AZ failure。它不是 regional disaster recovery。這裡的目標是 **RPO 不到一分鐘** 與 **RTO 不到十五分鐘**。那是可測目標，不是 AWS 產品保證。
+Multi-AZ 處理 AZ failure。它不是 regional disaster recovery。Strategy map——backup versus HA versus DR——見 [System Design 裡的 Disaster Recovery](/notes/disaster-recovery-in-system-design)。這裡的目標是 **RPO 不到一分鐘** 與 **RTO 不到十五分鐘**。那是可測目標，不是 AWS 產品保證。
 
 Warm Region 包含：
 

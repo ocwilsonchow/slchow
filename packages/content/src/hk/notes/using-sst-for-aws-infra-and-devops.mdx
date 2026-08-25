@@ -49,7 +49,7 @@ SST 讓開發者可以用 **Components** 定義應用功能，而不必親手組
 
 - SST components 編碼常見 app patterns，仍允許在需要更低階控制時使用 [`transform`](https://sst.dev/docs/components#transforms) 加上 [150+ providers](https://sst.dev/docs/all-providers#directory)。
 - Linking 補上 Terraform 或 CDK 通常靠手寫 env vars 與 IAM 填補的 runtime 缺口。`sst dev` 是產品功能，而不是自己組裝的本地 stack。
-- SST 仍然有 state——本地加上 backup bucket——所以 managed resources 不應在 Console 人手編輯（[Basics](https://sst.dev/docs/basics/)）。
+- SST 仍然有 state——本地加上 backup bucket——所以 managed resources 不應在 Console 人手編輯（[Basics](https://sst.dev/docs/basics/)）。那份 state 的 backup，以及何時 snapshot 不是 failover，見 [System Design 裡的 Disaster Recovery](/notes/disaster-recovery-in-system-design)。
 
 當 platform team 已經用 Terraform 或 OpenTofu 擁有 shared networking、當 Pulumi 或 Terraform 是團隊多雲 control planes 的語言，或當 CloudFormation-native CDK construct libraries 是招聘與 review 表面時，SST 並不適合。
 

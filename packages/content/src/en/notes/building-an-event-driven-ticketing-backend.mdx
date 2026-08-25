@@ -9,7 +9,7 @@ A ticket purchase is not one request. It is a state machine crossing inventory, 
 
 The stack here is **Hono** on **ECS Fargate**, **Drizzle** with **Aurora PostgreSQL**, **Kafka** on **Amazon MSK**, **Stripe PaymentIntents**, and **Terraform**. It targets 100,000 concurrent buyers and a 10,000-attempt-per-second onsale without making "exactly once" promises the network cannot keep.
 
-The typed HTTP foundation is [Backend APIs with Hono, Drizzle, Zod OpenAPI, and SST](/notes/_backend-apis-hono-sst). The reliability patterns are [Message Queues in System Design](/notes/message-queues-in-system-design). Partitioning, offsets, and replay are [Kafka in System Design](/notes/kafka-in-system-design). The schema starts in [Data Modeling in System Design](/notes/data-modeling-in-system-design). This note is the purchase path.
+The typed HTTP foundation is [Backend APIs with Hono, Drizzle, Zod OpenAPI, and SST](/notes/_backend-apis-hono-sst). The reliability patterns are [Message Queues in System Design](/notes/message-queues-in-system-design). Partitioning, offsets, and replay are [Kafka in System Design](/notes/kafka-in-system-design). The schema starts in [Data Modeling in System Design](/notes/data-modeling-in-system-design). Hold versus event catalog is [CAP Theorem in System Design](/notes/cap-theorem-in-system-design). This note is the purchase path.
 
 <br />
 
@@ -1459,7 +1459,7 @@ ElastiCache should be Multi-AZ with automatic failover and encryption. Losing it
 
 ## 15. Warm cross-Region disaster recovery
 
-Multi-AZ handles an AZ failure. It is not regional disaster recovery. The objective here is **RPO under one minute** and **RTO under fifteen minutes**. Those are measured objectives, not AWS product guarantees.
+Multi-AZ handles an AZ failure. It is not regional disaster recovery. The strategy map — backup versus HA versus DR — is [Disaster Recovery in System Design](/notes/disaster-recovery-in-system-design). The objective here is **RPO under one minute** and **RTO under fifteen minutes**. Those are measured objectives, not AWS product guarantees.
 
 The warm Region contains:
 

@@ -1,0 +1,357 @@
+---
+title: Disaster Recovery in System Design
+description: Why a snapshot is not a failover — RTO, RPO, backup vs HA vs DR, and the AWS strategies that follow
+date: 2026-08-25
+category: system-design
+---
+
+**Disaster recovery** is how the product comes back when a region, an account, or a datastore is gone. It is measured. **RTO** is how long the product may be down. **RPO** is how much recent data you may lose. Those numbers are a product promise. They are not an AWS SKU.
+
+This note follows the [AWS Well-Architected Reliability](https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/rel_planning_for_recovery_disaster_recovery.html) disaster recovery strategies. Stages and deploy are [Using SST to Manage AWS Infrastructure and DevOps](/notes/using-sst-for-aws-infra-and-devops). A concrete warm-standby runbook is [Building an Event-Driven Ticketing Backend](/notes/building-an-event-driven-ticketing-backend). The queue that must survive a process dying is [Message Queues in System Design](/notes/message-queues-in-system-design). This note is backup versus failover.
+
+The default workload is **compute + RDS Postgres + S3 + a queue**. Compute is rebuilt from IaC. Recover the data, the DNS, and the secrets.
+
+<br />
+
+---
+
+## Pattern Map
+
+| Pattern | What you pay for while healthy | Reach for it when |
+| --- | --- | --- |
+| Backup and restore | Storage | RTO hours–days. Cheapest. Redeploy, then restore |
+| Pilot light | Replicated data + a tiny core | RTO tens of minutes. Data is live; compute is not |
+| Warm standby | A scaled-down full stack in a second region | RTO minutes. The ticketing note is this |
+| Active/active | Two regions serving | RTO ~seconds. Almost never |
+
+<br />
+
+These are not DR:
+
+| What people buy | What it survives | What it is |
+| --- | --- | --- |
+| Multi-AZ | One AZ | **HA**. The region is still up |
+| Snapshots / PITR | A dropped table, a bad deploy, ransomware | **Backup**. The region is still up |
+
+<br />
+
+---
+
+## 1. Why DR exists
+
+An AZ failing is normal. A region failing is rare. A `DROP TABLE` on Friday is neither — and it is the incident you will actually run.
+
+<br />
+
+- **RTO** is the clock from "it is down" to "buyers can buy." DNS TTL, restore time, scale-up, and the runbook all sit on that clock. AWS does not guarantee your number.
+- **RPO** is the newest write you are willing to lose. Asynchronous replication across Regions is lag, not zero. The real RPO is the worse observed lag plus anything not yet durable.
+- Name both before naming a strategy. A blog that can be down until Monday is backup and restore. An onsale that cannot double-sell a seat is warm standby with fencing. The numbers decide the spend.
+
+<br />
+
+**Failure:** buying Aurora Global Database because "we need DR," then never measuring lag or running a failover. You purchased a replica. You did not purchase a recovery.
+
+<br />
+
+---
+
+## 2. Backup vs HA vs DR
+
+Three different failures. One AWS console. That is why they get collapsed.
+
+<br />
+
+```text
+Dropped table / ransomware  →  backup (PITR, versioning, vaults)
+One AZ gone                 →  HA     (Multi-AZ, three subnets)
+Region or account gone      →  DR     (another Region, another account)
+```
+
+<br />
+
+- **Backup** is recovery from a healthy region with dead data. The cluster is up. The rows are wrong. You rewind.
+- **HA** is Multi-AZ: a second writer-standby, three subnets, automatic failover inside one Region. The product stays in `us-east-1`. An AZ is not a Region.
+- **DR** is site recovery. Another Region, often another account. Compute is cheap to rebuild. Data, KMS keys, and DNS are not.
+
+<br />
+
+A Multi-AZ RDS instance with seven days of PITR is a good Monday. It is not a regional outage plan. Snapshots in the same account the attacker already has are not a ransomware plan.
+
+<br />
+
+**Failure:** calling Multi-AZ "our DR strategy," then discovering the Region's control plane is the thing that is down — or restoring a snapshot that was encrypted with a key the same incident deleted.
+
+<br />
+
+---
+
+## 3. Backup plans (logical failure)
+
+Backup is not failover. It is how you survive a `DROP TABLE`, a bad migration, or ransomware while `us-east-1` is fine.
+
+<br />
+
+**RDS.** Automated backups enable [point-in-time recovery](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_PIT.html). Transaction logs go to S3 about every five minutes. Restore creates a **new** instance. It does not rewind the one that is on fire.
+
+<br />
+
+```bash title="cli"
+aws rds modify-db-instance \
+  --db-instance-identifier app-prod \
+  --backup-retention-period 7
+
+aws rds restore-db-instance-to-point-in-time \
+  --source-db-instance-identifier app-prod \
+  --target-db-instance-identifier app-prod-rewind \
+  --restore-time 2026-08-25T10:15:00Z
+```
+
+<br />
+
+Retention is 0–35 days. `LatestRestorableTime` is the actual RPO, not the backup window on the calendar.
+
+<br />
+
+**S3.** Versioning turns overwrite and delete into new versions and delete markers. [Object Lock](https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-lock.html) makes a version WORM: governance can be bypassed with a permission; compliance cannot, including by root, until the retention elapses.
+
+<br />
+
+```bash title="cli"
+aws s3api put-bucket-versioning \
+  --bucket app-uploads \
+  --versioning-configuration Status=Enabled
+```
+
+<br />
+
+**AWS Backup.** One [backup plan](https://docs.aws.amazon.com/aws-backup/latest/devguide/about-backup-plans.html) across RDS, S3, and the rest. Copy recovery points to a vault in **another account**. Vault Lock in compliance mode stops the copies from being deleted. A [logically air-gapped vault](https://docs.aws.amazon.com/aws-backup/latest/devguide/logicallyairgappedvault.html) is the current name for a vault you share and restore from without trusting the workload account. Cross-account copies of RDS *continuous* backups become snapshots — PITR is not on the copy.
+
+<br />
+
+**Forgotten state.** Secrets Manager, KMS, and IaC state. Encrypted backups with a deleted CMK are paperweights. Replicate secrets and keys, or keep a restore path that does not need the production account. SST keeps state locally plus a backup bucket — [Using SST to Manage AWS Infrastructure and DevOps](/notes/using-sst-for-aws-infra-and-devops).
+
+<br />
+
+The queue is usually not "backed up." Replay from the **outbox** in Postgres after restore. That is why the outbox exists — [Message Queues in System Design](/notes/message-queues-in-system-design).
+
+<br />
+
+**Failure:** backups that have never been restored. A vault in the same account the ransomware already has. PITR that cannot reach before the bad migration because retention was one day.
+
+<br />
+
+---
+
+## 4. Backup and restore
+
+The cheapest DR. Data is copied to another Region (or another account). Compute does not exist there until the incident.
+
+<br />
+
+```text
+Healthy:   us-east-1 serves
+           backups copy → us-west-2 (storage only)
+
+Disaster:  deploy IaC in us-west-2
+           restore RDS + S3
+           point DNS
+```
+
+<br />
+
+- RTO is hours to a day: deploy, restore, wait for RDS to finish loading blocks from S3, smoke-test, then DNS. RPO is the backup interval, often hours unless continuous backups are on.
+- Infrastructure as code is what keeps this from being a console archaeology session. The recovery Region should be a `sst deploy` / `terraform apply` away, not a remembered click path.
+- Use it when the product can be down until the restore finishes. Internal tools. A content site. Not an onsale.
+
+<br />
+
+**Failure:** backups only in the source Region. The Region that died held the only copy. Copy first, then call it DR.
+
+<br />
+
+---
+
+## 5. Pilot light
+
+Data is live in the recovery Region. Compute is not. You pay for replication and a tiny core — databases, object storage, maybe a replica. Application servers are configuration you can deploy, not a fleet that is already on.
+
+<br />
+
+```text
+us-east-1                 us-west-2
+  API  API  API             (not deployed)
+  RDS ──────replicate────→  RDS (on)
+  S3  ──────replicate────→  S3  (on)
+```
+
+<br />
+
+- RPO in minutes if replication is continuous. RTO in tens of minutes: deploy or scale compute, promote the database, then DNS.
+- The "switched off" servers should be **not deployed**, with IaC ready to create them — not stopped instances you hope still boot.
+- Backups still exist in the recovery Region. Replication copies corruption too. PITR is how you rewind a logical failure that also landed on the replica.
+
+<br />
+
+**Failure:** a pilot light whose AMI, secret, or schema drifted from production, discovered during the incident. The data was live. The app was last year's.
+
+<br />
+
+---
+
+## 6. Warm standby
+
+A scaled-down but **fully functional** copy already running in the recovery Region. It can take a little traffic. It cannot take production until you scale it. Fully scaled, AWS calls this *hot standby*.
+
+<br />
+
+The difference from pilot light is that the code is already on. You skip the deploy. You still scale, promote, fence, and switch DNS.
+
+<br />
+
+This is the ticketing architecture: Aurora Global Database secondary ready to promote, MSK Replicator, low-count ECS, Route 53 failover. The runbook, the region epoch, and the Terraform live in [Building an Event-Driven Ticketing Backend](/notes/building-an-event-driven-ticketing-backend). Do not copy that module here. The strategy is: pay for a small live stack so RTO is minutes, not a deploy.
+
+<br />
+
+Replication is asynchronous. The RPO is lag, plus anything still in the primary outbox. Two healthy writers are worse than one down writer.
+
+<br />
+
+**Failure:** failing over DNS before fencing the old Region. Warm standby without a fence is two primaries.
+
+<br />
+
+---
+
+## 7. Active/active
+
+Both Regions serve. RTO can approach zero. Writes are the problem.
+
+<br />
+
+- A read in the nearest Region is easy. A write to the same row from two Regions is a conflict. Last-writer-wins is a product decision you have to mean. DynamoDB Global Tables are this trade, not a free "zero RPO" button.
+- Postgres does not become multi-primary because you wanted it. Aurora Global Database has one writer. Active/active with a single writer is active/passive with extra DNS.
+- Split-brain is worse than downtime. Two Regions that both accept purchases double-sell the seat. A monotonically increasing **region epoch** on every write — the ticketing note — is the fence. Do not design dual-write here.
+
+<br />
+
+Reach for it when the business already has a conflict story (CRDTs, immutable events, or a single writer with regional reads). Almost never as the interview default.
+
+<br />
+
+**Failure:** calling asynchronous replicas "active/active" and letting both Regions take writes. You bought a split-brain.
+
+<br />
+
+---
+
+## 8. DNS, fencing, failback
+
+Failover is an ordered runbook. DNS is the last step, not the first.
+
+<br />
+
+```text
+1. Fence the old Region (epoch, disable writes, stop admission)
+2. Declare the recovery point (lag, LatestRestorableTime)
+3. Promote / restore data
+4. Scale compute, smoke-test
+5. Switch Route 53
+6. Failback later — another migration, not "flip DNS back"
+```
+
+<br />
+
+- [Route 53 failover](https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/routing-policy-failover.html) is active/passive DNS: a primary record and a secondary, with health checks. TTL is on the RTO clock. Clients cache. The switch is not instant.
+- Health checks that only ping the load balancer will flip DNS while the database is still the primary you have not fenced. Check the product: can a buyer complete a write?
+- Failback is replicate the other way, reconcile, then move traffic. The old Region that "comes back" is a zombie until you fence it.
+
+<br />
+
+**Failure:** lowering TTL to 60 seconds and calling DNS the DR plan. DNS without fencing is two writers with a delay.
+
+<br />
+
+---
+
+## 9. Prove it
+
+A backup that has never been restored is a rumor. A failover that has never been run is a blog post.
+
+<br />
+
+- **Restore drill.** Pick a point in time. Restore RDS to a new instance. Restore an S3 prefix from a prior version. Open the app against that data. Time it. That duration is a piece of your RTO. AWS Backup [restore testing](https://docs.aws.amazon.com/aws-backup/latest/devguide/restore-testing.html) exists so this is a schedule, not a heroics weekend.
+- **Failover drill.** Promote the pilot light or warm standby in a game day. Record actual RPO (lag at cutover) and actual RTO (fence → healthy writes). The Well-Architected number is a band. Yours is a stopwatch.
+- Drill the forgotten path too: restore a secret, use a replica KMS key, bring SST/Terraform state up in the recovery account.
+
+<br />
+
+**Failure:** a dashboard that is green in `us-east-1` while the only restore test is "the snapshot job succeeded." Jobs succeeding is not recovery.
+
+<br />
+
+---
+
+## Recap Q&A
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="dr-when">
+    <AccordionTrigger>1. What are RTO and RPO, and who sets them?</AccordionTrigger>
+    <AccordionContent>
+
+      - **RTO** is how long the product may be down. **RPO** is how much recent data you may lose. They are a product promise, not an AWS guarantee.
+      - Name both before naming a strategy. The numbers decide whether you pay for storage, a replica, a warm fleet, or two live Regions.
+      - Asynchronous cross-Region replication is lag. The real RPO is observed lag plus anything not yet durable.
+      - **Failure:** buying a replica and never measuring lag or running a failover.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="dr-not">
+    <AccordionTrigger>2. Why is Multi-AZ not DR, and why is a snapshot not failover?</AccordionTrigger>
+    <AccordionContent>
+
+      - **Multi-AZ** survives one AZ. The product stays in the Region. That is HA.
+      - **Snapshots / PITR** rewind a dropped table, a bad deploy, or ransomware while the Region is healthy. That is backup. Restore creates a new RDS instance; it does not rewind the one on fire.
+      - **DR** is site recovery: another Region, often another account. Compute is rebuilt from IaC. Data, keys, and DNS are what you recover.
+      - **Failure:** calling Multi-AZ "our DR strategy," or keeping the only backups in the account the incident already has.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="dr-backup">
+    <AccordionTrigger>3. What belongs in a backup plan?</AccordionTrigger>
+    <AccordionContent>
+
+      - RDS automated backups + PITR. S3 versioning, and Object Lock when delete must not be possible. AWS Backup vaults with a copy in another account, Vault Lock, restore tests.
+      - Forgotten state: Secrets Manager, KMS, IaC state. Encrypted backups with a deleted key are paperweights. Replay queues from the Postgres outbox.
+      - A backup that has never been restored is a rumor. `LatestRestorableTime` is the actual RPO.
+      - **Failure:** one-day retention that cannot reach before the bad migration, or a vault in the same account as the ransomware.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="dr-strategies">
+    <AccordionTrigger>4. Backup-and-restore, pilot light, warm standby, or active/active?</AccordionTrigger>
+    <AccordionContent>
+
+      - **Backup and restore:** storage only in the recovery Region; deploy then restore. Hours. Cheapest.
+      - **Pilot light:** data live, compute not deployed. Tens of minutes. Keep IaC ready; do not hope stopped instances boot.
+      - **Warm standby:** a scaled-down live stack. Minutes. The ticketing note is the runbook. Fence before DNS.
+      - **Active/active:** both Regions serve. Writes conflict. Split-brain is worse than downtime. Almost never the default.
+      - **Failure:** failing over DNS before fencing, or treating async replicas as two writers.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="dr-prove">
+    <AccordionTrigger>5. How do you know the plan works?</AccordionTrigger>
+    <AccordionContent>
+
+      - Restore a database and an object prefix on a schedule. Time it. That duration is part of RTO.
+      - Run a failover game day. Record actual lag (RPO) and actual fence-to-healthy-writes (RTO).
+      - Drill secrets, KMS, and IaC state in the recovery account, not only RDS.
+      - **Failure:** treating "the snapshot job succeeded" as recovery.
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>
