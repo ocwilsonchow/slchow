@@ -1,0 +1,139 @@
+---
+title: 履歷 — 全端
+---
+
+## Wilson, Chow Sin Long
+
+擁有 **5 年**經驗的全端 **software engineer**，交付 **15+** 個 React 與 React Native 產品——從 Figma 到 Node.js API 與 AWS，包括 Apple App Store 與 Google Play 上架。載入時間縮短 **80%**，搜尋延遲降低 **90%**。目前主導一個具備持久化 workflows、memory、RAG 與 evals 的多渠道 **Generative AI** 平台。已取得 **AWS Certified Solutions Architect – Associate** 認證。
+
+---
+
+## 工作經驗
+
+### 軟件開發者，Vioo Company Limited，2022 年 5 月至今
+
+擔任多個並行客戶產品的主要開發者，負責從 UX 界定到雲端部署的完整交付。
+
+- 交付並維護 **15+** 個 React／React Native 應用，包括高保真 Figma 設計、共享設計系統，以及 Apple App Store／Google Play 上架。
+- 在不中斷發布的前提下，將 WordPress 站點遷移至 **Turborepo** 上的 Strapi／Sanity 與 Meilisearch／Algolia，並以 **SST** 部署；載入時間縮短 **80%**、搜尋延遲降低 **90%**，PageSpeed 分數達 **95** 以上。
+- 以 Hono／NestJS、OpenAPI 與 tRPC 在 Lambda／API Gateway 與 **ECS Fargate** 上建構型別安全 Node.js API；以 Drizzle／Prisma 做按組織隔離的 Postgres，Better Auth、OAuth 2.0／OIDC 與 RBAC。
+- 負責共享 **Radix**／**Tailwind**／**shadcn/ui** 元件與 hook API；**Storybook**、Fumadocs 與 MDX 指引消除各客戶應用的重複 UI。
+- 為共享 UI 與關鍵流程設立 **Vitest**、**Playwright**／**Cypress** 品質關卡。
+- 以 **Sentry** 監測 web、流動端與 API 發布的生產崩潰、裝置問題與 API 錯誤。
+- 採用 **tRPC** 與 Scalar 產生的 API 文件，整合時間縮短 **50%**，並消除 schema 不一致錯誤。
+- 以 GitHub Actions + **SST** 建立 CI／CD，部署前跑 lint、type-checking、tests 與 builds；部署時間縮短 **50%+**。
+- 透過結對編程、程式碼審查與正式上線交付，指導實習生與初級開發者。
+
+<br />
+
+---
+
+## 精選專案
+
+### 多渠道 Agent 平台，2026 年 4 月至今
+
+持久化 agent，賦能內部工具與工作流程。
+
+- 將每次 agent run 做成持久化串流，客戶端可斷線、重連並恢復，而不會遺失進度。
+- 建構 **Mastra workflows**、memory、schedules、tools、pause／resume、retries、sandboxing 與 skills；以 **Langfuse** 做可觀測性。
+- 運行於 **Hono**、**Better Auth**、**Postgres**（**Drizzle** ORM）；**S3** 存檔案；以 **SST** 作為 IaC 部署至 AWS ECS Fargate。
+- **RAG**（ingest、parse、embedding、**Pinecone** query／reranking）；另建 **SQL agent** 作實驗性資料分析。
+- 自訂 **@mentions-style** 輸入元件，將 workspace 檔案附加至訊息。
+
+---
+
+### 醫療保健 AI Agent，2025 年 7 月至 2026 年 4 月
+
+以上傳文件與 Shopify 商店商品資料為依據的醫療保健與購物助手。
+
+- 在 **Figma** 設計聊天與後台 UX，並負責面向客戶的流程——文件上傳、對話內問卷、商品與購物車操作。
+- 以 **Hono**、**Prisma**、**LangChain** 與 **Qdrant** 建構後端；以 **Better Auth**、HttpOnly cookies、CORS 與 RBAC 強化 Next.js 後台與客戶端應用。
+- 以 **AI SDK** 經 tRPC 將 **LangGraph** agent 回覆串流至聊天，把 tool calls 渲染成商品卡、購物車操作與問卷，而非純文字。
+- 建構含條件邏輯的後台 form builder，並在對話中執行動態問卷；以 **XState** 與 **React Hook Form**／**Zod** 建模。
+- 以 **memoization** 與 **useTransition** 優化昂貴元件，應對重量級 UI 更新。
+- 資料列表以 **TanStack Query** 做 server prefetch 與 client-side rehydration；**TanStack Table** 支援分頁、篩選與排序；表格狀態存於 URL search parameters，列表可分享、可加書籤。
+- 以 **SST** 作為 IaC，部署至 AWS **Lambda**（Hono API）與 **OpenNext**（Next.js）。
+
+---
+
+### 高效能編輯平台，2025
+
+WordPress 遷往 headless 過程中的 Strapi、Meilisearch 與 **Next.js** 編輯平台。
+
+- 最新 100 篇文章在建置時靜態渲染，其餘按需增量渲染。Strapi **GraphQL** 查詢正確標記 **Next.js** cache tags；內容更新事件觸發 webhook 做 revalidate。
+- 以 Meilisearch 交付即時搜尋，支援全文搜尋與模糊比對；結果命中 **&lt; 50ms**。
+- PageSpeed Insights 平均分數 **>90**；預留圖片空間避免 layout shift，並以 **caching** 與 **image optimization**（強制 webp／avif 並壓縮至 **&lt; 100 KB**）降低 LCP：**FCP &lt; 0.3s**、**LCP &lt; 0.5s**、**CLS &lt; 0.001**。
+- 將鍵盤可及導覽、無障礙表單錯誤處理、語意結構，以及 Lighthouse／axe 檢查視為發布門檻，而非上線後才修。
+- 以 AI SDK 建構用於 AI 內容生成的 Strapi plugin。
+
+---
+
+### React Native 影相亭應用，2024
+
+- 負責影相亭應用，從設計與開發做到 Apple App Store 與 Google Play 上架。
+- 使用者自拍、載入畫布、以貼紙與畫筆編輯，再上傳並分享。
+- 以 React Native Skia、React Native Reanimated 與 gesture handlers 建立畫布；以 react-native-vision-camera 擷取影像。
+- 將 SVG 貼紙轉成 Skia SVG React 元件，支援畫布上縮放、旋轉與平移。
+- 以 **Zustand** 管理狀態；選取保持 atomic，並對高頻更新做 debounce。
+- 以 memoization 與 context isolation 優化；畫布上超過 100 張貼紙與筆劃時，RN Perf Monitor 維持 **55+ FPS**。
+
+---
+
+### React Native 學生應用，2023
+
+- 負責學生流程（課程目錄、預約、公告），從 Figma 做到 Apple App Store 與 Google Play 上架。
+- 上線後維持 **99%** crash-free sessions，以 **Sentry** 診斷崩潰、裝置相容性與 API 瓶頸。
+- 以 **Tanstack Query** 拉取資料，用 cache 與 staleTime 減少重複請求；客戶端狀態以 **Redux Toolkit** 管理。
+- 剖析後發現長列表與全解析度圖片卡住 JS thread，導致動態列表捲動卡頓；改用 **FlashList** + 列 memoization，快取／縮小動態列表圖片，並以 **Reanimated** 在原生執行緒做轉場與手勢。
+- 凍結非作用中分頁與已離開畫面，並延遲掛載，避免不必要的 re-render。
+- 以 Firebase Cloud Messaging deep links，把促銷與里程碑通知導向對應畫面。
+
+<br />
+
+---
+
+## 其他工作
+
+此外亦交付了餐廳忠誠度／會員應用（React Native）、居家長者照護應用（Flutter）、活動／電商 storefronts（Next.js、Shopify **GraphQL**）、CMS 內容站點，以及多個 RBAC 後台系統；後端 API（Node.js、Hono、Drizzle、Postgres）
+
+<br />
+
+---
+
+## 技能
+
+- **前端**：TypeScript、React、Next.js、React Native、Tailwind CSS、shadcn/ui、Figma、Zustand、Redux、TipTap
+- **UI 行為**：TanStack Query、TanStack Form、React Hook Form、XState、TanStack Table、next-intl
+- **架構**：state modeling（URL／server／local）、design systems、tokens、React composition、component APIs、routing、SSR／ISR、GraphQL、tRPC、OpenAPI、Storybook、Fumadocs
+- **後端**：Node.js、Hono、NestJS、Drizzle、Prisma、OpenAPI、tRPC、Postgres、DynamoDB、Better Auth、Redis、websockets
+- **Auth 與安全**：OAuth 2.0／OIDC、JWT、HttpOnly cookies、CORS、RBAC
+- **AI**：Mastra、Vercel AI SDK、LangChain、Pinecone、Strands、AWS Bedrock、Mem0、Langfuse
+- **基礎設施與 DevOps**：SST、Terraform、Docker、GitHub Actions、AWS、Vercel、Turborepo、Kafka、microservices（familiar）
+- **QA**：Vitest、Playwright、Cypress、Lighthouse、axe、Sentry
+- **流動端**：Expo、FlashList、Reanimated、Moti、Skia、Unistyles、FCM
+
+<br />
+
+---
+
+## 認證
+
+- AWS Certified Solutions Architect – Associate，2026
+- AWS Certified Cloud Practitioner，2025
+
+<br />
+
+---
+
+## 教育背景
+
+### University College London
+
+- Master of Pharmacy（MPharm，本科），2016 至 2020 年 — 一等榮譽學位
+- 發現自己熱愛建構應用後，從藥劑轉行至軟件開發。
+
+<br />
+
+---
+
+你亦可以在[這裡](/resume-full-stack.pdf)下載我的履歷。
