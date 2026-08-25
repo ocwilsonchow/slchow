@@ -1,6 +1,6 @@
 ---
 title: "Full-Stack Q&A: Frontend"
-description: Spoken-length answers to frontend engineering questions
+description: Frontend engineering 问题的口语长度答案
 category: full-stack
 ---
 
@@ -8,226 +8,226 @@ category: full-stack
 
 <Accordion type="single" collapsible>
   <AccordionItem value="fe-rerender">
-    <AccordionTrigger>1. What triggers a re-render in React? Explain reconciliation and why key choice matters in lists.</AccordionTrigger>
+    <AccordionTrigger>1. 什么会触发 React 的 re-render？解释 reconciliation，以及 list 里 key 的选择为什么重要。</AccordionTrigger>
     <AccordionContent>
 
-      - A re-render is React asking a component for a new **description**, not the DOM updating. An update is scheduled when `state`, `props`, or `context` change, when a parent renders and this child is not bailed out, or when `useSyncExternalStore` reports a new snapshot. Rendering can be abandoned in concurrent mode. **Committing** is the later step that mutates the host tree and runs Effects.
-      - Reconciliation matches new elements to existing Fibers by **type**, **position**, and `key`. Same type and a compatible `key`: reuse the Fiber and **preserve its state**. Different type: tear the subtree down. Different `key`: a new identity even when the type matches.
-      - `key` is identity, not a performance hint. A stable id among siblings is the identity. A `key` can also reset state on purpose — an editor keyed by document id remounts when the document changes.
-      - **Failure:** index keys on a reorder attach leftover local state to the wrong row. The checked checkbox appears to jump. Model: [Understanding React in Depth](/notes/understanding-react-in-depth).
+      - Re-render 是 React 向 component 要一份新的 **描述**，不是 DOM 在更新。当 `state`、`props` 或 `context` 改变、当 parent render 且这个 child 没有被 bail out、或当 `useSyncExternalStore` 报告一份新 snapshot 时，一次 update 会被 schedule。Concurrent mode 下 rendering 可以被放弃。**Committing** 是稍后那一步：突变 host tree 并跑 Effects。
+      - Reconciliation 按 **type**、**position** 与 `key`，把新 elements 对上现有 Fibers。相同 type 且 `key` 兼容：重用 Fiber 并 **保留它的 state**。不同 type：拆掉整棵 subtree。不同 `key`：即使 type 相同，也是新的 identity。
+      - `key` 是 identity，不是 performance hint。Siblings 之间一份稳定的 id 才是 identity。`key` 也可以故意 reset state——一个按 document id keyed 的 editor，在 document 改变时 remount。
+      - **失败：** 用 index keys 再 reorder，会把残留的 local state 挂到错误的 row 上。勾选过的 checkbox 看起来会跳。模型：[深入理解 React](/notes/understanding-react-in-depth)。
 
     </AccordionContent>
   </AccordionItem>
 
   <AccordionItem value="fe-useeffect">
-    <AccordionTrigger>2. What's the correct mental model for useEffect? Give examples of effects that should be derived state or event handlers instead.</AccordionTrigger>
+    <AccordionTrigger>2. useEffect 正确的心智模型是什么？举出本应是 derived state 或 event handler 的 Effect 例子。</AccordionTrigger>
     <AccordionContent>
 
-      - `useEffect` is **synchronization with an external system after commit**, not "run this whenever values change." It usually runs after paint. Cleanup runs before the next setup and on unmount. Dependencies name that closure's reactive inputs. Omitting one keeps an **old closure**.
-      - These do **not** belong in Effects: **derived values** (compute during render); **resetting state when a prop changes** (key the subtree); **user actions** (form submit, "Buy," analytics on click — those belong in the handler); **copying props into state** on every change.
-      - Effects that belong have a real external lifetime: a WebSocket keyed by `roomId`, `document.title`, a third-party widget on a ref. Fetching in `useEffect` as the default data path is the model left behind in App Router.
-      - **Failure:** disabling the lint rule instead of including the input, using a functional updater, or moving the work into an event handler. If it can be calculated from props and state already in hand, it is not an Effect. See [Understanding React in Depth](/notes/understanding-react-in-depth).
+      - `useEffect` 是 **commit 之后与外部系统同步**，不是「只要值变了就跑这段」。它通常在 paint 之后跑。Cleanup 在下一次 setup 之前以及 unmount 时跑。Dependencies 点名这份 closure 的 reactive inputs。漏掉一个就会保住一份 **旧 closure**。
+      - 这些 **不该** 放进 Effects：**derived values**（在 render 期间算）；**prop 改变时 reset state**（给 subtree 加 key）；**用户动作**（form submit、「Buy」、click 上的 analytics——那些属于 handler）；**每次 change 都把 props 抄进 state**。
+      - 该存在的 Effects 有真实的外部 lifetime：按 `roomId` keyed 的 WebSocket、`document.title`、ref 上的第三方 widget。把 `useEffect` 里 fetch 当默认 data path，是 App Router 已经丢掉的模型。
+      - **失败：** 关掉 lint rule，而不是补上那个 input、用 functional updater，或把工作挪进 event handler。如果已经能从手头的 props 与 state 算出来，那就不是 Effect。见 [深入理解 React](/notes/understanding-react-in-depth)。
 
     </AccordionContent>
   </AccordionItem>
 
   <AccordionItem value="fe-usememo">
-    <AccordionTrigger>3. When do useMemo and useCallback actually help, and when do they add cost for nothing?</AccordionTrigger>
+    <AccordionTrigger>3. useMemo 与 useCallback 什么时候真的有用，什么时候只是白加成本？</AccordionTrigger>
     <AccordionContent>
 
-      - `useMemo` and `useCallback` are **performance tools, not semantic guarantees**. They skip work or keep a reference stable while dependencies stay equal. Memoization cannot make an impure render safe.
-      - They help when the work is **measurably expensive** and inputs change less often than the parent renders; when a child wrapped in `memo` would otherwise see a new object or function identity every time; when a hook dependency would churn and re-subscribe every render.
-      - They add cost for nothing when every literal and every click handler is wrapped "just in case." Each hook still allocates, compares dependencies, and occupies a Hook slot. Nested `useMemo` that returns a new object because of a spread into it is an empty win.
-      - The **React Compiler** can auto-memoize eligible components, which raises the bar for hand-written memo. It does not replace Server Components, cache policy, or a `key` mistake. See [Understanding React in Depth](/notes/understanding-react-in-depth).
+      - `useMemo` 与 `useCallback` 是 **performance tools，不是 semantic guarantees**。Dependencies 保持相等时，它们跳过工作或稳住一份 reference。Memoization 不能让一次 impure render 变安全。
+      - 它们有用，当工作 **可测地昂贵** 且 inputs 的变化比 parent render 更少；当包了 `memo` 的 child 否则每次都会看到新的 object 或 function identity；当一个 hook dependency 会 churn，导致每次 render 都 re-subscribe。
+      - 每个 literal、每个 click handler 都「以防万一」包一层时，它们只是白加成本。每个 hook 仍会 allocate、比较 dependencies、占一个 Hook slot。嵌套的 `useMemo` 因为 spread 进去又返回一个新 object，是空赢。
+      - **React Compiler** 可以对合格的 components 自动 memoize，手写 memo 的门槛因此更高。它不取代 Server Components、cache policy，或一次 `key` 用错。见 [深入理解 React](/notes/understanding-react-in-depth)。
 
     </AccordionContent>
   </AccordionItem>
 
   <AccordionItem value="fe-state-split">
-    <AccordionTrigger>4. How do you split local state, server state, and global client state? Why do React Query/SWR often replace Redux?</AccordionTrigger>
+    <AccordionTrigger>4. 如何拆分 local state、server state 与 global client state？为什么 React Query / SWR 常常取代 Redux？</AccordionTrigger>
     <AccordionContent>
 
-      - Split state by **who owns the source of truth and how it goes stale**, not by "is this used in two components."
-      - **Local UI state:** modal open, which accordion item, a hover target, an input before submit. `useState` next to the widget. **Server state:** prescriptions, inventory, the current user payload — async, shared, cacheable, and can be wrong the moment a fetch returns. Give it a **query key** that includes tenant, id, and filters. **Global client state:** theme, sidebar collapsed, a wizard step that is not the server record. A small store, not a copy of the API.
-      - **TanStack Query** and **SWR** often replace Redux because most of what used to live in Redux was a hand-rolled server cache: loading flags, retries, deduping, invalidation, pagination. Redux still earns its keep for complex client workflows, undo, or a domain model that is not a remote resource.
-      - **Failure:** **duplicating** server data into Redux and fighting which copy is newer. The client cache is a hint, not a permission boundary. Authorization still belongs on the API.
+      - 按 **谁拥有 source of truth、以及它如何变 stale** 来拆 state，不是按「是不是两个 components 都在用」。
+      - **Local UI state：** modal 开着、哪一个 accordion item、hover target、submit 之前的 input。`useState` 放在 widget 旁边。**Server state：** prescriptions、inventory、当前 user payload——async、shared、可 cache，而且 fetch 一返回就可能已经错了。给它一份包含 tenant、id 与 filters 的 **query key**。**Global client state：** theme、sidebar collapsed、不是 server record 的 wizard step。一个小 store，不是 API 的副本。
+      - **TanStack Query** 与 **SWR** 常常取代 Redux，因为以前活在 Redux 里的大多是手搓的 server cache：loading flags、retries、deduping、invalidation、pagination。Redux 仍值得留下的场景是复杂的 client workflows、undo，或不是 remote resource 的 domain model。
+      - **失败：** 把 server data **复制** 进 Redux，再争论哪一份更新。Client cache 是 hint，不是 permission boundary。Authorization 仍属于 API。
 
     </AccordionContent>
   </AccordionItem>
 
   <AccordionItem value="fe-rsc">
-    <AccordionTrigger>5. What do React Server Components change about data fetching and bundle size? Where's the client/server boundary in Next.js App Router?</AccordionTrigger>
+    <AccordionTrigger>5. React Server Components 如何改变 data fetching 与 bundle size？Next.js App Router 里 client/server boundary 在哪？</AccordionTrigger>
     <AccordionContent>
 
-      - In the App Router, **Server Components are the default**. They can await data during render, talk to a database through a server-only function, and send the **rendered result** to the client instead of the component source. Secret-handling code and query builders never become a browser chunk.
-      - The payload is **Flight**, not HTML. HTML is an initial picture so the browser can paint. Flight is the authoritative server-rendered React tree, Suspense holes, Client Component references, and serializable values. Hydration applies to **Client Components**, not to Server Component function bodies.
-      - The client/server boundary is a **`"use client"` module**, not a file named `client.tsx`. The directive marks a module-graph entry: that module and its transitive imports must be browser-reachable. It does **not** mean the component skips HTML, and it does not let a Client Component import server secrets. Keep the directive on **narrow interactive leaves**.
-      - Values crossing the boundary must serialize. Pass children slots so a Client wrapper can host already-rendered server output. A Flight endpoint is not a public JSON API. See [Understanding Next.js in Depth](/notes/understanding-next-js-in-depth).
+      - 在 App Router 里，**Server Components 是默认**。它们可以在 render 期间 await data、通过 server-only function 跟 database 说话，并把 **rendered result** 而不是 component source 发给 client。处理 secrets 的代码与 query builders 永远不会变成 browser chunk。
+      - Payload 是 **Flight**，不是 HTML。HTML 是让 browser 能 paint 的初始画面。Flight 才是权威的 server-rendered React tree、Suspense holes、Client Component references，以及 serializable values。Hydration 作用在 **Client Components** 上，不是 Server Component 的 function bodies。
+      - Client/server boundary 是一个 **`"use client"` module**，不是一个名叫 `client.tsx` 的文件。这条 directive 标记 module-graph entry：该 module 及其 transitive imports 必须能被 browser 到达。它 **不** 代表 component 跳过 HTML，也不让 Client Component 去 import server secrets。把 directive 放在 **窄的 interactive leaves**。
+      - 穿过 boundary 的 values 必须 serialize。传 children slots，好让 Client wrapper 能托管已经 render 好的 server output。Flight endpoint 不是公开的 JSON API。见 [深入理解 Next.js](/notes/understanding-next-js-in-depth)。
 
     </AccordionContent>
   </AccordionItem>
 
   <AccordionItem value="fe-rendering-modes">
-    <AccordionTrigger>6. Choose between SSR, SSG, ISR, and CSR for: a marketing page, a pharmacist dashboard, and a patient-facing prescription page. Justify each.</AccordionTrigger>
+    <AccordionTrigger>6. 为营销页、药剂师 dashboard、面向患者的 prescription 页在 SSR、SSG、ISR 与 CSR 之间做选择。各自说明理由。</AccordionTrigger>
     <AccordionContent>
 
-      - SSR, SSG, ISR, and CSR remain **outcomes**, but App Router composes them per subtree. The question is: when is the HTML or Flight allowed to be produced, and may a CDN reuse it.
-      - **Marketing page:** **SSG**, or **ISR** if editors publish through the day. No cookies, no tenant, same bytes for everyone. CSR-only would waste LCP on a page that should be a static document plus a little hydration.
-      - **Pharmacist dashboard:** **request-time SSR** / dynamic Server Components. The tree reads session cookies, tenant, and live queues. PHI or another pharmacy's board must not be SSG'd. **Patient-facing prescription page:** **SSR for the personalized payload**, never a shared CDN cache of that patient's drugs. Public chrome can be static. ISR is the wrong tool for "this exact prescription for this session."
-      - CSR remains right for browser-owned work: a canvas editor, a socket, offline IndexedDB. Do not force-static a route that calls `cookies()`. Do not cache personalized HTML under a single URL. Spectrum: [Understanding Next.js in Depth](/notes/understanding-next-js-in-depth).
+      - SSR、SSG、ISR 与 CSR 仍是 **outcomes**，但 App Router 按 subtree 组合它们。问题是：HTML 或 Flight 何时允许被产生，以及 CDN 能否 reuse。
+      - **营销页：** **SSG**，若编辑全天都在发布则用 **ISR**。没有 cookies、没有 tenant，所有人同一份 bytes。纯 CSR 会浪费 LCP，而这类页面本应是一份 static document 加上一点点 hydration。
+      - **药剂师 dashboard：** **request-time SSR** / dynamic Server Components。这棵树读 session cookies、tenant 与 live queues。PHI 或另一家药房的 board 绝不能被 SSG。**面向患者的 prescription 页：** **个性化 payload 用 SSR**，绝不要把该患者的药品放进 shared CDN cache。公开 chrome 可以 static。ISR 不是「这个 session 的这张处方」的工具。
+      - CSR 仍适合 browser 拥有的工作：canvas editor、socket、offline IndexedDB。不要把调用 `cookies()` 的 route 强行 static。不要在单一 URL 下 cache 个性化 HTML。光谱：[深入理解 Next.js](/notes/understanding-next-js-in-depth)。
 
     </AccordionContent>
   </AccordionItem>
 
   <AccordionItem value="fe-waterfalls">
-    <AccordionTrigger>7. What are request waterfalls, and how do you parallelize or hoist data fetching to eliminate them?</AccordionTrigger>
+    <AccordionTrigger>7. 什么是 request waterfalls？如何 parallelize 或 hoist data fetching 来消除它们？</AccordionTrigger>
     <AccordionContent>
 
-      - A **request waterfall** is latency that exists only because work waited to **start**. The network round trips are independent, but the code made them sequential. Users feel the sum, not the max.
-      - On the server: sequential awaits in a Server Component. Start independent promises first, then `await Promise.all`, or put sibling fetches in sibling components each under `Suspense`. On the client the waterfall is worse: render, hydrate, `useEffect` fetch, then a child mounts and fetches again.
-      - Kick off independent `fetch` or loader calls **before** the first await. Deduplicate with request-scoped memoization; do not confuse that with a persistent cache. Do not hop Server Component to this app's own Route Handler just to load page data.
-      - **Failure:** a self-inflicted chain that streaming cannot fix — inventory waited only because the parent awaited one child before creating the next. Write-up: [Understanding Next.js in Depth](/notes/understanding-next-js-in-depth).
+      - **Request waterfall** 是只因为工作在等着 **开始** 才存在的延迟。网络 round trips 本可独立，但代码把它们做成 sequential。用户感受到的是 sum，不是 max。
+      - 在 server：Server Component 里 sequential awaits。先启动独立的 promises，再 `await Promise.all`，或把 sibling fetches 放进各自包在 `Suspense` 下的 sibling components。在 client 这条 waterfall 更糟：render、hydrate、`useEffect` fetch，然后 child mount 再 fetch 一次。
+      - 在第一次 await **之前** 踢出独立的 `fetch` 或 loader 调用。用 request-scoped memoization 做 deduplicate；别把它跟 persistent cache 搞混。不要为了加载 page data 从 Server Component hop 到本应用自己的 Route Handler。
+      - **失败：** 一条 streaming 修不好的自残链——inventory 之所以在等，只因为 parent 先 await 了一个 child 才去创建下一个。写：[深入理解 Next.js](/notes/understanding-next-js-in-depth)。
 
     </AccordionContent>
   </AccordionItem>
 
   <AccordionItem value="fe-optimistic">
-    <AccordionTrigger>8. Implement an optimistic update: what happens on mutation failure, and how do you roll back cleanly?</AccordionTrigger>
+    <AccordionTrigger>8. 实现一次 optimistic update：mutation 失败时发生什么，如何干净地 roll back？</AccordionTrigger>
     <AccordionContent>
 
-      - An optimistic update shows the **expected result immediately**, then reconciles with the server. It belongs only when the success shape is obvious and failure is easy to explain — marking a prescription as "in review," not deleting a legal record with no undo.
-      - The clean rollback is a **snapshot**: **`onMutate`** cancel in-flight reads, snapshot the cache, write the optimistic value; **`onError`** restore the snapshot and show an error; **`onSettled`** invalidate so the server remains the authority. React 19 `useOptimistic` is the same idea tied to an Action — the optimistic value is **temporary**.
-      - If the Action throws, the optimistic layer drops and the previous UI returns. That is not "error handling done" — the failure still has to be surfaced.
-      - **Failure:** applying the optimistic patch twice, rolling back the wrong key, and ignoring a 409 when the server rejected a stale version. Mutations should be **idempotent** where possible. Destructive actions get a confirm, not an optimistic disappear.
+      - Optimistic update 立刻展示 **预期结果**，再与 server reconcile。只在 success shape 显而易见、失败也好解释时才用——把处方标成 "in review"，而不是删除一份没有 undo 的法律记录。
+      - 干净的 rollback 是一份 **snapshot**：**`onMutate`** 取消 in-flight reads、snapshot cache、写入 optimistic value；**`onError`** 恢复 snapshot 并展示 error；**`onSettled`** invalidate，让 server 仍是权威。React 19 `useOptimistic` 是绑在 Action 上的同一想法——optimistic value 是 **temporary**。
+      - 若 Action throw，optimistic 层掉落，先前的 UI 回来。那不是「error handling 做完了」——失败仍必须被 surface。
+      - **失败：** 把 optimistic patch 应用两次、rollback 了错误的 key、以及 server 因 stale version 拒绝时忽略 409。Mutations 应尽可能 **idempotent**。Destructive actions 要 confirm，不是 optimistic 消失。
 
     </AccordionContent>
   </AccordionItem>
 
   <AccordionItem value="fe-forms">
-    <AccordionTrigger>9. Controlled vs uncontrolled form inputs: tradeoffs, and how do you keep a 50-field clinical form performant?</AccordionTrigger>
+    <AccordionTrigger>9. Controlled vs uncontrolled form inputs：取舍是什么，如何让一份 50 字段的临床表单保持 performant？</AccordionTrigger>
     <AccordionContent>
 
-      - **Controlled** means React state is the source of truth: `value` plus `onChange` on every keystroke. Instant validation; the cost is a re-render of whoever owns that state. **Uncontrolled** means the DOM holds the value until it is read through a ref or `FormData`. Cheaper typing; the React tree can disagree with what is on screen unless discipline is strict.
-      - For a 50-field clinical form, do **not** keep one giant controlled object at the page root. Default to **uncontrolled fields** with React Hook Form. Validate on blur and submit, not every keypress, except safety-critical fields like dose. Isolate expensive widgets behind their own state.
-      - Persist a versioned draft on the **authenticated server**. Browser `sessionStorage` is XSS-readable and is a poor place for PHI. Key the form by `encounterId` so switching patients remounts instead of leaking values.
-      - Accessibility stays first-class: labelled inputs, error text tied with `aria-describedby`, a submit error summary. Missing a keystroke of live validation is better than dropping frames while a pharmacist enters a dose.
+      - **Controlled** 意味着 React state 是 source of truth：每个 keystroke 都有 `value` 加上 `onChange`。即时 validation；代价是拥有那份 state 的人会 re-render。**Uncontrolled** 意味着 DOM 握住 value，直到通过 ref 或 `FormData` 读取。打字更便宜；除非纪律严格，React tree 可能与屏幕上的内容不一致。
+      - 对于 50 字段的临床表单，**不要** 在 page root 放一个巨大的 controlled object。默认用 React Hook Form 的 **uncontrolled fields**。在 blur 与 submit 时 validate，不要每个 keypress 都跑，剂量这类 safety-critical 字段除外。把昂贵的 widgets 隔离在自己的 state 后面。
+      - 把带版本的 draft persist 到 **authenticated server**。Browser `sessionStorage` 可被 XSS 读取，不是放 PHI 的地方。按 `encounterId` 给 form 加 key，切换患者时 remount，而不是泄漏 values。
+      - Accessibility 仍是一等公民：labelled inputs、用 `aria-describedby` 绑上 error text、submit error summary。少一次 keystroke 的 live validation，好过药剂师输入剂量时掉帧。
 
     </AccordionContent>
   </AccordionItem>
 
   <AccordionItem value="fe-web-vitals">
-    <AccordionTrigger>10. Explain LCP, CLS, and INP. For each, name two concrete fixes.</AccordionTrigger>
+    <AccordionTrigger>10. 解释 LCP、CLS 与 INP。各给出两个具体修复。</AccordionTrigger>
     <AccordionContent>
 
-      - These are user-timed paints and interactions, not lab vanity scores. Split LCP into TTFB, resource discovery delay, download, and element render delay: [The Critical Rendering Path in the Browser](/notes/critical-rendering-path-in-the-browser).
-      - **LCP** — when the **largest visible content** appears. Do **not** lazy-load the LCP image; put `src` and dimensions in the initial HTML. Shrink and CDN the asset; unblock paint with critical CSS and less main-thread JS before first paint.
-      - **CLS** — **unexpected movement**. Width and height (or aspect-ratio) on images, embeds, and ad slots. Font fallback metrics or `size-adjust` so swapping from fallback to webfont does not shove the heading; do not inject banners above content after paint.
-      - **INP** — interaction until the **next paint**. Break long tasks; yield or move CPU work to a **Web Worker**. `startTransition` only deprioritizes interruptible React rendering — it does not take a 200ms loop off the handler. Ship less JS to the interaction path.
-      - Watch field data, not only Lighthouse. Marketing pages are LCP/CLS problems. Dashboards are INP problems. If TTFB dominates LCP, look at the origin and cache instead of compressing PNGs.
+      - 这些是按用户计时的 paints 与 interactions，不是 lab 里的虚荣分数。把 LCP 拆成 TTFB、resource discovery delay、download 与 element render delay：[Browser 中的 Critical Rendering Path](/notes/critical-rendering-path-in-the-browser)。
+      - **LCP** —— **最大可见内容** 出现的时刻。**不要** lazy-load LCP image；把 `src` 与 dimensions 放进初始 HTML。压缩并 CDN 这份 asset；用 critical CSS 与更少 first paint 之前的 main-thread JS 来 unblock paint。
+      - **CLS** —— **意外位移**。给 images、embeds 与 ad slots 设 width 与 height（或 aspect-ratio）。Font fallback metrics 或 `size-adjust`，让从 fallback 切到 webfont 时不要把 heading 顶开；不要在 paint 之后把 banners 插到内容上方。
+      - **INP** —— 从 interaction 到 **下一次 paint**。拆开 long tasks；yield 或把 CPU 工作挪到 **Web Worker**。`startTransition` 只是降低可中断 React rendering 的优先级——它不会把一段 200ms loop 从 handler 里拿走。少给 interaction path 运 JS。
+      - 看 field data，不只看 Lighthouse。营销页是 LCP/CLS 问题。Dashboards 是 INP 问题。若 TTFB 主导 LCP，去看 origin 与 cache，而不是去压 PNG。
 
     </AccordionContent>
   </AccordionItem>
 
   <AccordionItem value="fe-bundle">
-    <AccordionTrigger>11. How do you approach bundle size: code splitting, route-level lazy loading, and finding what to cut with bundle analysis?</AccordionTrigger>
+    <AccordionTrigger>11. 如何处理 bundle size：code splitting、route-level lazy loading，以及用 bundle analysis 找出该砍什么？</AccordionTrigger>
     <AccordionContent>
 
-      - Start from a **trace of what the user downloaded to do one job**, not from a single "main.js is too big" feeling. App Router already splits by route. The mistakes are pulling the world into the **shared layout** and putting `"use client"` too high so a markdown parser, a date library, or a chart SDK rides into every page.
-      - Run a **bundle analyzer** on the client graph. Sort by parsed size. Hunt duplicated copies of the same library and surprise locales from a date package. Keep data access and MDX compilation on the **server**.
-      - Route-level split is the default; add `next/dynamic` or `import()` for heavy leaves — a PDF viewer, a rich text editor, a chart — that most sessions never open. Cut the actual culprits: moment with all locales, a full icon pack imported from the root.
-      - **Failure:** lazy-loading the LCP hero to "save JS" — that trades bundle for Web Vitals. Do not split a 3 KB helper into its own chunk. Boundary placement: [Understanding Next.js in Depth](/notes/understanding-next-js-in-depth).
+      - 从 **用户做一件事下载了什么的 trace** 开始，不是从「main.js 太大了」的感觉。App Router 已经按 route split。错误是把全世界拉进 **shared layout**，以及把 `"use client"` 放得太高，让 markdown parser、date library 或 chart SDK 跟着进每一页。
+      - 对 client graph 跑 **bundle analyzer**。按 parsed size 排序。猎重复的同一 library 副本，以及 date package 带来的意外 locales。把 data access 与 MDX compilation 留在 **server**。
+      - Route-level split 是默认；对大多数 session 从不开的重 leaves——PDF viewer、rich text editor、chart——再加 `next/dynamic` 或 `import()`。砍真正的元凶：带上全部 locales 的 moment、从 root import 的整包 icon pack。
+      - **失败：** 为了「省 JS」去 lazy-load LCP hero——那是用 bundle 换 Web Vitals。不要把一个 3 KB helper split 成自己的 chunk。Boundary 放置：[深入理解 Next.js](/notes/understanding-next-js-in-depth)。
 
     </AccordionContent>
   </AccordionItem>
 
   <AccordionItem value="fe-virtualization">
-    <AccordionTrigger>12. A table must render 10,000 rows smoothly — walk through list virtualization and its tradeoffs.</AccordionTrigger>
+    <AccordionTrigger>12. 一张表必须流畅渲染 10,000 行——走一遍 list virtualization 及其取舍。</AccordionTrigger>
     <AccordionContent>
 
-      - Ten thousand DOM rows will not stay at sixty frames. **Virtualization** mounts a window: visible rows plus a small **overscan**, and it recycles or replaces cells as the user scrolls. The table body becomes a tall spacer with absolutely positioned rows. Measure row height or use a fixed height if the design allows it.
-      - **Variable height** rows need measurement and can jump if the estimate is wrong. **Keyboard and find-in-page** only see mounted nodes. **Screen readers** may announce an incomplete table unless real `table` semantics and a row count are kept. **Sticky columns** fight the virtualizer's positioning. **SSR** should not mount ten thousand rows on the server either.
-      - Do not virtualize a 40-row page, and do not `map` ten thousand into the DOM and hope `memo` saves the frame budget.
-      - Pair virtualization with a query that **pages on the server** so ten thousand JSON objects are not shipped to render twenty. The RN analog in these notes is FlashList; same budget, different renderer.
+      - 一万行 DOM rows 撑不住六十帧。**Virtualization** 只 mount 一扇窗口：可见 rows 加上一小段 **overscan**，用户滚动时 recycle 或替换 cells。Table body 变成带绝对定位 rows 的高 spacer。测量 row height，若设计允许就用固定高度。
+      - **Variable height** rows 需要测量，估计错了会跳。**Keyboard 与 find-in-page** 只看得到已 mount 的 nodes。除非保住真正的 `table` semantics 与 row count，**screen readers** 可能朗读一张不完整的表。**Sticky columns** 会跟 virtualizer 的 positioning 打架。**SSR** 也不该在 server 上 mount 一万行。
+      - 不要 virtualize 一页 40 行，也不要 `map` 一万条进 DOM 然后指望 `memo` 保住 frame budget。
+      - 把 virtualization 跟 **在 server 上 paging** 的 query 配对，这样就不用为了渲染二十行而运一万个 JSON objects。这些 notes 里 RN 的对应是 FlashList；同一份 budget，不同的 renderer。
 
     </AccordionContent>
   </AccordionItem>
 
   <AccordionItem value="fe-a11y">
-    <AccordionTrigger>13. What does accessibility mean beyond ARIA? Cover semantic HTML, keyboard navigation, and focus management in modals.</AccordionTrigger>
+    <AccordionTrigger>13. Accessibility 在 ARIA 之外意味着什么？覆盖 semantic HTML、keyboard navigation，以及 modals 里的 focus management。</AccordionTrigger>
     <AccordionContent>
 
-      - Accessibility is **can this person complete the task with the device they have**, not "ARIA sprinkled on divs." ARIA is a last resort when native HTML cannot express the widget. A `div` with `role="button"` that is not in the tab order and has no Enter/Space handler is worse than a real `button`.
-      - Semantic HTML: headings in order, one `h1` for the page job, landmarks (`header`, `nav`, `main`). `button` for actions, `a` for navigation, `label` tied to inputs, `table` for tabular data. Visible name that matches the accessible name so voice control works.
-      - Keyboard: a logical tab order that follows the visual order, `:focus-visible` that is not `outline: none`'d away, Escape to close, skip links for repeat nav.
-      - Modals: move focus into the dialog when it opens; **trap focus** inside; background gets `inert`; restore focus to the trigger on close; `role="dialog"`, `aria-modal`, labelled-by the title. Test with keyboard only and a screen reader on the critical path.
+      - Accessibility 是 **这个人用手里的设备能否完成这件事**，不是「在 divs 上撒 ARIA」。ARIA 是 native HTML 表达不了这个 widget 时的最后手段。一个 `div` 带着 `role="button"`、不在 tab order 里、也没有 Enter/Space handler，比真正的 `button` 更糟。
+      - Semantic HTML：headings 按顺序、页面任务一个 `h1`、landmarks（`header`、`nav`、`main`）。动作用 `button`，导航用 `a`，`label` 绑到 inputs，表格数据用 `table`。Visible name 与 accessible name 一致，voice control 才能工作。
+      - Keyboard：逻辑 tab order 跟随视觉顺序、`:focus-visible` 没有被 `outline: none` 消掉、Escape 关闭、给重复 nav 准备 skip links。
+      - Modals：打开时把 focus 移进 dialog；在里面 **trap focus**；背景加上 `inert`；关闭时把 focus 还给 trigger；`role="dialog"`、`aria-modal`、labelled-by 标题。在 critical path 上只用 keyboard 和 screen reader 测。
 
     </AccordionContent>
   </AccordionItem>
 
   <AccordionItem value="fe-tokens">
-    <AccordionTrigger>14. Where should auth tokens live — localStorage vs httpOnly cookies? Connect your answer to XSS and CSRF risk.</AccordionTrigger>
+    <AccordionTrigger>14. Auth tokens 该放在哪——localStorage 还是 httpOnly cookies？把答案接到 XSS 与 CSRF 风险上。</AccordionTrigger>
     <AccordionContent>
 
-      - Session credentials belong in an **`HttpOnly` + `Secure` + `SameSite` cookie** set by the server, not in `localStorage`. Any script on the origin can read Web Storage. That includes XSS. `HttpOnly` means `document.cookie` cannot read the value. `SameSite=Lax` or `Strict` is the default for a first-party app. Authenticated **cross-site** POSTs need `SameSite=None; Secure` **plus** CSRF tokens and Origin checks.
-      - The classic SPA pattern — JWT in `localStorage`, send `Authorization` by hand — often **skips CSRF** because the browser will not auto-attach that header. The trade is that **XSS becomes a full session steal**. Prefer taking CSRF seriously on a cookie session and keep the token out of JavaScript.
-      - `localStorage` is still right for a theme, a dismissed banner, a draft that is not a credential. `sessionStorage` is the same XSS story with a shorter lifetime. Cookies that are not `HttpOnly` are readable by scripts and still go out on matching requests — the worst mix.
-      - **Failure:** putting PHI or refresh tokens in Web Storage "because it is easier for Axios." The server owns the session, rotates it, and expires it. Practical rules: [Local Storage, Session Storage, and Cookies](/notes/browser-storage-localstorage-sessionstorage-cookies).
+      - Session credentials 属于 server 设置的 **`HttpOnly` + `Secure` + `SameSite` cookie**，不是 `localStorage`。Origin 上任何 script 都能读 Web Storage。这包括 XSS。`HttpOnly` 意味着 `document.cookie` 读不到这个值。`SameSite=Lax` 或 `Strict` 是 first-party app 的默认。Authenticated **cross-site** POSTs 需要 `SameSite=None; Secure` **加上** CSRF tokens 与 Origin checks。
+      - 经典 SPA 模式——JWT 放 `localStorage`、亲手发 `Authorization`——常常 **跳过 CSRF**，因为 browser 不会自动附上那个 header。代价是 **XSS 变成一次完整的 session steal**。更愿意在 cookie session 上认真对待 CSRF，并把 token 留在 JavaScript 之外。
+      - `localStorage` 仍适合 theme、dismissed banner、不是 credential 的 draft。`sessionStorage` 是同一套 XSS 故事，lifetime 更短。不是 `HttpOnly` 的 cookies 既可被 scripts 读取，仍会跟着 matching requests 出去——最糟的组合。
+      - **失败：** 把 PHI 或 refresh tokens 放进 Web Storage「因为对 Axios 更方便」。Server 拥有 session，rotate 它，expire 它。实用规则：[Local Storage、Session Storage 与 Cookies](/notes/browser-storage-localstorage-sessionstorage-cookies)。
 
     </AccordionContent>
   </AccordionItem>
 
   <AccordionItem value="fe-offline">
-    <AccordionTrigger>15. How do service workers and the Cache API enable offline support? Explain stale-while-revalidate.</AccordionTrigger>
+    <AccordionTrigger>15. Service workers 与 Cache API 如何支持 offline？解释 stale-while-revalidate。</AccordionTrigger>
     <AccordionContent>
 
-      - A **service worker** sits between the page and the network. Once activated, it can intercept `fetch`, read and write the **Cache API**, and answer with a `Response` even when the radio is off. The Cache API is a request-to-response store keyed by URL. It is not `localStorage`.
-      - **Stale-while-revalidate** means: if a cached response exists, **return it immediately**, then fetch in the background, and if the fresh response differs, **update the cache**. Workbox names this strategy; it can be implemented with `caches.match` then `fetch`.
-      - Pair it with a policy, not one global cache: app shell and hashed static assets are cache-first, versioned by build; list endpoints that may be stale are stale-while-revalidate; mutations are network-first or network-only; personalized PHI is not cached across users.
-      - Offline is also UX: a banner, last-updated time, writes that do not look successful when they failed. Caching an old HTML shell forever is how a stuck app ships. Bump the cache name so tabs do not mix two versions.
+      - **Service worker** 坐在 page 与 network 之间。一旦 activated，它可以拦截 `fetch`、读写 **Cache API**，即使无线电关掉也能用一份 `Response` 回答。Cache API 是按 URL keyed 的 request-to-response store。它不是 `localStorage`。
+      - **Stale-while-revalidate** 意味着：若 cached response 存在，**立刻返回它**，然后在后台 fetch，若 fresh response 不同，**更新 cache**。Workbox 给这个 strategy 起了名；可以用 `caches.match` 再 `fetch` 来实现。
+      - 配一份 policy，不是一个全局 cache：app shell 与 hashed static assets 用 cache-first，按 build versioned；允许 stale 的 list endpoints 用 stale-while-revalidate；mutations 用 network-first 或 network-only；个性化 PHI 不跨用户 cache。
+      - Offline 也是 UX：一条 banner、last-updated time、失败的 writes 看起来不能像成功。永远 cache 一份旧 HTML shell，就是卡住的 app 怎么 ship 出去的。Bump cache name，避免 tabs 混上两个 versions。
 
     </AccordionContent>
   </AccordionItem>
 
   <AccordionItem value="fe-boundaries">
-    <AccordionTrigger>16. How do error boundaries and Suspense boundaries compose? What belongs in global error reporting?</AccordionTrigger>
+    <AccordionTrigger>16. Error boundaries 与 Suspense boundaries 如何组合？全局 error reporting 该收什么？</AccordionTrigger>
     <AccordionContent>
 
-      - **Suspense** is a **pending** boundary: a child is not ready yet, so React shows the fallback. An **error boundary** is a **failed** boundary: a child threw during render. Wrap a Suspense island in an error boundary so a thrown fetch does not take down the dashboard, and keep a higher boundary around the route so a layout bug still has a way out.
-      - Order matters. If the error boundary is inside Suspense, a render throw is caught locally while siblings still stream. One root-only error boundary turns a bad widget into a full-page crash. App Router `error.tsx` and `loading.tsx` are the same two concepts, file-system shaped.
-      - Error boundaries do **not** catch event-handler errors, `setTimeout` failures, or a rejected promise that never re-enters render. Rethrow into the tree or handle those at the call site.
-      - Global reporting gets **unexpected** failures: render throws, unhandled rejections, server 500s, with request ids. Scrub PHI and tokens. Do **not** report every 404 or failed validation. A boundary that swallows and never reports is how a white screen arrives from a pharmacist, not from telemetry.
+      - **Suspense** 是 **pending** boundary：child 还没准备好，所以 React 显示 fallback。**Error boundary** 是 **failed** boundary：child 在 render 期间 throw 了。给 Suspense island 包一层 error boundary，这样一次 thrown fetch 不会拖垮 dashboard，并在 route 外再留一层更高的 boundary，layout bug 仍有退路。
+      - 顺序重要。若 error boundary 在 Suspense 里面，render throw 被局部接住，siblings 仍可以 stream。只有一层 root-only error boundary，会把一个坏 widget 变成整页 crash。App Router 的 `error.tsx` 与 `loading.tsx` 是同一对概念，file-system 形状。
+      - Error boundaries **不会** 接住 event-handler errors、`setTimeout` failures，或一份从未重新进入 render 的 rejected promise。Rethrow 进 tree，或在 call site 处理。
+      - 全局 reporting 收 **unexpected** failures：render throws、unhandled rejections、server 500s，带上 request ids。Scrub PHI 与 tokens。**不要** 上报每一个 404 或失败的 validation。一个吞掉错误却从不 report 的 boundary，就是药剂师看到白屏、telemetry 却没收到的原因。
 
     </AccordionContent>
   </AccordionItem>
 
   <AccordionItem value="fe-testing">
-    <AccordionTrigger>17. What do you test at each level — unit (Vitest), component (Testing Library), e2e (Playwright) — and what do you deliberately not test?</AccordionTrigger>
+    <AccordionTrigger>17. 每一层测什么——unit（Vitest）、component（Testing Library）、e2e（Playwright）——以及你故意不测什么？</AccordionTrigger>
     <AccordionContent>
 
-      - Test by **blast radius**, at the cheapest layer that still proves the behavior. **Unit, Vitest:** pure functions — query-key builders, dose parsers, reducers, URL helpers. Fast, no DOM. **Component, Testing Library:** user-observable contracts. Query by role and name, `userEvent`, assert the next thing the user can see. Mock the network at the boundary (MSW). **E2E, Playwright:** journeys that need a real browser, cookies, and a running app. One path per critical risk.
-      - Deliberately do **not** test: implementation details (function names, CSS class lists, Redux action types), third-party library internals, every presentational tweak, or the same fact at all three layers. Do not snapshot a whole page to "lock the design." Do not unit-test that React's `useState` works.
-      - The published playbook on this site uses Cypress for the e2e slot; Playwright fills the same job here. If a real browser is required to trust the result, go e2e. Otherwise stay in Vitest. Details: [Frontend Regression Tests](/notes/_frontend-regression-test).
+      - 按 **blast radius** 测，选仍能证明行为、成本最低的那一层。**Unit，Vitest：** pure functions——query-key builders、dose parsers、reducers、URL helpers。快，没有 DOM。**Component，Testing Library：** 用户可观察的 contracts。按 role 与 name query，`userEvent`，断言用户接下来能看到的东西。在 boundary mock network（MSW）。**E2E，Playwright：** 需要真正 browser、cookies 与正在跑的 app 的 journeys。每个 critical risk 一条 path。
+      - 故意 **不** 测：implementation details（function names、CSS class lists、Redux action types）、第三方 library internals、每一个 presentational tweak，或同一事实在三层都测一遍。不要 snapshot 整页来「锁住设计」。不要 unit-test React 的 `useState` 能工作。
+      - 本站已发布的 playbook 用 Cypress 占 e2e 那个槽；这里 Playwright 做同一份工作。如果结果必须依赖真正 browser 才可信，就走 e2e。否则留在 Vitest。细节：[Frontend Regression Tests](/notes/_frontend-regression-test)。
 
     </AccordionContent>
   </AccordionItem>
 
   <AccordionItem value="fe-design-system">
-    <AccordionTrigger>18. Design a component API for a shared design system: props vs compound components, theming via tokens, versioning across teams.</AccordionTrigger>
+    <AccordionTrigger>18. 为共享 design system 设计一份 component API：props vs compound components、用 tokens theming、跨团队 versioning。</AccordionTrigger>
     <AccordionContent>
 
-      - A shared kit is **behavior plus tokens**, not a dump of screenshots. **Variant props** (`variant`, `size`, `tone`) for small leaves: Button, Badge, Input. A finite union, no boolean soup. **Compound components** for widgets with slots and focus: `Dialog.Root`, `Trigger`, `Content`, `Title`. Avoid a mega-prop `config` object that cannot be typed or changelogged.
-      - Theming is **tokens**, not a `theme="pharmacyBlue"` prop on every leaf. Color, space, radius, and type live as CSS variables or a typed theme. Dark mode is a token set, not a second component library. Do not expose raw hex in app code.
-      - Versioning: Semver — visual tweaks patch, new optional props minor, removed props and changed defaults **major**. Ship a **codemod** and a deprecation window. One package version in the monorepo; no silent "just copy Button into the app." Storybook and MDX as the contract, plus a11y checks on the primitives.
-      - If fifteen apps fork the button, there was no system. A small, boring API that versions cleanly beats a clever render-prop maze nobody can upgrade.
+      - 共享 kit 是 **behavior 加上 tokens**，不是一堆 screenshots。**Variant props**（`variant`、`size`、`tone`）给小 leaves：Button、Badge、Input。有限 union，不要 boolean soup。**Compound components** 给带 slots 与 focus 的 widgets：`Dialog.Root`、`Trigger`、`Content`、`Title`。避免一个无法 typed 也无法 changelogged 的 mega-prop `config` object。
+      - Theming 是 **tokens**，不是每个 leaf 上一个 `theme="pharmacyBlue"` prop。Color、space、radius 与 type 活成 CSS variables 或一份 typed theme。Dark mode 是一套 token set，不是第二套 component library。不要在 app 代码里暴露 raw hex。
+      - Versioning：Semver——视觉微调 patch，新的 optional props minor，删除 props 与改变 defaults 是 **major**。Ship 一份 **codemod** 与一段 deprecation window。Monorepo 里一个 package version；不要默默「把 Button copy 进 app」。Storybook 与 MDX 当 contract，再加上 primitives 上的 a11y checks。
+      - 若十五个 apps fork 了这个 button，那就没有 system。一份小而无聊、能干净 version 的 API，胜过没人能升级的聪明 render-prop maze。
 
     </AccordionContent>
   </AccordionItem>
 
   <AccordionItem value="fe-fetch-state">
-    <AccordionTrigger>19. Show how you'd use TypeScript generics and discriminated unions to model a fetch state machine (idle | loading | success | error) safely.</AccordionTrigger>
+    <AccordionTrigger>19. 展示如何用 TypeScript generics 与 discriminated unions，安全地建模一份 fetch state machine（idle | loading | success | error）。</AccordionTrigger>
     <AccordionContent>
 
-      - Model fetch as a **discriminated union**, not as independent booleans. `isLoading` plus `isError` plus optional `data` lets TypeScript accept `data` on the error branch. One `status` field is the tag; a generic `TData` is the success payload.
+      - 把 fetch 建模成 **discriminated union**，不是一组独立 booleans。`isLoading` 加上 `isError` 再加上 optional `data`，会让 TypeScript 在 error branch 上接受 `data`。一个 `status` field 是 tag；generic `TData` 是 success payload。
 
       ```ts
       type FetchState<TData> =
@@ -237,20 +237,20 @@ category: full-stack
         | { status: "error"; error: Error }
       ```
 
-      - After `state.status === "success"`, `state.data` exists and `state.error` does not. `idle` versus `loading` keeps "not asked yet" distinct from "the spinner should show."
-      - Do not add `data` as optional on every branch "for convenience." That convenience is the bug. An exhaustive `switch` with a `never` default makes a new status a compile error. TanStack Query already encodes this; if a store is hand-rolled, this is the type to reach for first.
+      - `state.status === "success"` 之后，`state.data` 存在，`state.error` 不存在。`idle` 对比 `loading` 保住「还没问过」与「该显示 spinner」的区别。
+      - 不要为了「方便」在每个 branch 上都把 `data` 加成 optional。那份方便就是 bug。带 `never` default 的 exhaustive `switch` 会让新 status 变成 compile error。TanStack Query 已经编码了这套；若 store 是手搓的，这就是该先伸手去拿的 type。
 
     </AccordionContent>
   </AccordionItem>
 
   <AccordionItem value="fe-design-dashboard">
-    <AccordionTrigger>20. Design exercise: a real-time prescription-status dashboard with live updates, reconnection handling, and graceful offline behavior.</AccordionTrigger>
+    <AccordionTrigger>20. 设计练习：一份实时 prescription-status dashboard，带 live updates、reconnection handling 与体面的 offline 行为。</AccordionTrigger>
     <AccordionContent>
 
-      - Split **first paint** from **live movement**. A Server Component loads the pharmacist's tenant-scoped queue with cookie auth and renders the table shell. That payload is not CDN-cached. A `"use client"` leaf then opens the realtime channel. Pick **SSE** if the server is the only publisher; **WebSockets** if techs type into a shared board. The event is a small patch: id, status, version, timestamp.
-      - Reconnection: on `onerror` or `offline`, show a **stale** banner with last-updated time, backoff with jitter, and resume from a cursor or `Last-Event-ID`. Multiple instances need **pub/sub** behind the socket so a change on node A reaches the pharmacist on node B.
-      - Offline: cache the shell and last successful list with stale-while-revalidate. Mutations go into an IndexedDB **outbox** and replay with idempotency keys so double-tap does not double-dispense. A 409 drops the optimistic row and keeps the server version.
-      - Tenancy: every query key and channel includes `tenant_id`; the server checks the session. Error and Suspense boundaries wrap the live table. Do not put the session JWT in `localStorage` to "make the socket auth easier."
+      - 把 **first paint** 与 **live movement** 拆开。Server Component 用 cookie auth 加载药剂师 tenant-scoped 的 queue，并 render table shell。那份 payload 不进 CDN cache。然后一个 `"use client"` leaf 打开 realtime channel。若只有 server 在 publish，选 **SSE**；若 techs 在 shared board 上打字，选 **WebSockets**。Event 是一小份 patch：id、status、version、timestamp。
+      - Reconnection：在 `onerror` 或 `offline` 时，显示带 last-updated time 的 **stale** banner，带 jitter 的 backoff，并从 cursor 或 `Last-Event-ID` resume。多个 instances 需要 socket 后面的 **pub/sub**，好让 node A 上的 change 到达 node B 上的药剂师。
+      - Offline：用 stale-while-revalidate cache shell 与上次成功的 list。Mutations 进 IndexedDB **outbox**，用 idempotency keys replay，这样 double-tap 不会 double-dispense。409 丢掉 optimistic row，保住 server version。
+      - Tenancy：每个 query key 与 channel 都包含 `tenant_id`；server 检查 session。Error 与 Suspense boundaries 包住 live table。不要为了「让 socket auth 更容易」把 session JWT 放进 `localStorage`。
 
     </AccordionContent>
   </AccordionItem>

@@ -1,6 +1,6 @@
 ---
 title: "Full-Stack Q&A: Database"
-description: Spoken-length answers to database questions
+description: Database 问题的口语长度答案
 category: full-stack
 ---
 
@@ -8,239 +8,239 @@ category: full-stack
 
 <Accordion type="single" collapsible>
   <AccordionItem value="db-btree">
-    <AccordionTrigger>1. How does a B-Tree index work internally, and why does it make equality and range lookups fast?</AccordionTrigger>
+    <AccordionTrigger>1. B-Tree index 内部怎么工作，为什么它让 equality 与 range lookups 变快？</AccordionTrigger>
     <AccordionContent>
 
-      - In Postgres the default index is a **B-Tree**: a balanced tree of pages, usually 8KB. Internal pages hold separator keys and child pointers. Leaf pages hold the indexed values plus heap tuple pointers, and those leaves are linked in key order so a range can walk forward without climbing back to the root.
-      - **Equality:** descent from the root, one page per level, until the leaf that contains the key. Fanout is large, so height is usually three or four even on a big table — a handful of page reads, not a heap scan.
-      - **Range:** find the first matching leaf the same way, then follow sibling links. `BETWEEN`, ordered inequality, `ORDER BY` on the indexed column, and `LIMIT` can ride that walk. It is not a hash index. Hash helps equality only. Inserts, key updates, and deletes maintain the tree.
-      - Prove the access path with `EXPLAIN`. A B-Tree does not help if the column is wrapped in a function, if the type does not match, or if the predicate skips the leftmost columns of a composite key. Planner choice: [Core SQL Concepts](/notes/core-sql-concepts).
+      - Postgres 上的默认 index 是 **B-Tree**：一棵由 pages 组成的 balanced tree，通常 8KB。Internal pages 持有 separator keys 与 child pointers。Leaf pages 持有被 index 的 values 加上 heap tuple pointers，这些 leaves 按 key 顺序串起来，所以一段 range 可以往前走，不必爬回 root。
+      - **Equality：** 从 root 往下走，每一层读一页，直到含有该 key 的 leaf。Fanout 很大，所以即使大表，高度通常也只有三或四 —— 几次 page reads，不是 heap scan。
+      - **Range：** 用同样的方式找到第一个 matching leaf，然后跟 sibling links。`BETWEEN`、有序的 inequality、indexed column 上的 `ORDER BY`，以及 `LIMIT`，都可以骑这次 walk。它不是 hash index。Hash 只帮 equality。Inserts、key updates 与 deletes 维护这棵树。
+      - 用 `EXPLAIN` 证明 access path。如果 column 被包在 function 里、type 对不上、或 predicate 跳过了 composite key 的最左 columns，B-Tree 帮不上。Planner 选择：[SQL 核心概念](/notes/core-sql-concepts)。
 
     </AccordionContent>
   </AccordionItem>
 
   <AccordionItem value="db-composite-index">
-    <AccordionTrigger>2. For a composite index on (tenant_id, status, created_at), which queries can use it? Explain leftmost-prefix matching.</AccordionTrigger>
+    <AccordionTrigger>2. Composite index `(tenant_id, status, created_at)` 上，哪些 queries 能用它？解释 leftmost-prefix matching。</AccordionTrigger>
     <AccordionContent>
 
-      - `(tenant_id, status, created_at)` is one sorted key, not three independent indexes. **Leftmost-prefix matching** means the planner can walk the tree only while the predicate is a prefix of that key, with equality on the earlier columns before a range on a later one.
-      - Queries that can use it: equality on `tenant_id`; `tenant_id` plus `status`; all three — equality on `tenant_id` and `status`, then a range or sort on `created_at`. The range is valid **only** because the prior columns are equality.
-      - Skipping `tenant_id` and filtering only `status` is not a contiguous slice. Postgres 18 **skip scan** can still probe a B-Tree when a leading column is omitted, but only when that column has **low cardinality** — it is not a substitute for putting `tenant_id` first.
-      - Keyset pagination: duplicate `created_at` values skip or repeat unless the cursor includes a unique tail — `(tenant_id, status, created_at, id)`. `EXPLAIN` still has to show the condition as an `Index Cond`, not a filter after a scan. Same idea: [Core SQL Concepts](/notes/core-sql-concepts).
+      - `(tenant_id, status, created_at)` 是一把排好序的 key，不是三棵独立的 indexes。**Leftmost-prefix matching** 的意思是：planner 只能在 predicate 仍是这把 key 的 prefix 时走这棵树，更早的 columns 上等值，才能在更晚的 column 上做 range。
+      - 能用它的 queries：`tenant_id` 上等值；`tenant_id` 加 `status`；三个都有 —— `tenant_id` 与 `status` 上等值，再在 `created_at` 上 range 或 sort。这段 range **只有** 前面的 columns 都是 equality 时才成立。
+      - 跳过 `tenant_id`、只滤 `status`，不是一段连续的 slice。Postgres 18 的 **skip scan** 在缺 leading column 时仍能探测 B-Tree，但只在那一列 **low cardinality** 时 —— 它替代不了把 `tenant_id` 放第一位。
+      - Keyset pagination：重复的 `created_at` 会 skip 或 repeat，除非 cursor 带一条 unique tail —— `(tenant_id, status, created_at, id)`。`EXPLAIN` 仍得把条件显示成 `Index Cond`，而不是 scan 之后的 filter。同一个思路：[SQL 核心概念](/notes/core-sql-concepts)。
 
     </AccordionContent>
   </AccordionItem>
 
   <AccordionItem value="db-seq-scan">
-    <AccordionTrigger>3. Read this query plan: when is a sequential scan actually the right choice over an index scan?</AccordionTrigger>
+    <AccordionTrigger>3. 读这份 query plan：什么时候 sequential scan 其实比 index scan 更对？</AccordionTrigger>
     <AccordionContent>
 
-      - A plan that says `Seq Scan on orders` with a `Filter` is not a bug by default. The planner is cost-based. A sequential scan is the right choice when reading the heap in order is cheaper than bouncing through an index and then to random heap pages.
-      - **Row counts** matter, not the node name. **Small table:** a few pages of heap plus an index is extra work. **Low selectivity:** if the predicate matches most rows — `status = 'active'` at 90% — an index scan becomes a random read of nearly the whole table.
-      - **The query already needs most of the table.** Aggregations without a selective `WHERE` often should seq-scan. A bitmap heap scan is the middle ground when the index finds many pages and Postgres wants to visit them in heap order. **Stale stats:** `ANALYZE` lag can make a seq scan look "wrong." `EXPLAIN (ANALYZE, BUFFERS)` is checked against production-like counts, not a fixture of 50 rows.
-      - `SET enable_seqscan = off` is not a production fix. The predicate, the index shape, or the correlation of the column is what to fix. [Core SQL Concepts](/notes/core-sql-concepts): a seq scan on purpose is still a valid plan.
+      - Plan 写着 `Seq Scan on orders` 再加一个 `Filter`，默认不是 bug。Planner 是 cost-based。当按顺序读 heap 比穿过 index 再跳到随机 heap pages 更便宜时，sequential scan 就是对的选择。
+      - 重要的是 **row counts**，不是 node 名字。**小表：** 几页 heap 再加上一棵 index 是多余的活。**Low selectivity：** predicate 命中大多数 rows —— `status = 'active'` 占 90% —— index scan 变成对几乎整张表的随机读。
+      - **这条 query 本来就要表的大部分。** 没有选择性 `WHERE` 的 aggregations，常常就该 seq-scan。Index 找出很多 pages、Postgres 想按 heap 顺序拜访时，bitmap heap scan 是中间地带。**过期 stats：** `ANALYZE` 滞后会让 seq scan 看起来「错了」。`EXPLAIN (ANALYZE, BUFFERS)` 对照的是接近 production 的 counts，不是 50 行的 fixture。
+      - `SET enable_seqscan = off` 不是 production 修法。该修的是 predicate、index 形状、或那一列的 correlation。[SQL 核心概念](/notes/core-sql-concepts)：故意的 seq scan 仍是一份合法 plan。
 
     </AccordionContent>
   </AccordionItem>
 
   <AccordionItem value="db-ignored-index">
-    <AccordionTrigger>4. Give four reasons Postgres ignores your index (function on column, type mismatch, low selectivity, leading-wildcard LIKE).</AccordionTrigger>
+    <AccordionTrigger>4. 给出 Postgres 忽略你 index 的四个原因（function on column、type mismatch、low selectivity、leading-wildcard LIKE）。</AccordionTrigger>
     <AccordionContent>
 
-      - **Function on the column.** `WHERE lower(email) = $1` cannot use a B-Tree on `email`. The fix is an expression index on `lower(email)`, or store the canonical form and compare equality. Same trap with wrapping a timestamp in `date_trunc` or casting in the `WHERE`.
-      - **Type mismatch.** Keep the parameter type aligned with the column. The usual miss is `id::text = $1` (function on the indexed side) versus `$1::uuid`.
-      - **Low selectivity.** An index on `status` where 95% of rows are `'active'` is a directory to almost the whole heap. The planner correctly prefers a sequential scan. Partial indexes — `WHERE status = 'open'` — are how to index the rare slice.
-      - **Leading-wildcard `LIKE`.** `LIKE '%acme%'` cannot walk a B-Tree on the column. `LIKE 'acme%'` can, with a compatible collation or `text_pattern_ops`. For contains-search the tools are `pg_trgm` and a GIN index. If the predicate is a `Filter` and not an `Index Cond`, the index is decoration.
+      - **Function on the column。** `WHERE lower(email) = $1` 用不了 `email` 上的 B-Tree。修法是 `lower(email)` 上的 expression index，或存 canonical form 再比 equality。把 timestamp 包进 `date_trunc`、或在 `WHERE` 里 cast，是同一类陷阱。
+      - **Type mismatch。** 让 parameter type 与 column 对齐。常见失手是 `id::text = $1`（function 打在 indexed 那一侧）对上 `$1::uuid`。
+      - **Low selectivity。** `status` 上的 index，95% 的 rows 都是 `'active'`，等于一本指向几乎整张 heap 的目录。Planner 正确地偏向 sequential scan。Partial indexes —— `WHERE status = 'open'` —— 才是给稀有 slice 做 index 的方式。
+      - **Leading-wildcard `LIKE`。** `LIKE '%acme%'` 走不了 column 上的 B-Tree。`LIKE 'acme%'` 可以，前提是兼容的 collation 或 `text_pattern_ops`。Contains-search 的工具是 `pg_trgm` 与 GIN index。如果 predicate 是 `Filter` 而不是 `Index Cond`，这棵 index 只是装饰。
 
     </AccordionContent>
   </AccordionItem>
 
   <AccordionItem value="db-gin">
-    <AccordionTrigger>5. When do you reach for a GIN index instead of B-Tree — e.g., JSONB containment or full-text search?</AccordionTrigger>
+    <AccordionTrigger>5. 什么时候该伸手拿 GIN 而不是 B-Tree —— 例如 JSONB containment 或 full-text search？</AccordionTrigger>
     <AccordionContent>
 
-      - **GIN** is the index when the lookup is "does this value contain this key," not "walk this ordered column." A B-Tree stores sortable scalars. GIN is an inverted index: each token, array element, or JSONB key points at the rows that contain it. Heavier writes.
-      - **JSONB containment:** `WHERE metadata @> $1::jsonb` is the textbook GIN query. `jsonb_ops` is the default; `jsonb_path_ops` is smaller if only containment is needed. **Full-text:** `to_tsvector(...) @@ to_tsquery(...)` wants a GIN (or GiST) on the `tsvector`. **Arrays:** overlap and membership are GIN territory. **Trigram contains:** leading-wildcard `LIKE` with `pg_trgm`.
-      - GIN updates are more expensive, they do not give `ORDER BY` on the document, and they bloat if JSONB churns. For a tenant-scoped JSONB column `tenant_id` still belongs in a B-Tree for the hot equality path.
-      - GIN does not replace `(tenant_id, created_at)`. Ordered pagination stays on a B-Tree.
+      - Lookup 是「这个 value 含不含这个 key」，而不是「沿着这列有序走」时，才用 **GIN**。B-Tree 存的是 sortable scalars。GIN 是 inverted index：每个 token、array element、或 JSONB key 指向含有它的 rows。Writes 更重。
+      - **JSONB containment：** `WHERE metadata @> $1::jsonb` 是教科书式的 GIN query。`jsonb_ops` 是默认；只要 containment，`jsonb_path_ops` 更小。**Full-text：** `to_tsvector(...) @@ to_tsquery(...)` 要的是 `tsvector` 上的 GIN（或 GiST）。**Arrays：** overlap 与 membership 是 GIN 的地盘。**Trigram contains：** 带 `pg_trgm` 的 leading-wildcard `LIKE`。
+      - GIN 的 updates 更贵，给不了 document 上的 `ORDER BY`，JSONB 频繁 churn 还会 bloat。Tenant-scoped 的 JSONB column，hot equality path 上的 `tenant_id` 仍该放进 B-Tree。
+      - GIN 替代不了 `(tenant_id, created_at)`。有序 pagination 仍走 B-Tree。
 
     </AccordionContent>
   </AccordionItem>
 
   <AccordionItem value="db-normalization">
-    <AccordionTrigger>6. Explain 1NF–3NF briefly, then give a case where deliberate denormalization is the right call.</AccordionTrigger>
+    <AccordionTrigger>6. 简要解释 1NF–3NF，再给一个刻意 denormalize 才是对的 case。</AccordionTrigger>
     <AccordionContent>
 
-      - **1NF:** atomic cells, no repeating groups. Three NDCs do not belong in one text column split in the app. A line-item table is the repeating group done properly.
-      - **2NF:** non-key attributes depend on the **whole** composite key. If the key is `(order_id, sku)` and `customer_email` lives on the line, that email belongs on `orders`. **3NF:** no transitive dependence. `department_id` determines `department_name`; the name is not copied onto every order unless there is a reason. (ZIP does **not** uniquely determine city — that example is folklore.)
-      - **Deliberate denormalization** is right when the read path is the incident. A pharmacy dashboard that shows fills-per-day per tenant should not join `prescription_fills` to `prescriptions` to `patients` on every page load. A `fill_stats_daily` row keyed by `(organization_id, day)` is kept and updated from the write path or a job.
-      - The update anomaly is accepted and the write is owned: trigger, one transaction that updates both, or a rebuild job that can be rerun. Denormalize when `EXPLAIN` says the join is the product, and keep the normalized tables as the source of truth. Full map: [Data Modeling in System Design](/notes/data-modeling-in-system-design).
+      - **1NF：** atomic cells，没有 repeating groups。三个 NDCs 不该塞进一个 text column 再在 app 里拆。一张 line-item table 才是 repeating group 的正确做法。
+      - **2NF：** 非 key 的 attributes 依赖 **整把** composite key。如果 key 是 `(order_id, sku)` 而 `customer_email` 住在 line 上，那封 email 属于 `orders`。**3NF：** 没有传递依赖。`department_id` 决定 `department_name`；没有理由就把名字抄到每一笔 order 上。（ZIP **并不能** 唯一决定 city —— 那个例子是 folklore。）
+      - **刻意 denormalize** 在 read path 才是事故时才对。药房 dashboard 要看每个 tenant 的 fills-per-day，不该每次 page load 都 join `prescription_fills` 到 `prescriptions` 再到 `patients`。一行按 `(organization_id, day)` keyed 的 `fill_stats_daily`，从 write path 或 job 维护。
+      - Update anomaly 被接受，write 有人负责：trigger、一次更新两边的 transaction，或可重跑的 rebuild job。当 `EXPLAIN` 说 join 是乘积时再 denormalize，normalized tables 仍是 source of truth。完整地图：[System Design 里的 Data Modeling](/notes/data-modeling-in-system-design)。
 
     </AccordionContent>
   </AccordionItem>
 
   <AccordionItem value="db-isolation">
-    <AccordionTrigger>7. Walk through the four isolation levels and the read phenomena (dirty, non-repeatable, phantom) each prevents. What does Postgres default to?</AccordionTrigger>
+    <AccordionTrigger>7. 走一遍四个 isolation levels，以及各自挡住的 read phenomena（dirty、non-repeatable、phantom）。Postgres 默认是什么？</AccordionTrigger>
     <AccordionContent>
 
-      - **Dirty read:** another transaction's uncommitted write is visible. **Non-repeatable read:** a row is read, another transaction commits an update to that row, a second read shows the values changed. **Phantom:** a predicate is re-run and new rows appear that were not in the first result.
-      - Classic SQL: **Read Uncommitted** allows all three. **Read Committed** prevents dirty reads only. **Repeatable Read** prevents dirty and non-repeatable; **phantoms still allowed** in the textbook definition. **Serializable** prevents all three.
-      - **Postgres default is Read Committed.** It will not actually dirty-read — `READ UNCOMMITTED` is treated as Read Committed because of MVCC. **Postgres Repeatable Read is snapshot isolation**, so rows that committed after the snapshot are not visible. That blocks the textbook phantom-read case. It does **not** block write skew. **Serializable** uses SSI: it watches for a cycle and aborts one session with a serialization failure that must be retried.
-      - In production the usual stance is Read Committed for most request transactions, a single atomic `UPDATE` for inventory, and Serializable only for short transactions that would otherwise write-skew.
+      - **Dirty read：** 另一个 transaction 未提交的 write 可见。**Non-repeatable read：** 读了一行，另一个 transaction 提交了对该行的 update，第二次读看到 values 变了。**Phantom：** 再跑一次 predicate，出现了第一次结果里没有的新 rows。
+      - 经典 SQL：**Read Uncommitted** 三种都允许。**Read Committed** 只挡住 dirty reads。**Repeatable Read** 挡住 dirty 与 non-repeatable；教科书定义里 **phantoms 仍被允许**。**Serializable** 三种都挡住。
+      - **Postgres 默认是 Read Committed。** 它实际上不会 dirty-read —— 因为 MVCC，`READ UNCOMMITTED` 被当成 Read Committed。**Postgres 的 Repeatable Read 是 snapshot isolation**，snapshot 之后才 commit 的 rows 不可见。这挡住了教科书里的 phantom-read case。它 **挡不住** write skew。**Serializable** 用 SSI：盯着 cycle，abort 其中一个 session，带上必须 retry 的 serialization failure。
+      - Production 里常见立场：大多数 request transactions 用 Read Committed，inventory 用一条 atomic `UPDATE`，只有本来会 write-skew 的短 transactions 才上 Serializable。
 
     </AccordionContent>
   </AccordionItem>
 
   <AccordionItem value="db-long-tx">
-    <AccordionTrigger>8. What makes long-running transactions dangerous in production (lock contention, vacuum bloat)?</AccordionTrigger>
+    <AccordionTrigger>8. 为什么 long-running transactions 在 production 里危险（lock contention、vacuum bloat）？</AccordionTrigger>
     <AccordionContent>
 
-      - A long transaction is not "a slow query." It is **locks plus, at Repeatable Read or Serializable, a held snapshot** until `COMMIT`. At **Read Committed** the snapshot is statement-scoped; the danger is still an `idle in transaction` session holding locks or an assigned XID.
-      - **Lock contention.** `UPDATE`, `SELECT ... FOR UPDATE`, and some `ALTER`s hold row or table locks for the life of the transaction. Other sessions queue. The actual problem is often one session that started a transaction, then waited on a downstream HTTP call. `idle in transaction` is the smoking gun in `pg_stat_activity`.
-      - **VACUUM bloat.** Autovacuum cannot reclaim dead tuples that are still visible to some transaction's snapshot. The oldest `xmin` horizon holds the garbage. Tables and indexes grow, cache hit ratio drops, and the same queries get slower even after the long transaction finally ends. On a replica, `hot_standby_feedback` can create the same horizon from a long read-only query.
-      - Keep transactions tiny, never wait on the network inside one, batch updates in separate commits, set a statement timeout and an idle-in-transaction timeout, and watch `n_dead_tup` plus the age of the oldest transaction.
+      - 长 transaction 不是「一条慢 query」。它是 **locks，加上在 Repeatable Read 或 Serializable 下持有到 `COMMIT` 的 snapshot**。**Read Committed** 下 snapshot 是 statement-scoped；危险仍是一个 `idle in transaction` 的 session 握着 locks 或一个已分配的 XID。
+      - **Lock contention。** `UPDATE`、`SELECT ... FOR UPDATE`、以及某些 `ALTER`，在 transaction 活着期间握着 row 或 table locks。别的 sessions 排队。真正的问题常常是：一个 session 开了 transaction，然后等下游 HTTP call。`pg_stat_activity` 里的 `idle in transaction` 就是那支枪。
+      - **VACUUM bloat。** Autovacuum 收不回对某个 transaction 的 snapshot 仍可见的 dead tuples。最老的 `xmin` horizon 托住垃圾。Tables 与 indexes 变大，cache hit ratio 下降，长 transaction 终于结束后，同一批 queries 照样更慢。Replica 上，`hot_standby_feedback` 能让一条长的 read-only query 造出同样的 horizon。
+      - Transactions 保持极短，绝不在里面等网络，batch updates 拆成各自的 commits，设 statement timeout 与 idle-in-transaction timeout，盯 `n_dead_tup` 加上最老 transaction 的年龄。
 
     </AccordionContent>
   </AccordionItem>
 
   <AccordionItem value="db-deadlocks">
-    <AccordionTrigger>9. How do deadlocks occur between two transactions, and what coding practices prevent them?</AccordionTrigger>
+    <AccordionTrigger>9. 两个 transactions 之间 deadlock 怎么发生，什么 coding practices 能防住？</AccordionTrigger>
     <AccordionContent>
 
-      - A deadlock is two sessions waiting on each other. Transaction A updates row 1, then waits for row 2. Transaction B already updated row 2, then waits for row 1. Postgres detects the cycle and aborts one transaction with `40P01`. The loser must retry.
-      - It is not only two rows. A deadlock can involve a foreign-key check, a unique index insert, or a lock on a parent order while another session locks the child fill first. The shape is the same: **inconsistent lock order**.
-      - Practices: **lock rows in a stable order** (lowest-to-highest ids, including triggers); **keep the transaction short** — do not call Stripe inside `BEGIN`; **prefer one statement** (`UPDATE inventory SET qty = qty - 1 WHERE ...`); **`FOR UPDATE SKIP LOCKED`** for work queues; **retry on `40P01`** with backoff.
-      - If two features touch overlapping rows, lock order is part of the API, the same way unique constraints are.
+      - Deadlock 是两个 sessions 互相等。Transaction A 更新了 row 1，然后等 row 2。Transaction B 已经更新了 row 2，然后等 row 1。Postgres 侦测到 cycle，用 `40P01` abort 其中一个 transaction。输的那方必须 retry。
+      - 不只两行。Deadlock 可以牵进 foreign-key check、unique index insert，或一边锁住 parent order、另一边先锁住 child fill。形状一样：**不一致的 lock order**。
+      - 做法：**按稳定顺序锁 rows**（id 从低到高，包括 triggers）；**把 transaction 做短** —— 不要在 `BEGIN` 里面打 Stripe；**优先一条 statement**（`UPDATE inventory SET qty = qty - 1 WHERE ...`）；work queues 用 **`FOR UPDATE SKIP LOCKED`**；**碰到 `40P01` 就 retry**，带 backoff。
+      - 两个 features 摸到重叠的 rows，lock order 就是 API 的一部分，跟 unique constraints 同一等级。
 
     </AccordionContent>
   </AccordionItem>
 
   <AccordionItem value="db-n-plus-one">
-    <AccordionTrigger>10. How do you detect and fix N+1 queries — joins, batching, DataLoader-style patterns?</AccordionTrigger>
+    <AccordionTrigger>10. 怎么发现并修掉 N+1 queries —— joins、batching、DataLoader 式 patterns？</AccordionTrigger>
     <AccordionContent>
 
-      - N+1 is one query for the parent list, then one query per row for children. Twenty prescriptions on a page become twenty-one round trips. ORMs hide it: a loop of `prescription.patient` looks like a field access. If request latency grows linearly with page size, assume N+1 until traces **count** the queries. DataLoader caches are **per request and per tenant**.
-      - **A join.** One statement: prescriptions plus patients in a single `FROM` / `JOIN`. For "has at least one" use `EXISTS`, not a join plus `DISTINCT` — [Core SQL Concepts](/notes/core-sql-concepts).
-      - **Batching.** Load the page of prescriptions, collect patient ids, then `WHERE id = ANY($1)` once. Stitch in memory. That is the DataLoader pattern: coalesce keys in one tick, issue one `IN` query, memoize. Caching each child row still does N lookups on a cold path. Batch first.
-      - In GraphQL, DataLoader keeps resolvers from accidentally N+1. In Hono handlers the join or the `inArray` is written directly. Turning up the pool is not a fix for N+1.
+      - N+1 是 parent list 一条 query，然后每个 child 再一条。一页二十张 prescriptions 变成二十一次 round trips。ORMs 把它藏起来：循环里的 `prescription.patient` 看起来像读字段。如果 request latency 随 page size 线性涨，先当 N+1，直到 traces **数清** queries。DataLoader caches 是 **per request 且 per tenant**。
+      - **一条 join。** 一条 statement：prescriptions 加 patients，同一个 `FROM` / `JOIN`。「至少有一条」用 `EXISTS`，不要 join 再加 `DISTINCT` —— [SQL 核心概念](/notes/core-sql-concepts)。
+      - **Batching。** 先 load 这一页 prescriptions，收集 patient ids，然后 `WHERE id = ANY($1)` 一次。在内存里缝起来。这就是 DataLoader pattern：一个 tick 里 coalesce keys，发一条 `IN` query，memoize。把每个 child row cache 起来，cold path 上仍是 N 次 lookups。先 batch。
+      - GraphQL 里，DataLoader 防止 resolvers 一不小心 N+1。Hono handlers 里直接写 join 或 `inArray`。把 pool 调大不是 N+1 的修法。
 
     </AccordionContent>
   </AccordionItem>
 
   <AccordionItem value="db-for-update">
-    <AccordionTrigger>11. Compare SELECT ... FOR UPDATE with a version-column optimistic lock. Which fits a high-contention inventory decrement?</AccordionTrigger>
+    <AccordionTrigger>11. 比较 SELECT ... FOR UPDATE 与 version-column optimistic lock。高 contention 的 inventory decrement 该用哪个？</AccordionTrigger>
     <AccordionContent>
 
-      - **`SELECT ... FOR UPDATE`** is pessimistic. The row is read, a lock is held until commit, then written. Another session that wants that row waits. Right when several rows must be read and computed. `SKIP LOCKED` is the variant for queues.
-      - **A version column** is optimistic. Read `version`, write `WHERE id = $1 AND version = $2`, and bump the version. Zero rows updated means someone else won; retry. Under low contention that is fewer locks. Under high contention it becomes a retry storm.
-      - **High-contention inventory decrement** is not a good optimistic-lock problem. One atomic statement is the fit: `UPDATE inventory SET qty = qty - 1 WHERE sku = $1 AND qty >= 1 RETURNING qty`. A returned row means the decrement happened. No row means out of stock.
-      - `FOR UPDATE` still wins when the business rule cannot be expressed as that `WHERE`. Optimistic versioning wins on documents that rarely collide. Inventory at flash-sale traffic is the pessimistic or atomic-update case.
+      - **`SELECT ... FOR UPDATE`** 是 pessimistic。读这一行，锁握到 commit，再写。另一个想要这一行的 session 等待。适合必须先读几行再计算的时候。`SKIP LOCKED` 是 queues 的变体。
+      - **Version column** 是 optimistic。读 `version`，写 `WHERE id = $1 AND version = $2`，再 bump version。更新零行表示别人赢了；retry。Low contention 下 locks 更少。High contention 下变成 retry storm。
+      - **高 contention 的 inventory decrement** 不是好的 optimistic-lock 问题。适合的是一条 atomic statement：`UPDATE inventory SET qty = qty - 1 WHERE sku = $1 AND qty >= 1 RETURNING qty`。回了一行表示 decrement 发生了。没有 row 表示缺货。
+      - 业务规则写不成那个 `WHERE` 时，`FOR UPDATE` 仍赢。Optimistic versioning 赢在很少碰撞的 documents。Flash-sale 流量下的 inventory，是 pessimistic 或 atomic-update 的 case。
 
     </AccordionContent>
   </AccordionItem>
 
   <AccordionItem value="db-pooling">
-    <AccordionTrigger>12. Why does connection pooling matter, and how do PgBouncer's transaction vs session modes differ?</AccordionTrigger>
+    <AccordionTrigger>12. 为什么 connection pooling 重要，PgBouncer 的 transaction mode 与 session mode 差在哪？</AccordionTrigger>
     <AccordionContent>
 
-      - A Postgres connection is a **backend process**, not a cheap socket. An app fleet of 40 tasks times 20 connections is 800 backends before a traffic spike. The database falls over on connection count while CPU is idle. **Pooling** multiplexes many client sessions onto fewer server connections.
-      - **PgBouncer session mode** pins a server connection to the client for the whole client session. Session features work: prepared statements, session `SET`, temp tables, session-level advisory locks, `LISTEN`. It does not reuse a backend between clients until disconnect.
-      - **Transaction mode** returns the server connection at `COMMIT` or `ROLLBACK`. That is the mode that actually **reuses** backends under fan-out — excess demand queues. SQL `PREPARE`, session `SET`, temp tables, and **session advisory locks** leak or vanish. Protocol-level named prepares can work in transaction mode if PgBouncer's `max_prepared_statements` is on (1.21+).
-      - **`SET LOCAL`** and transaction-scoped `set_config(..., true)` are safe because they die at commit — that is why RLS tenant context belongs inside the transaction, not on the session. The production practice is transaction mode, tenant GUCs kept transaction-local, and no open transaction that then waits on the network while holding a borrowed backend.
+      - 一条 Postgres connection 是一个 **backend process**，不是便宜的 socket。App fleet 40 个 tasks 乘 20 条 connections，流量尖峰之前就是 800 个 backends。Database 在 CPU 还闲着时就倒在 connection count 上。**Pooling** 把许多 client sessions 复用到更少的 server connections 上。
+      - **PgBouncer session mode** 把一条 server connection 钉在 client 上，直到整个 client session 结束。Session 功能可用：prepared statements、session `SET`、temp tables、session-level advisory locks、`LISTEN`。Client 断开之前，backend 不会在 clients 之间 reuse。
+      - **Transaction mode** 在 `COMMIT` 或 `ROLLBACK` 时归还 server connection。这才是 fan-out 下真正 **reuse** backends 的 mode —— 超额需求排队。SQL `PREPARE`、session `SET`、temp tables、以及 **session advisory locks** 会泄漏或消失。Protocol-level 的 named prepares 在 transaction mode 里也能用，如果 PgBouncer 的 `max_prepared_statements` 开着（1.21+）。
+      - **`SET LOCAL`** 与 transaction-scoped 的 `set_config(..., true)` 是安全的，因为它们在 commit 时死去 —— 这就是 RLS tenant context 属于 transaction 内部、不属于 session 的原因。Production 默认是 transaction mode，tenant GUCs 保持 transaction-local，不要开着 transaction 再等网络，同时握着借来的 backend。
 
     </AccordionContent>
   </AccordionItem>
 
   <AccordionItem value="db-zero-downtime">
-    <AccordionTrigger>13. Design a zero-downtime migration: adding a NOT NULL column with a default to a 100M-row table. Why CONCURRENTLY for indexes?</AccordionTrigger>
+    <AccordionTrigger>13. 设计一次 zero-downtime migration：给 1 亿行的 table 加一列带 default 的 NOT NULL column。为什么 indexes 要用 CONCURRENTLY？</AccordionTrigger>
     <AccordionContent>
 
-      - In modern Postgres, `ALTER TABLE ... ADD COLUMN ... DEFAULT` with a **non-volatile** constant is a **catalog change**. The default is stored in metadata and applied when old rows are read. New rows get it on insert. `now()` is **STABLE**, not VOLATILE, and can still use that fast-default path. `gen_random_uuid()` is volatile and rewrites, so it is not the fast-path default on 100M rows.
-      - **`NOT NULL` still needs a rollout.** A catalog default does not mean `NOT NULL` belongs in the same statement on a huge table. For stored values, backfill in **batches**, each its own transaction, then `CHECK (col IS NOT NULL) NOT VALID`, `VALIDATE CONSTRAINT`, then `SET NOT NULL`. On Postgres 12+ a validated check can skip a second full verification.
-      - **`CREATE INDEX CONCURRENTLY`** is the index counterpart. A plain `CREATE INDEX` takes a lock that **blocks writes** for the whole build. On 100M rows that is an outage. `CONCURRENTLY` uses weaker locks and two scans. It cannot run inside a transaction, and it can fail leaving an invalid index that must be dropped.
+      - 现代 Postgres 里，带 **non-volatile** 常量的 `ALTER TABLE ... ADD COLUMN ... DEFAULT` 是一次 **catalog change**。Default 存在 metadata 里，读旧 rows 时才套上。新 rows 在 insert 时拿到。`now()` 是 **STABLE**，不是 VOLATILE，仍能走这条 fast-default path。`gen_random_uuid()` 是 volatile，会 rewrite，所以不是 1 亿行上的 fast-path default。
+      - **`NOT NULL` 仍需要 rollout。** Catalog default 并不表示 `NOT NULL` 该跟同一条 statement 打在一张巨大的 table 上。对已存的 values，按 **batches** backfill，每一批自己的 transaction，然后 `CHECK (col IS NOT NULL) NOT VALID`，`VALIDATE CONSTRAINT`，再 `SET NOT NULL`。Postgres 12+ 上，已经 validated 的 check 可以跳过第二次全表 verification。
+      - **`CREATE INDEX CONCURRENTLY`** 是 index 这一侧的对应物。普通 `CREATE INDEX` 会拿一把 **挡住 writes** 的锁，直到整棵建完。1 亿行上那就是一次 outage。`CONCURRENTLY` 用更弱的 locks、扫两遍。它不能跑在 transaction 里面，失败时会留下必须 drop 的 invalid index。
 
     </AccordionContent>
   </AccordionItem>
 
   <AccordionItem value="db-offset">
-    <AccordionTrigger>14. Why does OFFSET 100000 get slow, and how does keyset (cursor) pagination fix it at the SQL level?</AccordionTrigger>
+    <AccordionTrigger>14. 为什么 OFFSET 100000 会变慢，keyset (cursor) pagination 在 SQL 层面怎么修？</AccordionTrigger>
     <AccordionContent>
 
-      - `OFFSET 100000` is slow because Postgres still **finds and discards** those 100000 rows. The `LIMIT` applies after. Page 500 is not a seek to a bookmark; it is "walk the ordered result until you have thrown away 100000, then return the next 20." Cost grows with page number. Deep pages also skip or repeat under concurrent inserts.
-      - **Keyset pagination** seeks to the last row already returned. The sort key must be unique — `(created_at, id)` — or two rows with the same timestamp will skip or duplicate: `WHERE (created_at, id) < ($cursor_created_at, $cursor_id) ORDER BY created_at DESC, id DESC LIMIT 20`.
-      - With an index on `(created_at DESC, id DESC)`, or a tenant-scoped `(tenant_id, created_at DESC, id DESC)`, this is an index range starting **after** the cursor, not a walk from the beginning of the table.
-      - `OFFSET` "just for page numbers" does not belong on a hot path. The planner should show an `Index Cond` on that tuple, not a `Seq Scan` plus a huge offset. Same seek: [Core SQL Concepts](/notes/core-sql-concepts).
+      - `OFFSET 100000` 慢，是因为 Postgres 仍要 **找到并丢掉** 那 100000 行。`LIMIT` 在那之后才生效。第 500 页不是 seek 到一个书签；它是「沿着排好序的结果走，直到扔掉 100000 行，再返回下 20 行。」成本随页码涨。深页在 concurrent inserts 下还会 skip 或 repeat。
+      - **Keyset pagination** seek 到已经返回的最后一行。Sort key 必须 unique —— `(created_at, id)` —— 否则同一 timestamp 的两行会 skip 或 duplicate：`WHERE (created_at, id) < ($cursor_created_at, $cursor_id) ORDER BY created_at DESC, id DESC LIMIT 20`。
+      - 有 `(created_at DESC, id DESC)` 上的 index，或 tenant-scoped 的 `(tenant_id, created_at DESC, id DESC)`，这是从 cursor **之后** 开始的 index range，不是从表头走起。
+      - `OFFSET`「只为了页码」不该出现在 hot path。Planner 该在那把 tuple 上显示 `Index Cond`，而不是 `Seq Scan` 加一个巨大的 offset。同一套 seek：[SQL 核心概念](/notes/core-sql-concepts)。
 
     </AccordionContent>
   </AccordionItem>
 
   <AccordionItem value="db-replication">
-    <AccordionTrigger>15. How does streaming replication work, and what bugs does read-replica lag cause for read-your-writes?</AccordionTrigger>
+    <AccordionTrigger>15. Streaming replication 怎么工作，read-replica lag 会给 read-your-writes 带来什么 bugs？</AccordionTrigger>
     <AccordionContent>
 
-      - Streaming replication is WAL shipping. The primary writes changes to the write-ahead log. A WAL sender streams those records to the replica. The replica replays them. In the usual **asynchronous** setup, `COMMIT` on the primary returns before the replica has flushed or replayed that commit. Only **`remote_apply`** means a following read on that replica can see the write. Sync commit buys durability; it does not automatically bound query-visible lag.
-      - The replica is a **replay machine**, not a second primary. It is great for read-mostly traffic and failover. It is a bad place to send a read that must see the write just committed.
-      - **Read-your-writes bugs:** an `INSERT` then a `GET` redirected to a replica returns 404 — the user retries and duplicates. Inventory decremented on the primary, stock listed from the replica flickers backwards. Uniqueness checks against the replica are stale.
-      - The production practice: **session stickiness** to the primary for the request that mutated, or a "read your writes" rule — after a write in this session, go to the primary for a short window. Lag is the contract of async replication, and the application has to honor it.
+      - Streaming replication 是 WAL shipping。Primary 把 changes 写进 write-ahead log。WAL sender 把这些 records stream 到 replica。Replica replay 它们。常见的 **asynchronous** 配置里，primary 上的 `COMMIT` 在 replica flush 或 replay 那次 commit 之前就返回。只有 **`remote_apply`** 表示随后打到那台 replica 的 read 能看见这次 write。Sync commit 买到的是 durability；它不会自动给 query-visible lag 设上界。
+      - Replica 是一台 **replay machine**，不是第二台 primary。它很适合 read-mostly 流量与 failover。刚 commit 的 write 必须被看见的 read，不该送到这里。
+      - **Read-your-writes bugs：** 一次 `INSERT` 然后被转到 replica 的 `GET` 返回 404 —— 用户 retry，写出 duplicate。Inventory 在 primary 上 decrement 了，从 replica 列出的库存往回闪。对着 replica 做 uniqueness checks 是 stale 的。
+      - Production 默认：对刚 mutate 的 request **session stickiness** 打到 primary，或一条「read your writes」规则 —— 这次 session 写过之后，短窗口内走 primary。Lag 是 async replication 的契约，application 必须遵守。
 
     </AccordionContent>
   </AccordionItem>
 
   <AccordionItem value="db-partition-shard">
-    <AccordionTrigger>16. Partitioning vs sharding: what problem does each solve, and when is a table "big enough" to partition?</AccordionTrigger>
+    <AccordionTrigger>16. Partitioning vs sharding：各自解决什么问题，一张 table 什么时候「够大」该 partition？</AccordionTrigger>
     <AccordionContent>
 
-      - **Partitioning** is still one Postgres. A table is split into child partitions — range on `created_at`, list on a status, hash on `organization_id` — and the parent is what the app queries. The win is operational: autovacuum per partition, drop a month of fills with `DROP TABLE`, **partition pruning** so a date-bounded query does not touch old partitions. The failure domain is still one primary, one WAL stream, one backup story.
-      - **Sharding** is multiple databases. Routing is by a key — tenant, or hash of patient id — to different primaries. That is how **writes and storage** scale past one machine. Cross-shard joins, unique constraints, and transactions become application problems. Sharding is the move when one primary cannot take the write load or the disk, and a key exists that almost never needs cross-shard work. Full map: [Sharding in System Design](/notes/sharding-in-system-design).
-      - **Big enough to partition** is not a row-count slogan. Partition when vacuum, bloat, or bulk delete is the incident, and a **stable partition key** exists that queries actually constrain — usually time. Tens of millions of narrow rows can be fine unpartitioned. A 2M-row patients table is not partitioned "for scale." Indexes and archival come first. Full map: [Data Modeling in System Design](/notes/data-modeling-in-system-design) and [Core SQL Concepts](/notes/core-sql-concepts).
+      - **Partitioning** 仍是一台 Postgres。一张 table 拆成 child partitions —— `created_at` 上的 range、某个 status 上的 list、`organization_id` 上的 hash —— app query 的是 parent。赢在运维：每个 partition 自己 autovacuum，一个月的 fills 用 `DROP TABLE` 丢掉，**partition pruning** 让带日期边界的 query 碰不到旧 partitions。Failure domain 仍是一台 primary、一条 WAL stream、一套 backup 故事。
+      - **Sharding** 是多台 databases。按一把 key 路由 —— tenant，或 patient id 的 hash —— 到不同 primaries。这才是 **writes 与 storage** 撑过一台机器的方式。Cross-shard joins、unique constraints、transactions 变成 application 的问题。Sharding 是这一步：一台 primary 扛不住 write load 或 disk，并且存在一把几乎从不需要 cross-shard 工作的 key。完整地图：[System Design 里的 Sharding](/notes/sharding-in-system-design)。
+      - **够大该 partition** 不是一句 row-count 口号。Partition 是在 vacuum、bloat、或 bulk delete 成为事故时，并且存在一把 queries 真正会 constrain 的 **stable partition key** —— 通常是时间。几千万行的窄 rows 不 partition 也可以。一张 200 万行的 patients table 不是「为了 scale」去 partition 的。先 indexes 与 archival。完整地图：[System Design 里的 Data Modeling](/notes/data-modeling-in-system-design) 与 [SQL 核心概念](/notes/core-sql-concepts)。
 
     </AccordionContent>
   </AccordionItem>
 
   <AccordionItem value="db-oltp-olap">
-    <AccordionTrigger>17. OLTP vs OLAP: why would you pipe Postgres data into Redshift rather than running analytics on the primary?</AccordionTrigger>
+    <AccordionTrigger>17. OLTP vs OLAP：为什么要把 Postgres 数据 pipe 进 Redshift，而不是在 primary 上跑 analytics？</AccordionTrigger>
     <AccordionContent>
 
-      - **OLTP** is the primary's job: many small reads and writes, indexed point lookups, short transactions, normalized tables. **OLAP** is the opposite: scan a large slice, aggregate, group, maybe hash-join facts to dimensions. Row-store Postgres can do that work. That work still does not belong on the primary.
-      - A sequential scan of fills **evicts the hot OLTP pages**. Hash aggregates and sorts compete with `UPDATE inventory`. A 20-minute report is a long-running transaction in spirit: it holds a snapshot, delays vacuum, and bloats the same tables checkout needs.
-      - Warehouses are columnar, compressed, and built for wide scans. Postgres is built for the row just written.
-      - A **read replica** is a middle ground for light operational reports. It still replays every primary write and still uses a row store. It fits "fills today for this tenant," not last-year SKU affinity. CDC or a nightly unload into Redshift isolates analytics hardware from the OLTP commit path.
+      - **OLTP** 是 primary 的工作：大量小的 reads 与 writes、indexed point lookups、短 transactions、normalized tables。**OLAP** 正好相反：扫一大片、aggregate、group，也许把 facts hash-join 到 dimensions。Row-store Postgres 能做那份活。那份活仍不该放在 primary 上。
+      - 对 fills 的 sequential scan **会赶走热的 OLTP pages**。Hash aggregates 与 sorts 跟 `UPDATE inventory` 抢。一份 20 分钟的 report 精神上就是长 transaction：它握着 snapshot，拖住 vacuum，把 checkout 需要的同一批 tables 撑胖。
+      - Warehouses 是 columnar、compressed、为宽 scans 建的。Postgres 是为刚刚写下的那一行建的。
+      - **Read replica** 是轻量运维报表的中间地带。它仍 replay 每一次 primary write，仍用 row store。它适合「这个 tenant 今天的 fills」，不适合去年的 SKU affinity。CDC 或 nightly unload 进 Redshift，把 analytics 硬件从 OLTP commit path 隔开。
 
     </AccordionContent>
   </AccordionItem>
 
   <AccordionItem value="db-rls">
-    <AccordionTrigger>18. Compare Postgres Row-Level Security with application-level tenant filtering. What are the failure modes of each?</AccordionTrigger>
+    <AccordionTrigger>18. 比较 Postgres Row-Level Security 与 application-level tenant filtering。各自的 failure modes 是什么？</AccordionTrigger>
     <AccordionContent>
 
-      - Application filtering is `WHERE organization_id = $1` on every query. **RLS** is the same rule attached to the table, enforced by Postgres for the role the app connects as. **Both** belong together. RLS is defense in depth; it is not a license to write ambient queries. Contract: [Building a Multi-Tenant Backend with Hono, Better Auth, Drizzle, and Postgres RLS](/notes/multi-tenant-backend-drizzle-hono-better-auth).
-      - **App-level failure modes:** a new list endpoint forgets the filter. An admin script or a JOIN uses the wrong alias. A background job has no session and loads by primary key across tenants. The bug is silent: another tenant's rows are returned.
-      - **RLS failure modes:** **table owner bypass** unless `FORCE ROW LEVEL SECURITY`; **`SECURITY DEFINER`** functions run as the owner; **missing tenant GUC** — if the policy treats a missing setting as "allow," forgetting `set_config` is fail-open; **`BYPASSRLS`**, superuser, and `TRUNCATE` (RLS does not apply). Unique and FK checks also bypass row filters, so unique indexes are still scoped by tenant.
-      - The `WHERE` is still written in Drizzle. Forgetting a filter must not become a cross-tenant incident; RLS is how that sentence stays true.
+      - Application filtering 是每条 query 上的 `WHERE organization_id = $1`。**RLS** 是同一条规则贴在 table 上，由 Postgres 对 app 连上的 role 强制执行。**两边都要。** RLS 是 defense in depth；它不是写 ambient queries 的许可证。契约：[用 Hono、Better Auth、Drizzle 与 Postgres RLS 打造 Multi-Tenant 后端](/notes/multi-tenant-backend-drizzle-hono-better-auth)。
+      - **App-level failure modes：** 新的 list endpoint 忘了 filter。Admin script 或 JOIN 用了错的 alias。Background job 没有 session，按 primary key 跨 tenants load。Bug 是静默的：返回了另一个 tenant 的 rows。
+      - **RLS failure modes：** 没有 `FORCE ROW LEVEL SECURITY` 时的 **table owner bypass**；**`SECURITY DEFINER`** functions 以 owner 身份跑；**missing tenant GUC** —— 如果 policy 把缺 setting 当成「允许」，忘了 `set_config` 就是 fail-open；**`BYPASSRLS`**、superuser、以及 `TRUNCATE`（RLS 管不到）。Unique 与 FK checks 也绕过 row filters，所以 unique indexes 仍按 tenant 收窄。
+      - `WHERE` 仍写在 Drizzle 里。忘了 filter 不能变成一次 cross-tenant 事故；RLS 让这句话保持为真。
 
     </AccordionContent>
   </AccordionItem>
 
   <AccordionItem value="db-soft-delete">
-    <AccordionTrigger>19. Soft delete vs hard delete: implications for unique constraints, indexes (partial indexes), and data-retention compliance.</AccordionTrigger>
+    <AccordionTrigger>19. Soft delete vs hard delete：对 unique constraints、indexes（partial indexes）、以及 data-retention compliance 意味着什么。</AccordionTrigger>
     <AccordionContent>
 
-      - **Soft delete** is `deleted_at timestamptz` (or a flag) and every read adds `WHERE deleted_at IS NULL`. **Hard delete** is `DELETE` and the row is gone.
-      - **Unique constraints.** A unique index on `email` still sees soft-deleted rows. A patient who leaves cannot re-register with the same email until a purge. The fix is a **partial unique index**: unique on `(organization_id, email) WHERE deleted_at IS NULL`. Forgetting the partial predicate is how "deleted" users lock a unique key forever.
-      - **Indexes.** A full B-Tree on a table full of tombstones wastes space and cache. **Partial indexes** cover the hot path — `WHERE deleted_at IS NULL` — and a separate index if the admin undelete UI actually queries the deleted slice.
-      - **Retention and compliance.** Soft delete is not erasure. If the requirement is "remove personal data," a `deleted_at` flag fails until a purge job hard-deletes or anonymizes, and backups still hold the old row. `deleted_at` is a product undo. Retention is a purge policy plus backups.
+      - **Soft delete** 是 `deleted_at timestamptz`（或一个 flag），每次 read 加上 `WHERE deleted_at IS NULL`。**Hard delete** 是 `DELETE`，这一行没了。
+      - **Unique constraints。** `email` 上的 unique index 仍看得到 soft-deleted rows。离开的 patient 在 purge 之前不能用同一封 email 再注册。修法是 **partial unique index**：`(organization_id, email) WHERE deleted_at IS NULL` 上 unique。忘了 partial predicate，就是「已删除」用户把 unique key 锁死到永远的方式。
+      - **Indexes。** 一张满是 tombstones 的 table 上整棵 B-Tree，浪费空间与 cache。**Partial indexes** 覆盖 hot path —— `WHERE deleted_at IS NULL` —— 如果 admin undelete UI 真的会查 deleted slice，再单独一棵 index。
+      - **Retention 与 compliance。** Soft delete 不是 erasure。如果要求是「删掉个人数据」，一个 `deleted_at` flag 在 purge job hard-delete 或 anonymize 之前都算失败，而且 backups 仍握着旧行。`deleted_at` 是产品上的 undo。Retention 是 purge policy 加上 backups。
 
     </AccordionContent>
   </AccordionItem>
 
   <AccordionItem value="db-design-pharmacy">
-    <AccordionTrigger>20. Design exercise: schema for a multi-tenant pharmacy system — prescriptions, an immutable audit trail, and fast per-tenant reporting.</AccordionTrigger>
+    <AccordionTrigger>20. Design exercise：multi-tenant 药房系统的 schema —— prescriptions、不可变 audit trail、以及快的 per-tenant reporting。</AccordionTrigger>
     <AccordionContent>
 
-      - Isolation starts from [Building a Multi-Tenant Backend with Hono, Better Auth, Drizzle, and Postgres RLS](/notes/multi-tenant-backend-drizzle-hono-better-auth): shared schema, `organization_id` on every tenant-owned row, RLS plus explicit filters, runtime role not the table owner, `FORCE RLS`.
-      - **Core tables.** Tenant-owned: `patients`, `prescribers`, `medications`, `prescriptions`, `prescription_fills`. Every one has `organization_id NOT NULL`, FKs, and tenant-scoped uniqueness — `(organization_id, mrn)`, `(organization_id, rx_number)`. Hot indexes are leftmost-prefix: `(organization_id, status, created_at)` for work queues. Prescriptions are a state machine; a signed Rx is not silently overwritten. Inventory decrement is the atomic `UPDATE ... WHERE qty >= 1`.
-      - **Immutable audit.** `audit_events` with `INSERT` and `SELECT` only for `app_user` — no `UPDATE` or `DELETE`. That is append-only **for that role**, not physics: the table owner, a superuser, or DDL can still rewrite. For tamper-evidence add a separate writer role, hash chaining or WORM export, and no ORM update path. B-Tree on `(organization_id, created_at)`; GIN on `payload` only if searches go inside it.
-      - **Fast per-tenant reporting.** Fills are not aggregated on the primary for dashboards. `fill_stats_daily (organization_id, day, fill_count, ...)` is the denormalized read model. Heavy analytics go to a replica or a warehouse. Partition fills by month only when vacuum or drop-old-data is the incident, not because the table exists.
+      - Isolation 从 [用 Hono、Better Auth、Drizzle 与 Postgres RLS 打造 Multi-Tenant 后端](/notes/multi-tenant-backend-drizzle-hono-better-auth) 开始：shared schema，每一行 tenant-owned 的 row 上有 `organization_id`，RLS 加上显式 filters，runtime role 不是 table owner，`FORCE RLS`。
+      - **Core tables。** Tenant-owned：`patients`、`prescribers`、`medications`、`prescriptions`、`prescription_fills`。每一张都有 `organization_id NOT NULL`、FKs、以及 tenant-scoped uniqueness —— `(organization_id, mrn)`、`(organization_id, rx_number)`。Hot indexes 是 leftmost-prefix：work queues 用 `(organization_id, status, created_at)`。Prescriptions 是一台 state machine；签过的 Rx 不会被静默覆盖。Inventory decrement 是那条 atomic `UPDATE ... WHERE qty >= 1`。
+      - **不可变 audit。** `audit_events` 对 `app_user` 只给 `INSERT` 与 `SELECT` —— 没有 `UPDATE` 或 `DELETE`。那是 **对该 role** 的 append-only，不是物理定律：table owner、superuser、或 DDL 仍能改写。要 tamper-evidence，加一个单独的 writer role、hash chaining 或 WORM export，并且没有 ORM update path。`(organization_id, created_at)` 上 B-Tree；只有搜索会钻进 `payload` 时才在上面放 GIN。
+      - **快的 per-tenant reporting。** Fills 不在 primary 上为 dashboards aggregate。`fill_stats_daily (organization_id, day, fill_count, ...)` 是 denormalized read model。重的 analytics 去 replica 或 warehouse。只有 vacuum 或丢掉旧数据成为事故时，才按月 partition fills，不是因为这张 table 存在。
 
     </AccordionContent>
   </AccordionItem>

@@ -1,6 +1,6 @@
 ---
 title: "Full-Stack Q&A: Security"
-description: Spoken-length answers to security questions
+description: Security 問題的口語長度答案
 category: full-stack
 ---
 
@@ -8,239 +8,239 @@ category: full-stack
 
 <Accordion type="single" collapsible>
   <AccordionItem value="sec-sqli">
-    <AccordionTrigger>1. Explain how SQL injection works and why parameterized queries fix it. Where can ORMs still leave you exposed?</AccordionTrigger>
+    <AccordionTrigger>1. 解釋 SQL injection 如何運作，以及為什麼 parameterized queries 能修好它。ORMs 在哪些地方仍然會把你暴露出去？</AccordionTrigger>
     <AccordionContent>
 
-      - SQL injection is an interpreter mix-up: untrusted input is concatenated into a query string so the database parses part of that input as SQL. The attacker goal is to change what the statement means. The failure is mixing data into syntax.
-      - Parameterized queries send values out of band from the statement. The SQL text is a constant the application owns. In this stack that is Drizzle's `eq` helpers, the same pattern as [Web Security and the OWASP Top 10](/notes/web-security-owasp-top-10). A query builder is that separation, enforced.
-      - ORMs still leave you exposed: interpolating a request field into the SQL **text** of a raw fragment; **identifiers** — parameters bind values, not table or column names; **second-order data** stored last week and concatenated next week; **missing tenant filters** — that is access control, not injection.
-      - Shape is still validated with Zod. A valid string is still data. It is never syntax. Postgres RLS is the backstop when a filter is missing — if tenant context is transaction-scoped and the app role cannot bypass RLS.
+      - SQL injection 是 interpreter 把 data 跟 syntax 搞混：untrusted input 被 concatenate 進 query string，於是 database 把其中一部分當成 SQL 來 parse。Attacker goal 是改掉 statement 的意思。失敗是把 data 混進 syntax。
+      - Parameterized queries 把 values 跟 statement 分開發。SQL text 是 application 自己擁有的 constant。在這套 stack 裡就是 Drizzle 的 `eq` helpers，同一套 pattern 見 [Web Security and the OWASP Top 10](/notes/web-security-owasp-top-10)。Query builder 就是那份分離，被 enforce。
+      - ORMs 仍然會把你暴露出去：把 request field interpolate 進 raw fragment 的 SQL **text**；**identifiers** —— parameters bind 的是 values，不是 table 或 column names；**second-order data** 上週存進去、下週 concatenate；**missing tenant filters** —— 那是 access control，不是 injection。
+      - Shape 仍然用 Zod 驗證。一段 valid string 仍然是 data。它永遠不是 syntax。Postgres RLS 是 filter 漏掉時的 backstop —— 如果 tenant context 是 transaction-scoped，而且 app role 繞不過 RLS。
 
     </AccordionContent>
   </AccordionItem>
 
   <AccordionItem value="sec-xss">
-    <AccordionTrigger>2. Compare stored, reflected, and DOM-based XSS. What does React escape by default, and when is dangerouslySetInnerHTML acceptable?</AccordionTrigger>
+    <AccordionTrigger>2. 比較 stored、reflected 與 DOM-based XSS。React 預設 escape 什麼，什麼時候 dangerouslySetInnerHTML 可以接受？</AccordionTrigger>
     <AccordionContent>
 
-      - XSS is injection into the HTML or JavaScript context of the origin. Once hostile script runs there, the browser treats it as the site: it can read the DOM, `localStorage`, and any cookie that is not `HttpOnly`. **Stored** and **reflected** describe how the payload is delivered. **DOM-based** describes a browser-side source-to-sink path and can overlap either.
-      - **Stored XSS** persists in a database or CMS field and is served to other users later. **Reflected XSS** comes back in the response to the request that carried it. **DOM-based XSS** never needs the server to echo markup — client script reads the URL, storage, or postMessage data and writes it into an unsafe sink.
-      - React escapes **text children** and typical string attributes into text. It does not make every URL safe. A user-controlled `href`, `src`, or `router.push` target can still be a dangerous URL scheme. Hydration is not a sanitizer.
-      - `dangerouslySetInnerHTML` is acceptable only when the product truly must render markup — CMS HTML, a Markdown pipeline — and a maintained library has already sanitized it on the **server**. CSP still sits behind it. Stance: [Security in Next.js](/notes/security-in-next-js).
+      - XSS 是往 origin 的 HTML 或 JavaScript context 裡 injection。Hostile script 一旦在那裡跑，browser 就把它當這個 site：能讀 DOM、`localStorage`，以及任何不是 `HttpOnly` 的 cookie。**Stored** 與 **reflected** 描述 payload 怎麼送達。**DOM-based** 描述 browser 側的 source-to-sink path，可以跟前兩者重疊。
+      - **Stored XSS** 持久化在 database 或 CMS field 裡，稍後 served 給其他 users。**Reflected XSS** 跟著帶它來的那次 request 的 response 回來。**DOM-based XSS** 從不需要 server echo markup —— client script 讀 URL、storage 或 postMessage data，再寫進 unsafe sink。
+      - React 把 **text children** 與典型的 string attributes escape 成 text。它不會讓每個 URL 都安全。User-controlled 的 `href`、`src` 或 `router.push` target 仍然可以是危險的 URL scheme。Hydration 不是 sanitizer。
+      - `dangerouslySetInnerHTML` 只有在產品真的必須 render markup 時才可接受 —— CMS HTML、Markdown pipeline —— 而且受維護的 library 已經在 **server** 上 sanitize 過。CSP 仍然坐在後面。Stance：[Next.js 裡的 Security](/notes/security-in-next-js)。
 
     </AccordionContent>
   </AccordionItem>
 
   <AccordionItem value="sec-csrf">
-    <AccordionTrigger>3. How does CSRF work, and how do SameSite cookies and CSRF tokens mitigate it? Does a JWT-in-localStorage SPA need CSRF protection?</AccordionTrigger>
+    <AccordionTrigger>3. CSRF 如何運作，SameSite cookies 與 CSRF tokens 如何緩解？JWT-in-localStorage 的 SPA 需要 CSRF 保護嗎？</AccordionTrigger>
     <AccordionContent>
 
-      - CSRF works because the browser automatically attaches cookies to requests that match the cookie's site. A page on another origin can trigger a state-changing request to the API, and the victim's session cookie goes along. The attacker goal is to make the already-authenticated browser **do something**. Same-origin policy blocks reading the result. It does not block sending the cookie.
-      - **SameSite** cuts a lot of that auto-attach behavior. `Lax` sends the cookie on top-level GET navigations and same-site requests, not on cross-site POSTs. `Strict` withholds it on all cross-site requests. `None` is for deliberate cross-site widgets and requires `Secure`. Older browsers and some WebView clients need more.
-      - **CSRF tokens** bind the request to a secret the attacking origin cannot read. Origin checks are a useful extra signal on cookie-authenticated APIs.
-      - A JWT-in-`localStorage` SPA does **not** have classic cookie CSRF, because the browser will not attach that token by itself. XSS can still read `localStorage`. If a cookie-based refresh token is also present, CSRF returns. The production default is an `HttpOnly; Secure; SameSite` session cookie plus a mutation check, as in [Local Storage, Session Storage, and Cookies](/notes/browser-storage-localstorage-sessionstorage-cookies).
+      - CSRF 能成立，是因為 browser 會自動把 cookies attach 到匹配 cookie site 的 requests。另一個 origin 上的 page 可以觸發一次改狀態的 API request，受害者的 session cookie 跟著走。Attacker goal 是讓已經 authenticated 的 browser **去做一件事**。Same-origin policy 擋住讀結果。它不擋住送 cookie。
+      - **SameSite** 砍掉大量那種 auto-attach。`Lax` 在 top-level GET navigations 與 same-site requests 上送 cookie，不在 cross-site POSTs 上。`Strict` 在所有 cross-site requests 上扣住。`None` 給刻意的 cross-site widgets，並且要求 `Secure`。較老的 browsers 與某些 WebView clients 需要更多。
+      - **CSRF tokens** 把 request bind 到 attacking origin 讀不到的 secret。Origin checks 在 cookie-authenticated APIs 上是有用的 extra signal。
+      - JWT-in-`localStorage` 的 SPA **沒有** 經典 cookie CSRF，因為 browser 不會自己 attach 那顆 token。XSS 仍然能讀 `localStorage`。如果同時還握著 cookie-based refresh token，CSRF 就回來了。Production 預設是一顆 `HttpOnly; Secure; SameSite` session cookie 加上 mutation check，見 [Local Storage、Session Storage 與 Cookies](/notes/browser-storage-localstorage-sessionstorage-cookies)。
 
     </AccordionContent>
   </AccordionItem>
 
   <AccordionItem value="sec-sessions-jwt">
-    <AccordionTrigger>4. Sessions vs JWTs: how do you handle logout and revocation with stateless tokens? Explain refresh token rotation.</AccordionTrigger>
+    <AccordionTrigger>4. Sessions vs JWTs：stateless tokens 如何處理 logout 與 revocation？解釋 refresh token rotation。</AccordionTrigger>
     <AccordionContent>
 
-      - A **server session** is an opaque id in a cookie plus a record that can be deleted. Logout is a row delete. Revocation is immediate. A **stateless JWT access token** carries claims and a signature. Until it expires, there is no handle to kill it.
-      - Logout with stateless tokens cannot be "just delete a cookie on the client." Production picks: **short access tokens**; a **denylist or version check** keyed by `jti` or a user token-version in Redis; **revoke the refresh token** and accept that access tokens already issued live until expiry.
-      - **Refresh token rotation:** the refresh token is an **opaque value the client holds** — often an `HttpOnly` cookie — and a **hashed family** stored server-side. Each refresh issues a new refresh token and invalidates the previous one **atomically**. Legitimate concurrent refreshes need a grace window; a confirmed reuse of an already-rotated token is theft: the whole family is revoked.
-      - In production the preference is Better Auth's opaque session cookie for the web app. Mobile gets a short access token in memory and a refresh token in the OS secret store.
+      - **Server session** 是 cookie 裡一顆 opaque id，加上一條可以刪掉的 record。Logout 就是 row delete。Revocation 立刻生效。**Stateless JWT access token** 帶著 claims 與 signature。在它過期之前，沒有把手能殺掉它。
+      - Stateless tokens 的 logout 不能是「在 client 上刪掉一顆 cookie 就算了。」Production 的選擇：**短的 access tokens**；按 `jti` 或 Redis 裡的 user token-version 做 **denylist 或 version check**；**revoke the refresh token**，並接受已經發出去的 access tokens 活到 expiry。
+      - **Refresh token rotation：** refresh token 是 **client 握著的 opaque value** —— 常常是一顆 `HttpOnly` cookie —— 加上 server 側存的 **hashed family**。每次 refresh **atomically** 簽發一顆新的 refresh token 並作廢前一顆。合法的 concurrent refreshes 需要 grace window；已經 rotated 過的 token 被確認 reuse，就是 theft：整條 family 被 revoke。
+      - Production 裡 web app 偏好 Better Auth 的 opaque session cookie。Mobile 在 memory 裡拿短 access token，refresh token 放 OS secret store。
 
     </AccordionContent>
   </AccordionItem>
 
   <AccordionItem value="sec-passwords">
-    <AccordionTrigger>5. How should passwords be stored? Why bcrypt/argon2 over SHA-256, and what are salt and pepper?</AccordionTrigger>
+    <AccordionTrigger>5. Passwords 應該怎麼存？為什麼 bcrypt/argon2 優於 SHA-256，salt 與 pepper 是什麼？</AccordionTrigger>
     <AccordionContent>
 
-      - Passwords are never stored reversibly, and a naked SHA-256 of the password is never stored. The stored value is a **slow, salted, one-way hash** from a password hashing function. Application code should not roll a homemade construction.
-      - **SHA-256** is a general-purpose digest. It is fast on purpose. GPUs can try enormous numbers of candidates per second. `bcrypt` and `argon2` exist to make that guessing expensive. They are deliberately slow, and Argon2id is memory-hard so the attack does not map cleanly onto cheap parallel hardware.
-      - **Salt** is a per-password random value stored with the hash. Two users with the same password do not produce the same hash, and precomputed tables stop working. A global salt is not reused. **Pepper** is an application-level secret, not stored in the same row, mixed in before hashing. If the table leaks but the pepper stays in KMS, the dump is not immediately guessable. Pepper rotation is awkward, so it is defense in depth, not the main control.
-      - Hashing is necessary. It is not sufficient if the login endpoint has no throttling.
+      - Passwords 從不可逆地存，也從不存 password 的裸 SHA-256。存進去的是 password hashing function 給出的 **slow、salted、one-way hash**。Application code 不該自己滾一套 homemade construction。
+      - **SHA-256** 是 general-purpose digest。它故意快。GPUs 每秒能試巨大數量的 candidates。`bcrypt` 與 `argon2` 存在，就是為了讓那種 guessing 變貴。它們故意慢，而且 Argon2id 是 memory-hard，於是攻擊無法乾淨地映射到便宜的 parallel hardware。
+      - **Salt** 是跟 hash 一起存的 per-password random value。兩個 users 用同一條 password 也不會產出同一份 hash，precomputed tables 失效。Global salt 不複用。**Pepper** 是 application-level secret，不跟 hash 存在同一行，hashing 前混進去。如果 table 漏了但 pepper 留在 KMS，dump 不會立刻可猜。Pepper rotation 很彆扭，所以它是 defense in depth，不是主 control。
+      - Hashing 是必要的。如果 login endpoint 沒有 throttling，它不夠。
 
     </AccordionContent>
   </AccordionItem>
 
   <AccordionItem value="sec-oauth-pkce">
-    <AccordionTrigger>6. Walk through the OAuth 2.0 authorization code flow with PKCE. Why is the implicit flow deprecated?</AccordionTrigger>
+    <AccordionTrigger>6. 走一遍帶 PKCE 的 OAuth 2.0 authorization code flow。為什麼 implicit flow 被 deprecated？</AccordionTrigger>
     <AccordionContent>
 
-      - OAuth is delegated authorization, not "login with a popup." The **authorization code flow with PKCE** is what production ships for a public client — a SPA or a native app — where a client secret cannot be hidden. The longer reading is [OAuth 2.0 and OIDC Explained](/notes/oauth-2-and-oidc-explained).
-      - The client generates a high-entropy **code verifier** and derives a **code challenge** (usually SHA-256). It sends the user to the authorization server with the challenge; the verifier never goes on that first request. The user authenticates (system browser on mobile, not a scriptable WebView). The server redirects back with a short-lived **authorization code**. The client exchanges the code **and the verifier** at the token endpoint.
-      - PKCE's job is to stop an attacker who intercepted the code from exchanging it. They do not have the verifier.
-      - **Implicit flow** is deprecated because it delivered access tokens in the front channel with no client authentication and no one-time code. Tokens land in browser history and in any client that logs the full redirect URL. Fragments are **not** sent in `Referer` to other sites — that claim is a common mix-up. RFC 9700 discourages implicit; the **OAuth 2.1 draft** omits it and requires authorization code plus PKCE (S256) for public clients.
+      - OAuth 是 delegated authorization，不是「用 popup 登入。」**Authorization code flow with PKCE** 是 production 給 public client —— SPA 或 native app —— 真正 ship 的東西，因為 client secret 藏不住。更長的閱讀是 [OAuth 2.0 與 OIDC 解釋](/notes/oauth-2-and-oidc-explained)。
+      - Client 生成高熵 **code verifier**，再 derive **code challenge**（通常 SHA-256）。它帶著 challenge 把 user 送到 authorization server；verifier 從不走那第一次 request。User authenticate（mobile 上用 system browser，不是可腳本化的 WebView）。Server redirect 回來，帶一顆 short-lived **authorization code**。Client 在 token endpoint 用 code **加上 verifier** 去換。
+      - PKCE 的工作是攔住截獲 code 的 attacker 去換它。他們沒有 verifier。
+      - **Implicit flow** 被 deprecated，因為它在 front channel 交付 access tokens，沒有 client authentication，也沒有一次性 code。Tokens 落進 browser history，以及任何 log 完整 redirect URL 的 client。Fragments **不會** 作為 `Referer` 發給其他 sites —— 那個說法是常見的 mix-up。RFC 9700 勸退 implicit；**OAuth 2.1 draft** 拿掉它，並對 public clients 要求 authorization code plus PKCE (S256)。
 
     </AccordionContent>
   </AccordionItem>
 
   <AccordionItem value="sec-idor">
-    <AccordionTrigger>7. What is IDOR (broken object-level authorization), and why is it the classic multi-tenant vulnerability? How do you test for it?</AccordionTrigger>
+    <AccordionTrigger>7. 什麼是 IDOR（broken object-level authorization），為什麼它是經典的 multi-tenant 漏洞？怎麼測？</AccordionTrigger>
     <AccordionContent>
 
-      - IDOR is **broken object-level authorization**: the route exists for this user, but the object belongs to someone else. The handler trusts an id from the URL, body, or header and loads that row globally. Authentication succeeded. Authorization never asked whether this identity may touch this row.
-      - It is the classic multi-tenant bug because every SaaS API looks like `/organizations/:orgId/prescriptions/:id`. Sequential integers make guessing trivial. UUIDs make guessing harder and still are **not** access control. The failure is the missing membership check, not the id format. Path: [Building a Multi-Tenant Backend with Hono, Better Auth, Drizzle, and Postgres RLS](/notes/multi-tenant-backend-drizzle-hono-better-auth).
-      - How to test: automated **negative authorization** coverage on every object action, using synthetic isolated tenants the team owns. A caller with a valid session must be denied — 404 or 403, never another tenant's payload, and preferably without confirming that the id exists. A random id that still returns another tenant's document is a failed test.
+      - IDOR 是 **broken object-level authorization**：這條 route 對這個 user 存在，但 object 屬於別人。Handler 信任 URL、body 或 header 裡的 id，然後全局 load 那一行。Authentication 成功了。Authorization 從未問過這個 identity 能不能碰這一行。
+      - 它是經典的 multi-tenant bug，因為每個 SaaS API 都長得像 `/organizations/:orgId/prescriptions/:id`。Sequential integers 讓 guessing 變得 trivial。UUIDs 讓 guessing 更難，但仍然 **不是** access control。失敗是缺了 membership check，不是 id format。Path：[用 Hono、Better Auth、Drizzle 與 Postgres RLS 打造 Multi-Tenant 後端](/notes/multi-tenant-backend-drizzle-hono-better-auth)。
+      - 怎麼測：在每個 object action 上做自動化的 **negative authorization** coverage，用團隊自己擁有的 synthetic isolated tenants。握著 valid session 的 caller 必須被拒絕 —— 404 或 403，永遠不要另一個 tenant 的 payload，最好還不確認那個 id 存在。一個 random id 仍然返回另一個 tenant 的 document，就是 failed test。
 
     </AccordionContent>
   </AccordionItem>
 
   <AccordionItem value="sec-rbac-abac">
-    <AccordionTrigger>8. RBAC vs ABAC: model permissions for a pharmacy app where pharmacists, admins, and auditors share endpoints.</AccordionTrigger>
+    <AccordionTrigger>8. RBAC vs ABAC：為一家 pharmacy app 建模權限，pharmacists、admins 與 auditors 共用 endpoints。</AccordionTrigger>
     <AccordionContent>
 
-      - **RBAC** answers "what kind of user is this?" **ABAC** answers "in this context, on this record, is that enough?" A pharmacy app shares endpoints — the same `GET` and `POST` on a prescription — so the route list is a terrible permission model.
-      - Roles: **Pharmacist** — review, dispense, counsel, e-signature inside their pharmacy. **Admin** — roster, inventory, configuration. Not a silent super-pharmacist unless that is explicitly granted. **Auditor** — read-only for compliance review. Cannot dispense, cannot sign, cannot alter the audit trail.
-      - Shared endpoints then check role **and** attributes: **tenant** from membership, never from a client header; **assignment** — this pharmacist is on duty for this prescription's location; **minimum necessary**; **purpose and time** — treatment versus operations versus break-glass, logged and time-boxed.
-      - RBAC alone fails when two pharmacists share a role and one should not see another store's queue. ABAC alone becomes an unreadable forest of flags. A small role set, then tenant, resource, and purpose as attributes. The API still fail-closes if the policy engine times out. Hiding a button in React is not the control.
+      - **RBAC** 回答「這是哪種 user？」**ABAC** 回答「在這個 context，對這條 record，夠不夠？」Pharmacy app 共用 endpoints —— 同一張 prescription 上同樣的 `GET` 與 `POST` —— 所以 route list 是糟糕的 permission model。
+      - Roles：**Pharmacist** —— 在自己藥房裡 review、dispense、counsel、e-signature。**Admin** —— roster、inventory、configuration。不是沉默的 super-pharmacist，除非明確授予。**Auditor** —— 給 compliance review 的 read-only。不能 dispense，不能 sign，不能改 audit trail。
+      - 共用 endpoints 然後檢查 role **以及** attributes：**tenant** 來自 membership，從來不來自 client header；**assignment** —— 這位 pharmacist 值班於這張 prescription 的 location；**minimum necessary**；**purpose and time** —— treatment versus operations versus break-glass，logged 且 time-boxed。
+      - 兩個 pharmacists 共用一個 role，而其中一個不該看到另一家店的 queue 時，RBAC 單獨會失敗。ABAC 單獨會變成一團讀不懂的 flags。一小套 roles，然後 tenant、resource 與 purpose 作為 attributes。Policy engine timeout 時 API 仍然 fail-closes。在 React 裡藏一個 button 不是 control。
 
     </AccordionContent>
   </AccordionItem>
 
   <AccordionItem value="sec-cors">
-    <AccordionTrigger>9. What does CORS actually protect (and not protect)? Explain preflight and common misconfigurations like reflecting Origin with credentials.</AccordionTrigger>
+    <AccordionTrigger>9. CORS 實際保護什麼（以及不保護什麼）？解釋 preflight，以及把 Origin 連 credentials 一起 reflect 這類常見 misconfiguration。</AccordionTrigger>
     <AccordionContent>
 
-      - CORS is a **browser reading rule** for the calling page. It tells the browser which other origins may read this response. It is not a server access-control list. A mobile app, `curl`, or a server-side fetch will not obey it. Interviewers fish for "CORS is security." It is not, not by itself.
-      - Simple requests go straight to the server. The browser then decides whether JavaScript on the calling origin may read the body. **Preflight** is an `OPTIONS` request the browser sends first when the real request is non-simple: a custom header such as `Authorization`, a JSON content type, or a method like `PUT`.
-      - **Reflecting `Origin` with credentials** lets any website that can cause the victim's browser to call the API also **read** the authenticated response. **Wildcard origin with credentials** is rejected by browsers; teams then "fix" it by reflecting Origin, which is worse. Allowing the `null` origin or an unbounded header list with credentials is the same class.
-      - The production default names the app origin explicitly. CORS does not stop CSRF on cookie mutations. It stops the attacker page from **reading** the result.
+      - CORS 是給 calling page 的 **browser reading rule**。它告訴 browser 哪些其他 origins 可以讀這份 response。它不是 server access-control list。Mobile app、`curl` 或 server-side fetch 都不會聽它。面試官釣「CORS 就是 security。」它不是，單靠它不是。
+      - Simple requests 直接打到 server。Browser 然後決定 calling origin 上的 JavaScript 能不能讀 body。**Preflight** 是 browser 在真正 request 非 simple 時先發的 `OPTIONS`：自訂 header 例如 `Authorization`、JSON content type，或像 `PUT` 這樣的 method。
+      - **把 `Origin` 連 credentials 一起 reflect** 會讓任何能讓受害者 browser 打 API 的 website 也能 **讀** authenticated response。**Wildcard origin with credentials** 會被 browsers 拒絕；團隊然後「修好」它，改成 reflect Origin，更糟。允許 `null` origin，或 credentials 加上無界 header list，是同一類。
+      - Production 預設是明確點名 app origin。CORS 擋不住 cookie mutations 上的 CSRF。它擋住的是 attacker page **讀** 結果。
 
     </AccordionContent>
   </AccordionItem>
 
   <AccordionItem value="sec-csp">
-    <AccordionTrigger>10. How does a Content Security Policy stop XSS? Nonce vs hash strategies, and how do you roll CSP out with report-only first?</AccordionTrigger>
+    <AccordionTrigger>10. Content Security Policy 如何擋住 XSS？Nonce vs hash 策略，以及如何先用 report-only 推出 CSP？</AccordionTrigger>
     <AccordionContent>
 
-      - CSP is a **backup** for XSS, not a substitute for treating untrusted strings as data. It tells the browser which script, style, image, and frame sources this document may load. It does not make `dangerouslySetInnerHTML` safe.
-      - A useful policy starts locked down: `default-src 'self'`, `object-src 'none'`, `base-uri 'self'`, `frame-ancestors 'none'`. `'unsafe-inline'` undoes the XSS protection. **Nonce:** each HTML response gets a fresh random nonce; an injected script does not have it. **Hash:** the digest of each inline script's exact bytes is listed. Nonces are preferred for a Next.js app with a changing bundle; third-party tags stay on an explicit host allowlist.
-      - Rollout is **report-only first**. `Content-Security-Policy-Report-Only` ships with a report endpoint, what would have broken is watched, then the policy is tightened and switched to enforcing.
-      - Enforcing CSP is not turned on on a Friday only to discover the checkout script was inline.
+      - CSP 是 XSS 的 **backup**，不是把 untrusted strings 當 data 處理的替代。它告訴 browser 這份 document 可以 load 哪些 script、style、image 與 frame sources。它不會讓 `dangerouslySetInnerHTML` 變安全。
+      - 有用的 policy 從鎖死開始：`default-src 'self'`、`object-src 'none'`、`base-uri 'self'`、`frame-ancestors 'none'`。`'unsafe-inline'` 拆掉 XSS 保護。**Nonce：** 每次 HTML response 拿到一顆新鮮的 random nonce；injected script 沒有它。**Hash：** 列出每個 inline script 精確 bytes 的 digest。對 bundle 會變的 Next.js app，prefer nonces；third-party tags 留在明確的 host allowlist 上。
+      - Rollout 是 **先 report-only**。`Content-Security-Policy-Report-Only` 帶著 report endpoint ship，看著本來會壞什麼，然後收緊 policy 並切到 enforcing。
+      - Enforcing CSP 不會在週五打開，然後才發現 checkout script 是 inline 的。
 
     </AccordionContent>
   </AccordionItem>
 
   <AccordionItem value="sec-secret-leaks">
-    <AccordionTrigger>11. How do secrets leak into client bundles and logs, and what processes/tooling prevent it?</AccordionTrigger>
+    <AccordionTrigger>11. Secrets 如何漏進 client bundles 與 logs，什麼 process/tooling 能擋住？</AccordionTrigger>
     <AccordionContent>
 
-      - Secrets leak when a **client module graph** or a **log line** is treated as a private place. Anything that crosses `'use client'` in Next.js can appear in a browser chunk. Anything prefixed `NEXT_PUBLIC_` is inlined into those assets at build time. React Native is stricter: the Metro bundle on the device is extractable, so an HMAC or a Stripe secret in `app.json` is a public constant.
-      - Logs are the second dump. A debug 500 that prints the connection string, a request logger that records `Authorization`, or source maps on a public path all turn observability into a second breach.
-      - What production actually runs: **`server-only` imports** so a client import fails the build; **runtime secrets** from SST Secrets or the function environment, never `NEXT_PUBLIC_*`; **secret scanning** in git and CI; **log redaction** as policy; **bundle review** on a release candidate.
-      - Process matters more than a scanner. A PR checklist that asks "does this module run in the browser?" catches the Next.js graph mistake. Mobile public tokens get URL restrictions; they are still not secrets.
+      - Secrets 洩漏，是因為把 **client module graph** 或一條 **log line** 當成 private place。任何跨過 Next.js `'use client'` 的東西都能出現在 browser chunk 裡。任何 `NEXT_PUBLIC_` 前綴會在 build time inline 進那些 assets。React Native 更嚴：device 上的 Metro bundle 可被 extract，所以 `app.json` 裡的 HMAC 或 Stripe secret 就是 public constant。
+      - Logs 是第二次 dump。一條 debug 500 列印 connection string、request logger 記下 `Authorization`，或 source maps 放在 public path，都會把 observability 變成第二次 breach。
+      - Production 實際跑的：**`server-only` imports**，於是 client import 讓 build 失敗；**runtime secrets** 來自 SST Secrets 或 function environment，從不 `NEXT_PUBLIC_*`；git 與 CI 裡的 **secret scanning**；作為 policy 的 **log redaction**；release candidate 上的 **bundle review**。
+      - Process 比 scanner 更重要。一份問「這個 module 跑在 browser 裡嗎？」的 PR checklist 能抓住 Next.js graph 那個錯。Mobile public tokens 加上 URL restrictions；它們仍然不是 secrets。
 
     </AccordionContent>
   </AccordionItem>
 
   <AccordionItem value="sec-login-defense">
-    <AccordionTrigger>12. Design login defenses against brute force and credential stuffing: throttling, lockout, MFA, breached-password checks.</AccordionTrigger>
+    <AccordionTrigger>12. 設計對抗 brute force 與 credential stuffing 的 login defenses：throttling、lockout、MFA、breached-password checks。</AccordionTrigger>
     <AccordionContent>
 
-      - Brute force is guessing. **Credential stuffing** is reused passwords from other breaches, tried at scale with valid-looking usernames. The login endpoint is a rate-limited, multi-factor decision, not "check the hash and issue a cookie."
-      - **Throttling:** attempts limited per account **and** per IP or device cluster, with jittered backoff. Per-account only lets an attacker spread across many users. Per-IP only lets them rotate addresses on one target. **Lockout** is blunt — a long lock after five failures becomes an account-denial weapon. Temporary cooldown and a step-up after a threshold are preferred.
-      - **MFA** is the control that survives a stuffed password. Prefer passkeys or WebAuthn. Recovery codes are secrets; they are hashed like passwords. **Breached-password checks** at signup and at password change, using a k-anonymity prefix protocol. Passwords that already appear in dumps are rejected.
-      - Same error for unknown user and wrong password. Session rotation on success. Logging of success, failure, and MFA challenge — without logging the password. Hashing is necessary. It does not stop stuffing.
+      - Brute force 是猜。**Credential stuffing** 是其他 breaches 裡被複用的 passwords，帶著看起來合法的 usernames 大規模試。Login endpoint 是一次 rate-limited、multi-factor 的 decision，不是「check hash 然後發一顆 cookie。」
+      - **Throttling：** attempts 按 account **以及** 按 IP 或 device cluster 限制，加上 jittered backoff。只按 account 讓 attacker 散到很多 users。只按 IP 讓他們在一個 target 上輪換 addresses。**Lockout** 很鈍 —— 五次失敗之後長時間鎖住，會變成 account-denial 武器。Prefer 臨時 cooldown，以及過 threshold 之後 step-up。
+      - **MFA** 是 stuffed password 之後仍活著的 control。Prefer passkeys 或 WebAuthn。Recovery codes 是 secrets；它們像 passwords 一樣被 hash。Signup 與 password change 時做 **breached-password checks**，用 k-anonymity prefix protocol。已經出現在 dumps 裡的 passwords 被拒絕。
+      - Unknown user 與 wrong password 同一條 error。成功時 session rotation。Log success、failure 與 MFA challenge —— 不 log password。Hashing 是必要的。它擋不住 stuffing。
 
     </AccordionContent>
   </AccordionItem>
 
   <AccordionItem value="sec-encryption">
-    <AccordionTrigger>13. Encryption at rest vs in transit: where does TLS terminate in your architecture, and when is field-level encryption of PHI warranted?</AccordionTrigger>
+    <AccordionTrigger>13. Encryption at rest vs in transit：TLS 在你的架構裡哪裡 terminate，何時值得對 PHI 做 field-level encryption？</AccordionTrigger>
     <AccordionContent>
 
-      - **In transit** is TLS on the path. **At rest** is encryption of bytes on disk, in backups, and in object storage. In transit stops a network observer. At rest stops a stolen volume or snapshot. Neither is authorization. A decrypted connection that returns the wrong tenant's row is still a breach.
-      - TLS belongs on every hop, including app to Postgres, Redis, and S3. Internal networks are not a cryptographic boundary. Each HTTPS-facing managed service **terminates TLS** and re-establishes it on the next supported hop. If someone says "we terminate TLS at the load balancer, so the VPC is plaintext," that is a threat to name.
-      - **Field-level encryption of PHI** is warranted when disk encryption is not enough for the people who can already read the database: operators, analytics extracts, or backups that leave the production IAM world, and clinical columns whose leak is the incident. Envelope encryption with a data key wrapped by KMS, keys per tenant when possible. Plaintext cannot be naively searched.
-      - Field-level crypto without key custody and rotation is theater. TLS plus disk encryption plus access control remains the default.
+      - **In transit** 是路徑上的 TLS。**At rest** 是 disk、backups 與 object storage 上 bytes 的 encryption。In transit 擋住 network observer。At rest 擋住被偷走的 volume 或 snapshot。兩者都不是 authorization。一條 decrypted connection 返回錯誤 tenant 的 row，仍然是 breach。
+      - TLS 屬於每一跳，包括 app 到 Postgres、Redis 與 S3。Internal networks 不是 cryptographic boundary。每個面向 HTTPS 的 managed service **terminates TLS**，再在下一跳支援的地方重新建立。如果有人說「我們在 load balancer terminate TLS，所以 VPC 是 plaintext，」那是要點名的 threat。
+      - **PHI 的 field-level encryption** 在 disk encryption 對已經能讀 database 的人不夠時才值得：operators、analytics extracts，或離開 production IAM world 的 backups，以及洩漏本身就是 incident 的 clinical columns。Envelope encryption，data key 由 KMS wrap，可能的話 keys per tenant。Plaintext 不能 naive search。
+      - 沒有 key custody 與 rotation 的 field-level crypto 是 theater。TLS plus disk encryption plus access control 仍然是預設。
 
     </AccordionContent>
   </AccordionItem>
 
   <AccordionItem value="sec-ssrf">
-    <AccordionTrigger>14. Explain SSRF and why the AWS metadata endpoint (169.254.169.254) is the classic target. How do you mitigate it?</AccordionTrigger>
+    <AccordionTrigger>14. 解釋 SSRF，以及為什麼 AWS metadata endpoint（169.254.169.254）是經典目標。如何緩解？</AccordionTrigger>
     <AccordionContent>
 
-      - SSRF is **broken access control on the network side**. A handler fetches a URL the caller supplied and the **server** becomes the client. The attacker goal is a confused deputy: reach an address the caller's browser could not, using the server's network, DNS, and IAM role. Private RFC1918 hosts, internal admin ports, and cloud metadata are the usual destinations.
-      - `169.254.169.254` is the classic target because it is the **instance metadata service**: a link-local address only the instance can see, holding temporary credentials for the instance role. Naming the address is enough. The product mistake is "fetch this URL for me" with no allowlist.
-      - Mitigations: **prefer not to fetch caller-supplied URLs at all**; **allowlist schemes and hosts** (`https` only, named hosts, no IP literals if they can be avoided); **block link-local, loopback, metadata, and private ranges**, and re-check after DNS; **do not follow redirects** to a destination that has not been re-validated; **IMDSv2** plus least-privilege instance roles, and egress policy so the function cannot speak to the metadata hop unless it must.
+      - SSRF 是 **network 側的 broken access control**。Handler fetch 呼叫方提供的 URL，於是 **server** 變成 client。Attacker goal 是 confused deputy：用 server 的 network、DNS 與 IAM role，到達 caller 的 browser 到不了的地址。Private RFC1918 hosts、internal admin ports 與 cloud metadata 是常見目的地。
+      - `169.254.169.254` 是經典目標，因為它是 **instance metadata service**：只有 instance 看得到的 link-local address，握著 instance role 的 temporary credentials。點出這個地址就夠了。產品錯誤是「幫我 fetch 這個 URL」卻沒有 allowlist。
+      - Mitigations：**寧可根本不 fetch caller-supplied URLs**；**allowlist schemes 與 hosts**（只 `https`、named hosts、能避免就不接受 IP literals）；**block link-local、loopback、metadata 與 private ranges**，DNS 之後再 check 一次；**不要 follow redirects** 到尚未重新驗證的 destination；**IMDSv2** plus least-privilege instance roles，以及 egress policy，讓 function 除非必須，否則不能跟 metadata hop 說話。
 
     </AccordionContent>
   </AccordionItem>
 
   <AccordionItem value="sec-file-upload">
-    <AccordionTrigger>15. Secure a file-upload feature end to end: type validation, storage isolation, malware scanning, presigned URLs, safe content disposition.</AccordionTrigger>
+    <AccordionTrigger>15. 端到端保護一個 file-upload feature：type validation、storage isolation、malware scanning、presigned URLs、safe content disposition。</AccordionTrigger>
     <AccordionContent>
 
-      - Upload is an untrusted blob entering the origin, the bucket, and later someone else's browser. The attacker goals are executing in the origin, storing malware for others, and reading another tenant's file by id. User files are not served from the app origin.
-      - **Type validation** is an allowlist, not the client `Content-Type`. Size, extension, and sniffed magic bytes, then re-encode images when the product only needs pixels. **Storage isolation:** random object keys, never the user filename. Separate bucket or prefix per tenant. Authorization on download is the same IDOR test as any other row. **Malware scanning** in quarantine before the object becomes downloadable. Async, fail closed if the scanner is down.
-      - **Presigned URLs** for PUT and GET so the browser talks to object storage. A presigned **PUT does not enforce size by itself**. A presigned **POST policy** with a content-length range, an upload proxy, or post-upload size checks is used while the object is still quarantined. Short TTL, method bound, issued only after authn/authz.
-      - **Safe content disposition:** downloads go as `attachment` with `X-Content-Type-Options: nosniff` and a boring content type. Inline preview is a sanitized path on a **separate** origin. SVG and HTML uploads are script-in-disguise if they are ever served inline. If the product needs images only, those types are not accepted.
+      - Upload 是一份 untrusted blob 進入 origin、bucket，以及稍後別人的 browser。Attacker goals 是在 origin 上執行、給別人存 malware，以及按 id 讀另一個 tenant 的 file。User files 不從 app origin serve。
+      - **Type validation** 是 allowlist，不是 client 的 `Content-Type`。Size、extension 與 sniffed magic bytes，產品只要 pixels 時再 re-encode images。**Storage isolation：** random object keys，從不用 user filename。每個 tenant 單獨的 bucket 或 prefix。Download 上的 authorization 跟任何其他 row 是同一套 IDOR test。**Malware scanning** 在 quarantine 裡，object 變成 downloadable 之前。Async，scanner 掛了就 fail closed。
+      - **Presigned URLs** 給 PUT 與 GET，於是 browser 直接跟 object storage 說話。Presigned **PUT 本身不 enforce size**。帶 content-length range 的 presigned **POST policy**、upload proxy，或 post-upload size checks，在 object 仍在 quarantine 時使用。Short TTL，bind method，只在 authn/authz 之後簽發。
+      - **Safe content disposition：** downloads 走 `attachment`，加上 `X-Content-Type-Options: nosniff` 與一個無聊的 content type。Inline preview 是 **單獨** origin 上的 sanitized path。SVG 與 HTML uploads 如果曾經 inline serve，就是偽裝成檔案的 script。產品只要 images，那些 types 不被接受。
 
     </AccordionContent>
   </AccordionItem>
 
   <AccordionItem value="sec-supply-chain">
-    <AccordionTrigger>16. How do you manage supply-chain risk in npm dependencies — lockfiles, audits, typosquatting, SBOMs?</AccordionTrigger>
+    <AccordionTrigger>16. 如何管理 npm dependencies 的 supply-chain risk —— lockfiles、audits、typosquatting、SBOMs？</AccordionTrigger>
     <AccordionContent>
 
-      - Supply-chain failure is running code that was not intended to run. The attacker goal is execution on a laptop with production secrets or in CI that publishes the app. A malicious maintainer, a compromised publisher, a poisoned Action, or a package whose name looks like the project's are all the same category in OWASP 2025.
-      - **Lockfiles.** Commit the lockfile. CI installs with `npm ci` or `pnpm install --frozen-lockfile`. Production images are built from that same lockfile, not from `latest`. **Audits.** `npm audit` is a signal, not a score. Triage by whether the vulnerable path is reachable.
-      - **Typosquatting.** Lookalike names, a new publisher on a package already in use. Installs come from the lockfile. `ignore-scripts` is a reasonable default when compile-at-install is not needed. **SBOMs.** A CycloneDX or SPDX bill is generated from the resolved lockfile at release, stored with the artifact, and used when a CVE lands.
-      - GitHub Actions are also pinned to a full commit SHA. Tags move. The artifact that runs in production should be the artifact the pull request described.
+      - Supply-chain failure 是跑了本不該跑的 code。Attacker goal 是在握著 production secrets 的 laptop 上執行，或在 publish app 的 CI 裡執行。Malicious maintainer、compromised publisher、poisoned Action，或名字長得像這個 project 的 package，在 OWASP 2025 裡都是同一類。
+      - **Lockfiles.** Commit lockfile。CI 用 `npm ci` 或 `pnpm install --frozen-lockfile` 安裝。Production images 從同一份 lockfile 建置，不是從 `latest`。**Audits.** `npm audit` 是 signal，不是分數。按 vulnerable path 是否 reachable 來 triage。
+      - **Typosquatting.** Lookalike names，已經在用的 package 換了新 publisher。Installs 來自 lockfile。不需要 compile-at-install 時，`ignore-scripts` 是合理的預設。**SBOMs.** Release 時從 resolved lockfile 生成 CycloneDX 或 SPDX bill，跟 artifact 一起存，CVE 落地時用。
+      - GitHub Actions 也 pin 到完整 commit SHA。Tags 會動。Production 裡跑的 artifact 應該是 pull request 描述的那份 artifact。
 
     </AccordionContent>
   </AccordionItem>
 
   <AccordionItem value="sec-headers">
-    <AccordionTrigger>17. What do HSTS, frame-ancestors, and Referrer-Policy headers each defend against?</AccordionTrigger>
+    <AccordionTrigger>17. HSTS、frame-ancestors 與 Referrer-Policy headers 各自防什麼？</AccordionTrigger>
     <AccordionContent>
 
-      - These are **browser policy that cannot be enforced in application code after the response is gone**. None of them replaces authentication.
-      - **HSTS** (`Strict-Transport-Security`) tells the browser that this host must be reached over HTTPS for a max-age window. It defends against **SSL stripping**. After the browser has seen HSTS, it will not send that plaintext request. The first visit is still unprotected unless the site is preloaded. Ship it only on the real HTTPS origin, with a long max-age once that is sure.
-      - **`frame-ancestors`** names who may embed this document in a frame. `'none'` is the default. The attacker goal is **clickjacking**. `X-Frame-Options` is the older, coarser header. **`Referrer-Policy`** controls how much of the current URL is sent in the `Referer` header. URLs contain tokens, reset paths, and record ids. `strict-origin-when-cross-origin` is a sane default: full URL same-origin, origin-only on HTTPS cross-origin, nothing when downgrading.
-      - Headers are cheap. They are also easy to forget on an error response or a CDN path. They belong on every response, including 4xx and 5xx.
+      - 這些是 **response 走了之後，application code 無法再 enforce 的 browser policy**。沒有一個能替代 authentication。
+      - **HSTS**（`Strict-Transport-Security`）告訴 browser 這個 host 在 max-age 視窗內必須走 HTTPS。它防 **SSL stripping**。Browser 見過 HSTS 之後，就不會再發那條 plaintext request。第一次 visit 仍然不受保護，除非 site 被 preload。只在真正的 HTTPS origin 上 ship，確定之後用長 max-age。
+      - **`frame-ancestors`** 點名誰可以把這份 document embed 進 frame。`'none'` 是預設。Attacker goal 是 **clickjacking**。`X-Frame-Options` 是更老、更粗的 header。**`Referrer-Policy`** 控制當前 URL 有多少被送進 `Referer` header。URLs 裡有 tokens、reset paths 與 record ids。`strict-origin-when-cross-origin` 是清醒的預設：same-origin 給完整 URL，HTTPS cross-origin 只給 origin，downgrade 時什麼都不給。
+      - Headers 便宜。它們也容易在 error response 或 CDN path 上被忘掉。它們屬於每一份 response，包括 4xx 與 5xx。
 
     </AccordionContent>
   </AccordionItem>
 
   <AccordionItem value="sec-hipaa-audit">
-    <AccordionTrigger>18. For HIPAA-style compliance, what must an audit log capture, and how do you make it tamper-evident?</AccordionTrigger>
+    <AccordionTrigger>18. 對 HIPAA-style compliance，audit log 必須抓住什麼，如何讓它 tamper-evident？</AccordionTrigger>
     <AccordionContent>
 
-      - HIPAA does not hand out a universal field list. Treat this as a **risk-based baseline** that can answer who touched which patient's PHI, when, from where, and whether it succeeded — including administrators — plus authn events, authorization changes, and config changes, with retention from policy and contract.
-      - Capture: **actor** (user id, role, acting organization, break-glass or impersonation); **patient / record** (the PHI subject id, not the whole payload); **action**; **when** (trusted server timestamp, request id, session id); **from where** (IP, user agent, route); **outcome** (success, denial, not found). Passwords, full tokens, cookie headers, and entire clinical notes are **not** logged.
-      - Tamper-evidence: **append-only** storage with a separate account the app role can write but not delete or overwrite; **hash chaining** or a signed batch so a hole or an edit is visible; **WORM / object lock** on the archive; **alerts** on log deletion, policy change, or a burst of break-glass.
-      - A warehouse nobody pages is not a control. Integrity of the trail is part of the product, the same as RLS.
+      - HIPAA 不會發一份普世 field list。把它當成一份 **risk-based baseline**：能回答誰碰了哪位患者的 PHI、何時、從哪裡、是否成功 —— 包括 administrators —— 再加上 authn events、authorization changes 與 config changes，retention 來自 policy 與合約。
+      - Capture：**actor**（user id、role、acting organization、break-glass 或 impersonation）；**patient / record**（PHI subject id，不是整份 payload）；**action**；**when**（受信任的 server timestamp、request id、session id）；**from where**（IP、user agent、route）；**outcome**（success、denial、not found）。Passwords、完整 tokens、cookie headers 與整份 clinical notes **不** log。
+      - Tamper-evidence：app role 能寫但不能 delete 或 overwrite 的單獨 account 上的 **append-only** storage；**hash chaining** 或 signed batch，於是洞或 edit 看得見；archive 上的 **WORM / object lock**；log deletion、policy change 或 break-glass 爆發時的 **alerts**。
+      - 一個沒人 page 的 warehouse 不是 control。Trail 的 integrity 是產品的一部分，跟 RLS 一樣。
 
     </AccordionContent>
   </AccordionItem>
 
   <AccordionItem value="sec-cross-tenant">
-    <AccordionTrigger>19. Name three subtle cross-tenant data leaks beyond SQL: shared caches, queue messages, search indexes. How do you isolate each?</AccordionTrigger>
+    <AccordionTrigger>19. 點出 SQL 之外三種微妙的 cross-tenant data leaks：shared caches、queue messages、search indexes。各自如何隔離？</AccordionTrigger>
     <AccordionContent>
 
-      - SQL `WHERE organization_id = ?` is the leak everyone rehearses. Production leaks the same way in **every other store that forgot the tenant**.
-      - **Shared caches.** Redis or Next.js `cache` keyed only by user id or path will serve tenant A's JSON to tenant B. Isolation is the key: `organizationId` is part of every cache key, and authenticated responses are never cached as public.
-      - **Queue messages.** A worker that processes "generate invoice" without the tenant on the message **and** a membership check at consume time will write into whichever database connection it happens to hold. Every message carries `organizationId` from the verified request; the consumer opens the RLS transaction for that org; tenant is not taken from the job payload alone if a client could enqueue it.
-      - **Search indexes.** A shared OpenSearch or Pinecone corpus with only a metadata filter is one forgotten filter away from another tenant's documents. Isolation is a **server-side filter derived from trusted identity**, or a namespace the caller cannot name. The wrapper must not accept another tenant from the client. RLS does not follow you into Redis.
+      - SQL `WHERE organization_id = ?` 是人人排練的 leak。Production 用同樣的方式洩漏在 **每一個忘了 tenant 的其他 store**。
+      - **Shared caches.** Redis 或 Next.js `cache` 只按 user id 或 path 做 key，會把 tenant A 的 JSON served 給 tenant B。Isolation 就是 key：`organizationId` 是每個 cache key 的一部分，authenticated responses 從不 cache 成 public。
+      - **Queue messages.** Worker 處理「generate invoice」時 message 上沒有 tenant，**並且** consume 時沒有 membership check，就會寫進它碰巧握著的那條 database connection。每條 message 帶著來自 verified request 的 `organizationId`；consumer 為那個 org 打開 RLS transaction；如果 client 能 enqueue，tenant 不能單從 job payload 拿。
+      - **Search indexes.** 共用的 OpenSearch 或 Pinecone corpus 只靠 metadata filter，忘一個 filter 就離另一個 tenant 的 documents 一步之遙。Isolation 是 **從受信任 identity derive 的 server-side filter**，或 caller 點不出名的 namespace。Wrapper 不得從 client 接受另一個 tenant。RLS 不會跟著你進 Redis。
 
     </AccordionContent>
   </AccordionItem>
 
   <AccordionItem value="sec-threat-model">
-    <AccordionTrigger>20. Threat-modeling exercise: an e-signature feature for prescriptions — identify the top five threats and a mitigation for each.</AccordionTrigger>
+    <AccordionTrigger>20. Threat-modeling 練習：處方的 e-signature feature —— 找出前五個 threats，以及各自的 mitigation。</AccordionTrigger>
     <AccordionContent>
 
-      - The threat model is the **ceremony**, not the canvas widget. A prescription e-signature asserts that this pharmacist approved this exact order for this patient in this pharmacy. Attacker goals: sign as someone else, swap the document, or deny the act later.
-      - **Stolen or confused session.** Mitigation: step-up authentication at sign time, a short-lived signing challenge, and role plus tenant checks. A button behind a logged-in cookie is not a signature. **Document substitution.** Mitigation: bind a one-time signing challenge to an **immutable server-side document version and digest**, show the authoritative human-readable summary, and revalidate version, signer, tenant, and policy in the same transaction that commits.
-      - **Replay of a completed ceremony.** Mitigation: one-time server nonce, short expiry, and an idempotency key so a double submit cannot become two legal acts. **Cross-tenant retrieval of the signed artifact.** Mitigation: the same object-level control as IDOR — membership, row in tenant, RLS — and signed URLs that expire.
-      - **Repudiation and a writable audit trail.** Mitigation: append-only, hash-chained events with actor, patient, payload digest, time, and outcome. The ceremony fail-closes if policy times out.
+      - Threat model 是 **ceremony**，不是 canvas widget。一張處方的 e-signature 斷言這位 pharmacist 批准了這位患者在這家藥房的這份精確 order。Attacker goals：以別人身份 sign、換掉 document，或事後否認這個行為。
+      - **Stolen or confused session.** Mitigation：sign 時 step-up authentication、short-lived signing challenge，以及 role plus tenant checks。Logged-in cookie 後面的一個 button 不是 signature。**Document substitution.** Mitigation：把一次性 signing challenge bind 到 **immutable 的 server-side document version 與 digest**，展示權威的 human-readable summary，並在 commit 的同一筆 transaction 裡重新驗證 version、signer、tenant 與 policy。
+      - **Replay of a completed ceremony.** Mitigation：一次性 server nonce、短 expiry，以及 idempotency key，於是 double submit 不能變成兩次法律行為。**Cross-tenant retrieval of the signed artifact.** Mitigation：跟 IDOR 同一套 object-level control —— membership、tenant 裡的 row、RLS —— 以及會過期的 signed URLs。
+      - **Repudiation and a writable audit trail.** Mitigation：append-only、hash-chained events，帶著 actor、patient、payload digest、time 與 outcome。Policy timeout 時 ceremony fail-closes。
 
     </AccordionContent>
   </AccordionItem>
