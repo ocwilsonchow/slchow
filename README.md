@@ -90,25 +90,25 @@ bun run auth:generate   # regenerate Better Auth tables into @repo/db
 
 ## Scripts
 
-| Command                     | Description                                 |
-| --------------------------- | ------------------------------------------- |
-| `bun dev`                   | SST local stage; Next.js on port 3003       |
-| `bun run build`             | Turbo build across workspaces               |
-| `bun run lint`              | Turbo lint                                  |
-| `bun run check-types`       | Turbo typecheck                             |
-| `bun run format`            | Prettier across `ts` / `tsx` / `md` / `mts` / `json` |
+| Command                     | Description                                              |
+| --------------------------- | -------------------------------------------------------- |
+| `bun dev`                   | SST local stage; Next.js on port 3003                    |
+| `bun run build`             | Turbo build across workspaces                            |
+| `bun run lint`              | Turbo lint                                               |
+| `bun run check-types`       | Turbo typecheck                                          |
+| `bun run format`            | Prettier across `ts` / `tsx` / `md` / `mts` / `json`     |
 | `bun run format:check`      | Prettier check (used in CI; skips Biome-owned web files) |
-| `bun run test`              | Turbo unit tests (workspaces with a `test` script) |
-| `bun run audit`             | bun audit (known CVEs in the lockfile)      |
-| `bun run kill:ports`        | Free common local ports                     |
-| `bun run deploy:dev`        | Deploy to `dev` stage (`dev.slchow.com`)    |
-| `bun run deploy`            | Deploy to `production` (`slchow.com`)       |
-| `bun run deploy:production` | Production deploy + Playwright verify       |
-| `bun run verify:production` | Crawl a site sitemap (`PRODUCTION_URL`) and check pages |
-| `bun run a11y:smoke`        | axe-core smoke against key routes + search  |
-| `bun run sso`               | Refresh AWS SSO session                     |
-| `bun run db:*`              | Drizzle generate / migrate / push / studio  |
-| `bun run auth:generate`     | Generate Better Auth schema into `@repo/db` |
+| `bun run test`              | Turbo unit tests (workspaces with a `test` script)       |
+| `bun run audit`             | bun audit (known CVEs in the lockfile)                   |
+| `bun run kill:ports`        | Free common local ports                                  |
+| `bun run deploy:dev`        | Deploy to `dev` stage (`dev.slchow.com`)                 |
+| `bun run deploy`            | Deploy to `production` (`slchow.com`)                    |
+| `bun run deploy:production` | Production deploy + Playwright verify                    |
+| `bun run verify:production` | Crawl a site sitemap (`PRODUCTION_URL`) and check pages  |
+| `bun run a11y:smoke`        | axe-core smoke against key routes + search               |
+| `bun run sso`               | Refresh AWS SSO session                                  |
+| `bun run db:*`              | Drizzle generate / migrate / push / studio               |
+| `bun run auth:generate`     | Generate Better Auth schema into `@repo/db`              |
 
 **Web-only helpers** (from `apps/web`):
 
