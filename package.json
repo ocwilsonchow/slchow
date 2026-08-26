@@ -6,9 +6,11 @@
     "build": "turbo run build",
     "check-types": "turbo run check-types",
     "dev": "bunx sst dev --stage local",
-    "format": "prettier --write \"**/*.{ts,tsx,md}\"",
+    "format": "prettier --write \"**/*.{ts,tsx,md,mts,json}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,md,mts,json}\"",
     "lint": "turbo run lint",
+    "test": "turbo run test",
+    "audit": "bun audit",
     "kill:ports": "bash scripts/kill-ports.sh",
     "sso": "aws sso login --sso-session=sinlongchow",
     "deploy": "bunx sst deploy --stage production",
@@ -24,14 +26,14 @@
     "db:studio": "bunx sst shell --stage local -- bun run --filter @repo/db db:studio"
   },
   "devDependencies": {
-    "@axe-core/playwright": "^4.11.1",
+    "@axe-core/playwright": "^4.13.0",
     "@types/aws-lambda": "8.10.162",
-    "@types/node": "^26.1.2",
+    "@types/node": "^26.3.0",
     "husky": "^9.1.7",
     "lint-staged": "^17.3.0",
     "playwright": "^1.62.1",
-    "prettier": "^3.7.4",
-    "turbo": "^2.10.5",
+    "prettier": "^3.9.6",
+    "turbo": "^2.10.12",
     "typescript": "5.9.2"
   },
   "engines": {
