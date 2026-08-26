@@ -23,12 +23,10 @@ export const nextjs = new sst.aws.Nextjs("WEB", {
     SST_STAGE: $app.stage,
     ...(isProd ? { TURNSTILE_HOSTNAMES: siteDomain } : {}),
   },
-  openNextVersion: "4.0.3",
-  // SST invokes OpenNext directly (skips package.json prebuild). Sync design
-  // assets first; OpenNext then runs `bun run build`, which generates
-  // `public/search-index/*.json` before `next build`.
-  buildCommand:
-    "bun run sync:design-assets && npx --yes @opennextjs/aws@4.0.3 build",
+  openNextVersion: "4.1.0",
+  // Keep local CI packaging and SST deployments on the same OpenNext path.
+  // OpenNext runs `bun run build`, which generates the search index first.
+  buildCommand: "bun run build:open-next",
   dev: {
     command: "bun run dev",
     directory: "apps/web",
