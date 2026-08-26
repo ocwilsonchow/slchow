@@ -154,6 +154,8 @@ Because the deploy job uses a GitHub Environment, the OIDC `sub` claim is `repo:
 
 If assume-role fails with `Not authorized to perform sts:AssumeRoleWithWebIdentity`, the trust policy is almost always matching `ref:refs/heads/...` instead of `environment:...`.
 
+If assume-role fails with `The requested DurationSeconds exceeds the MaxSessionDuration set for this role`, keep `role-duration-seconds` at 3600 (the IAM default), **or** raise the role’s MaxSessionDuration in IAM (1–12 hours) and the job `timeout-minutes` together.
+
 Local `deploy:dev` / `deploy` remain for one-off deploys; `sst.config.ts` uses the `sinlongchow` AWS profile locally and skips it when `CI` is set.
 
 ## Content & locales
