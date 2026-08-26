@@ -116,7 +116,16 @@ bun run auth:generate   # regenerate Better Auth tables into @repo/db
 | `bun run sync:design-assets`     | Copy design files into `public/design-assets` and write 200/320/400/800w variants        |
 | `bun run optimize:design-assets` | Optimize stills with Sharp; transcode MOV/MP4 to H.264 + WebP poster (`ffmpeg` required) |
 
-**CI:** GitHub Actions (`.github/workflows/ci.yml`) runs on PRs and pushes to `main` / `develop`. It runs `bun install --frozen-lockfile`, `lint`, `format:check`, `check-types`, and `build`. On completion it posts status to Discord via the `DISCORD_WEBHOOK` repository secret.
+**CI / deploy:** GitHub Actions (`.github/workflows/ci.yml`) runs on PRs and pushes to `main` / `develop`. It runs `bun install --frozen-lockfile`, `lint`, `format:check`, `check-types`, unit tests, `build`, and e2e. Status posts to Discord via the `DISCORD_WEBHOOK` repository secret.
+
+Pull requests stop after those checks. After a green **push**, a deploy job assumes an AWS IAM role with GitHub OIDC and runs `sst deploy`:
+
+| Branch    | SST stage    | URL                    |
+| --------- | ------------ | ---------------------- |
+| `develop` | `dev`        | https://dev.slchow.com |
+| `main`    | `production` | https://slchow.com     |
+
+Create GitHub Environments named `dev` and `production`, each with secret `AWS_ROLE_ARN` (the IAM role that trusts this repo). Do not store AWS access keys. Local `deploy:dev` / `deploy` remain for one-off deploys; `sst.config.ts` uses the `sinlongchow` AWS profile locally and skips it when `CI` is set.
 
 ## Content & locales
 

@@ -7,6 +7,10 @@ on:
       - develop
   pull_request:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -82,6 +86,87 @@ jobs:
           webhook: ${{ secrets.DISCORD_WEBHOOK }}
           status: ${{ job.status }}
           title: CI
+          username: GitHub Actions
+          url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          description: ${{ steps.failure.outputs.summary }}
+
+  deploy:
+    needs: build
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment:
+      name: ${{ github.ref_name == 'main' && 'production' || 'dev' }}
+      url: ${{ github.ref_name == 'main' && 'https://slchow.com' || 'https://dev.slchow.com' }}
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      SST_STAGE: ${{ github.ref_name == 'main' && 'production' || 'dev' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ap-east-1
+          role-duration-seconds: 7200
+
+      - name: Deploy
+        run: bunx sst deploy --stage "$SST_STAGE" 2>&1 | tee -a deploy-output.log
+
+      - name: Summarize failure
+        if: failure()
+        id: failure
+        run: |
+          python3 << 'PY'
+          import os
+          import pathlib
+          import re
+
+          log_path = pathlib.Path("deploy-output.log")
+          text = log_path.read_text(errors="replace") if log_path.exists() else ""
+          text = re.sub(r"\x1b\[[0-9;]*[mK]", "", text)
+          lines = [line.rstrip() for line in text.splitlines() if line.strip()]
+          snippet = "\n".join(lines[-50:])
+          snippet = snippet.replace("```", "'''")
+          max_len = 1800
+          if len(snippet) > max_len:
+              snippet = "…\n" + snippet[-max_len:]
+
+          if snippet:
+              summary = f"```\n{snippet}\n```"
+          else:
+              summary = "No captured logs. Open the Actions run for details."
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
+              handle.write("summary<<EOF\n")
+              handle.write(summary + "\n")
+              handle.write("EOF\n")
+          PY
+
+      - name: Discord notification
+        if: always()
+        uses: sarisia/actions-status-discord@v1
+        with:
+          webhook: ${{ secrets.DISCORD_WEBHOOK }}
+          status: ${{ job.status }}
+          title: Deploy ${{ env.SST_STAGE }} · ${{ env.SST_STAGE == 'production' && 'slchow.com' || 'dev.slchow.com' }}
           username: GitHub Actions
           url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           description: ${{ steps.failure.outputs.summary }}
