@@ -156,6 +156,8 @@ If assume-role fails with `Not authorized to perform sts:AssumeRoleWithWebIdenti
 
 If assume-role fails with `The requested DurationSeconds exceeds the MaxSessionDuration set for this role`, keep `role-duration-seconds` at 3600 (the IAM default), **or** raise the role’s MaxSessionDuration in IAM (1–12 hours) and the job `timeout-minutes` together.
 
+If `sst deploy` fails with `ssm:GetParameter` on `parameter/sst/bootstrap`, OIDC worked but the role has no identity policies. Attach `AdministratorAccess` (SST’s default) to `github-actions-slchow-sst`, or use the [SST IAM policy](https://sst.dev/docs/iam-credentials/) and include `ssm:GetParameter` on `/sst/bootstrap`.
+
 Local `deploy:dev` / `deploy` remain for one-off deploys; `sst.config.ts` uses the `sinlongchow` AWS profile locally and skips it when `CI` is set.
 
 ## Content & locales
