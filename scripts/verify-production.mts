@@ -2,10 +2,23 @@ import { chromium, type Page } from "playwright"
 
 const productionUrl = process.env.PRODUCTION_URL ?? "https://slchow.com"
 const sitemapUrl = new URL("/sitemap.xml", productionUrl)
+const basicAuthUser = process.env.BASIC_AUTH_USER
+const basicAuthPassword = process.env.BASIC_AUTH_PASSWORD
+const hasBasicAuth = Boolean(basicAuthUser && basicAuthPassword)
+const basicAuthHeader = hasBasicAuth
+  ? `Basic ${Buffer.from(`${basicAuthUser}:${basicAuthPassword}`).toString("base64")}`
+  : undefined
 const navigationTimeoutMs = 30_000
 const renderSettleMs = 500
 const interPageDelayMs = 750
 const maxRateLimitRetries = 3
+
+class SkipVerify extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "SkipVerify"
+  }
+}
 
 type CheckResult = {
   url: string
@@ -25,7 +38,9 @@ async function getSitemapUrls() {
   let response = null
 
   for (let attempt = 0; attempt <= maxRateLimitRetries; attempt++) {
-    response = await fetch(sitemapUrl)
+    response = await fetch(sitemapUrl.href, {
+      headers: basicAuthHeader ? { Authorization: basicAuthHeader } : undefined,
+    })
 
     if (response.status !== 429 || attempt === maxRateLimitRetries) {
       break
@@ -33,14 +48,20 @@ async function getSitemapUrls() {
 
     const retryAfterMs = 5_000 * 2 ** attempt
     console.warn(
-      `RETRY ${sitemapUrl} after HTTP 429 (${retryAfterMs / 1_000}s)`
+      `RETRY ${sitemapUrl.href} after HTTP 429 (${retryAfterMs / 1_000}s)`
     )
     await new Promise((resolve) => setTimeout(resolve, retryAfterMs))
   }
 
+  if (response?.status === 401 && !hasBasicAuth) {
+    throw new SkipVerify(
+      `Skipping site verify: ${sitemapUrl.href} returned 401. Set BASIC_AUTH_USER and BASIC_AUTH_PASSWORD for this environment.`
+    )
+  }
+
   if (!response?.ok) {
     throw new Error(
-      `Could not load ${sitemapUrl}: ${response?.status ?? "no response"} ${response?.statusText ?? ""}`.trim()
+      `Could not load ${sitemapUrl.href}: ${response?.status ?? "no response"} ${response?.statusText ?? ""}`.trim()
     )
   }
 
@@ -124,7 +145,16 @@ async function checkPage(page: Page, url: string): Promise<CheckResult> {
 async function main() {
   const urls = await getSitemapUrls()
   const browser = await chromium.launch({ headless: true })
-  const context = await browser.newContext()
+  const context = await browser.newContext(
+    hasBasicAuth
+      ? {
+          httpCredentials: {
+            username: basicAuthUser as string,
+            password: basicAuthPassword as string,
+          },
+        }
+      : undefined
+  )
   const results: CheckResult[] = []
 
   await context.route("**/*", async (route) => {
@@ -141,7 +171,7 @@ async function main() {
     }
   })
 
-  console.log(`Checking ${urls.length} production pages from ${sitemapUrl}\n`)
+  console.log(`Checking ${urls.length} pages from ${sitemapUrl.href}\n`)
 
   try {
     for (const [index, url] of urls.entries()) {
@@ -184,8 +214,13 @@ async function main() {
 }
 
 main().catch((error) => {
+  if (error instanceof SkipVerify) {
+    console.warn(error.message)
+    return
+  }
+
   console.error(
-    `Production verification failed: ${error instanceof Error ? error.message : String(error)}`
+    `Site verification failed: ${error instanceof Error ? error.message : String(error)}`
   )
   process.exitCode = 1
 })

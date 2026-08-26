@@ -37,7 +37,5 @@ yarn-error.log*
 .DS_Store
 *.pem
 
-# sst
+# sst runtime state (resource types in sst-env.d.ts are committed for CI)
 .sst
-sst-env.d.ts
-**/sst-env.d.ts

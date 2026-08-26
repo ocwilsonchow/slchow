@@ -96,13 +96,15 @@ bun run auth:generate   # regenerate Better Auth tables into @repo/db
 | `bun run build`             | Turbo build across workspaces               |
 | `bun run lint`              | Turbo lint                                  |
 | `bun run check-types`       | Turbo typecheck                             |
-| `bun run format`            | Prettier across `ts` / `tsx` / `md`         |
-| `bun run format:check`      | Prettier check (used in CI)                 |
+| `bun run format`            | Prettier across `ts` / `tsx` / `md` / `mts` / `json` |
+| `bun run format:check`      | Prettier check (used in CI; skips Biome-owned web files) |
+| `bun run test`              | Turbo unit tests (workspaces with a `test` script) |
+| `bun run audit`             | bun audit (known CVEs in the lockfile)      |
 | `bun run kill:ports`        | Free common local ports                     |
 | `bun run deploy:dev`        | Deploy to `dev` stage (`dev.slchow.com`)    |
 | `bun run deploy`            | Deploy to `production` (`slchow.com`)       |
 | `bun run deploy:production` | Production deploy + Playwright verify       |
-| `bun run verify:production` | Crawl production sitemap and check pages    |
+| `bun run verify:production` | Crawl a site sitemap (`PRODUCTION_URL`) and check pages |
 | `bun run a11y:smoke`        | axe-core smoke against key routes + search  |
 | `bun run sso`               | Refresh AWS SSO session                     |
 | `bun run db:*`              | Drizzle generate / migrate / push / studio  |
@@ -116,7 +118,43 @@ bun run auth:generate   # regenerate Better Auth tables into @repo/db
 | `bun run sync:design-assets`     | Copy design files into `public/design-assets` and write 200/320/400/800w variants        |
 | `bun run optimize:design-assets` | Optimize stills with Sharp; transcode MOV/MP4 to H.264 + WebP poster (`ffmpeg` required) |
 
-**CI:** GitHub Actions (`.github/workflows/ci.yml`) runs on PRs and pushes to `main` / `develop`. It runs `bun install --frozen-lockfile`, `lint`, `format:check`, `check-types`, and `build`. On completion it posts status to Discord via the `DISCORD_WEBHOOK` repository secret.
+**CI / deploy:** GitHub Actions (`.github/workflows/ci.yml`) runs on PRs and pushes to `main` / `develop`. It runs `bun install --frozen-lockfile`, `lint`, `format:check`, `check-types` (web, api, and shared packages), unit tests, OpenNext packaging, and e2e. Failed e2e uploads the Playwright report. Status posts to Discord via the `DISCORD_WEBHOOK` repository secret.
+
+**Security:** `.github/workflows/security.yml` runs `bun audit` (fails the job on **critical** CVEs; high/moderate are reported) and CodeQL (`javascript-typescript`, `security-extended`). Findings land in the repo Security tab. Locally: `bun run audit`.
+
+`main` requires a pull request with a green **build** check. After a green **push**, a deploy job assumes an AWS IAM role with GitHub OIDC and runs `sst deploy`, then crawls the stage sitemap. Non-prod CloudFront Basic Auth needs `BASIC_AUTH_USER` / `BASIC_AUTH_PASSWORD` on the `dev` environment; without them, verify logs a skip instead of failing.
+
+| Branch    | SST stage    | GitHub environment | URL                    |
+| --------- | ------------ | ------------------ | ---------------------- |
+| `develop` | `dev`        | `dev`              | https://dev.slchow.com |
+| `main`    | `production` | `production`       | https://slchow.com     |
+
+Create GitHub Environments named `dev` and `production`, each with secret `AWS_ROLE_ARN`. Restrict `production` deploys to `main` and `dev` deploys to `develop`. Do not store AWS access keys.
+
+Because the deploy job uses a GitHub Environment, the OIDC `sub` claim is `repo:OWNER/REPO:environment:ENV` — not a branch ref. The IAM role trust policy must allow those environment subjects:
+
+```json
+{
+  "Effect": "Allow",
+  "Principal": {
+    "Federated": "arn:aws:iam::ACCOUNT_ID:oidc-provider/token.actions.githubusercontent.com"
+  },
+  "Action": "sts:AssumeRoleWithWebIdentity",
+  "Condition": {
+    "StringEquals": {
+      "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+      "token.actions.githubusercontent.com:sub": [
+        "repo:ocwilsonchow/slchow:environment:dev",
+        "repo:ocwilsonchow/slchow:environment:production"
+      ]
+    }
+  }
+}
+```
+
+If assume-role fails with `Not authorized to perform sts:AssumeRoleWithWebIdentity`, the trust policy is almost always matching `ref:refs/heads/...` instead of `environment:...`.
+
+Local `deploy:dev` / `deploy` remain for one-off deploys; `sst.config.ts` uses the `sinlongchow` AWS profile locally and skips it when `CI` is set.
 
 ## Content & locales
 

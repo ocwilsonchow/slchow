@@ -9,8 +9,8 @@ export default $config({
       home: "aws",
       providers: {
         aws: {
-          profile: "sinlongchow",
           region: "ap-east-1",
+          ...(!process.env.CI ? { profile: "sinlongchow" } : {}),
         },
       },
     }

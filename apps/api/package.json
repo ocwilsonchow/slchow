@@ -2,6 +2,7 @@
   "name": "api",
   "type": "module",
   "scripts": {
+    "check-types": "tsc --noEmit",
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
     "studio": "mastra studio --server-host localhost --server-port 4111 --server-protocol http --server-api-prefix /api/mastra"

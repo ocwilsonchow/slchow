@@ -54,12 +54,6 @@ const Page = async ({ params }: Props) => {
   if (!getMdxContent("blocks", slug, locale)) notFound()
 
   const t = await getTranslations({ locale, namespace: "resume" })
-  type Variants = (typeof import("@repo/intl"))["en"]["resume"]["variants"]
-  const _missingMobile: Variants = {
-    frontend: "",
-    "full-stack": "",
-    ai: "",
-  }
 
   const resumePdfHrefs = {
     frontend: "/resume-frontend.pdf",

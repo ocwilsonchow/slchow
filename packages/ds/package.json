@@ -13,6 +13,9 @@
     "./components/*": "./src/components/*.tsx",
     "./hooks/*": "./src/hooks/*.ts"
   },
+  "scripts": {
+    "check-types": "tsc --noEmit"
+  },
   "devDependencies": {
     "@types/bun": "1.3.14",
     "@types/react": "^19.2.17",

@@ -352,7 +352,7 @@ These are working defaults, not a certification:
 - **Authorize on the server**, every time. Membership for this organization, permission for this action, row loaded inside the tenant transaction. RLS as the second gate.
 - **Parameterized queries and Zod**. Untrusted input is data. HTML is data unless a trusted sanitizer says otherwise.
 - **CSP and tight CORS** in production. No debug pages, no public OpenAPI, no wildcard origins with credentials.
-- **Pin the supply chain.** Lockfile in git, frozen installs, Actions pinned to SHAs, secrets in SST not in the repo.
+- **Pin the supply chain.** Lockfile in git, frozen installs, Actions pinned to SHAs, secrets in SST not in the repo. The pipeline that enforces that is [DevSecOps](/notes/devsecops).
 - **Fail closed.** Timeouts and thrown errors are denials, not anonymous access. Clients get a generic 4xx/5xx; logs get the detail.
 - **Log and alert** on authz denials, admin actions, and signature failures — without logging secrets.
 

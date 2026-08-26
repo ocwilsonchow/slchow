@@ -10,6 +10,7 @@
     "dev": "next dev --port 3003",
     "prebuild": "bun run sync:design-assets",
     "build": "fumadocs-mdx && bun run build:search-index && next build",
+    "build:open-next": "bun run sync:design-assets && open-next build",
     "start": "next start",
     "lint": "biome check",
     "format": "biome format --write",

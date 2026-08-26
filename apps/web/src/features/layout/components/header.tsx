@@ -34,9 +34,7 @@ export const Info = async ({ ...props }: ComponentProps<"div">) => {
         <h1>
           <Link href="/">Wilson Chow</Link>
         </h1>
-        <h2 className="text-content-subdued font-medium">
-          {t("role")}
-        </h2>
+        <h2 className="text-content-subdued font-medium">{t("role")}</h2>
       </div>
       <HeaderSearchTrigger />
     </div>

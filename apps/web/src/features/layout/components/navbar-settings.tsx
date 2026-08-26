@@ -1,11 +1,11 @@
 "use client"
 
 import { cn, useTheme } from "@repo/ds"
+import { type HTMLMotionProps, motion } from "motion/react"
 import { type Locale, useLocale, useTranslations } from "next-intl"
 import { type ComponentProps, Fragment } from "react"
 import { usePathname, useRouter } from "@/i18n/navigation"
 import { localeOptions } from "@/i18n/routing"
-import { HTMLMotionProps, motion } from "motion/react"
 
 const themeOptions = [
   {

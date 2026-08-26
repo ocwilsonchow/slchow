@@ -7,10 +7,13 @@
     "target": "ESNext",
     "esModuleInterop": true,
     "skipLibCheck": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
     "jsx": "react-jsx",
     "jsxImportSource": "hono/jsx",
     "paths": {
       "@/*": ["./src/*"]
     }
-  }
+  },
+  "include": ["src", "sst-env.d.ts"]
 }
