@@ -41,7 +41,7 @@
     "nextjs-toploader": "^3.9.17",
     "posthog-js": "^1.415.7",
     "react": "19.2.4",
-    "react-dom": "19.2.4",
+    "react-dom": "19.2.8",
     "react-markdown": "^10.1.0",
     "xstate": "^5.32.5",
     "zod": "^4.4.3",
