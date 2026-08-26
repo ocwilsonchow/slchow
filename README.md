@@ -118,7 +118,7 @@ bun run auth:generate   # regenerate Better Auth tables into @repo/db
 | `bun run sync:design-assets`     | Copy design files into `public/design-assets` and write 200/320/400/800w variants        |
 | `bun run optimize:design-assets` | Optimize stills with Sharp; transcode MOV/MP4 to H.264 + WebP poster (`ffmpeg` required) |
 
-**CI / deploy:** GitHub Actions (`.github/workflows/ci.yml`) runs on PRs and pushes to `main` / `develop`. It runs `bun install --frozen-lockfile`, `lint`, `format:check`, `check-types` (web, api, and shared packages), unit tests, OpenNext packaging, and e2e. Failed e2e uploads the Playwright report. Status posts to Discord via the `DISCORD_WEBHOOK` repository secret.
+**CI / deploy:** GitHub Actions (`.github/workflows/ci.yml`) runs on PRs, pushes to `main` / `develop`, and manual `workflow_dispatch`. It runs `bun install --frozen-lockfile`, `lint`, `format:check`, `check-types` (web, api, and shared packages), unit tests, OpenNext packaging, and e2e. Failed e2e uploads the Playwright report. Status posts to Discord via the `DISCORD_WEBHOOK` repository secret. If a push never created a run (dropped webhook), use **Actions → CI → Run workflow**; deploy still runs on `workflow_dispatch`.
 
 **Security:** `.github/workflows/security.yml` runs `bun audit` (fails the job on **critical** CVEs; high/moderate are reported) and CodeQL (`javascript-typescript`, `security-extended`). Findings land in the repo Security tab. Locally: `bun run audit`.
 
