@@ -11,8 +11,8 @@ import { Header } from "@/features/layout/components/header"
 import { PageLayout } from "@/features/layout/components/page"
 import { RenderMdxBlockByPath } from "@/features/mdx/components/render-mdx-block"
 import { ListNotes } from "@/features/notes/components/list-notes"
-import { buildPageMetadata } from "@/lib/metadata"
 import { ListWorks } from "@/features/works/components/list-works"
+import { buildPageMetadata } from "@/lib/metadata"
 
 type Props = {
   params: Promise<{ locale: Locale }>
