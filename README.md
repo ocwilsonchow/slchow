@@ -90,25 +90,25 @@ bun run auth:generate   # regenerate Better Auth tables into @repo/db
 
 ## Scripts
 
-| Command                     | Description                                 |
-| --------------------------- | ------------------------------------------- |
-| `bun dev`                   | SST local stage; Next.js on port 3003       |
-| `bun run build`             | Turbo build across workspaces               |
-| `bun run lint`              | Turbo lint                                  |
-| `bun run check-types`       | Turbo typecheck                             |
-| `bun run format`            | Prettier across `ts` / `tsx` / `md` / `mts` / `json` |
+| Command                     | Description                                              |
+| --------------------------- | -------------------------------------------------------- |
+| `bun dev`                   | SST local stage; Next.js on port 3003                    |
+| `bun run build`             | Turbo build across workspaces                            |
+| `bun run lint`              | Turbo lint                                               |
+| `bun run check-types`       | Turbo typecheck                                          |
+| `bun run format`            | Prettier across `ts` / `tsx` / `md` / `mts` / `json`     |
 | `bun run format:check`      | Prettier check (used in CI; skips Biome-owned web files) |
-| `bun run test`              | Turbo unit tests (workspaces with a `test` script) |
-| `bun run audit`             | bun audit (known CVEs in the lockfile)      |
-| `bun run kill:ports`        | Free common local ports                     |
-| `bun run deploy:dev`        | Deploy to `dev` stage (`dev.slchow.com`)    |
-| `bun run deploy`            | Deploy to `production` (`slchow.com`)       |
-| `bun run deploy:production` | Production deploy + Playwright verify       |
-| `bun run verify:production` | Crawl a site sitemap (`PRODUCTION_URL`) and check pages |
-| `bun run a11y:smoke`        | axe-core smoke against key routes + search  |
-| `bun run sso`               | Refresh AWS SSO session                     |
-| `bun run db:*`              | Drizzle generate / migrate / push / studio  |
-| `bun run auth:generate`     | Generate Better Auth schema into `@repo/db` |
+| `bun run test`              | Turbo unit tests (workspaces with a `test` script)       |
+| `bun run audit`             | bun audit (known CVEs in the lockfile)                   |
+| `bun run kill:ports`        | Free common local ports                                  |
+| `bun run deploy:dev`        | Deploy to `dev` stage (`dev.slchow.com`)                 |
+| `bun run deploy`            | Deploy to `production` (`slchow.com`)                    |
+| `bun run deploy:production` | Production deploy + Playwright verify                    |
+| `bun run verify:production` | Crawl a site sitemap (`PRODUCTION_URL`) and check pages  |
+| `bun run a11y:smoke`        | axe-core smoke against key routes + search               |
+| `bun run sso`               | Refresh AWS SSO session                                  |
+| `bun run db:*`              | Drizzle generate / migrate / push / studio               |
+| `bun run auth:generate`     | Generate Better Auth schema into `@repo/db`              |
 
 **Web-only helpers** (from `apps/web`):
 
@@ -118,7 +118,7 @@ bun run auth:generate   # regenerate Better Auth tables into @repo/db
 | `bun run sync:design-assets`     | Copy design files into `public/design-assets` and write 200/320/400/800w variants        |
 | `bun run optimize:design-assets` | Optimize stills with Sharp; transcode MOV/MP4 to H.264 + WebP poster (`ffmpeg` required) |
 
-**CI / deploy:** GitHub Actions (`.github/workflows/ci.yml`) runs on PRs and pushes to `main` / `develop`. It runs `bun install --frozen-lockfile`, `lint`, `format:check`, `check-types` (web, api, and shared packages), unit tests, OpenNext packaging, and e2e. Failed e2e uploads the Playwright report. Status posts to Discord via the `DISCORD_WEBHOOK` repository secret.
+**CI / deploy:** GitHub Actions (`.github/workflows/ci.yml`) runs on PRs, pushes to `main` / `develop`, and manual `workflow_dispatch`. It runs `bun install --frozen-lockfile`, `lint`, `format:check`, `check-types` (web, api, and shared packages), unit tests, OpenNext packaging, and e2e. Failed e2e uploads the Playwright report. Status posts to Discord via the `DISCORD_WEBHOOK` repository secret. If a push never created a run (dropped webhook), use **Actions → CI → Run workflow**; deploy still runs on `workflow_dispatch`.
 
 **Security:** `.github/workflows/security.yml` runs `bun audit` (fails the job on **critical** CVEs; high/moderate are reported) and CodeQL (`javascript-typescript`, `security-extended`). Findings land in the repo Security tab. Locally: `bun run audit`.
 
@@ -153,6 +153,10 @@ Because the deploy job uses a GitHub Environment, the OIDC `sub` claim is `repo:
 ```
 
 If assume-role fails with `Not authorized to perform sts:AssumeRoleWithWebIdentity`, the trust policy is almost always matching `ref:refs/heads/...` instead of `environment:...`.
+
+If assume-role fails with `The requested DurationSeconds exceeds the MaxSessionDuration set for this role`, keep `role-duration-seconds` at 3600 (the IAM default), **or** raise the role’s MaxSessionDuration in IAM (1–12 hours) and the job `timeout-minutes` together.
+
+If `sst deploy` fails with `ssm:GetParameter` on `parameter/sst/bootstrap`, OIDC worked but the role has no identity policies. Attach `AdministratorAccess` (SST’s default) to `github-actions-slchow-sst`, or use the [SST IAM policy](https://sst.dev/docs/iam-credentials/) and include `ssm:GetParameter` on `/sst/bootstrap`.
 
 Local `deploy:dev` / `deploy` remain for one-off deploys; `sst.config.ts` uses the `sinlongchow` AWS profile locally and skips it when `CI` is set.
 

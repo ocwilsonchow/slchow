@@ -6,6 +6,7 @@ on:
       - main
       - develop
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -96,7 +97,7 @@ jobs:
 
   deploy:
     needs: build
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     environment:
@@ -138,7 +139,9 @@ jobs:
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ap-east-1
-          role-duration-seconds: 7200
+          # Must be <= IAM role MaxSessionDuration (default 3600). Raising this
+          # later also requires an IAM change and a higher timeout-minutes.
+          role-duration-seconds: 3600
 
       - name: Deploy
         run: bunx sst deploy --stage "$SST_STAGE"

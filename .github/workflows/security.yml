@@ -6,6 +6,7 @@ on:
       - main
       - develop
   pull_request:
+  workflow_dispatch:
   schedule:
     - cron: "18 7 * * 1"
 
