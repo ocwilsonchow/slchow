@@ -4,7 +4,81 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    open-pull-requests-limit: 1
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+      github-actions-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
+
   - package-ecosystem: npm
     directory: /
     schedule:
       interval: weekly
+    open-pull-requests-limit: 2
+    groups:
+      react:
+        patterns:
+          - "react"
+          - "react-dom"
+          - "@types/react"
+          - "@types/react-dom"
+      mastra:
+        patterns:
+          - "mastra"
+          - "@mastra/*"
+      better-auth:
+        patterns:
+          - "better-auth"
+          - "@better-auth/*"
+      fumadocs:
+        patterns:
+          - "fumadocs-*"
+      drizzle:
+        patterns:
+          - "drizzle-*"
+      tanstack:
+        patterns:
+          - "@tanstack/*"
+      ai-sdk:
+        patterns:
+          - "ai"
+          - "@ai-sdk/*"
+      hono:
+        patterns:
+          - "hono"
+          - "@hono/*"
+      xstate:
+        patterns:
+          - "xstate"
+          - "@xstate/*"
+      playwright:
+        patterns:
+          - "playwright"
+          - "@playwright/*"
+          - "@axe-core/playwright"
+      tailwind:
+        patterns:
+          - "tailwindcss"
+          - "@tailwindcss/*"
+          - "tw-animate-css"
+          - "tailwind-merge"
+      radix:
+        patterns:
+          - "radix-ui"
+          - "@radix-ui/*"
+      other:
+        patterns:
+          - "*"
+        exclude-patterns:
+          - "next"
+          - "typescript"
+          - "sst"
+          - "@opennextjs/*"
+      security:
+        applies-to: security-updates
+        patterns:
+          - "*"
