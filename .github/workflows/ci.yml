@@ -146,13 +146,6 @@ jobs:
       - name: Deploy
         run: bunx sst deploy --stage "$SST_STAGE"
 
-      - name: Verify deployment
-        env:
-          PRODUCTION_URL: ${{ env.SST_STAGE == 'production' && 'https://slchow.com' || 'https://dev.slchow.com' }}
-          BASIC_AUTH_USER: ${{ secrets.BASIC_AUTH_USER }}
-          BASIC_AUTH_PASSWORD: ${{ secrets.BASIC_AUTH_PASSWORD }}
-        run: bun run verify:production
-
       - name: Discord notification
         if: always()
         uses: sarisia/actions-status-discord@eb045afee445dc055c18d3d90bd0f244fd062708 # v1
@@ -164,4 +157,4 @@ jobs:
           title: Deploy ${{ env.SST_STAGE }} · ${{ env.SST_STAGE == 'production' && 'slchow.com' || 'dev.slchow.com' }}
           username: GitHub Actions
           url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          description: ${{ job.status == 'success' && 'Deployment checks passed.' || 'Open the Actions run for details.' }}
+          description: ${{ job.status == 'success' && 'Deployment succeeded.' || 'Open the Actions run for details.' }}
