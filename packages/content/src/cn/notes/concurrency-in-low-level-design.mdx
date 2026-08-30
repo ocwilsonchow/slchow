@@ -1,0 +1,399 @@
+---
+title: Low-Level Design 里的并发
+description: 进程内三类问题 —— correctness、coordination、scarcity —— 以及该伸手去拿哪一种 primitive
+date: 2026-08-30
+category: computer-science
+---
+
+Low-level design 的并发发生在 **一个 process** 里。Threads 共享同一份 heap。要看清的是：两条 thread 重叠时什么会坏掉，以及在发明第四种机制之前，该伸手去拿哪一种 primitive。
+
+这篇笔记依 [Hello Interview](https://www.youtube.com/watch?v=d8rmosXttTE)。书面对照是 [concurrency intro](https://www.hellointerview.com/learn/low-level-design/concurrency/intro)。JavaScript 与 TypeScript 跑在 main thread 上是例外 —— user code 并不跨 thread 共享内存；那一篇是 [深入理解 JavaScript Event Loop](/notes/javascript-event-loop-in-depth)。这篇笔记讲的是分类。
+
+<br />
+
+---
+
+## Pattern Map
+
+| 类型 | 坏在哪里 | Primitive | 出现在 |
+| --- | --- | --- | --- |
+| Correctness | Shared state 被并发更新 | Lock，或单个变量上的 atomic | Check-then-act、read-modify-write |
+| Coordination | Threads 需要交接或等待 | Bounded blocking queue | 异步工作、workers、backpressure |
+| Scarcity | 资源有固定上限 | Semaphore，或把 queue 当 pool 用 | 并发操作上限、connection pool |
+
+<br />
+
+多数设计从 correctness 开始。一旦存在 shared state，或吞吐量上来，coordination 与 scarcity 就会出现。真实系统常常三者并存。一次只给其中一个命名。
+
+<br />
+
+---
+
+## 1. 两条 thread，一个座位
+
+一个进程内的订座服务。浏览座位，订下一个。第一稿看起来没有问题。
+
+<br />
+
+```java
+public boolean bookSeat(String seatId, String userId) {
+    Seat seat = seats.get(seatId);
+    if (seat.isAvailable()) {
+        seat.book(userId);
+        return true;
+    }
+    return false;
+}
+```
+
+<br />
+
+Alice 和 Bob 都想要 7A。Alice 检查：空着。Bob 检查：仍空着 —— Alice 还没写完。两人都订了。Bob 覆盖了 Alice。Alice 以为自己有座位。她没有。
+
+<br />
+
+```text
+Alice: is 7A free?  yes
+Bob:   is 7A free?  yes     ← Alice has not booked yet
+Alice: book 7A
+Bob:   book 7A              ← overwrites Alice
+```
+
+<br />
+
+Bug 就住在这段空隙里。在 single-threaded 的 main thread 上，同一段函数是安全的。在多 thread 的 process 里则不是。
+
+<br />
+
+**Failure:** 把 check-then-book 拆成两步就上线，只因为它通过了单 thread 的测试。
+
+<br />
+
+---
+
+## 2. Correctness
+
+两条 thread 同时碰同一份 shared state，状态就会被写坏。两种形态几乎覆盖所有情况。
+
+<br />
+
+### Check-then-act
+
+先检查一个条件，再据此行动。空隙里，另一条 thread 可以改掉那个条件。
+
+<br />
+
+- **座位。** 检查是否空闲，再预订。
+- **停车场。** 检查车位是否空，再把车分配进去。
+- **Rate limiter。** 检查用户是否仍在限额内，再放行请求。
+- **库存。** 检查存量，再扣掉一件。
+
+<br />
+
+检查与行动必须是 **一次 atomic operation**。默认工具是 lock：临界区内只有一条 thread，其余等待。Java 的 `synchronized` 在整个 block 上持有 lock。Go 与 Rust 称之为 mutex。Python 用 `threading.Lock`。
+
+<br />
+
+```java
+public synchronized boolean bookSeat(String seatId, String userId) {
+    Seat seat = seats.get(seatId);
+    if (seat.isAvailable()) {
+        seat.book(userId);
+        return true;
+    }
+    return false;
+}
+```
+
+<br />
+
+Alice 拿到 lock，检查，预订，再释放。Bob 等待。轮到他检查时，7A 已被占用。他得到的是 no。
+
+<br />
+
+**Failure:** 只 lock 了检查、没有 lock 预订；或者每条 request 各拿一把 lock，座位 map 本身却仍无保护地共享。
+
+<br />
+
+### Read-modify-write
+
+读出一个值，据此计算，再写回去。`count++` 看起来像一次操作。它其实是三步：读、加一、写。
+
+<br />
+
+两条 thread 都读到 `5`。都算出 `6`。都写下 `6`。一次 increment 消失了。点击计数、余额、库存数量、指标汇总 —— 凡是更新依赖于当前值的，都会落到这个形态。
+
+<br />
+
+对 **单个变量**，atomic 能在一个 CPU 步骤里做完 read-modify-write。现代芯片有 compare-and-swap。Java 把它暴露为 `AtomicInteger`。
+
+<br />
+
+```java
+AtomicInteger count = new AtomicInteger(10);
+int next = count.incrementAndGet(); // 11 — hardware CAS, not count++
+```
+
+<br />
+
+Python 没有内建 atomics。同样的 increment 需要一把 lock。
+
+<br />
+
+```python
+lock = threading.Lock()
+counter = 0
+
+with lock:
+    counter += 1
+```
+
+<br />
+
+一个计数器、一个 flag、一项统计，用 atomic。一旦两个变量必须保持一致 —— 例如账户之间的转账 —— atomics 帮不上忙。用一把覆盖两次 write 的 lock。
+
+<br />
+
+**Failure:** 在共享的 `int` 上做 `count++`，或用两个 `AtomicInteger` 去做必须 all-or-nothing 的转账。
+
+<br />
+
+---
+
+## 3. Coordination
+
+工作必须从一条 thread 交到另一条。Signup 应当立刻返回。欢迎邮件要花 500ms。API threads 把任务放进 queue。Worker threads 再取下来。
+
+<br />
+
+Queue 一旦存在，两个问题就会出现。
+
+<br />
+
+**Worker 如何知道有工作来了 —— 还不至于烧掉一颗核心？** 在空 queue 上 `while (true)` 轮询，会永远占着一颗 CPU。Sleep-then-poll 少浪费一些周期，但引入延迟：任务若落在 100ms sleep 刚开始时，就要等这次 sleep 结束。
+
+<br />
+
+真正想要的是：queue 为空时休眠，producer 一 `put` 立刻醒来。这就是 **blocking queue**。Worker 调用 `take`。空则这条 thread 休眠。一次 `put` 会唤醒等待者。
+
+<br />
+
+```java
+BlockingQueue<Email> emails = new LinkedBlockingQueue<>(1000);
+
+public void signup(User user) {
+    emails.put(new Email(user)); // blocks if the queue is full
+}
+
+// worker
+while (true) {
+    Email task = emails.take(); // sleeps if empty
+    send(task);
+}
+```
+
+<br />
+
+Python 的 `queue.Queue` 默认就是 blocking。`put` 与 `get` 是同一套想法。
+
+<br />
+
+**若工作到达的速度超过 workers 的消耗呢？** 无界 queue 会一直涨，直到 process 耗尽内存。给 queue 设上限。满了之后，`put` 阻塞。这就是 **backpressure**：consumers 跟不上时，producers 自然放慢。始终设上限。
+
+<br />
+
+凡是工作在 threads 之间流动，就会出现这种形态：scheduler、后台 job processor、process 内部的消息交接。
+
+<br />
+
+本文不展开的后续问题：buffer 该有多大、shutdown 时 workers 如何排空、以及阻塞 request path 不可接受时该怎么办。
+
+<br />
+
+**Failure:** 在空 queue 上自旋，或在注册高峰里用一条无界 queue 吃掉 heap。
+
+<br />
+
+---
+
+## 4. Scarcity
+
+资源有固定上限。外部 API 只允许 10 个 in-flight 调用。五十条 thread 都想进去。需要一种说法：同一时刻只许十个。
+
+<br />
+
+**Semaphore** 是一桶 permits。做事前先取一张。做完再放回。桶空了：等到有人把 permit 放回来。
+
+<br />
+
+```java
+Semaphore downloads = new Semaphore(5);
+
+public void download() throws InterruptedException {
+    downloads.acquire();
+    try {
+        doDownload();
+    } finally {
+        downloads.release();
+    }
+}
+```
+
+<br />
+
+若 `doDownload` 抛错而你从未 `release`，那张 permit 就丢了。五次异常会把桶清空。之后每一次 download 都会永远等下去。在 `finally` 里释放。Python 是同一形态：`acquire`、做事、在 `finally` 里 `release`。
+
+<br />
+
+有时你数的不是次数。你在复用 **带状态的对象** —— 一条 database connection 握着 socket、内存、事务状态。不会为每次 query 新开一条。你先建好十条 connection，再把它们递出去。
+
+<br />
+
+这个 pool 就是装满这些对象的 blocking queue。`take` 一条，用完，再 `put` 回去。与 coordination 是同一种 primitive，只是当作一只袋子来用。
+
+<br />
+
+```java
+BlockingQueue<Connection> pool = new LinkedBlockingQueue<>(10);
+
+void init() throws InterruptedException {
+    for (int i = 0; i < 10; i++) {
+        pool.put(openConnection());
+    }
+}
+
+void query(String sql) throws InterruptedException {
+    Connection conn = pool.take();
+    try {
+        conn.execute(sql);
+    } finally {
+        pool.put(conn);
+    }
+}
+```
+
+<br />
+
+两种 scarcity 都是 acquire、使用、release。工作失败时，release 仍然必须发生。
+
+<br />
+
+**Failure:** 只在成功路径上归还 permit 或 connection，第五次异常就会把整个 process 卡住。
+
+<br />
+
+---
+
+## 5. 语言对照表
+
+同一组 primitives，不同的名字。伸手去拿已经存在的那一个。
+
+<br />
+
+| Concept | Java | Python | Go | C++ | C# |
+| --- | --- | --- | --- | --- | --- |
+| Lock / mutex | `synchronized` / `ReentrantLock` | `threading.Lock` | `sync.Mutex` | `std::mutex` | `lock` / `Monitor` |
+| Read-write lock | `ReentrantReadWriteLock` | N/A（第三方） | `sync.RWMutex` | `std::shared_mutex` | `ReaderWriterLockSlim` |
+| Condition variable | `Object.wait` / `notify` | `threading.Condition` | `sync.Cond` | `std::condition_variable` | `Monitor.Wait` / `Pulse` |
+| Semaphore | `Semaphore` | `threading.Semaphore` | `x/sync/semaphore` | `std::counting_semaphore` | `SemaphoreSlim` |
+| Blocking queue | `LinkedBlockingQueue` | `queue.Queue` | buffered channel | 自行组合 | `BlockingCollection` |
+| Atomic integer | `AtomicInteger` | N/A（用 lock） | `sync/atomic` | `std::atomic` | `Interlocked` |
+| Concurrent map | `ConcurrentHashMap` | N/A（GIL） | `sync.Map` | TBB hash map | `ConcurrentDictionary` |
+
+<br />
+
+- Python 的 GIL 表示 CPU-bound 的 threads 不会并行。I/O-bound 的仍然会。没有原生 atomic integer。
+- Go：channel 是惯用的 queue。先用它，再考虑 `sync.Cond`。
+- C++ 常常要你自己把 mutex 与 condition variable 组合起来。
+
+<br />
+
+---
+
+## 6. 清单
+
+三个问题。多数设计会落到其中之一。
+
+<br />
+
+1. **是否存在多于一条 thread 能碰到的 shared state？** Correctness。Check-then-act 或 read-modify-write。Lock 住临界区；若只是单个变量，用 atomic。
+2. **工作是否从一条 thread 流向另一条？** Coordination。空则休眠，满则阻塞。一条 bounded blocking queue。
+3. **是否存在固定上限？** Scarcity。在计数时用 semaphore。在 pooling 对象时用装满对象的 blocking queue。在 `finally` 里释放。
+
+<br />
+
+先给类型命名，再给 primitive 命名，然后写下临界区。在这三种撑不住设计之前，不要发明第四种机制。
+
+<br />
+
+**Failure:** 还没说清自己在解这三类里的哪一类，就跳进自制的 lock-free 结构，或给整个服务包上一把全局 lock。
+
+<br />
+
+---
+
+## Recap Q&A
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="lld-what">
+    <AccordionTrigger>1. LLD 并发是什么，不是什么？</AccordionTrigger>
+    <AccordionContent>
+
+      - 一个 process。Threads 共享 heap。无论跑在两颗核心还是一颗上，操作都会交错。
+      - System design 的并发发生在多台 servers 之间。Primitive 不同，失败模式也不同。这篇笔记是进程内的情形。
+      - JavaScript 与 TypeScript 跑在 main thread 上没有这个问题。那一篇是 [深入理解 JavaScript Event Loop](/notes/javascript-event-loop-in-depth)。
+      - **Failure:** 把一段单 thread 下安全的订座函数，当成多 thread process 里也安全；或在一个 JVM 里去拿 distributed locks。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="lld-correctness">
+    <AccordionTrigger>2. Correctness 的两种形态是什么，该用哪种 primitive？</AccordionTrigger>
+    <AccordionContent>
+
+      - **Check-then-act：** 先检查条件，再行动。座位、车位、rate limit、库存。另一条 thread 可以赢下那段空隙。用 lock 把检查与行动收进同一段临界区。
+      - **Read-modify-write：** 读、计算、写。`count++` 是三条指令。两条 thread 都读到 `5`，都写下 `6`。
+      - 单个变量：atomic（`AtomicInteger`、CAS）。必须保持一致的两个变量：一把 lock。Python：两种都用 lock —— 没有原生 atomics。
+      - **Failure:** 在共享的 `int` 上做 `count++`，或用两个 atomics 去做必须成对 atomic 的转账。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="lld-coordination">
+    <AccordionTrigger>3. 什么时候是 coordination，该伸手去拿什么？</AccordionTrigger>
+    <AccordionContent>
+
+      - 工作从一条 thread 交到另一条：signup 返回，worker 去发邮件。
+      - 自旋或 sleep-polling 是错误的等待。Blocking 的 `take` 在空时休眠，在 `put` 时醒来。
+      - 给 queue 设上限。满了的 `put` 会阻塞。这就是 backpressure。无界 queue 会把 process OOM。
+      - 容量、shutdown，以及「不要阻塞 request path」，是后续问题。
+      - **Failure:** 热轮询循环，或一条没有 max size 的 queue。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="lld-scarcity">
+    <AccordionTrigger>4. 什么时候是 scarcity，什么时候 queue 是一个 pool？</AccordionTrigger>
+    <AccordionContent>
+
+      - 固定上限：十个 in-flight API 调用、五次 download。Semaphore 是一桶 permits。Acquire，做事，release。
+      - 带状态的对象（connections）是 pool：先填满一条 blocking queue，`take`，使用，再 `put` 回去。
+      - 在 `finally` 里释放。跳过 `release` 的异常会泄漏一张 permit 或一条 connection。泄漏够多次，所有人都会永远等下去。
+      - **Failure:** 只在成功路径上归还 permit。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="lld-checklist">
+    <AccordionTrigger>5. 哪三个问题能把问题归类？</AccordionTrigger>
+    <AccordionContent>
+
+      - 多于一条 thread 能碰到的 shared state？Correctness —— lock 或 atomic。
+      - 工作在 threads 之间流动？Coordination —— bounded blocking queue。
+      - 固定上限？Scarcity —— semaphore，或装满 pooled objects 的 queue。
+      - 先给类型命名，再给 primitive 命名。多数设计属于这三类之一。
+      - **Failure:** 还没分类，就发明一种新机制，或上一把全局 lock。
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>

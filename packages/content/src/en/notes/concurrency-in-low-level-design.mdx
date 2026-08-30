@@ -1,0 +1,399 @@
+---
+title: Concurrency in Low-Level Design
+description: Three in-process problem types — correctness, coordination, scarcity — and which primitive to reach for
+date: 2026-08-30
+category: computer-science
+---
+
+Low-level design concurrency is **one process**. Threads share a heap. What matters is what breaks when two of them overlap, and which primitive you reach for before you invent a new one.
+
+This note follows [Hello Interview](https://www.youtube.com/watch?v=d8rmosXttTE). The written companion is the [concurrency intro](https://www.hellointerview.com/learn/low-level-design/concurrency/intro). JavaScript and TypeScript on the main thread are the exception — user code does not share memory across threads; that note is [The JavaScript Event Loop in Depth](/notes/javascript-event-loop-in-depth). This note is the classification.
+
+<br />
+
+---
+
+## Pattern Map
+
+| Type | What breaks | Primitive | Where it shows up |
+| --- | --- | --- | --- |
+| Correctness | Shared state is updated concurrently | Lock, or an atomic on one variable | Check-then-act, read-modify-write |
+| Coordination | Threads need handoff or a wait | Bounded blocking queue | Async work, workers, backpressure |
+| Scarcity | A resource has a fixed limit | Semaphore, or a queue used as a pool | Concurrent-op cap, connection pool |
+
+<br />
+
+Most designs start as correctness. Coordination and scarcity show up once shared state exists or throughput rises. Real systems mix the three. Name them one at a time.
+
+<br />
+
+---
+
+## 1. Two threads, one seat
+
+An in-process booking service. Browse seats, book one. The first draft looks fine.
+
+<br />
+
+```java
+public boolean bookSeat(String seatId, String userId) {
+    Seat seat = seats.get(seatId);
+    if (seat.isAvailable()) {
+        seat.book(userId);
+        return true;
+    }
+    return false;
+}
+```
+
+<br />
+
+Alice and Bob both want 7A. Alice checks: available. Bob checks: still available — Alice has not written yet. Both book. Bob overwrites Alice. Alice thinks she has a seat. She does not.
+
+<br />
+
+```text
+Alice: is 7A free?  yes
+Bob:   is 7A free?  yes     ← Alice has not booked yet
+Alice: book 7A
+Bob:   book 7A              ← overwrites Alice
+```
+
+<br />
+
+That gap is the bug. On a single-threaded main thread the same function is safe. In a multi-threaded process it is not.
+
+<br />
+
+**Failure:** shipping the check-then-book as two steps and calling it done because it passed a single-threaded test.
+
+<br />
+
+---
+
+## 2. Correctness
+
+Shared state gets corrupted because two threads touch it at once. Two shapes cover almost every case.
+
+<br />
+
+### Check-then-act
+
+You check a condition, then you act on it. Another thread can change the condition in the gap.
+
+<br />
+
+- **Seats.** Check available, then book.
+- **Parking lot.** Check the spot is empty, then assign the car.
+- **Rate limiter.** Check the user is under the limit, then allow the request.
+- **Inventory.** Check stock, then take the unit.
+
+<br />
+
+The check and the act have to be **one atomic operation**. The default tool is a lock: one thread inside the critical section, everyone else waits. Java's `synchronized` holds the lock for the block. Go and Rust call it a mutex. Python uses `threading.Lock`.
+
+<br />
+
+```java
+public synchronized boolean bookSeat(String seatId, String userId) {
+    Seat seat = seats.get(seatId);
+    if (seat.isAvailable()) {
+        seat.book(userId);
+        return true;
+    }
+    return false;
+}
+```
+
+<br />
+
+Alice takes the lock, checks, books, releases. Bob waits. When he checks, 7A is taken. He is told no.
+
+<br />
+
+**Failure:** locking the check and not the book, or taking a lock per request while the seat map is still shared without it.
+
+<br />
+
+### Read-modify-write
+
+You read a value, compute from it, write it back. `count++` looks like one operation. It is three: read, add one, write.
+
+<br />
+
+Two threads both read `5`. Both compute `6`. Both write `6`. One increment is gone. Hit counters, balances, inventory quantities, metric aggregation — any update that depends on the current value.
+
+<br />
+
+For a **single variable**, an atomic does the read-modify-write in one CPU step. Modern chips have compare-and-swap. Java exposes it as `AtomicInteger`.
+
+<br />
+
+```java
+AtomicInteger count = new AtomicInteger(10);
+int next = count.incrementAndGet(); // 11 — hardware CAS, not count++
+```
+
+<br />
+
+Python has no built-in atomics. The same increment needs a lock.
+
+<br />
+
+```python
+lock = threading.Lock()
+counter = 0
+
+with lock:
+    counter += 1
+```
+
+<br />
+
+Use an atomic for one counter, flag, or statistic. The moment two variables must stay consistent — a transfer between accounts — atomics cannot help. Take a lock that covers both writes.
+
+<br />
+
+**Failure:** `count++` on a shared `int`, or two `AtomicInteger`s for a transfer that has to be all-or-nothing.
+
+<br />
+
+---
+
+## 3. Coordination
+
+Work has to move from one thread to another. A signup should return now. The welcome email takes 500ms. API threads put tasks on a queue. Worker threads pull them off.
+
+<br />
+
+Two problems appear the moment the queue exists.
+
+<br />
+
+**How does the worker know work arrived — without burning a core?** A `while (true)` that polls an empty queue occupies a CPU forever. Sleep-then-poll wastes fewer cycles and adds latency: a job that lands at the start of a 100ms sleep waits for the sleep.
+
+<br />
+
+What you want: sleep when the queue is empty, wake the instant a producer `put`s. That is a **blocking queue**. The worker calls `take`. Empty means the thread sleeps. A `put` wakes a waiter.
+
+<br />
+
+```java
+BlockingQueue<Email> emails = new LinkedBlockingQueue<>(1000);
+
+public void signup(User user) {
+    emails.put(new Email(user)); // blocks if the queue is full
+}
+
+// worker
+while (true) {
+    Email task = emails.take(); // sleeps if empty
+    send(task);
+}
+```
+
+<br />
+
+Python's `queue.Queue` is already blocking. `put` and `get` are the same idea.
+
+<br />
+
+**What if work arrives faster than workers drain it?** An unbounded queue grows until the process is out of memory. Bound the queue. When it is full, `put` blocks. That is **backpressure**: producers slow down because consumers cannot keep up. Always bound it.
+
+<br />
+
+This shows up whenever work flows between threads: a scheduler, a background job processor, a message handoff inside the process.
+
+<br />
+
+Follow-ups, not this note: how large the buffer should be, how workers drain on shutdown, and what to do if blocking the request path is unacceptable.
+
+<br />
+
+**Failure:** a spin loop on an empty queue, or an unbounded queue that eats the heap during a signup spike.
+
+<br />
+
+---
+
+## 4. Scarcity
+
+A resource has a fixed limit. An external API allows 10 in-flight calls. Fifty threads want in. You need a way to say: only ten of you at a time.
+
+<br />
+
+A **semaphore** is a bucket of permits. Acquire one before the work. Release it after. Empty bucket: wait until someone puts a permit back.
+
+<br />
+
+```java
+Semaphore downloads = new Semaphore(5);
+
+public void download() throws InterruptedException {
+    downloads.acquire();
+    try {
+        doDownload();
+    } finally {
+        downloads.release();
+    }
+}
+```
+
+<br />
+
+If `doDownload` throws and you never `release`, that permit is gone. Five exceptions empty the bucket. Every later download waits forever. Release in `finally`. Same shape in Python: `acquire`, work, `release` in `finally`.
+
+<br />
+
+Sometimes you are not counting. You are reusing **objects with state** — a database connection holds a socket, memory, transaction state. You do not open one per query. You create ten connections and hand them out.
+
+<br />
+
+That pool is a blocking queue filled with the objects. `take` one, use it, `put` it back. Same primitive as coordination, used as a bag.
+
+<br />
+
+```java
+BlockingQueue<Connection> pool = new LinkedBlockingQueue<>(10);
+
+void init() throws InterruptedException {
+    for (int i = 0; i < 10; i++) {
+        pool.put(openConnection());
+    }
+}
+
+void query(String sql) throws InterruptedException {
+    Connection conn = pool.take();
+    try {
+        conn.execute(sql);
+    } finally {
+        pool.put(conn);
+    }
+}
+```
+
+<br />
+
+Both scarcity shapes are acquire, use, release. The release has to happen when the work fails.
+
+<br />
+
+**Failure:** acquiring a permit or a connection and returning it only on the happy path, so the fifth exception stalls the process.
+
+<br />
+
+---
+
+## 5. Language table
+
+The same primitives, different names. Reach for the one that already exists.
+
+<br />
+
+| Concept | Java | Python | Go | C++ | C# |
+| --- | --- | --- | --- | --- | --- |
+| Lock / mutex | `synchronized` / `ReentrantLock` | `threading.Lock` | `sync.Mutex` | `std::mutex` | `lock` / `Monitor` |
+| Read-write lock | `ReentrantReadWriteLock` | N/A (third party) | `sync.RWMutex` | `std::shared_mutex` | `ReaderWriterLockSlim` |
+| Condition variable | `Object.wait` / `notify` | `threading.Condition` | `sync.Cond` | `std::condition_variable` | `Monitor.Wait` / `Pulse` |
+| Semaphore | `Semaphore` | `threading.Semaphore` | `x/sync/semaphore` | `std::counting_semaphore` | `SemaphoreSlim` |
+| Blocking queue | `LinkedBlockingQueue` | `queue.Queue` | buffered channel | compose it | `BlockingCollection` |
+| Atomic integer | `AtomicInteger` | N/A (use a lock) | `sync/atomic` | `std::atomic` | `Interlocked` |
+| Concurrent map | `ConcurrentHashMap` | N/A (GIL) | `sync.Map` | TBB hash map | `ConcurrentDictionary` |
+
+<br />
+
+- Python's GIL means CPU-bound threads do not run in parallel. I/O-bound threads still do. There is no native atomic integer.
+- Go: a channel is the idiomatic queue. Use it before you reach for `sync.Cond`.
+- C++ often wants you to compose mutex + condition variable yourself.
+
+<br />
+
+---
+
+## 6. Checklist
+
+Three questions. Most designs map to one of them.
+
+<br />
+
+1. **Is there shared state more than one thread can touch?** Correctness. Check-then-act or read-modify-write. Lock the critical section, or use an atomic if it is one variable.
+2. **Is work flowing from one thread to another?** Coordination. Sleep on empty, block on full. A bounded blocking queue.
+3. **Is there a fixed limit?** Scarcity. A semaphore if you are counting. A blocking queue of objects if you are pooling. Release in `finally`.
+
+<br />
+
+Name the type. Name the primitive. Then write the critical section. Do not invent a fourth mechanism until these three cannot hold the design.
+
+<br />
+
+**Failure:** jumping to a custom lock-free structure, or wrapping the whole service in one lock, before saying which of the three you are solving.
+
+<br />
+
+---
+
+## Recap Q&A
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="lld-what">
+    <AccordionTrigger>1. What is LLD concurrency, and what is it not?</AccordionTrigger>
+    <AccordionContent>
+
+      - One process. Threads share a heap. Operations interleave whether they run on two cores or one.
+      - System design concurrency is across servers. Different primitives, different failure modes. This note is the in-process case.
+      - JavaScript and TypeScript on the main thread do not have this problem. That note is [The JavaScript Event Loop in Depth](/notes/javascript-event-loop-in-depth).
+      - **Failure:** treating a single-threaded booking function as safe in a multi-threaded process, or reaching for distributed locks inside one JVM.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="lld-correctness">
+    <AccordionTrigger>2. What are the two correctness shapes, and which primitive?</AccordionTrigger>
+    <AccordionContent>
+
+      - **Check-then-act:** check a condition, then act. Seats, parking spots, rate limits, inventory. Another thread can win the gap. Make check and act one critical section with a lock.
+      - **Read-modify-write:** read, compute, write. `count++` is three instructions. Two threads both read `5` and both write `6`.
+      - One variable: an atomic (`AtomicInteger`, CAS). Two variables that must stay consistent: a lock. Python: a lock either way — no native atomics.
+      - **Failure:** `count++` on a shared `int`, or two atomics for a transfer that has to be atomic as a pair.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="lld-coordination">
+    <AccordionTrigger>3. When is it coordination, and what do you reach for?</AccordionTrigger>
+    <AccordionContent>
+
+      - Work moves from one thread to another: signup returns, a worker sends the email.
+      - Spinning or sleep-polling is the wrong wait. A blocking `take` sleeps on empty and wakes on `put`.
+      - Bound the queue. Full `put` blocks. That is backpressure. Unbounded queues OOM the process.
+      - Sizing, shutdown, and "do not block the request path" are follow-ups.
+      - **Failure:** a hot poll loop, or a queue with no max size.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="lld-scarcity">
+    <AccordionTrigger>4. When is it scarcity, and when is the queue a pool?</AccordionTrigger>
+    <AccordionContent>
+
+      - A fixed limit: ten in-flight API calls, five downloads. A semaphore is a bucket of permits. Acquire, do the work, release.
+      - Objects with state (connections) are a pool: fill a blocking queue, `take`, use, `put` back.
+      - Release in `finally`. An exception that skips `release` leaks a permit or a connection. Enough leaks and everything waits forever.
+      - **Failure:** returning the permit only on the happy path.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="lld-checklist">
+        <AccordionTrigger>5. What three questions classify the problem?</AccordionTrigger>
+    <AccordionContent>
+
+      - Shared state more than one thread can touch? Correctness — lock or atomic.
+      - Work flowing between threads? Coordination — bounded blocking queue.
+      - A fixed limit? Scarcity — semaphore, or a queue of pooled objects.
+      - Name the type, then the primitive. Most designs are one of these three.
+      - **Failure:** inventing a new mechanism, or one global lock, before classifying the problem.
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>
