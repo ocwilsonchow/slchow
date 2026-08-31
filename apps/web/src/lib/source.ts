@@ -9,6 +9,7 @@ import {
 import { toFumadocsSource } from "fumadocs-mdx/runtime/server"
 import type { DocData, DocMethods } from "fumadocs-mdx/runtime/types"
 import { fumadocsI18n } from "@/lib/fumadocs-i18n"
+import { NOTES_CATEGORY_ORDER } from "@/lib/notes-category-order"
 import {
   FULL_STACK_QA_SECTION_SLUGS,
   isDraftSourcePage,
@@ -224,19 +225,6 @@ export async function loadFullStackQa(locale: string) {
     toc: sections.flatMap((section) => section.toc),
   }
 }
-
-const NOTES_CATEGORY_ORDER = [
-  "frontend",
-  "typescript",
-  "backend",
-  "system-design",
-  "ai",
-  "security",
-  "devops",
-  "computer-science",
-  "full-stack",
-  "personal",
-] as const
 
 const getPageDate = (date?: string | Date) => {
   if (!date) return 0
