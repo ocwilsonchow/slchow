@@ -1,0 +1,631 @@
+---
+title: 深入理解 NestJS
+description: Modules、IoC container 与 HTTP request pipeline 如何组成 NestJS 12 —— 以及为什么 Nest 是 adapter 外围的 container，不是 router
+date: 2026-08-31
+category: backend
+---
+
+Nest 常被介绍成「带 decorators 的 TypeScript Express」。那个描述跳过了为什么你自己 `new` 的 service 对 graph 不可见、为什么 middleware 看不见 handler、为什么 pipe 会在 controller 跑之前 throw，以及为什么换成 Fastify 不会重写 module tree。
+
+有用的模型：Nest 是 **HTTP adapter 外围的 container**。Bootstrap 时，它从 `@Module()` metadata 建出一棵 **application graph**。Request time 跑一条固定 pipeline，再由 adapter 写出 response。
+
+<br />
+
+```text
+NestFactory.create(AppModule)
+  → scan modules, register tokens, instantiate providers
+  → bind controllers to the HTTP adapter (Express by default)
+request
+  → middleware (platform; route not selected yet)
+  → guards (canActivate + ExecutionContext)
+  → interceptors (before)
+  → pipes (transform / validate arguments)
+  → controller handler
+  → interceptors (after; RxJS)
+  → exception filters (if anything threw)
+```
+
+<br />
+
+这篇笔记针对 **NestJS 12**（[docs](https://docs.nestjs.com/)，[v12.0.0](https://github.com/nestjs/nest/releases/tag/v12.0.0)，2026-08-27）。官方 snippets 使用 ESM `.js` import suffixes。跑 framework 需要 **Node v20.19+ 或 v22.12+**。CLI generators 的门槛更高。CommonJS 应用仍可通过 `require(esm)` 消费这些 ESM packages —— 把 *你自己的* app 迁到 ESM 是可选的。
+
+三种陈述：
+
+- 一条 **TypeScript / Node 规则**，例如 interfaces 在 runtime 被 erase，或只有一条 event-loop thread。
+- 一份 **Nest 契约**，例如 `@Module()`、`CanActivate`，或 `StandardSchemaValidationPipe`。
+- 一项 **实现观察**，例如 `reflect-metadata` tokens 或 Express `req`/`res`。有助于调试。应用代码不得依赖未文档化的 internals。
+
+这个站的 typed router 是 [用 Hono、Drizzle、Zod OpenAPI 与 SST 打造 Backend APIs](/notes/_backend-apis-hono-sst)。Hono 是你组起来的 function。Nest 建构 graph，再把 HTTP map 到 methods。那个分裂的 Spring 表亲是 [以 TypeScript Developer 身份学 Java](/notes/learning-java-as-a-typescript-developer)。为什么 class 是 runtime token，见 [TypeScript Class 与 Runtime Identity](/notes/typescript-classes-and-runtime-identity)。Node 仍是一条 thread：[深入理解 JavaScript Event Loop](/notes/javascript-event-loop-in-depth)。
+
+GraphQL、WebSockets、microservices、queues 与 Passport recipes 不是这篇笔记。v12 也出了 `@nestjs/observe`；那也不是这篇。
+
+---
+
+## 1. Nest 是 Adapter 外围的 Container
+
+`NestFactory.create(AppModule)` 不会启动一个 router。它 **bootstrap 一个 container**：扫描 root module、走 `imports`、注册 tokens、实例化 singleton providers，再把 controllers 交给 HTTP adapter。
+
+<br />
+
+```ts title="main.ts"
+import { NestFactory } from "@nestjs/core"
+import { AppModule } from "./app.module.js"
+
+async function bootstrap() {
+  const app = await NestFactory.create(AppModule)
+  await app.listen(process.env.PORT ?? 3000)
+}
+await bootstrap()
+```
+
+<br />
+
+返回的对象是 `INestApplication`。那是 Nest 表面：listen、close、绑定 global pipes、enable shutdown hooks。Express 是默认 adapter（`@nestjs/platform-express`）。除非你要 Express-only methods，否则不必点名：
+
+<br />
+
+```ts
+const app = await NestFactory.create<NestExpressApplication>(AppModule)
+```
+
+<br />
+
+- **Compilation** 是 TypeScript 加上 `reflect-metadata`。Decorators 写下 container 在 bootstrap 时读取的 tokens。到那时 `interface` 已经消失。
+- **Graph** 是谁可以 inject 谁的 source of truth。不在 `providers` 或 `exports` 里的 class，对 injector 不存在。
+- **Adapter** 可替换。Controllers、guards、pipes 与 filters 留下。`req`/`res` types 与部分 middleware 不会。
+
+Hono 是按顺序注册的 `app.get` 加上 middleware。Nest 是 Angular-inspired architecture：一棵 module graph、一个 IoC container，以及对每条 route 都相同的 pipeline。那个直觉的 Spring mapping 见 [以 TypeScript Developer 身份学 Java](/notes/learning-java-as-a-typescript-developer) §11。
+
+**失败：** 把 `@Controller` 当成带额外 syntax 的 Express `Router`。Decorator 是 metadata。Container 决定 class 何时被建构、注入什么。
+
+<br />
+
+---
+
+## 2. Application Graph
+
+Module 是带 `@Module()` 的 class。这个 decorator 是 graph 某一片的 public API。
+
+<br />
+
+| Property | Nest 拿它做什么 |
+| --- | --- |
+| `providers` | 实例化这些，至少在这个 module 内共享 |
+| `controllers` | 实例化这些，并把它们的 routes bind 到 adapter |
+| `imports` | 让另一个 module **exported** 的 providers 在这里可 inject |
+| `exports` | 这个 module 里，importers 可以 inject 的子集 |
+
+<br />
+
+Providers 默认被 **encapsulate**。你 inject 的是这个 module 提供的，或 imported module export 的。其余都不可见，哪怕 class 文件就在同一个 folder。
+
+<br />
+
+```ts title="cats/cats.module.ts"
+import { Module } from "@nestjs/common"
+import { CatsController } from "./cats.controller.js"
+import { CatsService } from "./cats.service.js"
+
+@Module({
+  controllers: [CatsController],
+  providers: [CatsService],
+  exports: [CatsService],
+})
+export class CatsModule {}
+```
+
+<br />
+
+Modules 是 singletons。两个 feature modules 都 import `CatsModule`，你共享 **一个** `CatsService`。把 `CatsService` 分别写进两个 module 的 `providers`，你会得到两个 instances。那不是「modularity」。那是碰巧同名的两棵 graphs。
+
+`@Global()` 让 exports 到处可 inject，不必 `imports`。Global module 只注册一次，通常从 root。把所有东西变 global，是 graph 不再可审计的方式。
+
+**Dynamic module** 在 runtime 返回 metadata。`forRoot(options)`（或 `forRootAsync`）**扩展** 静态 `@Module()` metadata —— 不是覆盖。`ConfigurableModuleBuilder` 是这个 pattern 的 typed helper。只在 module 真的是 infrastructure 时，才在返回对象上设 `global: true`。
+
+**失败：** import 一个 module，却指望里面每一个 provider。只有 `exports` 穿过边界。
+
+<br />
+
+---
+
+## 3. Providers 与 Tokens
+
+Provider 是 container 可以 inject 的任何东西：service、factory 结果、constant、mocked object。`@Injectable()` 标记一个 class 可被管理。Constructor parameter types 是默认 tokens。
+
+<br />
+
+```ts
+@Injectable()
+export class CatsService {
+  findAll(): Cat[] {
+    return []
+  }
+}
+
+@Controller("cats")
+export class CatsController {
+  constructor(private catsService: CatsService) {}
+}
+```
+
+<br />
+
+`providers: [CatsService]` 是 `{ provide: CatsService, useClass: CatsService }` 的 shorthand。Token 是 lookup key。Class 是产生 value 的一种方式。
+
+TypeScript **interfaces 会被 erase**。它们不能当 tokens。用 `Symbol`（或集中放在一个文件里的 string）加上 `@Inject()`，或用 **abstract class** —— 它在 compilation 后仍在，可以同时当 contract 与 token。[TypeScript Class 与 Runtime Identity](/notes/typescript-classes-and-runtime-identity)。
+
+<br />
+
+| Registration | 何时 |
+| --- | --- |
+| `useClass` | Token resolve 到 Nest 建构的 class |
+| `useValue` | Inject constant、外部 object，或 test mock |
+| `useFactory` | 算出 value；`inject` 列出 factory 自己的 dependencies |
+| `useExisting` | Alias。两个 tokens，一个 instance |
+
+<br />
+
+Export custom provider 用它的 token，或整个 provider object。Graph 起不来时，`NEST_DEBUG=1` 会 log resolution。
+
+**失败：** 在一个也 provide 它的 module 旁边 `new CatsService()`。两个 instances。Tests、request scope 与 interceptors 看见 graph 里的那个。你的 controller 在跟另一个说话。
+
+<br />
+
+---
+
+## 4. Controllers 是 HTTP Surface
+
+Controller 是 methods 即 routes 的 class。它应该吃 HTTP，再调用 provider。它不该持有 domain。
+
+<br />
+
+```ts
+@Controller("cats")
+export class CatsController {
+  constructor(private catsService: CatsService) {}
+
+  @Post()
+  create(@Body({ schema: createCatSchema }) body: CreateCat) {
+    return this.catsService.create(body)
+  }
+
+  @Get("me")
+  me() {
+    return this.catsService.me()
+  }
+
+  @Get(":id")
+  findOne(@Param("id", { schema: z.coerce.number().int().positive() }) id: number) {
+    return this.catsService.findOne(id)
+  }
+}
+```
+
+<br />
+
+`@Body()`、`@Query()`、`@Param()`、`@RawBody()` 从 request 读取。v12 它们接受 `schema` option。那只是 **附上 metadata**。必须稍后跑 pipe，否则没有 validation。
+
+Routes 按 **declaration order** 注册。在对顺序敏感的 adapters 上，`@Get(":id")` 写在 `@Get("me")` 前面会吞掉 `GET /cats/me`。v12 让你可以选择看见这件事：
+
+<br />
+
+```ts
+const app = await NestFactory.create(AppModule, {
+  routeConflictPolicy: { duplicate: "error", shadow: "warn" },
+  routeResolutionStrategy: "specificity",
+})
+```
+
+<br />
+
+两者默认都是以前的静默行为。
+
+**失败：** `@Get(":id")` 写在 `@Get("me")` 上面，然后调试为什么 `me` 永远打不中 handler。Adapter 匹配到 path parameter。除非你开口，Nest 不会警告。
+
+<br />
+
+---
+
+## 5. Request Pipeline
+
+Pipeline 是这篇笔记的脊柱。每条 HTTP route 都一样。
+
+<br />
+
+```text
+middleware → guards → interceptors (before) → pipes → handler → interceptors (after)
+                                                              ↘ exception filters
+```
+
+<br />
+
+Guards 跑在所有 middleware **之后**，interceptors 与 pipes **之前**。Pipes 跑在 handler 的 **arguments** 上，所以 interceptor 已经进栈之后、method body 之前。Filters 只在有东西 throw 时跑。
+
+Enhancers 有三种宽度：
+
+- **Method** —— 一个 handler 上的 `@UseGuards()`、`@UseInterceptors()`、`@UsePipes()`、`@UseFilters()`。
+- **Controller** —— class 上同样的 decorators。
+- **Global** —— `app.useGlobalGuards()`（以及 siblings），或 module 里的 `APP_GUARD`、`APP_INTERCEPTOR`、`APP_PIPE`、`APP_FILTER` tokens。
+
+在 module 外 `useGlobalX(new SomeGuard())` **不能 inject**。优先用 `APP_*` token 加 `useClass`，让 container 建构 enhancer。这些 tokens 在 bootstrap 被消费。之后不能 `app.get(APP_GUARD)`。多次注册 `APP_GUARD` 会按注册顺序跑每一个 guard。
+
+**失败：** 在 `main.ts` 里用 `new` 做一个需要 `ConfigService` 的 global guard。Constructor 永远看不见 container。
+
+<br />
+
+---
+
+## 6. Middleware
+
+Middleware 是 **route handler 之前** 被调用的 function。Nest middleware 默认是 Express 形状：`req`、`res`、`next`。它可以改 request、结束 cycle，或调用 `next()`。Express 与 Fastify 不共享 signatures。
+
+`@Module()` 上没有 `middleware` array。实现 `NestModule`，用 `configure()`：
+
+<br />
+
+```ts title="app.module.ts"
+@Module({ imports: [CatsModule] })
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer.apply(LoggerMiddleware).forRoutes(CatsController)
+  }
+}
+```
+
+<br />
+
+Class middleware 带 `@Injectable()` 并实现 `NestMiddleware`。它可以 inject 同一 module 里的其他 providers。Functional middleware 是普通 function。没有 dependencies 时用它。
+
+`app.use(logger)` 绑到每条 route，并且 **没有 DI**。要保留 DI 又大范围套用，在 module 里用 `consumer.apply(LoggerMiddleware).forRoutes("*")`。
+
+Middleware 跑在 **handler 被选中之前**。Middleware class 上的 `@UseFilters()` 无效。只有 **global** exception filters（`app.useGlobalFilters()` 或 `APP_FILTER`）会接住 middleware 的 throw。
+
+Express adapter 默认注册 `json` 与 `urlencoded` body parsers。若要通过 `MiddlewareConsumer` 替换它们，创建 app 时设 `{ bodyParser: false }`。
+
+**失败：** 从 middleware throw `UnauthorizedException`，却指望 controller-scoped filter 来格式化。Handler 从未被选中。Filter 从未跑。
+
+<br />
+
+---
+
+## 7. Guards
+
+Guard 实现 `CanActivate`。它的工作是一个 boolean：这个 request 可以到达 handler 吗？那是 **authorization**（也常常是 authentication 的最后一步）。Middleware 很适合 parse token 并挂上 `request.user`。Middleware 对 **下一个是哪个** handler 是哑的。Guard 拿到 `ExecutionContext`，可以读那个 handler 的 metadata。
+
+<br />
+
+```ts
+@Injectable()
+export class RolesGuard implements CanActivate {
+  constructor(private reflector: Reflector) {}
+
+  canActivate(context: ExecutionContext): boolean {
+    const roles = this.reflector.get(Roles, context.getHandler())
+    if (!roles) {
+      return true
+    }
+    const request = context.switchToHttp().getRequest()
+    return matchRoles(roles, request.user.roles)
+  }
+}
+
+export const Roles = Reflector.createDecorator<string[]>()
+```
+
+<br />
+
+`Reflector.createDecorator()` 是 v12 偏好的形式（CLI `decorator` schematic 会发出它）。`@SetMetadata()` 仍然可用。
+
+`canActivate` 可以返回 boolean、`Promise` 或 `Observable`。`true` 继续。`false` 变成 `ForbiddenException`。403 不对时，throw 你自己的 exception。
+
+`ExecutionContext` 扩展 `ArgumentsHost`。`switchToHttp().getRequest()` 是 HTTP view。同一个对象存在，是为了让一个 guard *可以* 在其他 Nest contexts 工作。这篇笔记留在 HTTP。
+
+**失败：** 因为「Express 就是这样」而把 role checks 放进 middleware。Middleware 读不到它尚未选中的 method 上的 `@Roles()`。
+
+<br />
+
+---
+
+## 8. Interceptors
+
+Interceptor 实现 `NestInterceptor`。`intercept(context, next)` 包住 pipeline 的其余部分。`next.handle()` 返回 RxJS `Observable`。如果你从不调用 `handle()`，controller method 不会跑。
+
+<br />
+
+```ts
+@Injectable()
+export class LoggingInterceptor implements NestInterceptor {
+  intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
+    const now = Date.now()
+    return next.handle().pipe(tap(() => console.log(`${Date.now() - now}ms`)))
+  }
+}
+```
+
+<br />
+
+`handle()` 之前是「handler 之前」（从 interceptor 的角度看也在 pipes 之前：interceptor 已经在栈上）。Observable 上的 operators 是「之后」：`map` 改写 body，`catchError` 改写 exception，`timeout` 中止。返回 `of(cached)` 会完全跳过 handler。
+
+如果 handler 用 `@Res()` 接管并自己写 adapter response，response mapping 不会生效。
+
+v12 为 outgoing Standard Schema（Zod、Valibot、ArkType）加上 `StandardSchemaSerializerInterceptor` 与 `@SerializeOptions({ schema })`。`ClassSerializerInterceptor` 仍留给 `class-transformer` DTOs。按 response 风格选一个。不要在同一个 handler 上叠两个还指望它们一致。
+
+**失败：** 一个从不调用 `handle()` 的 interceptor，然后奇怪为什么 service method 与每一条 pipe 都沉默。你替换了 stream。
+
+<br />
+
+---
+
+## 9. Pipes
+
+Pipe 实现 `PipeTransform`。它跑在 **一个 argument** 上，就在 method 被调用之前。两件事：**transform**（`"42"` → `42`）与 **validate**（throw，或原样通过）。
+
+Pipes 跑在 **exceptions zone 里面**。Pipe throw 的 exception 变成 400-class response，controller body 永远不会跑。这就是重点：hostile input 死在边界。
+
+内置包括 `Parse*` 家族（`ParseIntPipe`、`ParseUUIDPipe`、`ParseEnumPipe`，…）、`ValidationPipe`，以及 v12 的 `StandardSchemaValidationPipe`。
+
+<br />
+
+```ts
+@Get(":id")
+findOne(@Param("id", ParseIntPipe) id: number) {
+  return this.catsService.findOne(id)
+}
+
+@Post()
+create(@Body({ schema: createCatSchema }) body: CreateCat) {
+  return this.catsService.create(body)
+}
+```
+
+<br />
+
+`@Body({ schema })` 只把 metadata 存在 `ArgumentMetadata.schema`。要注册 pipe：
+
+<br />
+
+```ts
+app.useGlobalPipes(new StandardSchemaValidationPipe())
+```
+
+<br />
+
+`ValidationPipe` 加上 `class-validator` / `class-transformer` 仍然被支持。没有移除计划。DTOs 是带 decorators 的 classes 时用它。Schema 已经存在时用 Standard Schema —— 同一份对象稍后可以喂给 OpenAPI。Parameter type 若是 interface，class-validator pipe 看不到 metatype；它 compile 成 `Object`。
+
+**失败：** `@Body({ schema: createCatSchema })` 却没有 `StandardSchemaValidationPipe`。Handler 收到 raw body。TypeScript 不是 validation。
+
+<br />
+
+---
+
+## 10. Exception Filters
+
+未处理的 exceptions 打到 Nest 的 exceptions layer。`HttpException`（及其 subclasses）变成 JSON。其他一切变成 `{ statusCode: 500, message: "Internal server error" }`。内置 HTTP exceptions（`BadRequestException`、`UnauthorizedException`、`ForbiddenException`，…）继承 `HttpException`。它们也继承 `IntrinsicException`，所以默认 logger 把它们当正常 control flow，不是 crash。
+
+v12 在 `HttpExceptionOptions` 上加了 `errorCode`。它会被 serialize。Clients 按稳定 identifier 分支，不按 message string。`cause` 给 logs，**不会** 被 serialize。
+
+<br />
+
+```ts
+throw new BadRequestException("Password is too weak", {
+  errorCode: "WEAK_PASSWORD",
+})
+```
+
+<br />
+
+Filter 实现 `ExceptionFilter`，用 `@Catch()` 绑定。`@Catch(HttpException)` 是 typed。`@Catch()` 接住一切。两者并存时，先声明 catch-everything filter，好让 typed filter 仍收到它的 type。
+
+`ArgumentsHost` 让你拿到 `request` / `response`，而不把 Express 烤进 library filter。同一份 filter 要同时服务 Express 与 Fastify 时，优先用 `HttpAdapterHost` 与 `httpAdapter.reply(...)`。
+
+`main.ts` 里的 `useGlobalFilters(new Filter())` 不能 inject。用 `APP_FILTER`。Middleware 的 throw 只到达 **global** filters —— 见 §6。
+
+**失败：** 在 client 里 parse `message` 来区分两个 400。String 给人看。`errorCode` 给机器。
+
+<br />
+
+---
+
+## 11. Injection Scopes
+
+默认 scope 是 **singleton**。整个 process 一个 instance。这对 Node 是对的：没有 per-request thread。[深入理解 JavaScript Event Loop](/notes/javascript-event-loop-in-depth)。
+
+<br />
+
+| Scope | Lifetime |
+| --- | --- |
+| `DEFAULT` | 一个 instance，绑在 app 上。默认。优先用它。 |
+| `REQUEST` | 每个 incoming request 一个新 instance；response 之后被回收 |
+| `TRANSIENT` | 每个 consumer 一个新 instance。Consumer 自己的 scope 不变 |
+
+<br />
+
+`REQUEST` 会 **bubble**。Singleton controller inject 了 request-scoped service，自己也会变成 request-scoped。`TRANSIENT` 不 bubble：singleton inject 一个 transient logger，仍是 singleton，并保住那一个 logger instance。
+
+Inject `REQUEST`（`@Inject(REQUEST)`）才能看到当前 HTTP request。那个 token 本身是 request-scoped。任何 inject 它的东西都会变成 request-scoped。Lifecycle hooks **不会** 在 request-scoped classes 上跑。
+
+Request scope 有代价：controller 与它的 request-scoped chain 每个 request 都要建构。一个读 header 的共享「current tenant datasource」会把大半 graph 拉进那个模式。
+
+**Durable providers** 给的是这种情形：你没有几万个 tenants，isolation key 是 tenant id，不是 request UUID。在流量到达前用 `ContextIdFactory.apply(...)` 注册 `ContextIdStrategy`。把 tenant-scoped provider 标成 `{ scope: Scope.REQUEST, durable: true }`。Nest 于是按 **每个 tenant 一棵 DI subtree** 复用，而不是每个 request。Durability 像 `REQUEST` 一样会 bubble。这不是 security boundary。Isolation 仍属于 membership checks 与 database：[用 Hono、Better Auth、Drizzle 与 Postgres RLS 打造 Multi-Tenant 后端](/notes/multi-tenant-backend-drizzle-hono-better-auth)。
+
+**失败：** 「以防万一」把 `REQUEST` inject 进 logger 或 database pool wrapper。Graph 现在是 request-scoped。Latency 是症状。原因是 token。
+
+<br />
+
+---
+
+## 12. Lifecycle
+
+Bootstrap、run、terminate。Hooks 存在于 modules、providers 与 controllers。
+
+<br />
+
+```text
+resolve the graph
+  → onModuleInit
+  → onApplicationBootstrap
+  → listen
+  → (SIGTERM / app.close, if shutdown hooks are enabled)
+  → onModuleDestroy
+  → beforeApplicationShutdown
+  → close connections
+  → onApplicationShutdown
+```
+
+<br />
+
+`onModuleInit` 与 `onApplicationBootstrap` 只在你调用 `app.init()` 或 `app.listen()` 时跑。Shutdown hooks 只在你调用 `app.close()`，或你已调用 `enableShutdownHooks()` 且 process 收到 Nest 能看见的 signal 时跑。它们默认关闭，因为 listeners 耗 memory —— 同一 process 里并行 tests 会抱怨。
+
+v12 按 **component hierarchy level** 调用 hooks。相关 providers 之间，import-array 顺序不再是安全假设。若 A 必须在 B 之前 initialize，做成 constructor dependency，或在同一个 hook 里显式 `await`，而不是「B 的 module 列在第二」。
+
+Request-scoped classes 收不到这些 hooks。Express adapter 在 shutdown 时 **drain in-flight requests**。`app.close()` 不会退出 Node。一个落单的 `setInterval` 会让 process 活着。
+
+**失败：** 在 request-scoped service 的 `onModuleInit` 里开 connection。Hook 从不跑。Connection 从不打开。或者：v12 upgrade 之后，仍假设 module import order 会排好两个 `onModuleInit`。
+
+<br />
+
+---
+
+## 13. Fastify Adapter
+
+Graph 不变。Platform 变。
+
+<br />
+
+```ts title="main.ts"
+import { NestFactory } from "@nestjs/core"
+import {
+  FastifyAdapter,
+  NestFastifyApplication,
+} from "@nestjs/platform-fastify"
+import { AppModule } from "./app.module.js"
+
+const app = await NestFactory.create<NestFastifyApplication>(
+  AppModule,
+  new FastifyAdapter(),
+)
+await app.listen(process.env.PORT ?? 3000, "0.0.0.0")
+```
+
+<br />
+
+安装 `@nestjs/platform-fastify`。Fastify 默认 listen `127.0.0.1`；process 不只绑 localhost 时，传入 `0.0.0.0`。
+
+Middleware 看见的是 **raw** Node `req`/`res`（经由 `middie`），不是 Fastify 的 wrappers。Type 成 `FastifyRequest["raw"]` / `FastifyReply["raw"]`。调用 `response.json` 的 filters 必须改用 `response.send` —— 或者更好，用 §10 的 `HttpAdapterHost`。
+
+Express middleware packages 不适用。为 Express 写的 `@Res()` recipes 不适用。`@RouteConfig()` 与 `@RouteConstraints()` 是 Fastify-only。
+
+整节就这些。同样的 modules、tokens、pipeline。不同的 `req`。
+
+**失败：** 换了 adapter，却在 guards 与 filters 里留下 `import type { Request, Response } from "express"`。Types 能 compile。Runtime objects 对不上。
+
+<br />
+
+---
+
+## 14. Config 与测试 Graph
+
+`@nestjs/config` 加载 `.env`（dotenv）并暴露 `ConfigService`。v12 通过 **Standard Schema** 校验 `process.env`。Zod 是新项目的文档默认。Joi 在 **v18+** 仍可用，library options 放在 `validationOptions.libraryOptions` 下。
+
+<br />
+
+```ts
+ConfigModule.forRoot({
+  validationSchema: z.object({
+    NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
+    PORT: z.coerce.number().default(3000),
+  }),
+})
+```
+
+<br />
+
+Test surface 是同一棵 graph，更小。`@nestjs/testing` 对 runner 无关。新的 ESM scaffolds 默认 **Vitest**；现有 Jest suites 不必立刻搬家。
+
+<br />
+
+```ts
+const moduleRef = await Test.createTestingModule({
+  controllers: [CatsController],
+  providers: [CatsService],
+})
+  .overrideProvider(CatsService)
+  .useValue({ findAll: () => [] })
+  .compile()
+
+const controller = moduleRef.get(CatsController)
+```
+
+<br />
+
+`overrideProvider` 是 tests 里的 `useValue`：同一个 token，不同 instance。如果 spec 自己 `new CatsController(new CatsService())`，那不是在测 Nest。那是在测你手接的两个 classes。
+
+**失败：** 对 spec 里 `new` 出来的 service 做 assert，而 under test 的 controller 从 testing module 拿到的是另一个 instance。
+
+<br />
+
+---
+
+## Recap Q&A
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="nest-container">
+    <AccordionTrigger>1. 为什么 Nest 是 adapter 外围的 container，不是 router？</AccordionTrigger>
+    <AccordionContent>
+
+      - `NestFactory.create` 从 `@Module()` metadata 建出 **application graph**、实例化 providers，再把 controllers bind 到 Express（默认）或 Fastify。
+      - Hono 是你组起来的 router。Nest 建构 graph，再把 HTTP map 到 methods。换成 `FastifyAdapter` 不会重写 modules 或 tokens。
+      - `INestApplication` 是 Nest 表面。`NestExpressApplication` / `NestFastifyApplication` 是 adapter extras，只有调用 platform APIs 时才需要。
+      - **失败：** 把 `@Controller` 当成带 decorators 的 Express `Router`。Decorator 是 metadata。Container 决定建构与 injection。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="nest-tokens">
+    <AccordionTrigger>2. 什么是 DI token，为什么 interface 不能当一个？</AccordionTrigger>
+    <AccordionContent>
+
+      - Token 是 lookup key。`providers: [CatsService]` 等于 `{ provide: CatsService, useClass: CatsService }`。
+      - TypeScript **interfaces 会被 erase**。Nest 在 bootstrap 读 `reflect-metadata`。用 `Symbol` 加 `@Inject()`，或用 runtime 仍在的 abstract class。
+      - `useValue`、`useFactory` 与 `useExisting` 能产生 class shorthand 做不到的 values。Export 的是 token，不是「隔壁那个文件」。
+      - **失败：** 在一个也 provide 它的 module 旁边 `new CatsService()`。两个 instances。Graph 丢了。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="nest-pipeline">
+    <AccordionTrigger>3. HTTP pipeline 顺序是什么，谁看得见 middleware 的 throw？</AccordionTrigger>
+    <AccordionContent>
+
+      - **Middleware → guards → interceptors (before) → pipes → handler → interceptors (after)。** 有东西 throw 时跑 filters。
+      - Middleware 跑在 **handler 被选中之前**。它读不到 method metadata。Guards 可以：`ExecutionContext` 加上 `Reflector`。
+      - `main.ts` 里的 `useGlobalX(new …)` 不能 inject。用 `APP_GUARD` / `APP_INTERCEPTOR` / `APP_PIPE` / `APP_FILTER`。
+      - **失败：** 在 middleware class 上写 `@UseFilters()`。只有 **global** filters 接得住 middleware exceptions。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="nest-schema">
+    <AccordionTrigger>4. 何时用 ValidationPipe，何时用 StandardSchemaValidationPipe？</AccordionTrigger>
+    <AccordionContent>
+
+      - 两者都是 pipes：跑在 **arguments** 上，在 exceptions zone 里，method body 之前。
+      - `ValidationPipe` 是 class-validator / class-transformer 路径。仍然被支持。Interface parameter 不是它能看见的 metatype。
+      - v12 的 `@Body({ schema })` / `@Param("id", { schema })` 只附 metadata。`StandardSchemaValidationPipe` 读取它。同一份 schemas 可以喂给 response serialization 与 OpenAPI。
+      - **失败：** 附了 `schema` 却从不注册 pipe。Handler 收到 raw body。TypeScript 不是 validation。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="nest-scope-lifecycle">
+    <AccordionTrigger>5. REQUEST scope 改变了什么，v12 对 lifecycle 改了什么？</AccordionTrigger>
+    <AccordionContent>
+
+      - Singleton 是默认，也是一条 event-loop thread 上正确的默认。`REQUEST` 为每个 request 建 instance，并沿 injection chain **bubble**。`TRANSIENT` 不 bubble。
+      - Lifecycle hooks 不在 request-scoped classes 上跑。Durable providers 加上 `ContextIdStrategy` 按 tenant key 复用 DI subtree；它们不是 RLS。
+      - v12 按 **component hierarchy level** 跑 hooks。不要假设相关 `onModuleInit` 仍按 import-array 顺序。Shutdown 需要 `enableShutdownHooks()`。
+      - **失败：** 把 `REQUEST` inject 进被广泛共享的 logger 或 pool。Graph 变成 request-scoped。Tenant 笔记是 [用 Hono、Better Auth、Drizzle 与 Postgres RLS 打造 Multi-Tenant 后端](/notes/multi-tenant-backend-drizzle-hono-better-auth)。
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>

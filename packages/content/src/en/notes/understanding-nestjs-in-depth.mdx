@@ -1,0 +1,631 @@
+---
+title: Understanding NestJS in Depth
+description: How modules, the IoC container, and the HTTP request pipeline fit into NestJS 12 — and why Nest is a container around an adapter, not a router
+date: 2026-08-31
+category: backend
+---
+
+Nest is often introduced as "TypeScript Express with decorators." That skips why a service you `new` yourself is invisible to the graph, why middleware cannot see the handler, why a pipe throws before the controller runs, and why a Fastify swap does not rewrite the module tree.
+
+The useful model: Nest is a **container around an HTTP adapter**. At bootstrap it builds an **application graph** from `@Module()` metadata. At request time it runs a fixed pipeline, then the adapter writes the response.
+
+<br />
+
+```text
+NestFactory.create(AppModule)
+  → scan modules, register tokens, instantiate providers
+  → bind controllers to the HTTP adapter (Express by default)
+request
+  → middleware (platform; route not selected yet)
+  → guards (canActivate + ExecutionContext)
+  → interceptors (before)
+  → pipes (transform / validate arguments)
+  → controller handler
+  → interceptors (after; RxJS)
+  → exception filters (if anything threw)
+```
+
+<br />
+
+This note targets **NestJS 12** ([docs](https://docs.nestjs.com/), [v12.0.0](https://github.com/nestjs/nest/releases/tag/v12.0.0), 2026-08-27). Official snippets use ESM `.js` import suffixes. Running the framework needs **Node v20.19+ or v22.12+**. CLI generators sit on a newer floor. CommonJS apps still consume the ESM packages through `require(esm)` — migrating *your* app to ESM is optional.
+
+Three kinds of statements:
+
+- A **TypeScript / Node rule**, such as interfaces erased at runtime, or one event-loop thread.
+- A **Nest contract**, such as `@Module()`, `CanActivate`, or `StandardSchemaValidationPipe`.
+- An **implementation observation**, such as `reflect-metadata` tokens or Express `req`/`res`. Useful for debugging. Application code must not depend on undocumented internals.
+
+This site's typed router is [Backend APIs with Hono, Drizzle, Zod OpenAPI, and SST](/notes/_backend-apis-hono-sst). Hono is a function you assemble. Nest constructs the graph, then maps HTTP onto methods. The Spring cousin of that split is [Learning Java as a TypeScript Developer](/notes/learning-java-as-a-typescript-developer). Why a class is a runtime token is [TypeScript Classes and Runtime Identity](/notes/typescript-classes-and-runtime-identity). Node is still one thread: [The JavaScript Event Loop in Depth](/notes/javascript-event-loop-in-depth).
+
+GraphQL, WebSockets, microservices, queues, and Passport recipes are not this note. v12 also shipped `@nestjs/observe`; that is not this note either.
+
+---
+
+## 1. Nest Is a Container Around an Adapter
+
+`NestFactory.create(AppModule)` does not start a router. It **bootstraps a container**: scan the root module, walk `imports`, register tokens, instantiate singleton providers, then hand controllers to an HTTP adapter.
+
+<br />
+
+```ts title="main.ts"
+import { NestFactory } from "@nestjs/core"
+import { AppModule } from "./app.module.js"
+
+async function bootstrap() {
+  const app = await NestFactory.create(AppModule)
+  await app.listen(process.env.PORT ?? 3000)
+}
+await bootstrap()
+```
+
+<br />
+
+The returned object is an `INestApplication`. That is the Nest surface: listen, close, bind global pipes, enable shutdown hooks. Express is the default adapter (`@nestjs/platform-express`). You do not need to name it unless you want Express-only methods:
+
+<br />
+
+```ts
+const app = await NestFactory.create<NestExpressApplication>(AppModule)
+```
+
+<br />
+
+- **Compilation** is TypeScript plus `reflect-metadata`. Decorators write tokens the container reads at bootstrap. An `interface` is gone by then.
+- **The graph** is the source of truth for who may inject whom. A class that is not in `providers` or `exports` does not exist to the injector.
+- **The adapter** is replaceable. Controllers, guards, pipes, and filters stay. `req`/`res` types and some middleware do not.
+
+Hono is `app.get` plus middleware you register in order. Nest is Angular-inspired architecture: a module graph, an IoC container, and a pipeline that is the same for every route. The Spring mapping of that instinct is [Learning Java as a TypeScript Developer](/notes/learning-java-as-a-typescript-developer) §11.
+
+**Failure:** treating `@Controller` as Express `Router` with extra syntax. The decorator is metadata. The container decides when the class is constructed and what is injected.
+
+<br />
+
+---
+
+## 2. The Application Graph
+
+A module is a class with `@Module()`. The decorator is the public API of a slice of the graph.
+
+<br />
+
+| Property | What Nest does with it |
+| --- | --- |
+| `providers` | Instantiate these and share them at least inside this module |
+| `controllers` | Instantiate these and bind their routes to the adapter |
+| `imports` | Make another module's **exported** providers injectable here |
+| `exports` | The subset of this module that importers may inject |
+
+<br />
+
+Providers are **encapsulated**. You inject what this module provides, or what an imported module exports. Everything else is invisible, even if the class file sits in the same folder.
+
+<br />
+
+```ts title="cats/cats.module.ts"
+import { Module } from "@nestjs/common"
+import { CatsController } from "./cats.controller.js"
+import { CatsService } from "./cats.service.js"
+
+@Module({
+  controllers: [CatsController],
+  providers: [CatsService],
+  exports: [CatsService],
+})
+export class CatsModule {}
+```
+
+<br />
+
+Modules are singletons. Import `CatsModule` from two feature modules and you share **one** `CatsService`. Register `CatsService` in both modules' `providers` arrays and you get two instances. That is not "modularity." That is two graphs that happen to share a class name.
+
+`@Global()` makes exports injectable everywhere without `imports`. Register a global module once, usually from the root. Making everything global is how the graph stops being auditable.
+
+A **dynamic module** returns metadata at runtime. `forRoot(options)` (or `forRootAsync`) **extends** the static `@Module()` metadata — it does not replace it. `ConfigurableModuleBuilder` is the typed helper for that pattern. Set `global: true` on the returned object only when the module is truly infrastructure.
+
+**Failure:** importing a module and expecting every provider inside it. Only `exports` cross the boundary.
+
+<br />
+
+---
+
+## 3. Providers and Tokens
+
+A provider is anything the container can inject: a service, a factory result, a constant, a mocked object. `@Injectable()` marks a class as manageable. Constructor parameter types are the default tokens.
+
+<br />
+
+```ts
+@Injectable()
+export class CatsService {
+  findAll(): Cat[] {
+    return []
+  }
+}
+
+@Controller("cats")
+export class CatsController {
+  constructor(private catsService: CatsService) {}
+}
+```
+
+<br />
+
+`providers: [CatsService]` is shorthand for `{ provide: CatsService, useClass: CatsService }`. The token is the lookup key. The class is one way to produce a value.
+
+TypeScript **interfaces are erased**. They cannot be tokens. Use a `Symbol` (or a string you keep in one file) plus `@Inject()`, or an **abstract class**, which survives compilation and can be both the contract and the token. [TypeScript Classes and Runtime Identity](/notes/typescript-classes-and-runtime-identity).
+
+<br />
+
+| Registration | When |
+| --- | --- |
+| `useClass` | Token resolves to a class Nest constructs |
+| `useValue` | Inject a constant, an external object, or a test mock |
+| `useFactory` | Compute the value; `inject` lists the factory's own dependencies |
+| `useExisting` | Alias. Two tokens, one instance |
+
+<br />
+
+Export a custom provider by its token or by the whole provider object. `NEST_DEBUG=1` logs resolution when the graph will not boot.
+
+**Failure:** `new CatsService()` next to a module that also provides it. Two instances. Tests, request scope, and interceptors see the one in the graph. Your controller talks to the other.
+
+<br />
+
+---
+
+## 4. Controllers Are the HTTP Surface
+
+A controller is a class whose methods are routes. It should take HTTP in and call a provider. It should not hold the domain.
+
+<br />
+
+```ts
+@Controller("cats")
+export class CatsController {
+  constructor(private catsService: CatsService) {}
+
+  @Post()
+  create(@Body({ schema: createCatSchema }) body: CreateCat) {
+    return this.catsService.create(body)
+  }
+
+  @Get("me")
+  me() {
+    return this.catsService.me()
+  }
+
+  @Get(":id")
+  findOne(@Param("id", { schema: z.coerce.number().int().positive() }) id: number) {
+    return this.catsService.findOne(id)
+  }
+}
+```
+
+<br />
+
+`@Body()`, `@Query()`, `@Param()`, `@RawBody()` read from the request. In v12 they accept a `schema` option. That only **attaches metadata**. A pipe must run later or nothing is validated.
+
+Routes are registered in **declaration order**. On order-sensitive adapters, `@Get(":id")` declared before `@Get("me")` can swallow `GET /cats/me`. v12 makes that visible if you opt in:
+
+<br />
+
+```ts
+const app = await NestFactory.create(AppModule, {
+  routeConflictPolicy: { duplicate: "error", shadow: "warn" },
+  routeResolutionStrategy: "specificity",
+})
+```
+
+<br />
+
+Both default to the previous silent behavior.
+
+**Failure:** `@Get(":id")` above `@Get("me")`, then debugging why `me` never hits the handler. The adapter matched a path parameter. Nest did not warn unless you asked.
+
+<br />
+
+---
+
+## 5. The Request Pipeline
+
+The pipeline is the note's spine. It is the same for every HTTP route.
+
+<br />
+
+```text
+middleware → guards → interceptors (before) → pipes → handler → interceptors (after)
+                                                              ↘ exception filters
+```
+
+<br />
+
+Guards run **after** all middleware and **before** interceptors and pipes. Pipes run on the handler's **arguments**, so they run after the interceptor has entered and before the method body. Filters run only if something threw.
+
+Enhancers bind at three widths:
+
+- **Method** — `@UseGuards()`, `@UseInterceptors()`, `@UsePipes()`, `@UseFilters()` on one handler.
+- **Controller** — the same decorators on the class.
+- **Global** — `app.useGlobalGuards()` (and siblings), or the `APP_GUARD`, `APP_INTERCEPTOR`, `APP_PIPE`, `APP_FILTER` tokens in a module.
+
+`useGlobalX(new SomeGuard())` outside a module **cannot inject**. Prefer the `APP_*` token with `useClass` so the container constructs the enhancer. Those tokens are consumed at bootstrap. You cannot `app.get(APP_GUARD)` later. Registering `APP_GUARD` several times runs every guard, in registration order.
+
+**Failure:** a global guard created with `new` in `main.ts` that needs `ConfigService`. The constructor never sees the container.
+
+<br />
+
+---
+
+## 6. Middleware
+
+Middleware is a function called **before** a route handler. Nest middleware is Express-shaped by default: `req`, `res`, `next`. It can mutate the request, end the cycle, or call `next()`. Express and Fastify do not share signatures.
+
+There is no `middleware` array on `@Module()`. Implement `NestModule` and use `configure()`:
+
+<br />
+
+```ts title="app.module.ts"
+@Module({ imports: [CatsModule] })
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer.apply(LoggerMiddleware).forRoutes(CatsController)
+  }
+}
+```
+
+<br />
+
+Class middleware is `@Injectable()` and implements `NestMiddleware`. It can inject other providers from the same module. Functional middleware is a plain function. Use it when there are no dependencies.
+
+`app.use(logger)` binds to every route and **has no DI**. To keep DI and apply widely, use `consumer.apply(LoggerMiddleware).forRoutes("*")` inside a module.
+
+Middleware runs **before a handler is selected**. `@UseFilters()` on a middleware class does nothing. Only **global** exception filters (`app.useGlobalFilters()` or `APP_FILTER`) catch throws from middleware.
+
+The Express adapter registers `json` and `urlencoded` body parsers by default. To replace them through `MiddlewareConsumer`, create the app with `{ bodyParser: false }`.
+
+**Failure:** throwing `UnauthorizedException` from middleware and expecting a controller-scoped filter to format it. The handler was never chosen. The filter never ran.
+
+<br />
+
+---
+
+## 7. Guards
+
+A guard implements `CanActivate`. Its job is a boolean: may this request reach the handler? That is **authorization** (and often the last step of authentication). Middleware is a fine place to parse a token and attach `request.user`. Middleware is dumb about **which** handler is next. A guard receives `ExecutionContext` and can read that handler's metadata.
+
+<br />
+
+```ts
+@Injectable()
+export class RolesGuard implements CanActivate {
+  constructor(private reflector: Reflector) {}
+
+  canActivate(context: ExecutionContext): boolean {
+    const roles = this.reflector.get(Roles, context.getHandler())
+    if (!roles) {
+      return true
+    }
+    const request = context.switchToHttp().getRequest()
+    return matchRoles(roles, request.user.roles)
+  }
+}
+
+export const Roles = Reflector.createDecorator<string[]>()
+```
+
+<br />
+
+`Reflector.createDecorator()` is the v12-preferred form (the CLI `decorator` schematic emits it). `@SetMetadata()` still works.
+
+`canActivate` may return a boolean, a `Promise`, or an `Observable`. `true` continues. `false` becomes `ForbiddenException`. Throw your own exception when 403 is the wrong status.
+
+`ExecutionContext` extends `ArgumentsHost`. `switchToHttp().getRequest()` is the HTTP view. The same object exists so one guard *could* work in other Nest contexts. This note stays on HTTP.
+
+**Failure:** putting role checks in middleware because "that is how Express did it." Middleware cannot read `@Roles()` on the method it has not selected yet.
+
+<br />
+
+---
+
+## 8. Interceptors
+
+An interceptor implements `NestInterceptor`. `intercept(context, next)` wraps the rest of the pipeline. `next.handle()` returns an RxJS `Observable`. If you never call `handle()`, the controller method does not run.
+
+<br />
+
+```ts
+@Injectable()
+export class LoggingInterceptor implements NestInterceptor {
+  intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
+    const now = Date.now()
+    return next.handle().pipe(tap(() => console.log(`${Date.now() - now}ms`)))
+  }
+}
+```
+
+<br />
+
+Before `handle()` is "before the handler" (and before pipes, from the interceptor's point of view: the interceptor is already on the stack). Operators on the Observable are "after": `map` rewrites the body, `catchError` rewrites the exception, `timeout` aborts. Returning `of(cached)` skips the handler entirely.
+
+Response mapping does not work if the handler takes over with `@Res()` and writes the adapter response itself.
+
+v12 adds `StandardSchemaSerializerInterceptor` plus `@SerializeOptions({ schema })` for outgoing Standard Schema (Zod, Valibot, ArkType). `ClassSerializerInterceptor` remains for `class-transformer` DTOs. Pick one per response style. Do not stack both on the same handler and hope they agree.
+
+**Failure:** an interceptor that never calls `handle()`, then wondering why the service method and every pipe are silent. You replaced the stream.
+
+<br />
+
+---
+
+## 9. Pipes
+
+A pipe implements `PipeTransform`. It runs on **one argument**, just before the method is invoked. Two jobs: **transform** (`"42"` → `42`) and **validate** (throw, or pass through).
+
+Pipes run **inside the exceptions zone**. A thrown pipe exception becomes a 400-class response and the controller body never runs. That is the point: hostile input dies at the boundary.
+
+Built-ins include the `Parse*` family (`ParseIntPipe`, `ParseUUIDPipe`, `ParseEnumPipe`, …), `ValidationPipe`, and v12 `StandardSchemaValidationPipe`.
+
+<br />
+
+```ts
+@Get(":id")
+findOne(@Param("id", ParseIntPipe) id: number) {
+  return this.catsService.findOne(id)
+}
+
+@Post()
+create(@Body({ schema: createCatSchema }) body: CreateCat) {
+  return this.catsService.create(body)
+}
+```
+
+<br />
+
+`@Body({ schema })` only stores metadata on `ArgumentMetadata.schema`. Register the pipe:
+
+<br />
+
+```ts
+app.useGlobalPipes(new StandardSchemaValidationPipe())
+```
+
+<br />
+
+`ValidationPipe` plus `class-validator` / `class-transformer` is still supported. There is no plan to remove it. Use it when DTOs are classes with decorators. Use Standard Schema when the schema already exists — the same object can later feed OpenAPI. An interface as the parameter type is not a metatype the class-validator pipe can see; it compiles to `Object`.
+
+**Failure:** `@Body({ schema: createCatSchema })` without `StandardSchemaValidationPipe`. The handler receives the raw body. TypeScript is not validation.
+
+<br />
+
+---
+
+## 10. Exception Filters
+
+Unhandled exceptions hit Nest's exceptions layer. `HttpException` (and subclasses) become JSON. Anything else becomes `{ statusCode: 500, message: "Internal server error" }`. Built-in HTTP exceptions (`BadRequestException`, `UnauthorizedException`, `ForbiddenException`, …) inherit `HttpException`. They also inherit `IntrinsicException`, so the default logger treats them as normal control flow, not a crash.
+
+v12 adds `errorCode` on `HttpExceptionOptions`. It is serialized. Clients branch on a stable identifier, not a message string. `cause` is for logs and is **not** serialized.
+
+<br />
+
+```ts
+throw new BadRequestException("Password is too weak", {
+  errorCode: "WEAK_PASSWORD",
+})
+```
+
+<br />
+
+A filter implements `ExceptionFilter` and is bound with `@Catch()`. `@Catch(HttpException)` is typed. `@Catch()` catches everything. When both exist, declare the catch-everything filter **first** so the typed filter still receives its type.
+
+`ArgumentsHost` is how you reach `request` / `response` without baking Express into a library filter. Prefer `HttpAdapterHost` and `httpAdapter.reply(...)` when the same filter must work on Express and Fastify.
+
+`useGlobalFilters(new Filter())` in `main.ts` cannot inject. Use `APP_FILTER`. Middleware throws only reach **global** filters — see §6.
+
+**Failure:** parsing `message` in a client to distinguish two 400s. The string is for humans. `errorCode` is for machines.
+
+<br />
+
+---
+
+## 11. Injection Scopes
+
+Default scope is **singleton**. One instance for the process. That is correct for Node: there is no per-request thread. [The JavaScript Event Loop in Depth](/notes/javascript-event-loop-in-depth).
+
+<br />
+
+| Scope | Lifetime |
+| --- | --- |
+| `DEFAULT` | One instance, tied to the app. The default. Prefer it. |
+| `REQUEST` | New instance per incoming request; collected after the response |
+| `TRANSIENT` | New instance per consumer. The consumer's own scope does not change |
+
+<br />
+
+`REQUEST` **bubbles**. A singleton controller that injects a request-scoped service becomes request-scoped. `TRANSIENT` does not bubble: a singleton that injects a transient logger stays singleton and keeps that one logger instance.
+
+Inject `REQUEST` (`@Inject(REQUEST)`) to see the current HTTP request. That token is request-scoped. Anything that injects it becomes request-scoped. Lifecycle hooks do **not** run on request-scoped classes.
+
+Request scope has a cost: the controller and its request-scoped chain are constructed per request. A shared "current tenant datasource" that reads a header will pull most of the graph into that mode.
+
+**Durable providers** exist for the case where you do not have tens of thousands of tenants and the isolation key is a tenant id, not a request UUID. Register a `ContextIdStrategy` with `ContextIdFactory.apply(...)` before traffic arrives. Mark the tenant-scoped provider `{ scope: Scope.REQUEST, durable: true }`. Nest then reuses a **DI subtree per tenant** instead of per request. Durability bubbles like `REQUEST`. This is not a security boundary. Isolation still belongs in membership checks and in the database: [Building a Multi-Tenant Backend with Hono, Better Auth, Drizzle, and Postgres RLS](/notes/multi-tenant-backend-drizzle-hono-better-auth).
+
+**Failure:** injecting `REQUEST` into a logger or a database pool wrapper "just in case." The graph is now request-scoped. Latency is the symptom. The cause is the token.
+
+<br />
+
+---
+
+## 12. Lifecycle
+
+Bootstrap, run, terminate. Hooks exist on modules, providers, and controllers.
+
+<br />
+
+```text
+resolve the graph
+  → onModuleInit
+  → onApplicationBootstrap
+  → listen
+  → (SIGTERM / app.close, if shutdown hooks are enabled)
+  → onModuleDestroy
+  → beforeApplicationShutdown
+  → close connections
+  → onApplicationShutdown
+```
+
+<br />
+
+`onModuleInit` and `onApplicationBootstrap` run only if you call `app.init()` or `app.listen()`. Shutdown hooks run only if you call `app.close()`, or if you called `enableShutdownHooks()` and the process receives a signal Nest can see. They are off by default because the listeners cost memory — parallel tests in one process will complain.
+
+v12 invokes hooks by **component hierarchy level**. Import-array order is no longer a safe assumption between related providers. If A must initialize before B, make that a constructor dependency or an explicit `await` inside one hook, not "B's module is listed second."
+
+Request-scoped classes do not receive these hooks. The Express adapter **drains in-flight requests** on shutdown. `app.close()` does not exit Node. A stray `setInterval` keeps the process alive.
+
+**Failure:** opening a connection in `onModuleInit` of a request-scoped service. The hook never runs. The connection never opens. Or: assuming module import order still sequences two `onModuleInit` implementations after a v12 upgrade.
+
+<br />
+
+---
+
+## 13. The Fastify Adapter
+
+The graph does not change. The platform does.
+
+<br />
+
+```ts title="main.ts"
+import { NestFactory } from "@nestjs/core"
+import {
+  FastifyAdapter,
+  NestFastifyApplication,
+} from "@nestjs/platform-fastify"
+import { AppModule } from "./app.module.js"
+
+const app = await NestFactory.create<NestFastifyApplication>(
+  AppModule,
+  new FastifyAdapter(),
+)
+await app.listen(process.env.PORT ?? 3000, "0.0.0.0")
+```
+
+<br />
+
+Install `@nestjs/platform-fastify`. Fastify listens on `127.0.0.1` by default; pass `0.0.0.0` when the process is not bound to localhost only.
+
+Middleware sees the **raw** Node `req`/`res` (via `middie`), not Fastify's wrappers. Type them as `FastifyRequest["raw"]` / `FastifyReply["raw"]`. Filters that call `response.json` must use `response.send` — or, better, `HttpAdapterHost` from §10.
+
+Express middleware packages do not apply. `@Res()` recipes written for Express do not apply. `@RouteConfig()` and `@RouteConstraints()` are Fastify-only.
+
+That is the whole section. Same modules, same tokens, same pipeline. Different `req`.
+
+**Failure:** swapping the adapter and leaving `import type { Request, Response } from "express"` in guards and filters. The types compile. The runtime objects do not match.
+
+<br />
+
+---
+
+## 14. Config and Testing the Graph
+
+`@nestjs/config` loads `.env` (dotenv) and exposes `ConfigService`. v12 validates `process.env` through **Standard Schema**. Zod is the documented default for new projects. Joi still works at **v18+**, with library options under `validationOptions.libraryOptions`.
+
+<br />
+
+```ts
+ConfigModule.forRoot({
+  validationSchema: z.object({
+    NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
+    PORT: z.coerce.number().default(3000),
+  }),
+})
+```
+
+<br />
+
+The test surface is the same graph, smaller. `@nestjs/testing` is runner-agnostic. New ESM scaffolds default to **Vitest**; existing Jest suites do not have to move.
+
+<br />
+
+```ts
+const moduleRef = await Test.createTestingModule({
+  controllers: [CatsController],
+  providers: [CatsService],
+})
+  .overrideProvider(CatsService)
+  .useValue({ findAll: () => [] })
+  .compile()
+
+const controller = moduleRef.get(CatsController)
+```
+
+<br />
+
+`overrideProvider` is `useValue` for tests: same token, different instance. If the test constructs `new CatsController(new CatsService())`, it is not testing Nest. It is testing two classes you wired by hand.
+
+**Failure:** asserting on a service you `new`'d in the spec while the controller under test received a different instance from the testing module.
+
+<br />
+
+---
+
+## Recap Q&A
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="nest-container">
+    <AccordionTrigger>1. Why is Nest a container around an adapter, not a router?</AccordionTrigger>
+    <AccordionContent>
+
+      - `NestFactory.create` builds an **application graph** from `@Module()` metadata, instantiates providers, then binds controllers to Express (default) or Fastify.
+      - Hono is a router you assemble. Nest constructs the graph, then maps HTTP onto methods. Swapping `FastifyAdapter` does not rewrite modules or tokens.
+      - `INestApplication` is the Nest surface. `NestExpressApplication` / `NestFastifyApplication` are adapter extras you only need when you call platform APIs.
+      - **Failure:** treating `@Controller` as Express `Router` with decorators. The decorator is metadata. The container decides construction and injection.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="nest-tokens">
+    <AccordionTrigger>2. What is a DI token, and why can't an interface be one?</AccordionTrigger>
+    <AccordionContent>
+
+      - A token is the lookup key. `providers: [CatsService]` means `{ provide: CatsService, useClass: CatsService }`.
+      - TypeScript **interfaces are erased**. Nest reads `reflect-metadata` at bootstrap. Use a `Symbol` plus `@Inject()`, or an abstract class that exists at runtime.
+      - `useValue`, `useFactory`, and `useExisting` produce values the class shorthand cannot. Export the token, not "the file next door."
+      - **Failure:** `new CatsService()` beside a module that also provides it. Two instances. The graph lost.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="nest-pipeline">
+    <AccordionTrigger>3. What is the HTTP pipeline order, and who sees a middleware throw?</AccordionTrigger>
+    <AccordionContent>
+
+      - **Middleware → guards → interceptors (before) → pipes → handler → interceptors (after).** Filters run if something threw.
+      - Middleware runs **before a handler is selected**. It cannot read method metadata. Guards can: `ExecutionContext` plus `Reflector`.
+      - `useGlobalX(new …)` in `main.ts` cannot inject. Use `APP_GUARD` / `APP_INTERCEPTOR` / `APP_PIPE` / `APP_FILTER`.
+      - **Failure:** `@UseFilters()` on a middleware class. Only **global** filters catch middleware exceptions.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="nest-schema">
+    <AccordionTrigger>4. When do you use ValidationPipe versus StandardSchemaValidationPipe?</AccordionTrigger>
+    <AccordionContent>
+
+      - Both are pipes: they run on **arguments**, inside the exceptions zone, before the method body.
+      - `ValidationPipe` is the class-validator / class-transformer path. Still supported. An interface parameter is not a metatype it can see.
+      - v12 `@Body({ schema })` / `@Param("id", { schema })` only attaches metadata. `StandardSchemaValidationPipe` reads it. Same schemas can feed response serialization and OpenAPI.
+      - **Failure:** attaching `schema` and never registering the pipe. The handler receives the raw body. TypeScript is not validation.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="nest-scope-lifecycle">
+    <AccordionTrigger>5. What does REQUEST scope change, and what did v12 change about lifecycle?</AccordionTrigger>
+    <AccordionContent>
+
+      - Singleton is the default and the right default on one event-loop thread. `REQUEST` creates a per-request instance and **bubbles** up the injection chain. `TRANSIENT` does not bubble.
+      - Lifecycle hooks do not run on request-scoped classes. Durable providers plus a `ContextIdStrategy` reuse a DI subtree per tenant key; they are not RLS.
+      - v12 runs hooks by **component hierarchy level**. Do not assume import-array order between related `onModuleInit` implementations. Shutdown needs `enableShutdownHooks()`.
+      - **Failure:** injecting `REQUEST` into a widely shared logger or pool. The graph becomes request-scoped. The tenant note is [Building a Multi-Tenant Backend…](/notes/multi-tenant-backend-drizzle-hono-better-auth).
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>
