@@ -45,7 +45,7 @@ const Page = async ({ params }: Props) => {
         </Header.Column>
       </Header.Root>
       <div className="p-5 pb-50">
-        <ListNotes locale={locale} showHeading={false} />
+        <ListNotes locale={locale} variant="tree" showHeading={false} />
       </div>
     </PageLayout>
   )
