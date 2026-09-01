@@ -1,0 +1,1084 @@
+---
+title: "在 AWS 上打造 Production FastAPI：Lambda 或 ECS"
+description: 一套 FastAPI app，跑在 Lambda 或 Fargate——Pydantic、OIDC JWT、SQLAlchemy、Alembic、OpenAPI、Terraform、RDS Proxy、WAF 與 alarms
+date: 2026-09-01
+category: backend
+---
+
+Backend API 需要一條從 request 到 database 的短路徑，validation、documentation 與 infrastructure 來自同一份程式碼。這套 stack 是 **FastAPI**、**Pydantic v2**、**SQLAlchemy 2**、**Alembic**、**PostgreSQL**，以及跑在 **AWS Lambda** 或 **ECS Fargate** 上的 **Terraform**。Identity 是可攜式的 **OIDC** access token，在 Lambda 上於 edge 驗證，在 Fargate 上於 process 內驗證。
+
+Python 作為語言 —— duck typing、GIL、`Depends` 對比 Hono —— 見 [以 TypeScript Developer 身分學 Python](/notes/learning-python-as-a-typescript-developer)。SST 上的 TypeScript 兄弟篇是 [用 Hono、Drizzle、Zod OpenAPI 與 SST 打造 Backend APIs](/notes/_backend-apis-hono-sst)。本站自己的 deploy loop 仍是 SST；這裡的 Terraform 是獨立的 architecture example，disclaimer 與 [打造 Event-Driven 票務 Backend](/notes/building-an-event-driven-ticketing-backend) 相同。Tokens 見 [OAuth 2.0 與 OIDC 解釋](/notes/oauth-2-and-oidc-explained)。這篇筆記涵蓋 typed FastAPI API，一路到 production 的 protect、monitor 與 recover。
+
+<br />
+
+---
+
+## 1. Architecture
+
+預設形態：一個 **FastAPI Lambda** 放在 **API Gateway HTTP API** 後面，使用內建 **JWT authorizer**。被拒絕的 tokens 永遠不會 invoke function。同一個 app 在 Fargate 上用 `uvicorn` 跑。唯一需要知道 AWS 的檔案，是 Mangum entry 與 Terraform。
+
+<br />
+
+| 選擇 **Lambda** 的時機… | 選擇 **ECS Fargate** 的時機… |
+| --- | --- |
+| 流量尖峰或閒置；handlers 短 | 穩定流量、長請求、streaming、workers |
+| JWT authorizer 在 API 跑之前先拒絕 | 長駐 process 與真正的 connection pool |
+| 薄 BFF 的最小 ops 表面 | 團隊已經在交付 containers，並需要 warm capacity |
+
+<br />
+
+```text
+Client
+  → Lambda:  API Gateway → throttle → JWT authorizer → Mangum → FastAPI
+  → Fargate: WAF → ALB → task → uvicorn → FastAPI Depends
+  → Pydantic → SQLAlchemy → RDS Proxy → PostgreSQL
+  → OpenAPI JSON → /docs
+  → logs / metrics / alarms
+```
+
+<br />
+
+- 保持 entrypoint 精簡。Routes、models 與 services 不要 import Mangum 或 boto3。
+- 在 Lambda 上，identity 是 infrastructure 邊界。在 Fargate 上，它在 request 打到 task 之後於 process 內執行。
+- 兩邊都仍需要 edge controls。兩邊都經 **RDS Proxy** 到達 Postgres，避免一波 Lambda 在 instance 上為每次 invoke 各開一條 connection。
+
+<br />
+
+---
+
+## 2. FastAPI
+
+一個 app object。兩套 process adapters。**uv** 掌管 lockfile。
+
+<br />
+
+```toml title="pyproject.toml"
+[project]
+name = "api"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.115",
+  "pydantic[email]>=2.10",
+  "sqlalchemy[asyncio]>=2.0",
+  "asyncpg>=0.30",
+  "mangum>=0.19",
+  "pyjwt[crypto]>=2.10",
+  "uvicorn[standard]>=0.34",
+  "awslambdaric>=3.0",
+]
+
+[dependency-groups]
+dev = ["pytest>=8.3", "httpx>=0.28", "alembic>=1.14"]
+```
+
+<br />
+
+```python title="app/main.py"
+from uuid import uuid4
+
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, Response
+
+from app.errors import ApiError, error_response
+from app.routers import users
+from app.schemas import ErrorBody
+
+app = FastAPI(title="Example API", version="1.0.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["https://app.example.com"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "X-Request-Id"],
+    allow_credentials=True,
+)
+
+
+@app.middleware("http")
+async def request_id(request: Request, call_next):
+    rid = request.headers.get("x-request-id") or str(uuid4())
+    request.state.request_id = rid
+    response = await call_next(request)
+    response.headers["x-request-id"] = rid
+    return response
+
+
+@app.get("/api/health", include_in_schema=False)
+async def health() -> dict[str, str]:
+    return {"status": "ok"}
+
+
+@app.options("/{path:path}")
+async def options(path: str) -> Response:
+    return Response(status_code=204)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
+    body = ErrorBody(
+        code="VALIDATION_ERROR",
+        message="Request validation failed.",
+        request_id=getattr(request.state, "request_id", None),
+        issues=[
+            {"path": ".".join(str(p) for p in err["loc"]) or "request", "message": err["msg"]}
+            for err in exc.errors()
+        ],
+    )
+    return JSONResponse(status_code=400, content=body.model_dump())
+
+
+@app.exception_handler(ApiError)
+async def api_error(request: Request, exc: ApiError) -> JSONResponse:
+    return error_response(request, exc.status_code, exc.code, str(exc.detail))
+
+
+app.include_router(users.router)
+```
+
+<br />
+
+Lambda 是一個 module。Fargate 是 image 的 `CMD`。
+
+<br />
+
+```python title="app/lambda_handler.py"
+from mangum import Mangum
+
+from app.main import app
+
+handler = Mangum(app, lifespan="off")
+```
+
+<br />
+
+```dockerfile title="Dockerfile"
+FROM python:3.12-slim-bookworm
+
+COPY --from=ghcr.io/astral-sh/uv:0.7.12 /uv /bin/uv
+
+WORKDIR /app
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev
+COPY app ./app
+
+ENV PATH="/app/.venv/bin:$PATH"
+EXPOSE 8000
+
+# Fargate default. Lambda overrides command to the Mangum handler.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+```
+
+<br />
+
+- `OPTIONS` 與 `/api/health` 保持 public。其餘一切在正確邊界走 auth。
+- Mangum 上的 `lifespan="off"`：SQLAlchemy engine 在 import 時建立，直覺與把 Drizzle client 建在 Hono handler 之外相同。Lambda 沒有你可以指望的 graceful shutdown。
+- AWS Lambda Web Adapter 也可以讓 Lambda 上的 process 仍是 `uvicorn`。這篇筆記用 **Mangum**，讓 adapter 成為明確的一行，如同 Hono 的 `handle(app)`。
+
+**Failure:** 從 `app/routers/users.py` import `Mangum`。這條 route 應當能在沒有 AWS event 的情況下跑 pytest。
+
+<br />
+
+---
+
+## 3. 用 Pydantic 定義 Contract
+
+Contract 是一條 route 接受什麼、回傳什麼，以及 errors 長什麼樣。一份 **Pydantic** model 同時驅動 **validation**、**OpenAPI** 與 response body。普通函數上的 type annotation 只是註釋 —— [以 TypeScript Developer 身分學 Python](/notes/learning-python-as-a-typescript-developer)。REST 形態見 [System Design 裡的 API Design](/notes/api-design-in-system-design)。
+
+<br />
+
+```python title="app/schemas.py"
+from pydantic import BaseModel, EmailStr, Field
+
+
+class UserRead(BaseModel):
+    id: str
+    email: EmailStr
+    name: str
+
+
+class UserCreate(BaseModel):
+    email: EmailStr
+    name: str = Field(min_length=1, max_length=100)
+
+
+class ErrorIssue(BaseModel):
+    path: str
+    message: str
+
+
+class ErrorBody(BaseModel):
+    code: str
+    message: str
+    request_id: str | None = None
+    issues: list[ErrorIssue] | None = None
+```
+
+<br />
+
+```python title="app/errors.py"
+from fastapi import HTTPException, Request
+from fastapi.responses import JSONResponse
+
+from app.schemas import ErrorBody
+
+
+class ApiError(HTTPException):
+    def __init__(self, status_code: int, code: str, message: str) -> None:
+        super().__init__(status_code=status_code, detail=message)
+        self.code = code
+
+
+def error_response(request: Request, status_code: int, code: str, message: str) -> JSONResponse:
+    body = ErrorBody(
+        code=code,
+        message=message,
+        request_id=getattr(request.state, "request_id", None),
+    )
+    return JSONResponse(status_code=status_code, content=body.model_dump())
+```
+
+<br />
+
+```python title="app/routers/users.py"
+from fastapi import APIRouter, Depends
+
+from app.auth import Principal, require_user
+from app.db import SessionDep
+from app.schemas import ErrorBody, UserCreate, UserRead
+from app.services import users as users_service
+
+router = APIRouter(prefix="/users", tags=["users"])
+
+
+@router.get("/{user_id}", response_model=UserRead, responses={404: {"model": ErrorBody}})
+async def get_user(
+    user_id: str,
+    session: SessionDep,
+    _: Principal = Depends(require_user),
+) -> UserRead:
+    return await users_service.require(session, user_id)
+
+
+@router.post("", response_model=UserRead, status_code=201, responses={409: {"model": ErrorBody}})
+async def create_user(
+    body: UserCreate,
+    session: SessionDep,
+    _: Principal = Depends(require_user),
+) -> UserRead:
+    return await users_service.create(session, body)
+```
+
+<br />
+
+- `response_model=UserRead` 是邊界。Handler 回傳 Pydantic model（或能 validate 成它的東西），不是 SQLAlchemy instance。
+- 共享的 `ErrorBody` 讓 `400` / `404` / `409` 保持一致。API Gateway JWT 失敗用更小的 gateway 形狀表示 `401` / `403` —— 兩邊都要寫進文件。
+- 儘早掛上 **request ID**，並把它放進 logs 與 error responses。
+- FastAPI 已經從這些 annotations 發出 `/openapi.json`。你不必手寫第二份 contract。
+
+**Failure:** 因為「FastAPI 會 serialize」就把 ORM row 回傳。那是 detached instance、lazy load，或 500。
+
+<br />
+
+---
+
+## 4. SQLAlchemy 與 PostgreSQL
+
+PostgreSQL 是 durable authority。SQLAlchemy 2 讓 schema 與 queries 保持 typed，同時不把 SQL 藏起來。Statement 模型見 [SQL 核心概念](/notes/core-sql-concepts)。在 concurrency 下，優先用 **database constraints**（unique email、`timestamptz`），而不是 check-then-insert。
+
+在 import 時把 engine **建立一次**。在 Lambda 上，那是每個 warm environment，不是艦隊級 pool。每種 runtime 都指向 **RDS Proxy**。Lambda 用 `NullPool`，避免 process 在被凍結的 environments 之間握住 client。Fargate 用小 pool，因為 task 是長駐 process。
+
+<br />
+
+```python title="app/db.py"
+import os
+from collections.abc import AsyncIterator
+from typing import Annotated
+
+from fastapi import Depends
+from sqlalchemy.ext.asyncio import (
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
+from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.pool import NullPool
+
+RUNTIME = os.environ.get("RUNTIME", "fargate")
+DATABASE_URL = os.environ["DATABASE_URL"]
+CONNECT_ARGS = {"ssl": True, "statement_cache_size": 0}
+
+engine = (
+    create_async_engine(DATABASE_URL, poolclass=NullPool, connect_args=CONNECT_ARGS)
+    if RUNTIME == "lambda"
+    else create_async_engine(
+        DATABASE_URL,
+        pool_size=5,
+        max_overflow=5,
+        pool_timeout=10,
+        connect_args=CONNECT_ARGS,
+    )
+)
+
+SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+async def get_session() -> AsyncIterator[AsyncSession]:
+    async with SessionLocal() as session:
+        yield session
+
+
+SessionDep = Annotated[AsyncSession, Depends(get_session)]
+```
+
+<br />
+
+```python title="app/models.py"
+from sqlalchemy import String, Text
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.db import Base
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    email: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+```
+
+<br />
+
+```python title="app/services/users.py"
+from uuid import uuid4
+
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.errors import ApiError
+from app.models import User
+from app.schemas import UserCreate, UserRead
+
+
+def to_read(row: User) -> UserRead:
+    return UserRead(id=row.id, email=row.email, name=row.name)
+
+
+async def require(session: AsyncSession, user_id: str) -> UserRead:
+    row = await session.scalar(select(User).where(User.id == user_id))
+    if row is None:
+        raise ApiError(404, "USER_NOT_FOUND", "User not found.")
+    return to_read(row)
+
+
+async def create(session: AsyncSession, body: UserCreate) -> UserRead:
+    row = User(id=str(uuid4()), email=body.email, name=body.name)
+    session.add(row)
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise ApiError(409, "EMAIL_TAKEN", "Email already exists.") from exc
+    await session.refresh(row)
+    return to_read(row)
+```
+
+<br />
+
+- `statement_cache_size=0` 關掉 asyncpg 的 prepared-statement cache。當 prepared statements 保持打開時，RDS Proxy 會把 client **pin** 到一條 session；pinning 加上 Lambda concurrency，就是耗盡 instance 的方式。
+- 每個 warm environment 的 reuse 不是 global pooling。限制 function 的 reserved concurrency。Proxy 是 multiplexor。
+- Migrations 是 **deploy step**，絕不是 request path 的一部分。對 Proxy 或 migrator task 跑 `uv run alembic upgrade head`，審閱 SQL，在程式碼依賴新形狀之前 apply。
+- 無法原子出貨的改動，用 expand-and-contract。
+- Secrets 來自 **Secrets Manager**，不是 committed 的 `.env`。Lambda 與 task 在 boot 時讀取 `DATABASE_URL`。
+
+**Failure:** 在 Lambda 上用預設大小為 5 的 `QueuePool`。一百個並發 cold starts 就是五百條 connections 穿過隨後會 pin 的 Proxy。Lambda 的預設是 `NullPool` 加 Proxy。
+
+<br />
+
+---
+
+## 5. OIDC JWT
+
+這個 API 是 **resource server**。它不跑 login form。你不擁有的 issuer（Auth0、Okta、Cognito，或任何 OIDC provider）簽發 access token。Issuer URL 與 audience 是 Terraform variables。Roles、grants，以及 ID token 與 access token 的區分，見 [OAuth 2.0 與 OIDC 解釋](/notes/oauth-2-and-oidc-explained)。
+
+在 Lambda 上，**HTTP API JWT authorizer** 在 Mangum 跑 **之前** 檢查 `iss`、`aud`、expiry 與 JWKS signature。缺失或無效的 `Authorization` 永遠不會 invoke function。在 Fargate 上，同樣的檢查是 request 打到 task 之後的 FastAPI `Depends`。
+
+<br />
+
+```python title="app/auth.py"
+import os
+from dataclasses import dataclass
+from typing import Annotated
+
+import jwt
+from fastapi import Depends, HTTPException
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from jwt import PyJWKClient
+
+OIDC_ISSUER = os.environ["OIDC_ISSUER"]
+OIDC_AUDIENCE = os.environ["OIDC_AUDIENCE"]
+_jwks = PyJWKClient(f"{OIDC_ISSUER.rstrip('/')}/.well-known/jwks.json")
+_bearer = HTTPBearer(auto_error=True)
+
+
+@dataclass(frozen=True)
+class Principal:
+    sub: str
+    raw: dict[str, object]
+
+
+def decode_access_token(token: str) -> Principal:
+    signing_key = _jwks.get_signing_key_from_jwt(token)
+    claims = jwt.decode(
+        token,
+        signing_key.key,
+        algorithms=["RS256"],
+        audience=OIDC_AUDIENCE,
+        issuer=OIDC_ISSUER,
+    )
+    sub = claims.get("sub")
+    if not isinstance(sub, str) or not sub:
+        raise HTTPException(status_code=401, detail="Token is missing sub.")
+    return Principal(sub=sub, raw=claims)
+
+
+def require_user(
+    creds: Annotated[HTTPAuthorizationCredentials, Depends(_bearer)],
+) -> Principal:
+    try:
+        return decode_access_token(creds.credentials)
+    except jwt.PyJWTError as exc:
+        raise HTTPException(status_code=401, detail="Invalid access token.") from exc
+```
+
+<br />
+
+- Identity 是 `Principal.sub`。絕不是 client 的 `X-User-Id`。
+- Authentication 回答 *誰*。Authorization（roles、org membership、RLS）留在 app 裡 —— 見 [multi-tenant 後端筆記](/notes/multi-tenant-backend-drizzle-hono-better-auth)。
+- `PyJWKClient` 會 cache keys。不要每次 request 都親手 fetch JWKS。
+- 在 Lambda 上，你可以從 `event.requestContext.authorizer.jwt.claims` 讀取已經驗證過的 claims，並跳過第二次 JWKS 調用。把 `require_user` 作為唯一路徑更便於測試。Authorizer 仍然提供 reject-before-invoke 的性質。
+- 讓 `/api/health` 與 `OPTIONS` **離開** authorizer。
+
+**Failure:** 信任 client 的 `X-User-Id` header，或帶 credentials 的 wildcard CORS origin。**Failure:** 把 ID token 當成 API credential。
+
+<br />
+
+---
+
+## 6. OpenAPI
+
+OpenAPI JSON 是可攜式的 artifact（CI、typed clients、breaking-change checks）。FastAPI 的 `/docs` 是 presentation 層。
+
+- FastAPI 從同一個 `app` object 提供 `/openapi.json` 與 `/docs`。你已經點名了 `response_model` 與 `responses`。
+- Bearer scheme 註冊一次，讓生成的文件與 JWT authorizer 一致：
+
+<br />
+
+```python
+from fastapi.openapi.utils import get_openapi
+
+def custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+    schema = get_openapi(title=app.title, version=app.version, routes=app.routes)
+    schema["components"]["securitySchemes"] = {
+        "BearerAuth": {"type": "http", "scheme": "bearer", "bearerFormat": "JWT"}
+    }
+    schema["security"] = [{"BearerAuth": []}]
+    app.openapi_schema = schema
+    return schema
+
+app.openapi = custom_openapi
+```
+
+<br />
+
+- 在 production 對 `/docs` 與 `/openapi.json` 做 stage-gate 或 authenticate。公開的 reference 就是免費偵察。
+- 即使 FastAPI 在 Lambda 路徑上不發出 gateway `401` / `403`，也要寫進文件 —— 那是 authorizer 發出的。
+
+<br />
+
+---
+
+## 7. 用 Terraform 部署
+
+本倉庫用 SST 部署這個站點。下面的 Terraform 是獨立的 architecture example，不是這裡已經存在的基礎設施。在真實的 platform repository 裡 pin 並測試 provider version。
+
+一份 image。兩份 compute resources。共享 VPC、RDS、Proxy 與 OIDC variables。沒有 MSK、沒有 global Aurora、沒有 purchase cells —— 那些屬於 [票務筆記](/notes/building-an-event-driven-ticketing-backend)。
+
+<br />
+
+```hcl title="infra/providers.tf"
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 6.33"
+    }
+  }
+}
+
+provider "aws" {
+  region = var.region
+}
+
+variable "oidc_issuer" {
+  type = string
+}
+
+variable "oidc_audience" {
+  type = string
+}
+
+variable "image_uri" {
+  type = string
+}
+```
+
+<br />
+
+HTTP API、JWT authorizer、放在 VPC 裡的 container Lambda，以便到達 Proxy。Health 與 preflight 保持 public。
+
+<br />
+
+```hcl title="infra/lambda.tf"
+resource "aws_apigatewayv2_api" "http" {
+  name          = "api"
+  protocol_type = "HTTP"
+
+  cors_configuration {
+    allow_origins = ["https://app.example.com"]
+    allow_methods = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+    allow_headers = ["content-type", "authorization", "x-request-id"]
+    allow_credentials = true
+  }
+}
+
+resource "aws_apigatewayv2_authorizer" "jwt" {
+  api_id           = aws_apigatewayv2_api.http.id
+  authorizer_type  = "JWT"
+  identity_sources = ["$request.header.Authorization"]
+  name             = "oidc"
+
+  jwt_configuration {
+    audience = [var.oidc_audience]
+    issuer   = var.oidc_issuer
+  }
+}
+
+resource "aws_lambda_function" "api" {
+  function_name = "api"
+  role          = aws_iam_role.lambda.arn
+  package_type  = "Image"
+  image_uri     = var.image_uri
+  timeout       = 15
+  memory_size   = 512
+
+  image_config {
+    command     = ["app.lambda_handler.handler"]
+    entry_point = ["/app/.venv/bin/python", "-m", "awslambdaric"]
+  }
+
+  vpc_config {
+    subnet_ids         = var.private_subnet_ids
+    security_group_ids = [aws_security_group.compute.id]
+  }
+
+  environment {
+    variables = {
+      RUNTIME       = "lambda"
+      DATABASE_URL  = jsondecode(data.aws_secretsmanager_secret_version.app_db.secret_string)["url"]
+      OIDC_ISSUER   = var.oidc_issuer
+      OIDC_AUDIENCE = var.oidc_audience
+    }
+  }
+}
+
+resource "aws_apigatewayv2_stage" "default" {
+  api_id      = aws_apigatewayv2_api.http.id
+  name        = "$default"
+  auto_deploy = true
+}
+
+resource "aws_apigatewayv2_integration" "lambda" {
+  api_id                 = aws_apigatewayv2_api.http.id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = aws_lambda_function.api.invoke_arn
+  payload_format_version = "2.0"
+}
+
+resource "aws_apigatewayv2_route" "health" {
+  api_id    = aws_apigatewayv2_api.http.id
+  route_key = "GET /api/health"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+}
+
+resource "aws_apigatewayv2_route" "options" {
+  api_id    = aws_apigatewayv2_api.http.id
+  route_key = "OPTIONS /{proxy+}"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+}
+
+resource "aws_apigatewayv2_route" "default" {
+  api_id             = aws_apigatewayv2_api.http.id
+  route_key          = "$default"
+  authorization_type = "JWT"
+  authorizer_id      = aws_apigatewayv2_authorizer.jwt.id
+  target             = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+}
+
+resource "aws_lambda_permission" "apigw" {
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.api.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.http.execution_arn}/*/*"
+}
+
+resource "aws_wafv2_web_acl_association" "http_api" {
+  resource_arn = aws_apigatewayv2_stage.default.arn
+  web_acl_arn  = aws_wafv2_web_acl.api.arn
+}
+```
+
+<br />
+
+Fargate 使用 **同一份 image**。Task command 是 uvicorn。TLS 與 WAF 坐在 ALB 上。
+
+<br />
+
+```hcl title="infra/ecs.tf"
+resource "aws_ecs_cluster" "api" {
+  name = "api"
+}
+
+resource "aws_ecs_task_definition" "api" {
+  family                   = "api"
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+  cpu                      = "512"
+  memory                   = "1024"
+  execution_role_arn       = aws_iam_role.exec.arn
+  task_role_arn            = aws_iam_role.task.arn
+
+  container_definitions = jsonencode([{
+    name  = "api"
+    image = var.image_uri
+    portMappings = [{ containerPort = 8000, protocol = "tcp" }]
+    environment = [
+      { name = "RUNTIME", value = "fargate" },
+      { name = "OIDC_ISSUER", value = var.oidc_issuer },
+      { name = "OIDC_AUDIENCE", value = var.oidc_audience },
+    ]
+    secrets = [
+      { name = "DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.app_db.arn}:url::" }
+    ]
+    logConfiguration = {
+      logDriver = "awslogs"
+      options = {
+        awslogs-group         = aws_cloudwatch_log_group.api.name
+        awslogs-region        = var.region
+        awslogs-stream-prefix = "api"
+      }
+    }
+    healthCheck = {
+      command     = ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health')\""]
+      interval    = 30
+      timeout     = 5
+      retries     = 3
+      startPeriod = 15
+    }
+  }])
+}
+
+resource "aws_ecs_service" "api" {
+  name            = "api"
+  cluster         = aws_ecs_cluster.api.id
+  task_definition = aws_ecs_task_definition.api.arn
+  desired_count   = 2
+  launch_type     = "FARGATE"
+
+  network_configuration {
+    assign_public_ip = false
+    subnets          = var.private_subnet_ids
+    security_groups  = [aws_security_group.compute.id]
+  }
+
+  load_balancer {
+    target_group_arn = aws_lb_target_group.api.arn
+    container_name   = "api"
+    container_port   = 8000
+  }
+
+  deployment_minimum_healthy_percent = 100
+  deployment_maximum_percent         = 200
+}
+
+resource "aws_lb" "api" {
+  name               = "api"
+  load_balancer_type = "application"
+  subnets            = var.public_subnet_ids
+  security_groups    = [aws_security_group.alb.id]
+}
+
+resource "aws_lb_target_group" "api" {
+  name        = "api"
+  port        = 8000
+  protocol    = "HTTP"
+  vpc_id      = var.vpc_id
+  target_type = "ip"
+
+  health_check {
+    path = "/api/health"
+  }
+}
+
+resource "aws_lb_listener" "http" {
+  load_balancer_arn = aws_lb.api.arn
+  port              = 80
+  protocol          = "HTTP"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.api.arn
+  }
+}
+
+resource "aws_wafv2_web_acl" "api" {
+  name  = "api"
+  scope = "REGIONAL"
+
+  default_action {
+    allow {}
+  }
+
+  rule {
+    name     = "rate"
+    priority = 1
+
+    action {
+      block {}
+    }
+
+    statement {
+      rate_based_statement {
+        limit              = 1000
+        aggregate_key_type = "IP"
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "api-rate"
+      sampled_requests_enabled   = true
+    }
+  }
+
+  visibility_config {
+    cloudwatch_metrics_enabled = true
+    metric_name                = "api"
+    sampled_requests_enabled   = true
+  }
+}
+
+resource "aws_wafv2_web_acl_association" "alb" {
+  resource_arn = aws_lb.api.arn
+  web_acl_arn  = aws_wafv2_web_acl.api.arn
+}
+```
+
+<br />
+
+RDS 是 Multi-AZ。Proxy 坐在 private subnets。Function 與 task 都把 Proxy endpoint 當作 `DATABASE_URL`。
+
+<br />
+
+```hcl title="infra/rds.tf"
+resource "aws_db_instance" "postgres" {
+  engine                       = "postgres"
+  engine_version               = "16"
+  instance_class               = "db.t4g.medium"
+  allocated_storage            = 20
+  db_name                      = "app"
+  username                     = "app"
+  manage_master_user_password  = true
+  db_subnet_group_name         = aws_db_subnet_group.this.name
+  vpc_security_group_ids       = [aws_security_group.rds.id]
+  storage_encrypted            = true
+  backup_retention_period      = 7
+  deletion_protection          = true
+  multi_az                     = true
+  performance_insights_enabled = true
+}
+
+resource "aws_db_proxy" "postgres" {
+  name                   = "app-proxy"
+  engine_family          = "POSTGRESQL"
+  role_arn               = aws_iam_role.proxy.arn
+  vpc_subnet_ids         = var.private_subnet_ids
+  vpc_security_group_ids = [aws_security_group.proxy.id]
+  require_tls            = true
+
+  auth {
+    auth_scheme = "SECRETS"
+    iam_auth    = "DISABLED"
+    secret_arn  = aws_db_instance.postgres.master_user_secret[0].secret_arn
+  }
+}
+
+resource "aws_db_proxy_default_target_group" "postgres" {
+  db_proxy_name = aws_db_proxy.postgres.name
+
+  connection_pool_config {
+    max_connections_percent      = 90
+    max_idle_connections_percent = 50
+    connection_borrow_timeout    = 30
+  }
+}
+
+resource "aws_db_proxy_target" "postgres" {
+  db_proxy_name          = aws_db_proxy.postgres.name
+  target_group_name      = aws_db_proxy_default_target_group.postgres.name
+  db_instance_identifier = aws_db_instance.postgres.identifier
+}
+
+# Compose postgresql+asyncpg://user:pass@PROXY:5432/app from the master
+# secret and the proxy endpoint. Both runtimes read this key as DATABASE_URL.
+resource "aws_secretsmanager_secret" "app_db" {
+  name = "api/database-url"
+}
+
+data "aws_secretsmanager_secret_version" "app_db" {
+  secret_id = aws_secretsmanager_secret.app_db.id
+  # First apply must write a version (composed URL) before the function can decode it.
+}
+```
+
+<br />
+
+- Function 放進 VPC，只因為它必須到達 Proxy。Cold start 會隨 ENI attach 變長；預先建立的 Hyperplane ENI 讓第二次 invoke 更便宜。
+- ALB snippet 監聽 80，是為了讓這一跳可見。Production 是 listener 上的 **443** 加上 ACM certificate。
+- 明確的 public `OPTIONS` 與 `/api/health` 很重要：帶 JWT authorizer 的 `$default` 會拒絕 browser preflight 與 liveness。
+- 與 runtime 無關的 app hardening：嚴格 CORS、request IDs、structured logs（不含 tokens）、Pydantic validation、least-privilege 的 task 與 function roles。
+- 用 `aws_wafv2_web_acl_association` 把 **WAFv2** 掛到 HTTP API 的 stage ARN，方式與掛在 ALB 上相同。
+- Alembic 在 CI 或一次性 task 裡跑，**早於** 新 image 接收流量。
+
+<br />
+
+---
+
+## 8. Monitor 與 Recover
+
+Logs、metrics 與 traces 應當共享一個 request id。針對症狀告警。SNS 是「告訴人」的 bus。
+
+<br />
+
+| Signal | Fargate | Lambda |
+| --- | --- | --- |
+| Logs | Task `awslogs` → CloudWatch | Function log group |
+| Metrics | ALB 5xx / latency, ECS CPU / memory | Errors, duration, throttles, concurrency |
+| Alarms | Unhealthy hosts, p99, CPU | Error rate, throttles, timeout proximity |
+
+<br />
+
+```hcl title="infra/alarms.tf"
+resource "aws_sns_topic" "alerts" {
+  name = "api-alerts"
+}
+
+resource "aws_sns_topic_subscription" "email" {
+  topic_arn = aws_sns_topic.alerts.arn
+  protocol  = "email"
+  endpoint  = "oncall@example.com"
+}
+
+resource "aws_cloudwatch_metric_alarm" "lambda_errors" {
+  alarm_name          = "api-lambda-errors"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 2
+  metric_name         = "Errors"
+  namespace           = "AWS/Lambda"
+  period              = 60
+  statistic           = "Sum"
+  threshold           = 5
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = [aws_sns_topic.alerts.arn]
+  dimensions = {
+    FunctionName = aws_lambda_function.api.function_name
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "alb_5xx" {
+  alarm_name          = "api-alb-5xx"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 2
+  metric_name         = "HTTPCode_Target_5XX_Count"
+  namespace           = "AWS/ApplicationELB"
+  period              = 60
+  statistic           = "Sum"
+  threshold           = 10
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = [aws_sns_topic.alerts.arn]
+  dimensions = {
+    LoadBalancer = aws_lb.api.arn_suffix
+  }
+}
+```
+
+<br />
+
+- CloudTrail 與 GuardDuty 留在 account 層級 —— 確認它們是開的；不要在 Console 人手編輯 Terraform 管理的 resources。
+- Durable state 幾乎全是 **Postgres**。Compute 可以從 git + image tag 重新部署。
+- 先寫下 **RPO** 與 **RTO**，然後：自動化 backups，retention 對齊 RPO；產品重要時做 cross-region snapshot copy；versioned Alembic revisions，讓 restore 後的 DB 能趕上。
+- Restore drill：snapshot → 非 prod 的 `DATABASE_URL` → `alembic upgrade head` → `/api/health` + 一條關鍵路徑 → 記錄真實 RTO。
+
+**Failure:** 把 Multi-AZ 叫作「disaster recovery」。那是同一 region 內的 high availability，不是 cross-region DR。策略見 [System Design 裡的 Disaster Recovery](/notes/disaster-recovery-in-system-design)。
+
+<br />
+
+---
+
+## 9. Lifecycle、Tests、Trade-offs
+
+Lambda 上的 `POST /users`：API Gateway → JWT authorizer → Mangum → request ID → Pydantic → `require_user` → SQLAlchemy → RDS Proxy → Postgres → `201`。同一套 models 出現在 `/openapi.json`。
+
+測試寫在 Mangum **之下**。Stub `require_user`。用可丟棄的真實 Postgres 跑 queries 與 migrations。
+
+<br />
+
+```python title="tests/test_users.py"
+import pytest
+from fastapi.testclient import TestClient
+
+from app.auth import Principal, require_user
+from app.main import app
+
+
+def principal() -> Principal:
+    return Principal(sub="user_1", raw={"sub": "user_1"})
+
+
+@pytest.fixture
+def client() -> TestClient:
+    app.dependency_overrides[require_user] = principal
+    with TestClient(app) as test_client:
+        yield test_client
+    app.dependency_overrides.clear()
+
+
+def test_health(client: TestClient) -> None:
+    response = client.get("/api/health")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+
+def test_create_user_rejects_bad_email(client: TestClient) -> None:
+    response = client.post("/users", json={"email": "not-an-email", "name": "Ada"})
+    assert response.status_code == 400
+    assert response.json()["code"] == "VALIDATION_ERROR"
+```
+
+<br />
+
+- 把 deployed tests 留給 authorizer 決策、CORS、secrets，以及 live URL 上的 `/api/health`。
+- 可接受的 trade-offs：container-image 的 **cold start**（比 zip 大）、Proxy 多一跳、CPython 的 GIL 使 CPU-bound 工作不屬於這條 request path（[學 Python](/notes/learning-python-as-a-typescript-developer)），以及你必須保護的 Terraform state —— 本站的 app stacks 仍在 [SST](/notes/using-sst-for-aws-infra-and-devops)。每一層都保持可替換。
+
+<br />
+
+---
+
+## Mental Model
+
+```text
+Contract   → Pydantic models + shared errors + generated OpenAPI
+Auth       → OIDC JWT authorizer (Lambda) or Depends (Fargate)
+Data       → SQLAlchemy 2 + NullPool/Proxy on Lambda + Alembic on deploy
+Deploy     → one image → HTTP API + Function  or  WAF + ALB + Service
+Protect    → WAF, rate limits, least-privilege secrets, docs gated
+Monitor    → requestId logs + runtime metrics + SNS alarms
+Recover    → RPO/RTO → backups → restore drills → new image + DNS
+```
+
+<br />
+
+保持路徑簡短：validated request、trusted identity、typed query、durable constraint、generated docs、可審閱的 infra。依流量形態選擇 **Lambda** 或 **Fargate**，把 WAF 與 identity 放在正確邊界，針對症狀告警，在 restore drill 符合你寫下的 RPO/RTO 之前，不要說它 production-ready。
+
+這條脊柱的 TypeScript 版本是 [Hono 筆記](/notes/_backend-apis-hono-sst)。票務規模的 Fargate 是 [event-driven 票務筆記](/notes/building-an-event-driven-ticketing-backend)。
+
+---
+
+## Recap Q&A
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="fastapi-arch">
+    <AccordionTrigger>1. 預設架構是什麼，什麼時候選 Lambda，什麼時候選 Fargate？</AccordionTrigger>
+    <AccordionContent>
+
+      - 預設形態：一個 **FastAPI Lambda** 放在 **API Gateway HTTP API** 後面，使用內建 **JWT authorizer**。被拒絕的 tokens 永遠不會 invoke function。
+      - 同一個 app 在 Fargate 上用 `uvicorn` 跑。唯一的 AWS-specific module 是 `app/lambda_handler.py`（`Mangum(app)`）。Business logic 不要 import Mangum。
+      - 選 **Lambda**：流量尖峰或閒置、handlers 短、authorizer 先拒絕。
+      - 選 **Fargate**：穩定流量、長請求、streaming、workers，以及真正的 connection pool。
+      - 在 Lambda 上，identity 是 infrastructure 邊界。在 Fargate 上，它在 request 打到 task 之後於 process 內執行。兩邊都仍需要 edge controls。兩邊都經 RDS Proxy 到達 Postgres。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="fastapi-pydantic">
+    <AccordionTrigger>2. 一份 Pydantic model 驅動什麼，為什麼那就是 contract？</AccordionTrigger>
+    <AccordionContent>
+
+      - Contract 是一條 route 接受什麼、回傳什麼，以及 errors 長什麼樣。一份 Pydantic model 同時驅動 **validation**、**OpenAPI** 與 JSON body。
+      - `response_model=UserRead` 是 HTTP 邊界。在 service 裡把 ORM → Pydantic。沒有 Pydantic 的 function annotation 只是註釋。
+      - 共享的 `ErrorBody` 讓 `400` / `404` / `409` 保持一致。即使 FastAPI 在 Lambda 路徑上不發出 gateway `401` / `403`，也要寫進文件。
+      - `/openapi.json` 是可攜式的 artifact。`/docs` 是 presentation —— production 裡做 stage-gate。
+      - Production 預設是一個 app object，讓 middleware、errors、OpenAPI 與 DB setup 留在一處。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="fastapi-proxy">
+    <AccordionTrigger>3. SQLAlchemy 在 Lambda 上該怎麼放，migrations 何時跑？</AccordionTrigger>
+    <AccordionContent>
+
+      - PostgreSQL 是 durable authority。在 concurrency 下，優先用 **database constraints**，而不是 check-then-insert。
+      - 把 engine 建立在 handler **之外**。Lambda 上用 `NullPool` 與 `statement_cache_size=0`，避免 RDS Proxy 把 session pin 到每個 warm environment。Fargate 上用小的 `QueuePool`。
+      - 限制 reserved concurrency。Proxy 是 multiplexor，不是每次 invoke 開五條 connections 的許可證。
+      - Migrations 是 **deploy step**，絕不是 request path 的一部分。先在可丟棄的 DB 上 `alembic upgrade head`，再在新 image 接收流量之前 apply。
+      - Secrets 來自 **Secrets Manager**，不是 committed 的 env file。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="fastapi-jwt">
+    <AccordionTrigger>4. OIDC access token 在哪裡檢查，什麼應離開 authorizer？</AccordionTrigger>
+    <AccordionContent>
+
+      - 這個 API 是 **resource server**。Terraform 接收 `oidc_issuer` 與 `oidc_audience`。這篇筆記沒有 Cognito resource。
+      - 在 Lambda 上，HTTP API **JWT authorizer** 在 Mangum 跑之前驗證 `iss`、`aud` 與 JWKS signature。在 Fargate 上，`require_user` 用 `PyJWKClient` 做同樣的事。
+      - 讓 `/api/health` 與 `OPTIONS` **離開** authorizer。Identity 是 `sub`，絕不是 `X-User-Id`。
+      - Authorization（roles、org、RLS）留在 app 裡。ID token 不是 API credential。
+      - **Failure:** 帶 credentials 的 wildcard CORS origin，或跳過 authorizer、為每一枚無效 bearer token 付錢去 invoke。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="fastapi-terraform">
+    <AccordionTrigger>5. Terraform 如何接上兩種 runtime，什麼不在範圍內？</AccordionTrigger>
+    <AccordionContent>
+
+      - 一份 container image。Lambda 經 `awslambdaric` 把 `command` 改成 `app.lambda_handler.handler`。Fargate 保留 Dockerfile 的 `CMD`（`uvicorn`）。
+      - HTTP API 的 `$default` 走 JWT authorizer。ECS service 坐在帶 WAFv2 的 ALB 後面。RDS + RDS Proxy 共享。
+      - 這是精簡 example：沒有 MSK、沒有 Aurora Global、沒有 purchase cells。票務規模是另一篇。本站自己的 stacks 仍在 SST。
+      - 對 Lambda `Errors` 與 ALB `5xx` 告警。Durable state 是 Postgres。Compute 是 image tag。
+      - 在 restore drill 符合你寫下的 RPO/RTO 之前，不要說它 production-ready。
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>
