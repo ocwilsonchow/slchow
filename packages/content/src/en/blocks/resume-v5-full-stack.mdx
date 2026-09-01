@@ -36,10 +36,10 @@ Durable agent that empowers internal tools and workflows.
 
 - Built agent runs durable streams so clients could disconnect, reconnect, and resume without losing progress.
 - Built **workflows**, **memory systems**, schedules, tools, pause/resume, retries, sandboxing, and skills in **Mastra**; **Langfuse** for observability.
-- **RAG** (**llamaIndex** parsing and extraction, **Pinecone** query/reranking); **SQL agent** for experimental data analysis.
+- **RAG**: **structure-aware** parsing and chunking, **metadata creation**, **retrieval funneling** with **Pinecone hybrid search** (dense and sparse vectors, BM25) and reranking; **SQL agent** for experimental data analysis.
 - Enforced document-level permissions with **ABAC** based on document ownership and user roles and access levels.
 - Ran on **Hono**, **Better Auth**, **Postgres** with **Drizzle** ORM; **S3** for file storage; deployed to AWS ECS Fargate using **SST** as IaC.
-- Built a custom **@mentions-style** input component for attaching workspace files to messages.
+- Built a custom **@mentions-style** input component for attaching workspace files to messages (published on npm as `@ocwilsonchow/editor`).
 
 ---
 
