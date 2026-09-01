@@ -1,0 +1,233 @@
+---
+title: Docling
+description: 給 RAG 用的 structure-aware parsing — DocumentConverter、HybridChunker、Pydantic extraction、MCP，以及它跟 Reducto 怎麼並排
+date: 2026-09-01
+category: ai
+---
+
+多數 RAG 失敗發生在 model 之前。把 PDF 丟進 naive extractor，tables 被攤成一鍋字、headings 沒了、reading order 亂了。Model 再從垃圾裡自信地作答。
+
+這份 note 跟 IBM 的 [Docling walkthrough](https://www.youtube.com/watch?v=zSA7ylHP6AY)。寫入 vectors 的 ingest workflow 是 [如何搭建一套 RAG 系統](/notes/how-to-build-a-rag-system)——今天用 Reducto Parse。這份 note 是 converter、chunker、與 extractor。Agents 與 retrieval debug 留在 [生產級 Agent 架構](/notes/production-agent-architecture)。Pydantic schemas 跟 [在 AWS 上打造 Production FastAPI：Lambda 或 ECS](/notes/production-fastapi-on-aws) 是同一套本能。
+
+Docling 是 MIT，屬於 [LF AI & Data](https://lfaidata.foundation/) 專案。它跑在你面前這台機器上。
+
+<br />
+
+---
+
+## 1. 失敗的是 parsing，不是 model
+
+RAG 或 agent 難的不是 loop。難的是整理 loop 被允許看見的知識。Enterprise data 進來時是 PDFs、Word files、slide decks、spreadsheets、scanned images、與 audio。那些都不是 chunk。
+
+典型 OCR 和 `pdftotext` 回一堵字牆。Hierarchy 沒了。Table 變成 paragraph。Caption 跟 figure 拆開。Fixed-size splitters 再按 token budget 切那鍋湯，於是 heading 落在一個 vector，它介紹的 paragraph 落在另一個。
+
+<br />
+
+```text
+naive extract
+  → wall of text
+  → token splitter
+  → vectors that no longer know they were a table
+
+Docling
+  → DoclingDocument (headings, tables, figures, reading order, bbox)
+  → HybridChunker
+  → vectors that still know their section
+```
+
+<br />
+
+- Garbage in，自信的錯答案 out。Retrieval 救不回 parser 丟掉的 structure。
+- Layout-aware parse 是 deterministic ingest step，不是 model decision。跟 RAG note 裡的 Reducto 同一條規則。
+- 輸出是層級化的 **DoclingDocument**：element types、headings、per-element metadata。Markdown 與 JSON 是那棵樹的 exports，不是 source of truth。
+
+**Failure：** 把一份 10-K 的 raw `pdftotext` 拿去 embed，table cell 變成三句不相干的句子時去怪 reranker。
+
+<br />
+
+---
+
+## 2. DocumentConverter 與 DoclingDocument
+
+一個 API。PDF、DOCX、PPTX、XLSX、HTML、images、audio。Layout analysis、table structure、formulas、reading order、掃描件 OCR。結果是 `DoclingDocument`。下游需要 Markdown 或 JSON 時再 export。還需要 structure 時，留住 document object。
+
+<br />
+
+```python title="convert.py"
+from docling.document_converter import DocumentConverter
+
+converter = DocumentConverter()
+doc = converter.convert("report.pdf").document
+
+print(doc.export_to_markdown())
+```
+
+<br />
+
+- `convert` 吃 local path 或 URL。Converter 依 format 選 backend。
+- Hierarchy、layout、reading order、tables、formulas、pictures、與 provenance 在 conversion 之後還在。頁面本來的意思，parse 完仍可還原。
+- 把 `DoclingDocument` JSON 留在 file 旁邊。換 embedding models 時 re-embed 而不 re-parse。跟 RAG note 裡 Reducto parse JSON 同一個 cached-intermediate 合約。
+- Granite-Docling 是可選的 vision pass，一頁一次讀完。預設 conversion 已經做 layout。掃描件或複雜頁面打贏 classical pipeline 時，再動 VLM。
+
+**Failure：** convert 成 Markdown 就把 `DoclingDocument` 丟掉。你付了 structure 的錢，只留下攤平的字串。
+
+<br />
+
+---
+
+## 3. HybridChunker
+
+Naive chunking 是字元數。**HybridChunker** 先按 document structure 切——sections、tables、captions——再按 token limit 收斂，讓每個 chunk 塞進 embedding model。Parent headings 跟著 chunk 走。Table cell 不是孤兒。
+
+Embed 的是 contextualized string，不是 raw `chunk.text`。`contextualize` 會把讀者在頁面上會看到的 headings 當 prefix。
+
+<br />
+
+```python title="chunk.py"
+from docling.document_converter import DocumentConverter
+from docling.chunking import HybridChunker
+
+doc = DocumentConverter().convert("report.pdf").document
+chunker = HybridChunker()
+
+for chunk in chunker.chunk(doc):
+    text = chunker.contextualize(chunk)
+    # embed(text)
+    # metadata: page / bbox from chunk.meta.doc_items
+```
+
+<br />
+
+- 先按 structure 切，再按 tokens。不要從 sliding window 開始。
+- `merge_peers`（預設開）會把共用同一組 headings 的 undersized siblings 黏起來。除非你要一個 element 一個 chunk，否則別關。
+- 超過 token budget 的 tables 會逐行切，並重複 header。那就是 structure-aware chunker 存在的理由。
+- **不要**用 Docling parse 完，再拿 export 去砸 token splitter。跟 RAG note 同一條規則：不要對 Reducto 輸出再跑 `MDocument.chunk()`。Chunker 才是產品。Markdown dump 是 adapter。
+
+**Failure：** `export_to_markdown()` 丟進 LangChain 的 recursive splitter。你買了 HybridChunker，然後把它扔掉。
+
+<br />
+
+---
+
+## 4. Multimodal RAG 與 provenance
+
+Images 與 tables 留在樹上。可以選擇替 figure 加文字描述，讓它跟 paragraphs 一起被 retrieve。除非以後要靠像素搜「這張圖是什麼」，否則不需要第二個 vision index 來答「figure 3 在講什麼」。
+
+每個 element 帶 provenance：page number 與 bounding box。Retrieval 可以把 span overlay 回 source page、連回去、讓答案可被審查。沒有 bbox 的 citations 是在賭。
+
+<br />
+
+- Figures 留在 parse 裡。若要進 dense index，就 caption 它們。
+- 把 `page` 與 `bbox` map 進 vector metadata，做法跟 RAG note map Reducto `blocks[]` 一樣。Read path 已經回 sources。填進去。
+- Overlay 是產品功能，不是 prompt instruction。Chunk 沒有 bbox，你就 highlight 不了。
+
+**Failure：** 從從沒看過 page 的 splitter 回「page 12」。那個數字是編的。Provenance 必須來自 parser。
+
+<br />
+
+---
+
+## 5. Schema extraction
+
+Parse 建 corpus。Extract 填表。它們是不同產品，有不同 callers。
+
+Invoice 上的典型 OCR 只回 text。**DocumentExtractor** 吃一個 Pydantic model（或 dict / JSON string），回 validated fields：bill number、total、sender。Type safety 從 PDF 開始，不是從第一個希望字串是 float 的 API handler 開始。
+
+<br />
+
+```python title="extract.py"
+from pydantic import BaseModel, Field
+
+from docling.datamodel.base_models import InputFormat
+from docling.document_extractor import DocumentExtractor
+
+
+class Invoice(BaseModel):
+    bill_no: str = Field(examples=["A123", "5414"])
+    total: float = Field(examples=[20])
+
+
+extractor = DocumentExtractor(allowed_formats=[InputFormat.IMAGE, InputFormat.PDF])
+result = extractor.extract(source="invoice.pdf", template=Invoice)
+print(result.pages)
+```
+
+<br />
+
+- 這是 RAG note 裡 Reducto Extract 的工作：`invoice.total`、`contract.effectiveDate`。較晚的 workflow。不是寫入 vectors 的 ingest DAG。
+- Nested models 可用。`Invoice` 裡的 `Contact` 仍是一份 template。
+- 若 API 需要 typed object，對 extracted dict 跑 `model_validate`。Schema 是合約。PDF 是 input。
+
+**Failure：** 把抽出來的 invoices 塞進跟 handbook chunks 同一個 Pinecone namespace。Schema fill 不是 retrieval。
+
+<br />
+
+---
+
+## 6. MCP server
+
+Agents 不該在 prompt 裡 parse PDFs。它們該呼叫 tool。Docling 的 MCP server 把 conversion 與 extraction 暴露成針對同一份 document model 的 typed tool calls。
+
+它接 Cursor、Claude Desktop、與 LM Studio。預設是 local。Documents 留在機器上——這也是 healthcare 與 finance 用得上它、而不只是 demo 用得上的原因。
+
+<br />
+
+```json title="mcp.json"
+{
+  "mcpServers": {
+    "docling": {
+      "command": "uvx",
+      "args": ["--from", "docling-mcp", "docling-mcp-server"]
+    }
+  }
+}
+```
+
+<br />
+
+```text
+MCP client (Cursor / Claude / LM Studio)
+  → docling-mcp-server (local)
+  → convert PDF → DoclingDocument / Markdown
+  → extract(template) → validated fields
+```
+
+<br />
+
+- `uvx --from docling-mcp docling-mcp-server` 是 stdio 預設。SSE 與 streamable HTTP 給 Llama Stack 與 containers。
+- 對 client 講自然語言沒問題。Server 仍跑 `convert` 與 `extract`。LLM 不是 parser。
+- 預設 local。Remote（Docling Serve / watsonx）是 deployment choice，不是另一套 API。
+
+**Failure：** 把 40 頁 PDF 貼進 chat，叫 model「做成 Markdown」。那又是字牆，帳單更大。
+
+<br />
+
+---
+
+## 7. 它在這裡怎麼坐
+
+這個站的 RAG write path 是一套 Mastra workflow：load → parse → map → embed → upsert。Parse 是 deterministic step。你插哪一個 parser 是 configuration choice。Isolation、hybrid search、與 rerank 不變。
+
+<br />
+
+| | **Docling** | **Reducto** |
+| --- | --- | --- |
+| Runs | Local process，可選 Serve / watsonx | Hosted Parse API |
+| License | MIT，LF AI & Data | Commercial API |
+| Chunking | `DoclingDocument` 上的 `HybridChunker` | Parse 上的 `retrieval.chunking` |
+| Extract | `DocumentExtractor` + Pydantic | Reducto Extract |
+| Fit | On-prem、regulated、不 upload | 目前 ingest workflow 的 parse step |
+
+<br />
+
+- Parse JSON（Docling 或 Reducto）是 cached intermediate。Re-embed 而不 re-parse。Retry index 而不再為 layout 付錢。
+- LangChain、LlamaIndex、Haystack、LangFlow、與 CrewAI 有 adapters。它們不是這裡的 product path。Product path 仍是 Mastra ingest + 一個對 `organizationId` 當 key 的 Pinecone namespace 做 tool-called retrieval。
+- 換 parse step。不要換 tenancy。Model 仍然不能選搜誰的 index。
+
+**Failure：** 把 framework integrations 當成架構。Parse 一次。Chunk 一次。Stack 其餘已經決定了。
+
+<br />
+
+---
+
+Primary references： [Docling walkthrough](https://www.youtube.com/watch?v=zSA7ylHP6AY)、[docling.ai](https://docling.ai/)、與 [docling-project/docling](https://github.com/docling-project/docling)。MCP setup 在 [docling-mcp](https://github.com/docling-project/docling-mcp)。這個 converter 插進去的 ingest 合約是 [如何搭建一套 RAG 系統](/notes/how-to-build-a-rag-system)。

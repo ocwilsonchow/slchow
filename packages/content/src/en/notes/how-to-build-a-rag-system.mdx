@@ -248,6 +248,7 @@ If a step later becomes independently useful or operationally heavy, extract the
 <br />
 
 - Use Reducto **Parse**, not Extract. Parse is the RAG ingest step: pages, blocks, tables, figures, bounding boxes, citation-ready chunks. Extract is schema fill (`invoice.total`, `contract.effectiveDate`) — a second product, not the corpus builder.
+- Layout-aware parse can also be local **Docling**. The workflow still treats parse as a deterministic step. That converter is [Docling](/notes/docling).
 - Let Reducto chunk. `retrieval.chunking.chunk_mode: "variable"` targets semantic boundaries around 1000 characters. Add `embedding_optimized: true` so tables get an `embed` string for vectors and a `content` string for display. Filter `Header`, `Footer`, and `Page Number` blocks.
 - Do **not** run `MDocument.chunk()` on Reducto output. That pays for structure-aware chunks and then smashes them with a token splitter. `MDocument` is an **adapter** here: `fromMarkdown` (or `fromJSON`) to hold `text` + metadata, not to re-chunk.
 - Images go through the same Parse path (OCR / vision pass). You do not need a separate vision index unless you later search “find this screenshot” by pixels.

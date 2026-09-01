@@ -1,0 +1,233 @@
+---
+title: Docling
+description: Structure-aware parsing for RAG — DocumentConverter, HybridChunker, Pydantic extraction, MCP, and where it sits next to Reducto
+date: 2026-09-01
+category: ai
+---
+
+Most RAG failures start before the model. Dump a PDF through a naive extractor and you get tables flattened into word soup, headings lost, reading order scrambled. The model then answers confidently from garbage.
+
+This note follows IBM's [Docling walkthrough](https://www.youtube.com/watch?v=zSA7ylHP6AY). The ingest workflow that writes vectors is [How to build a RAG system](/notes/how-to-build-a-rag-system) — Reducto Parse today. This note is the converter, the chunker, and the extractor. Agents and retrieval debug stay in [Production agent architecture](/notes/production-agent-architecture). Pydantic schemas are the same instinct as [Production FastAPI on AWS](/notes/production-fastapi-on-aws).
+
+Docling is MIT, an [LF AI & Data](https://lfaidata.foundation/) project. It runs on the machine in front of you.
+
+<br />
+
+---
+
+## 1. The failure is parsing, not the model
+
+The hard part of RAG or an agent is not the loop. It is curating the knowledge the loop is allowed to see. Enterprise data arrives as PDFs, Word files, slide decks, spreadsheets, scanned images, and audio. None of that is a chunk.
+
+Typical OCR and `pdftotext` return a wall of text. Hierarchy is gone. A table becomes a paragraph. A caption detaches from its figure. Fixed-size splitters then cut that soup on a token budget, so a heading lands in one vector and the paragraph it introduced lands in another.
+
+<br />
+
+```text
+naive extract
+  → wall of text
+  → token splitter
+  → vectors that no longer know they were a table
+
+Docling
+  → DoclingDocument (headings, tables, figures, reading order, bbox)
+  → HybridChunker
+  → vectors that still know their section
+```
+
+<br />
+
+- Garbage in, confident wrong answers out. Retrieval cannot recover structure the parser threw away.
+- Layout-aware parse is a deterministic ingest step, not a model decision. Same rule as Reducto in the RAG note.
+- The output is a hierarchical **DoclingDocument**: element types, headings, per-element metadata. Markdown and JSON are exports of that tree, not the source of truth.
+
+**Failure:** embedding the raw `pdftotext` of a 10-K and blaming the reranker when a table cell comes back as three unrelated sentences.
+
+<br />
+
+---
+
+## 2. DocumentConverter and DoclingDocument
+
+One API. PDF, DOCX, PPTX, XLSX, HTML, images, audio. Layout analysis, table structure, formulas, reading order, OCR on scans. The result is a `DoclingDocument`. Export it when a downstream tool needs Markdown or JSON. Keep the document object when you still need structure.
+
+<br />
+
+```python title="convert.py"
+from docling.document_converter import DocumentConverter
+
+converter = DocumentConverter()
+doc = converter.convert("report.pdf").document
+
+print(doc.export_to_markdown())
+```
+
+<br />
+
+- `convert` takes a local path or a URL. The converter picks a backend per format.
+- Hierarchy, layout, reading order, tables, formulas, pictures, and provenance survive conversion. What the page meant is still recoverable after parsing.
+- Persist the `DoclingDocument` JSON next to the file. Re-embed without re-parsing when you change embedding models. Same cached-intermediate contract as Reducto parse JSON in the RAG note.
+- Granite-Docling is an optional vision pass that reads a page in one shot. Default conversion already does layout. Reach for the VLM when scans or complex pages beat the classical pipeline.
+
+**Failure:** converting to Markdown and throwing the `DoclingDocument` away. You paid for structure, then kept only the flattened string.
+
+<br />
+
+---
+
+## 3. HybridChunker
+
+Naive chunking is a character count. **HybridChunker** splits on document structure first — sections, tables, captions — then refines by token limit so each chunk fits the embedding model. Parent headings travel with the chunk. A table cell is not an orphan.
+
+Embed the contextualized string, not the raw `chunk.text`. `contextualize` prefixes the headings the reader would have seen on the page.
+
+<br />
+
+```python title="chunk.py"
+from docling.document_converter import DocumentConverter
+from docling.chunking import HybridChunker
+
+doc = DocumentConverter().convert("report.pdf").document
+chunker = HybridChunker()
+
+for chunk in chunker.chunk(doc):
+    text = chunker.contextualize(chunk)
+    # embed(text)
+    # metadata: page / bbox from chunk.meta.doc_items
+```
+
+<br />
+
+- Split by structure, then by tokens. Do not start with a sliding window.
+- `merge_peers` (default on) glues undersized siblings that share the same headings. Leave it on unless you need one element per chunk.
+- Tables that overflow the token budget split line-by-line with the header repeated. That is the point of a structure-aware chunker.
+- Do **not** parse with Docling and then smash the export with a token splitter. Same rule as the RAG note: do not run `MDocument.chunk()` on Reducto output. The chunker is the product. The Markdown dump is an adapter.
+
+**Failure:** `export_to_markdown()` into LangChain's recursive splitter. You bought HybridChunker and then threw it out.
+
+<br />
+
+---
+
+## 4. Multimodal RAG and provenance
+
+Images and tables stay in the tree. Optionally enrich a figure with a text description so it is retrievable alongside paragraphs. You do not need a second vision index to answer “what does figure 3 show?” unless you later search by pixels.
+
+Every element carries provenance: page number and bounding box. Retrieval can overlay the span on the source page, link back, and make the answer reviewable. Citations without bbox are a leap of faith.
+
+<br />
+
+- Keep figures in the parse. Caption them if you want them in the dense index.
+- Map `page` and `bbox` into vector metadata the same way the RAG note maps Reducto `blocks[]`. The read path already returns sources. Fill them.
+- Overlay is a product feature, not a prompt instruction. If the chunk has no bbox, you cannot highlight it.
+
+**Failure:** returning “page 12” from a splitter that never saw a page. The number is invented. Provenance has to come from the parser.
+
+<br />
+
+---
+
+## 5. Schema extraction
+
+Parse builds a corpus. Extract fills a form. They are different products with different callers.
+
+Typical OCR on an invoice returns text. **DocumentExtractor** takes a Pydantic model (or a dict / JSON string) and returns validated fields: bill number, total, sender. Type safety starts at the PDF, not at the first API handler that hoped the string was a float.
+
+<br />
+
+```python title="extract.py"
+from pydantic import BaseModel, Field
+
+from docling.datamodel.base_models import InputFormat
+from docling.document_extractor import DocumentExtractor
+
+
+class Invoice(BaseModel):
+    bill_no: str = Field(examples=["A123", "5414"])
+    total: float = Field(examples=[20])
+
+
+extractor = DocumentExtractor(allowed_formats=[InputFormat.IMAGE, InputFormat.PDF])
+result = extractor.extract(source="invoice.pdf", template=Invoice)
+print(result.pages)
+```
+
+<br />
+
+- This is Reducto Extract's job in the RAG note: `invoice.total`, `contract.effectiveDate`. A later workflow. Not the ingest DAG that writes vectors.
+- Nested models work. A `Contact` inside an `Invoice` is still one template.
+- Validate with `model_validate` on the extracted dict if you need a typed object for the API. The schema is the contract. The PDF is the input.
+
+**Failure:** stuffing extracted invoices into the same Pinecone namespace as handbook chunks. Schema fill is not retrieval.
+
+<br />
+
+---
+
+## 6. MCP server
+
+Agents should not parse PDFs in the prompt. They should call a tool. Docling's MCP server exposes conversion and extraction as typed tool calls against the same document model.
+
+It plugs into Cursor, Claude Desktop, and LM Studio. Default is local. Documents stay on the machine — the reason this is usable in healthcare and finance, not only in a demo.
+
+<br />
+
+```json title="mcp.json"
+{
+  "mcpServers": {
+    "docling": {
+      "command": "uvx",
+      "args": ["--from", "docling-mcp", "docling-mcp-server"]
+    }
+  }
+}
+```
+
+<br />
+
+```text
+MCP client (Cursor / Claude / LM Studio)
+  → docling-mcp-server (local)
+  → convert PDF → DoclingDocument / Markdown
+  → extract(template) → validated fields
+```
+
+<br />
+
+- `uvx --from docling-mcp docling-mcp-server` is the stdio default. SSE and streamable HTTP exist for Llama Stack and containers.
+- Natural language to the client is fine. The server still runs `convert` and `extract`. The LLM is not the parser.
+- Local by default. Remote (Docling Serve / watsonx) is a deployment choice, not a different API.
+
+**Failure:** pasting a 40-page PDF into the chat and asking the model to “make it Markdown.” That is the wall of text again, with a larger bill.
+
+<br />
+
+---
+
+## 7. Where it sits here
+
+This site's RAG write path is a Mastra workflow: load → parse → map → embed → upsert. Parse is a deterministic step. Which parser you plug in is a configuration choice. Isolation, hybrid search, and rerank do not change.
+
+<br />
+
+| | **Docling** | **Reducto** |
+| --- | --- | --- |
+| Runs | Local process, optional Serve / watsonx | Hosted Parse API |
+| License | MIT, LF AI & Data | Commercial API |
+| Chunking | `HybridChunker` on `DoclingDocument` | `retrieval.chunking` on Parse |
+| Extract | `DocumentExtractor` + Pydantic | Reducto Extract |
+| Fit | On-prem, regulated, no upload | The parse step in the current ingest workflow |
+
+<br />
+
+- Parse JSON (Docling or Reducto) is a cached intermediate. Re-embed without re-parse. Retry index without re-paying for layout.
+- LangChain, LlamaIndex, Haystack, LangFlow, and CrewAI have adapters. They are not the product path here. The product path is still Mastra ingest + a tool-called retriever over a Pinecone namespace keyed by `organizationId`.
+- Swap the parse step. Do not swap tenancy. The model still must not choose whose index to search.
+
+**Failure:** treating framework integrations as the architecture. Parse once. Chunk once. The rest of the stack is already decided.
+
+<br />
+
+---
+
+Primary references: the [Docling walkthrough](https://www.youtube.com/watch?v=zSA7ylHP6AY), [docling.ai](https://docling.ai/), and [docling-project/docling](https://github.com/docling-project/docling). MCP setup lives in [docling-mcp](https://github.com/docling-project/docling-mcp). The ingest contract this converter plugs into is [How to build a RAG system](/notes/how-to-build-a-rag-system).
