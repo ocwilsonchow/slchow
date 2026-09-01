@@ -945,15 +945,15 @@ resource "aws_cloudwatch_metric_alarm" "alb_5xx" {
 
 ---
 
-## 9. Lifecycle、Tests、Trade-offs
+## 9. 用 pytest 做单元测试
 
-Lambda 上的 `POST /users`：API Gateway → JWT authorizer → Mangum → request ID → Pydantic → `require_user` → SQLAlchemy → RDS Proxy → Postgres → `201`。同一套 models 出现在 `/openapi.json`。
+测试写在 Mangum **之下**。`TestClient` 对同一个 `app` object 说 HTTP。它不需要 AWS event、container，或真实 issuer。Stub `require_user`，让缺失的 JWKS key 不成为 unit-test 的问题。Queries 与 migrations 仍需要可丢弃的 Postgres —— 那是另一套 suite。
 
-测试写在 Mangum **之下**。Stub `require_user`。用可丢弃的真实 Postgres 跑 queries 与 migrations。
+命令是 `uv run pytest`。Fixtures 放在 `conftest.py`，让 route tests 与 service tests 共用同一套 overrides。
 
 <br />
 
-```python title="tests/test_users.py"
+```python title="tests/conftest.py"
 import pytest
 from fastapi.testclient import TestClient
 
@@ -973,6 +973,18 @@ def client() -> TestClient:
     app.dependency_overrides.clear()
 
 
+@pytest.fixture
+def anon_client() -> TestClient:
+    with TestClient(app) as test_client:
+        yield test_client
+```
+
+<br />
+
+```python title="tests/test_users.py"
+from fastapi.testclient import TestClient
+
+
 def test_health(client: TestClient) -> None:
     response = client.get("/api/health")
     assert response.status_code == 200
@@ -983,9 +995,48 @@ def test_create_user_rejects_bad_email(client: TestClient) -> None:
     response = client.post("/users", json={"email": "not-an-email", "name": "Ada"})
     assert response.status_code == 400
     assert response.json()["code"] == "VALIDATION_ERROR"
+
+
+def test_create_user_rejects_missing_bearer(anon_client: TestClient) -> None:
+    response = anon_client.post("/users", json={"email": "ada@example.com", "name": "Ada"})
+    assert response.status_code == 403
 ```
 
 <br />
+
+HTTP tests 覆盖 contract。只做 ORM → Pydantic mapping 的 service function，可以不经过 `TestClient` 来断言：
+
+<br />
+
+```python title="tests/test_users_service.py"
+from app.models import User
+from app.services.users import to_read
+
+
+def test_to_read_maps_orm_fields() -> None:
+    row = User(id="u1", email="ada@example.com", name="Ada")
+    assert to_read(row).model_dump() == {
+        "id": "u1",
+        "email": "ada@example.com",
+        "name": "Ada",
+    }
+```
+
+<br />
+
+- `dependency_overrides` 是 seam。Override `require_user`；当 write path 不能碰 Postgres 时，再 override `get_session`。除非你在测 `app/auth.py` 本身，否则不要 patch `jwt.decode`。
+- `HTTPBearer(auto_error=True)` 把缺失的 `Authorization` 变成 **403**，不是 401。断言 dependency 实际发出的 status。
+- `select` / `IntegrityError` / Alembic 留给可丢弃的 Postgres（或 Testcontainers）。那仍是 pytest。它不是 route 的 unit test。
+
+**Failure:** 在每个 test 里拼一个 API Gateway event 再调用 `handler`。那测的是 Mangum，不是 API。
+
+<br />
+
+---
+
+## 10. Lifecycle 与 trade-offs
+
+Lambda 上的 `POST /users`：API Gateway → JWT authorizer → Mangum → request ID → Pydantic → `require_user` → SQLAlchemy → RDS Proxy → Postgres → `201`。同一套 models 出现在 `/openapi.json`。
 
 - 把 deployed tests 留给 authorizer 决策、CORS、secrets，以及 live URL 上的 `/api/health`。
 - 可接受的 trade-offs：container-image 的 **cold start**（比 zip 大）、Proxy 多一跳、CPython 的 GIL 使 CPU-bound 工作不属于这条 request path（[学 Python](/notes/learning-python-as-a-typescript-developer)），以及你必须保护的 Terraform state —— 本站的 app stacks 仍在 [SST](/notes/using-sst-for-aws-infra-and-devops)。每一层都保持可替换。
@@ -1004,6 +1055,7 @@ Deploy     → one image → HTTP API + Function  or  WAF + ALB + Service
 Protect    → WAF, rate limits, least-privilege secrets, docs gated
 Monitor    → requestId logs + runtime metrics + SNS alarms
 Recover    → RPO/RTO → backups → restore drills → new image + DNS
+Tests      → pytest + TestClient below Mangum; stub Depends; Postgres for SQL
 ```
 
 <br />
@@ -1078,6 +1130,19 @@ Recover    → RPO/RTO → backups → restore drills → new image + DNS
       - 这是精简 example：没有 MSK、没有 Aurora Global、没有 purchase cells。票务规模是另一篇。本站自己的 stacks 仍在 SST。
       - 对 Lambda `Errors` 与 ALB `5xx` 告警。Durable state 是 Postgres。Compute 是 image tag。
       - 在 restore drill 符合你写下的 RPO/RTO 之前，不要说它 production-ready。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="fastapi-pytest">
+    <AccordionTrigger>6. 如何用 pytest 对 FastAPI app 做单元测试？</AccordionTrigger>
+    <AccordionContent>
+
+      - 测试写在 Mangum **之下**，用 `TestClient` 打同一个 `app`。命令是 `uv run pytest`。不需要 AWS event、container，或真实 issuer。
+      - 经 `dependency_overrides` stub `require_user`。那是 seam。write path 不能碰 Postgres 时，再 override `get_session`。
+      - 断言 contract：`/api/health` 是 public，坏 body 是 `400` + `VALIDATION_ERROR`，缺失 bearer 是 **403**（`HTTPBearer`）。
+      - ORM → Pydantic 的 mapping 放在 service function，不经 HTTP 也能测。`select`、unique violations 与 Alembic 用可丢弃的 Postgres —— 仍是 pytest，不是 route unit test。
+      - **Failure:** 在每个 test 里拼 API Gateway event 再调用 `handler`。那测的是 Mangum，不是 API。
 
     </AccordionContent>
   </AccordionItem>
