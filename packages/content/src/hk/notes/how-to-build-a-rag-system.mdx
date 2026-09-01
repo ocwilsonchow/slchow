@@ -248,6 +248,7 @@ pinecone-document-ingestion  (one run)
 <br />
 
 - 用 Reducto 的 **Parse**，不是 Extract。Parse 是 RAG ingest 這一步：pages、blocks、tables、figures、bounding boxes、citation-ready chunks。Extract 是 schema fill（`invoice.total`、`contract.effectiveDate`）——那是第二個產品，不是 corpus builder。
+- Layout-aware parse 也可以是本機的 **Docling**。Workflow 仍把 parse 當 deterministic step。那份 converter 是 [Docling](/notes/docling)。
 - 讓 Reducto 來 chunk。`retrieval.chunking.chunk_mode: "variable"` 以 1000 字元左右的 semantic boundaries 為目標。加上 `embedding_optimized: true`，tables 會得到一條給 vectors 用的 `embed` 字串和一條給 display 用的 `content` 字串。過濾 `Header`、`Footer` 與 `Page Number` blocks。
 - **不要**對 Reducto 的輸出再跑 `MDocument.chunk()`。那是先花錢買 structure-aware chunks，再用 token splitter 砸爛。`MDocument` 在這裡是 **adapter**：用 `fromMarkdown`（或 `fromJSON`）裝 `text` + metadata，而不是 re-chunk。
 - Images 走同一條 Parse 路徑（OCR / vision pass）。除非以後要靠像素搜「找到這張截圖」，否則不需要單獨的 vision index。
