@@ -945,15 +945,15 @@ resource "aws_cloudwatch_metric_alarm" "alb_5xx" {
 
 ---
 
-## 9. Lifecycle, Tests, Trade-offs
+## 9. Unit tests with pytest
 
-For `POST /users` on Lambda: API Gateway → JWT authorizer → Mangum → request ID → Pydantic → `require_user` → SQLAlchemy → RDS Proxy → Postgres → `201`. The same models appear in `/openapi.json`.
+Test **below** Mangum. `TestClient` speaks HTTP to the same `app` object. It does not need an AWS event, a container, or a real issuer. Stub `require_user` so a missing JWKS key is not a unit-test concern. Queries and migrations still want a disposable Postgres — that is a different suite.
 
-Test **below** Mangum. Stub `require_user`. Use a real disposable Postgres for queries and migrations.
+`uv run pytest` is the command. Keep fixtures in `conftest.py` so route tests and service tests share the same overrides.
 
 <br />
 
-```python title="tests/test_users.py"
+```python title="tests/conftest.py"
 import pytest
 from fastapi.testclient import TestClient
 
@@ -973,6 +973,18 @@ def client() -> TestClient:
     app.dependency_overrides.clear()
 
 
+@pytest.fixture
+def anon_client() -> TestClient:
+    with TestClient(app) as test_client:
+        yield test_client
+```
+
+<br />
+
+```python title="tests/test_users.py"
+from fastapi.testclient import TestClient
+
+
 def test_health(client: TestClient) -> None:
     response = client.get("/api/health")
     assert response.status_code == 200
@@ -983,9 +995,48 @@ def test_create_user_rejects_bad_email(client: TestClient) -> None:
     response = client.post("/users", json={"email": "not-an-email", "name": "Ada"})
     assert response.status_code == 400
     assert response.json()["code"] == "VALIDATION_ERROR"
+
+
+def test_create_user_rejects_missing_bearer(anon_client: TestClient) -> None:
+    response = anon_client.post("/users", json={"email": "ada@example.com", "name": "Ada"})
+    assert response.status_code == 403
 ```
 
 <br />
+
+The HTTP tests cover the contract. A service function that only maps ORM → Pydantic can be asserted without `TestClient`:
+
+<br />
+
+```python title="tests/test_users_service.py"
+from app.models import User
+from app.services.users import to_read
+
+
+def test_to_read_maps_orm_fields() -> None:
+    row = User(id="u1", email="ada@example.com", name="Ada")
+    assert to_read(row).model_dump() == {
+        "id": "u1",
+        "email": "ada@example.com",
+        "name": "Ada",
+    }
+```
+
+<br />
+
+- `dependency_overrides` is the seam. Override `require_user` and, when you need a write path without Postgres, `get_session`. Do not patch `jwt.decode` unless you are testing `app/auth.py` itself.
+- `HTTPBearer(auto_error=True)` turns a missing `Authorization` into **403**, not 401. Assert the status the dependency actually emits.
+- Reserve a disposable Postgres (or Testcontainers) for `select` / `IntegrityError` / Alembic. That is still pytest. It is not a unit test of the route.
+
+**Failure:** constructing an API Gateway event and calling `handler` in every test. That tests Mangum, not the API.
+
+<br />
+
+---
+
+## 10. Lifecycle and trade-offs
+
+For `POST /users` on Lambda: API Gateway → JWT authorizer → Mangum → request ID → Pydantic → `require_user` → SQLAlchemy → RDS Proxy → Postgres → `201`. The same models appear in `/openapi.json`.
 
 - Reserve deployed tests for authorizer decisions, CORS, secrets, and `/api/health` on the live URL.
 - Accepted trade-offs: container-image **cold start** (bigger than a zip), the Proxy extra hop, CPython’s GIL so CPU-bound work does not belong on this request path ([Learning Python](/notes/learning-python-as-a-typescript-developer)), and Terraform state you must protect — this site’s app stacks stay on [SST](/notes/using-sst-for-aws-infra-and-devops). Each layer stays replaceable.
@@ -1004,6 +1055,7 @@ Deploy     → one image → HTTP API + Function  or  WAF + ALB + Service
 Protect    → WAF, rate limits, least-privilege secrets, docs gated
 Monitor    → requestId logs + runtime metrics + SNS alarms
 Recover    → RPO/RTO → backups → restore drills → new image + DNS
+Tests      → pytest + TestClient below Mangum; stub Depends; Postgres for SQL
 ```
 
 <br />
@@ -1078,6 +1130,19 @@ The TypeScript version of this spine is the [Hono note](/notes/_backend-apis-hon
       - This is a slim example: no MSK, no Aurora Global, no purchase cells. Ticketing scale is a different note. This site’s own stacks stay on SST.
       - Alarm on Lambda `Errors` and ALB `5xx`. Durable state is Postgres. Compute is an image tag.
       - Do not call it production-ready until a restore drill matches the RPO/RTO you wrote down.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="fastapi-pytest">
+    <AccordionTrigger>6. How do you unit-test the FastAPI app with pytest?</AccordionTrigger>
+    <AccordionContent>
+
+      - Test **below** Mangum with `TestClient` against the same `app`. `uv run pytest` is the command. No AWS event, no container, no real issuer.
+      - Stub `require_user` through `dependency_overrides`. That is the seam. Override `get_session` when a write path must not touch Postgres.
+      - Assert the contract: `/api/health` is public, a bad body is `400` + `VALIDATION_ERROR`, a missing bearer is **403** (`HTTPBearer`).
+      - Map ORM → Pydantic in a service function and test that without HTTP. Use a disposable Postgres for `select`, unique violations, and Alembic — still pytest, not a route unit test.
+      - **Failure:** building an API Gateway event and calling `handler` in every test. That tests Mangum, not the API.
 
     </AccordionContent>
   </AccordionItem>
