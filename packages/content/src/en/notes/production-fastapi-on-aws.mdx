@@ -1,0 +1,1084 @@
+---
+title: "Production FastAPI on AWS: Lambda or ECS"
+description: One FastAPI app on Lambda or Fargate — Pydantic, OIDC JWT, SQLAlchemy, Alembic, OpenAPI, Terraform, RDS Proxy, WAF, and alarms
+date: 2026-09-01
+category: backend
+---
+
+A backend API needs a short path from request to database, with validation, documentation, and infrastructure from the same code. The stack is **FastAPI**, **Pydantic v2**, **SQLAlchemy 2**, **Alembic**, **PostgreSQL**, and **Terraform** on **AWS Lambda** or **ECS Fargate**. Identity is a portable **OIDC** access token, verified at the edge on Lambda and in-process on Fargate.
+
+Python as a language — duck typing, the GIL, `Depends` versus Hono — is [Learning Python as a TypeScript Developer](/notes/learning-python-as-a-typescript-developer). The TypeScript sibling on SST is [Backend APIs with Hono, Drizzle, Zod OpenAPI, and SST](/notes/_backend-apis-hono-sst). This site’s own deploy loop stays SST; the Terraform here is a standalone architecture example, the same disclaimer as [Building an Event-Driven Ticketing Backend](/notes/building-an-event-driven-ticketing-backend). Tokens are [OAuth 2.0 and OIDC Explained](/notes/oauth-2-and-oidc-explained). This note is the typed FastAPI API through production protect, monitor, and recover.
+
+<br />
+
+---
+
+## 1. Architecture
+
+Default shape: one **FastAPI Lambda** behind **API Gateway HTTP API**, with the built-in **JWT authorizer**. Rejected tokens never invoke the function. The same app runs on Fargate with `uvicorn`. The only files that know about AWS are the Mangum entry and the Terraform.
+
+<br />
+
+| Choose **Lambda** when… | Choose **ECS Fargate** when… |
+| --- | --- |
+| Spiky or idle traffic; short handlers | Steady traffic, long requests, streaming, workers |
+| JWT authorizer rejects before the API runs | Long-lived process and a real connection pool |
+| Smallest ops surface for a thin BFF | Team already ships containers and needs warm capacity |
+
+<br />
+
+```text
+Client
+  → Lambda:  API Gateway → throttle → JWT authorizer → Mangum → FastAPI
+  → Fargate: WAF → ALB → task → uvicorn → FastAPI Depends
+  → Pydantic → SQLAlchemy → RDS Proxy → PostgreSQL
+  → OpenAPI JSON → /docs
+  → logs / metrics / alarms
+```
+
+<br />
+
+- Keep the entrypoint thin. Routes, models, and services do not import Mangum or boto3.
+- On Lambda, identity is an infrastructure boundary. On Fargate, it runs in-process after the request hits the task.
+- Both still need edge controls. Both talk to Postgres through **RDS Proxy** so a burst of Lambdas does not open a connection per invoke on the instance.
+
+<br />
+
+---
+
+## 2. FastAPI
+
+One app object. Two process adapters. **uv** owns the lockfile.
+
+<br />
+
+```toml title="pyproject.toml"
+[project]
+name = "api"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.115",
+  "pydantic[email]>=2.10",
+  "sqlalchemy[asyncio]>=2.0",
+  "asyncpg>=0.30",
+  "mangum>=0.19",
+  "pyjwt[crypto]>=2.10",
+  "uvicorn[standard]>=0.34",
+  "awslambdaric>=3.0",
+]
+
+[dependency-groups]
+dev = ["pytest>=8.3", "httpx>=0.28", "alembic>=1.14"]
+```
+
+<br />
+
+```python title="app/main.py"
+from uuid import uuid4
+
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, Response
+
+from app.errors import ApiError, error_response
+from app.routers import users
+from app.schemas import ErrorBody
+
+app = FastAPI(title="Example API", version="1.0.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["https://app.example.com"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "X-Request-Id"],
+    allow_credentials=True,
+)
+
+
+@app.middleware("http")
+async def request_id(request: Request, call_next):
+    rid = request.headers.get("x-request-id") or str(uuid4())
+    request.state.request_id = rid
+    response = await call_next(request)
+    response.headers["x-request-id"] = rid
+    return response
+
+
+@app.get("/api/health", include_in_schema=False)
+async def health() -> dict[str, str]:
+    return {"status": "ok"}
+
+
+@app.options("/{path:path}")
+async def options(path: str) -> Response:
+    return Response(status_code=204)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
+    body = ErrorBody(
+        code="VALIDATION_ERROR",
+        message="Request validation failed.",
+        request_id=getattr(request.state, "request_id", None),
+        issues=[
+            {"path": ".".join(str(p) for p in err["loc"]) or "request", "message": err["msg"]}
+            for err in exc.errors()
+        ],
+    )
+    return JSONResponse(status_code=400, content=body.model_dump())
+
+
+@app.exception_handler(ApiError)
+async def api_error(request: Request, exc: ApiError) -> JSONResponse:
+    return error_response(request, exc.status_code, exc.code, str(exc.detail))
+
+
+app.include_router(users.router)
+```
+
+<br />
+
+Lambda is one module. Fargate is the image `CMD`.
+
+<br />
+
+```python title="app/lambda_handler.py"
+from mangum import Mangum
+
+from app.main import app
+
+handler = Mangum(app, lifespan="off")
+```
+
+<br />
+
+```dockerfile title="Dockerfile"
+FROM python:3.12-slim-bookworm
+
+COPY --from=ghcr.io/astral-sh/uv:0.7.12 /uv /bin/uv
+
+WORKDIR /app
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev
+COPY app ./app
+
+ENV PATH="/app/.venv/bin:$PATH"
+EXPOSE 8000
+
+# Fargate default. Lambda overrides command to the Mangum handler.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+```
+
+<br />
+
+- `OPTIONS` and `/api/health` stay public. Everything else goes through auth at the right boundary.
+- `lifespan="off"` on Mangum: the SQLAlchemy engine is created at import, the same instinct as creating a Drizzle client outside the Hono handler. Lambda does not run a graceful shutdown you can count on.
+- AWS Lambda Web Adapter can keep `uvicorn` as the process on Lambda too. This note uses **Mangum** so the adapter is an explicit line, like Hono `handle(app)`.
+
+**Failure:** importing `Mangum` from `app/routers/users.py`. The route should run under pytest without an AWS event.
+
+<br />
+
+---
+
+## 3. Contract with Pydantic
+
+The contract is what a route accepts, returns, and how errors look. One **Pydantic** model drives **validation**, **OpenAPI**, and the response body. A type annotation on a plain function is a comment — [Learning Python as a TypeScript Developer](/notes/learning-python-as-a-typescript-developer). REST shape is [API Design in System Design](/notes/api-design-in-system-design).
+
+<br />
+
+```python title="app/schemas.py"
+from pydantic import BaseModel, EmailStr, Field
+
+
+class UserRead(BaseModel):
+    id: str
+    email: EmailStr
+    name: str
+
+
+class UserCreate(BaseModel):
+    email: EmailStr
+    name: str = Field(min_length=1, max_length=100)
+
+
+class ErrorIssue(BaseModel):
+    path: str
+    message: str
+
+
+class ErrorBody(BaseModel):
+    code: str
+    message: str
+    request_id: str | None = None
+    issues: list[ErrorIssue] | None = None
+```
+
+<br />
+
+```python title="app/errors.py"
+from fastapi import HTTPException, Request
+from fastapi.responses import JSONResponse
+
+from app.schemas import ErrorBody
+
+
+class ApiError(HTTPException):
+    def __init__(self, status_code: int, code: str, message: str) -> None:
+        super().__init__(status_code=status_code, detail=message)
+        self.code = code
+
+
+def error_response(request: Request, status_code: int, code: str, message: str) -> JSONResponse:
+    body = ErrorBody(
+        code=code,
+        message=message,
+        request_id=getattr(request.state, "request_id", None),
+    )
+    return JSONResponse(status_code=status_code, content=body.model_dump())
+```
+
+<br />
+
+```python title="app/routers/users.py"
+from fastapi import APIRouter, Depends
+
+from app.auth import Principal, require_user
+from app.db import SessionDep
+from app.schemas import ErrorBody, UserCreate, UserRead
+from app.services import users as users_service
+
+router = APIRouter(prefix="/users", tags=["users"])
+
+
+@router.get("/{user_id}", response_model=UserRead, responses={404: {"model": ErrorBody}})
+async def get_user(
+    user_id: str,
+    session: SessionDep,
+    _: Principal = Depends(require_user),
+) -> UserRead:
+    return await users_service.require(session, user_id)
+
+
+@router.post("", response_model=UserRead, status_code=201, responses={409: {"model": ErrorBody}})
+async def create_user(
+    body: UserCreate,
+    session: SessionDep,
+    _: Principal = Depends(require_user),
+) -> UserRead:
+    return await users_service.create(session, body)
+```
+
+<br />
+
+- `response_model=UserRead` is the boundary. The handler returns a Pydantic model (or something that validates into one), not a SQLAlchemy instance.
+- Shared `ErrorBody` keeps `400` / `404` / `409` consistent. API Gateway JWT failures use a smaller gateway shape for `401` / `403` — document both.
+- Attach a **request ID** early and include it in logs and error responses.
+- FastAPI already emits `/openapi.json` from these annotations. You do not hand-write a second contract.
+
+**Failure:** returning the ORM row because “FastAPI will serialize it.” That is a detached instance, a lazy load, or a 500.
+
+<br />
+
+---
+
+## 4. SQLAlchemy and PostgreSQL
+
+PostgreSQL is the durable authority. SQLAlchemy 2 keeps schema and queries typed without hiding SQL. The statement model is [Core SQL Concepts](/notes/core-sql-concepts). Prefer **database constraints** (unique email, `timestamptz`) over check-then-insert under concurrency.
+
+Create the engine **once** at import. On Lambda that is per warm environment, not a fleet-wide pool. Point every runtime at **RDS Proxy**. Lambda uses `NullPool` so the process does not hold a client across frozen environments. Fargate uses a small pool because the task is a long-lived process.
+
+<br />
+
+```python title="app/db.py"
+import os
+from collections.abc import AsyncIterator
+from typing import Annotated
+
+from fastapi import Depends
+from sqlalchemy.ext.asyncio import (
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
+from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.pool import NullPool
+
+RUNTIME = os.environ.get("RUNTIME", "fargate")
+DATABASE_URL = os.environ["DATABASE_URL"]
+CONNECT_ARGS = {"ssl": True, "statement_cache_size": 0}
+
+engine = (
+    create_async_engine(DATABASE_URL, poolclass=NullPool, connect_args=CONNECT_ARGS)
+    if RUNTIME == "lambda"
+    else create_async_engine(
+        DATABASE_URL,
+        pool_size=5,
+        max_overflow=5,
+        pool_timeout=10,
+        connect_args=CONNECT_ARGS,
+    )
+)
+
+SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+async def get_session() -> AsyncIterator[AsyncSession]:
+    async with SessionLocal() as session:
+        yield session
+
+
+SessionDep = Annotated[AsyncSession, Depends(get_session)]
+```
+
+<br />
+
+```python title="app/models.py"
+from sqlalchemy import String, Text
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.db import Base
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    email: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+```
+
+<br />
+
+```python title="app/services/users.py"
+from uuid import uuid4
+
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.errors import ApiError
+from app.models import User
+from app.schemas import UserCreate, UserRead
+
+
+def to_read(row: User) -> UserRead:
+    return UserRead(id=row.id, email=row.email, name=row.name)
+
+
+async def require(session: AsyncSession, user_id: str) -> UserRead:
+    row = await session.scalar(select(User).where(User.id == user_id))
+    if row is None:
+        raise ApiError(404, "USER_NOT_FOUND", "User not found.")
+    return to_read(row)
+
+
+async def create(session: AsyncSession, body: UserCreate) -> UserRead:
+    row = User(id=str(uuid4()), email=body.email, name=body.name)
+    session.add(row)
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise ApiError(409, "EMAIL_TAKEN", "Email already exists.") from exc
+    await session.refresh(row)
+    return to_read(row)
+```
+
+<br />
+
+- `statement_cache_size=0` turns off asyncpg’s prepared-statement cache. RDS Proxy **pins** a client to a session when prepared statements stay open; pinning plus Lambda concurrency is how you exhaust the instance.
+- Reuse per warm environment is not global pooling. Cap reserved concurrency on the function. The Proxy is the multiplexor.
+- Migrations are a **deploy step**, never part of the request path. `uv run alembic upgrade head` against the Proxy or a migrator task, review the SQL, apply before code depends on the new shape.
+- Use expand-and-contract when a change cannot ship atomically.
+- Secrets come from **Secrets Manager**, not a committed `.env`. The Lambda and the task read `DATABASE_URL` at boot.
+
+**Failure:** a default `QueuePool` of 5 on Lambda. One hundred concurrent cold starts is five hundred connections through a Proxy that then pins. `NullPool` plus Proxy is the Lambda default.
+
+<br />
+
+---
+
+## 5. OIDC JWT
+
+This API is a **resource server**. It does not run a login form. An issuer you do not own (Auth0, Okta, Cognito, or any OIDC provider) signs an access token. The issuer URL and audience are Terraform variables. Roles, grants, and the ID token versus access token distinction are [OAuth 2.0 and OIDC Explained](/notes/oauth-2-and-oidc-explained).
+
+On Lambda the **HTTP API JWT authorizer** checks `iss`, `aud`, expiry, and the JWKS signature **before** Mangum runs. Missing or junk `Authorization` never invokes the function. On Fargate the same check is a FastAPI `Depends` after the request reaches the task.
+
+<br />
+
+```python title="app/auth.py"
+import os
+from dataclasses import dataclass
+from typing import Annotated
+
+import jwt
+from fastapi import Depends, HTTPException
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from jwt import PyJWKClient
+
+OIDC_ISSUER = os.environ["OIDC_ISSUER"]
+OIDC_AUDIENCE = os.environ["OIDC_AUDIENCE"]
+_jwks = PyJWKClient(f"{OIDC_ISSUER.rstrip('/')}/.well-known/jwks.json")
+_bearer = HTTPBearer(auto_error=True)
+
+
+@dataclass(frozen=True)
+class Principal:
+    sub: str
+    raw: dict[str, object]
+
+
+def decode_access_token(token: str) -> Principal:
+    signing_key = _jwks.get_signing_key_from_jwt(token)
+    claims = jwt.decode(
+        token,
+        signing_key.key,
+        algorithms=["RS256"],
+        audience=OIDC_AUDIENCE,
+        issuer=OIDC_ISSUER,
+    )
+    sub = claims.get("sub")
+    if not isinstance(sub, str) or not sub:
+        raise HTTPException(status_code=401, detail="Token is missing sub.")
+    return Principal(sub=sub, raw=claims)
+
+
+def require_user(
+    creds: Annotated[HTTPAuthorizationCredentials, Depends(_bearer)],
+) -> Principal:
+    try:
+        return decode_access_token(creds.credentials)
+    except jwt.PyJWTError as exc:
+        raise HTTPException(status_code=401, detail="Invalid access token.") from exc
+```
+
+<br />
+
+- Identity is `Principal.sub`. Never a client `X-User-Id`.
+- Authentication answers *who*. Authorization (roles, org membership, RLS) stays in the app — see the [multi-tenant note](/notes/multi-tenant-backend-drizzle-hono-better-auth).
+- `PyJWKClient` caches keys. Do not fetch JWKS on every request by hand.
+- On Lambda you may read already-verified claims from `event.requestContext.authorizer.jwt.claims` and skip a second JWKS call. Keeping `require_user` as the only path is simpler to test. The authorizer still pays for the reject-before-invoke property.
+- Keep `/api/health` and `OPTIONS` **off** the authorizer.
+
+**Failure:** trusting a client `X-User-Id` header, or a wildcard CORS origin with credentials. **Failure:** treating the ID token as an API credential.
+
+<br />
+
+---
+
+## 6. OpenAPI
+
+The OpenAPI JSON is the portable artifact (CI, typed clients, breaking-change checks). FastAPI’s `/docs` is the presentation layer.
+
+- FastAPI serves `/openapi.json` and `/docs` from the same `app` object. You already named `response_model` and `responses`.
+- Register the bearer scheme once so the generated doc matches the JWT authorizer:
+
+<br />
+
+```python
+from fastapi.openapi.utils import get_openapi
+
+def custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+    schema = get_openapi(title=app.title, version=app.version, routes=app.routes)
+    schema["components"]["securitySchemes"] = {
+        "BearerAuth": {"type": "http", "scheme": "bearer", "bearerFormat": "JWT"}
+    }
+    schema["security"] = [{"BearerAuth": []}]
+    app.openapi_schema = schema
+    return schema
+
+app.openapi = custom_openapi
+```
+
+<br />
+
+- Stage-gate or authenticate `/docs` and `/openapi.json` in production. A public reference is free reconnaissance.
+- Document gateway `401` / `403` even though FastAPI does not emit them on the Lambda path — the authorizer does.
+
+<br />
+
+---
+
+## 7. Deploy with Terraform
+
+This repository uses SST for the site. The following Terraform is a standalone architecture example, not infrastructure that already exists here. Pin and test the provider version in a real platform repository.
+
+One image. Two compute resources. Shared VPC, RDS, Proxy, and OIDC variables. No MSK, no global Aurora, no purchase cells — those belong in the [ticketing note](/notes/building-an-event-driven-ticketing-backend).
+
+<br />
+
+```hcl title="infra/providers.tf"
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 6.33"
+    }
+  }
+}
+
+provider "aws" {
+  region = var.region
+}
+
+variable "oidc_issuer" {
+  type = string
+}
+
+variable "oidc_audience" {
+  type = string
+}
+
+variable "image_uri" {
+  type = string
+}
+```
+
+<br />
+
+HTTP API, JWT authorizer, container Lambda in the VPC so it can reach the Proxy. Health and preflight stay public.
+
+<br />
+
+```hcl title="infra/lambda.tf"
+resource "aws_apigatewayv2_api" "http" {
+  name          = "api"
+  protocol_type = "HTTP"
+
+  cors_configuration {
+    allow_origins = ["https://app.example.com"]
+    allow_methods = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+    allow_headers = ["content-type", "authorization", "x-request-id"]
+    allow_credentials = true
+  }
+}
+
+resource "aws_apigatewayv2_authorizer" "jwt" {
+  api_id           = aws_apigatewayv2_api.http.id
+  authorizer_type  = "JWT"
+  identity_sources = ["$request.header.Authorization"]
+  name             = "oidc"
+
+  jwt_configuration {
+    audience = [var.oidc_audience]
+    issuer   = var.oidc_issuer
+  }
+}
+
+resource "aws_lambda_function" "api" {
+  function_name = "api"
+  role          = aws_iam_role.lambda.arn
+  package_type  = "Image"
+  image_uri     = var.image_uri
+  timeout       = 15
+  memory_size   = 512
+
+  image_config {
+    command     = ["app.lambda_handler.handler"]
+    entry_point = ["/app/.venv/bin/python", "-m", "awslambdaric"]
+  }
+
+  vpc_config {
+    subnet_ids         = var.private_subnet_ids
+    security_group_ids = [aws_security_group.compute.id]
+  }
+
+  environment {
+    variables = {
+      RUNTIME       = "lambda"
+      DATABASE_URL  = jsondecode(data.aws_secretsmanager_secret_version.app_db.secret_string)["url"]
+      OIDC_ISSUER   = var.oidc_issuer
+      OIDC_AUDIENCE = var.oidc_audience
+    }
+  }
+}
+
+resource "aws_apigatewayv2_stage" "default" {
+  api_id      = aws_apigatewayv2_api.http.id
+  name        = "$default"
+  auto_deploy = true
+}
+
+resource "aws_apigatewayv2_integration" "lambda" {
+  api_id                 = aws_apigatewayv2_api.http.id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = aws_lambda_function.api.invoke_arn
+  payload_format_version = "2.0"
+}
+
+resource "aws_apigatewayv2_route" "health" {
+  api_id    = aws_apigatewayv2_api.http.id
+  route_key = "GET /api/health"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+}
+
+resource "aws_apigatewayv2_route" "options" {
+  api_id    = aws_apigatewayv2_api.http.id
+  route_key = "OPTIONS /{proxy+}"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+}
+
+resource "aws_apigatewayv2_route" "default" {
+  api_id             = aws_apigatewayv2_api.http.id
+  route_key          = "$default"
+  authorization_type = "JWT"
+  authorizer_id      = aws_apigatewayv2_authorizer.jwt.id
+  target             = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+}
+
+resource "aws_lambda_permission" "apigw" {
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.api.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.http.execution_arn}/*/*"
+}
+
+resource "aws_wafv2_web_acl_association" "http_api" {
+  resource_arn = aws_apigatewayv2_stage.default.arn
+  web_acl_arn  = aws_wafv2_web_acl.api.arn
+}
+```
+
+<br />
+
+Fargate uses the **same image**. The task command is uvicorn. TLS and WAF sit on the ALB.
+
+<br />
+
+```hcl title="infra/ecs.tf"
+resource "aws_ecs_cluster" "api" {
+  name = "api"
+}
+
+resource "aws_ecs_task_definition" "api" {
+  family                   = "api"
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+  cpu                      = "512"
+  memory                   = "1024"
+  execution_role_arn       = aws_iam_role.exec.arn
+  task_role_arn            = aws_iam_role.task.arn
+
+  container_definitions = jsonencode([{
+    name  = "api"
+    image = var.image_uri
+    portMappings = [{ containerPort = 8000, protocol = "tcp" }]
+    environment = [
+      { name = "RUNTIME", value = "fargate" },
+      { name = "OIDC_ISSUER", value = var.oidc_issuer },
+      { name = "OIDC_AUDIENCE", value = var.oidc_audience },
+    ]
+    secrets = [
+      { name = "DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.app_db.arn}:url::" }
+    ]
+    logConfiguration = {
+      logDriver = "awslogs"
+      options = {
+        awslogs-group         = aws_cloudwatch_log_group.api.name
+        awslogs-region        = var.region
+        awslogs-stream-prefix = "api"
+      }
+    }
+    healthCheck = {
+      command     = ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health')\""]
+      interval    = 30
+      timeout     = 5
+      retries     = 3
+      startPeriod = 15
+    }
+  }])
+}
+
+resource "aws_ecs_service" "api" {
+  name            = "api"
+  cluster         = aws_ecs_cluster.api.id
+  task_definition = aws_ecs_task_definition.api.arn
+  desired_count   = 2
+  launch_type     = "FARGATE"
+
+  network_configuration {
+    assign_public_ip = false
+    subnets          = var.private_subnet_ids
+    security_groups  = [aws_security_group.compute.id]
+  }
+
+  load_balancer {
+    target_group_arn = aws_lb_target_group.api.arn
+    container_name   = "api"
+    container_port   = 8000
+  }
+
+  deployment_minimum_healthy_percent = 100
+  deployment_maximum_percent         = 200
+}
+
+resource "aws_lb" "api" {
+  name               = "api"
+  load_balancer_type = "application"
+  subnets            = var.public_subnet_ids
+  security_groups    = [aws_security_group.alb.id]
+}
+
+resource "aws_lb_target_group" "api" {
+  name        = "api"
+  port        = 8000
+  protocol    = "HTTP"
+  vpc_id      = var.vpc_id
+  target_type = "ip"
+
+  health_check {
+    path = "/api/health"
+  }
+}
+
+resource "aws_lb_listener" "http" {
+  load_balancer_arn = aws_lb.api.arn
+  port              = 80
+  protocol          = "HTTP"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.api.arn
+  }
+}
+
+resource "aws_wafv2_web_acl" "api" {
+  name  = "api"
+  scope = "REGIONAL"
+
+  default_action {
+    allow {}
+  }
+
+  rule {
+    name     = "rate"
+    priority = 1
+
+    action {
+      block {}
+    }
+
+    statement {
+      rate_based_statement {
+        limit              = 1000
+        aggregate_key_type = "IP"
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "api-rate"
+      sampled_requests_enabled   = true
+    }
+  }
+
+  visibility_config {
+    cloudwatch_metrics_enabled = true
+    metric_name                = "api"
+    sampled_requests_enabled   = true
+  }
+}
+
+resource "aws_wafv2_web_acl_association" "alb" {
+  resource_arn = aws_lb.api.arn
+  web_acl_arn  = aws_wafv2_web_acl.api.arn
+}
+```
+
+<br />
+
+RDS is Multi-AZ. The Proxy sits in the private subnets. Both the function and the task use the Proxy endpoint as `DATABASE_URL`.
+
+<br />
+
+```hcl title="infra/rds.tf"
+resource "aws_db_instance" "postgres" {
+  engine                       = "postgres"
+  engine_version               = "16"
+  instance_class               = "db.t4g.medium"
+  allocated_storage            = 20
+  db_name                      = "app"
+  username                     = "app"
+  manage_master_user_password  = true
+  db_subnet_group_name         = aws_db_subnet_group.this.name
+  vpc_security_group_ids       = [aws_security_group.rds.id]
+  storage_encrypted            = true
+  backup_retention_period      = 7
+  deletion_protection          = true
+  multi_az                     = true
+  performance_insights_enabled = true
+}
+
+resource "aws_db_proxy" "postgres" {
+  name                   = "app-proxy"
+  engine_family          = "POSTGRESQL"
+  role_arn               = aws_iam_role.proxy.arn
+  vpc_subnet_ids         = var.private_subnet_ids
+  vpc_security_group_ids = [aws_security_group.proxy.id]
+  require_tls            = true
+
+  auth {
+    auth_scheme = "SECRETS"
+    iam_auth    = "DISABLED"
+    secret_arn  = aws_db_instance.postgres.master_user_secret[0].secret_arn
+  }
+}
+
+resource "aws_db_proxy_default_target_group" "postgres" {
+  db_proxy_name = aws_db_proxy.postgres.name
+
+  connection_pool_config {
+    max_connections_percent      = 90
+    max_idle_connections_percent = 50
+    connection_borrow_timeout    = 30
+  }
+}
+
+resource "aws_db_proxy_target" "postgres" {
+  db_proxy_name          = aws_db_proxy.postgres.name
+  target_group_name      = aws_db_proxy_default_target_group.postgres.name
+  db_instance_identifier = aws_db_instance.postgres.identifier
+}
+
+# Compose postgresql+asyncpg://user:pass@PROXY:5432/app from the master
+# secret and the proxy endpoint. Both runtimes read this key as DATABASE_URL.
+resource "aws_secretsmanager_secret" "app_db" {
+  name = "api/database-url"
+}
+
+data "aws_secretsmanager_secret_version" "app_db" {
+  secret_id = aws_secretsmanager_secret.app_db.id
+  # First apply must write a version (composed URL) before the function can decode it.
+}
+```
+
+<br />
+
+- Put the function in a VPC only because it must reach the Proxy. Cold start grows with ENI attach; a pre-created Hyperplane ENI makes the second invoke cheaper.
+- The ALB snippet listens on 80 so the hop is visible. Production is **443** plus an ACM certificate on the listener.
+- Explicit public `OPTIONS` and `/api/health` matter: `$default` with a JWT authorizer would reject browser preflight and liveness.
+- App hardening that stays runtime-agnostic: strict CORS, request IDs, structured logs (no tokens), Pydantic validation, least-privilege task and function roles.
+- Associate **WAFv2** with the HTTP API (`aws_wafv2_web_acl_association` on the API stage ARN) the same way it sits on the ALB.
+- Alembic runs in CI or a one-shot task **before** the new image receives traffic.
+
+<br />
+
+---
+
+## 8. Monitor and Recover
+
+Logs, metrics, and traces should share a request id. Alert on symptoms. SNS is the “tell a human” bus.
+
+<br />
+
+| Signal | Fargate | Lambda |
+| --- | --- | --- |
+| Logs | Task `awslogs` → CloudWatch | Function log group |
+| Metrics | ALB 5xx / latency, ECS CPU / memory | Errors, duration, throttles, concurrency |
+| Alarms | Unhealthy hosts, p99, CPU | Error rate, throttles, timeout proximity |
+
+<br />
+
+```hcl title="infra/alarms.tf"
+resource "aws_sns_topic" "alerts" {
+  name = "api-alerts"
+}
+
+resource "aws_sns_topic_subscription" "email" {
+  topic_arn = aws_sns_topic.alerts.arn
+  protocol  = "email"
+  endpoint  = "oncall@example.com"
+}
+
+resource "aws_cloudwatch_metric_alarm" "lambda_errors" {
+  alarm_name          = "api-lambda-errors"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 2
+  metric_name         = "Errors"
+  namespace           = "AWS/Lambda"
+  period              = 60
+  statistic           = "Sum"
+  threshold           = 5
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = [aws_sns_topic.alerts.arn]
+  dimensions = {
+    FunctionName = aws_lambda_function.api.function_name
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "alb_5xx" {
+  alarm_name          = "api-alb-5xx"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 2
+  metric_name         = "HTTPCode_Target_5XX_Count"
+  namespace           = "AWS/ApplicationELB"
+  period              = 60
+  statistic           = "Sum"
+  threshold           = 10
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = [aws_sns_topic.alerts.arn]
+  dimensions = {
+    LoadBalancer = aws_lb.api.arn_suffix
+  }
+}
+```
+
+<br />
+
+- CloudTrail and GuardDuty stay at the account level — verify they are on; do not Console-edit Terraform-managed resources.
+- Durable state is almost entirely **Postgres**. Compute is redeployable from git + the image tag.
+- Write **RPO** and **RTO** first, then: automated backups with retention that matches RPO; cross-region snapshot copy when the product matters; versioned Alembic revisions so a restored DB can catch up.
+- A restore drill: snapshot → non-prod `DATABASE_URL` → `alembic upgrade head` → `/api/health` + one critical path → record the real RTO.
+
+**Failure:** calling Multi-AZ “disaster recovery.” It is high availability inside one region, not cross-region DR. The strategies are [Disaster Recovery in System Design](/notes/disaster-recovery-in-system-design).
+
+<br />
+
+---
+
+## 9. Lifecycle, Tests, Trade-offs
+
+For `POST /users` on Lambda: API Gateway → JWT authorizer → Mangum → request ID → Pydantic → `require_user` → SQLAlchemy → RDS Proxy → Postgres → `201`. The same models appear in `/openapi.json`.
+
+Test **below** Mangum. Stub `require_user`. Use a real disposable Postgres for queries and migrations.
+
+<br />
+
+```python title="tests/test_users.py"
+import pytest
+from fastapi.testclient import TestClient
+
+from app.auth import Principal, require_user
+from app.main import app
+
+
+def principal() -> Principal:
+    return Principal(sub="user_1", raw={"sub": "user_1"})
+
+
+@pytest.fixture
+def client() -> TestClient:
+    app.dependency_overrides[require_user] = principal
+    with TestClient(app) as test_client:
+        yield test_client
+    app.dependency_overrides.clear()
+
+
+def test_health(client: TestClient) -> None:
+    response = client.get("/api/health")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+
+def test_create_user_rejects_bad_email(client: TestClient) -> None:
+    response = client.post("/users", json={"email": "not-an-email", "name": "Ada"})
+    assert response.status_code == 400
+    assert response.json()["code"] == "VALIDATION_ERROR"
+```
+
+<br />
+
+- Reserve deployed tests for authorizer decisions, CORS, secrets, and `/api/health` on the live URL.
+- Accepted trade-offs: container-image **cold start** (bigger than a zip), the Proxy extra hop, CPython’s GIL so CPU-bound work does not belong on this request path ([Learning Python](/notes/learning-python-as-a-typescript-developer)), and Terraform state you must protect — this site’s app stacks stay on [SST](/notes/using-sst-for-aws-infra-and-devops). Each layer stays replaceable.
+
+<br />
+
+---
+
+## Mental Model
+
+```text
+Contract   → Pydantic models + shared errors + generated OpenAPI
+Auth       → OIDC JWT authorizer (Lambda) or Depends (Fargate)
+Data       → SQLAlchemy 2 + NullPool/Proxy on Lambda + Alembic on deploy
+Deploy     → one image → HTTP API + Function  or  WAF + ALB + Service
+Protect    → WAF, rate limits, least-privilege secrets, docs gated
+Monitor    → requestId logs + runtime metrics + SNS alarms
+Recover    → RPO/RTO → backups → restore drills → new image + DNS
+```
+
+<br />
+
+Keep the path short: validated request, trusted identity, typed query, durable constraint, generated docs, reviewable infra. Pick **Lambda** or **Fargate** from traffic shape, put WAF and identity at the right boundary, alarm on symptoms, and do not call it production-ready until a restore drill matches the RPO/RTO you wrote down.
+
+The TypeScript version of this spine is the [Hono note](/notes/_backend-apis-hono-sst). Fargate at ticketing scale is the [event-driven ticketing note](/notes/building-an-event-driven-ticketing-backend).
+
+---
+
+## Recap Q&A
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="fastapi-arch">
+    <AccordionTrigger>1. What is the default architecture, and when do you pick Lambda vs Fargate?</AccordionTrigger>
+    <AccordionContent>
+
+      - Default shape: one **FastAPI Lambda** behind **API Gateway HTTP API**, with the built-in **JWT authorizer**. Rejected tokens never invoke the function.
+      - The same app runs on Fargate with `uvicorn`. The only AWS-specific module is `app/lambda_handler.py` (`Mangum(app)`). Business logic does not import Mangum.
+      - Choose **Lambda** for spiky or idle traffic, short handlers, and authorizer-first reject.
+      - Choose **Fargate** for steady traffic, long requests, streaming, workers, and a real connection pool.
+      - On Lambda, identity is an infrastructure boundary. On Fargate, it runs in-process after the request hits the task. Both still need edge controls. Both reach Postgres through RDS Proxy.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="fastapi-pydantic">
+    <AccordionTrigger>2. What does one Pydantic model drive, and why is that the contract?</AccordionTrigger>
+    <AccordionContent>
+
+      - The contract is what a route accepts, returns, and how errors look. One Pydantic model drives **validation**, **OpenAPI**, and the JSON body.
+      - `response_model=UserRead` is the HTTP boundary. Map ORM → Pydantic in the service. A function annotation without Pydantic is a comment.
+      - Shared `ErrorBody` keeps `400` / `404` / `409` consistent. Document gateway `401` / `403` even though FastAPI does not emit them on the Lambda path.
+      - `/openapi.json` is the portable artifact. `/docs` is presentation — stage-gate it in production.
+      - The production default is one app object so middleware, errors, OpenAPI, and DB setup stay in one place.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="fastapi-proxy">
+    <AccordionTrigger>3. How should SQLAlchemy sit on Lambda, and when do migrations run?</AccordionTrigger>
+    <AccordionContent>
+
+      - PostgreSQL is the durable authority. Prefer **database constraints** over check-then-insert under concurrency.
+      - Create the engine **outside** the handler. On Lambda use `NullPool` and `statement_cache_size=0` so RDS Proxy does not pin a session per warm environment. On Fargate use a small `QueuePool`.
+      - Cap reserved concurrency. The Proxy is the multiplexor, not a license to open five connections per invoke.
+      - Migrations are a **deploy step**, never part of the request path. `alembic upgrade head` on a disposable DB, then before the new image receives traffic.
+      - Secrets come from **Secrets Manager**, not a committed env file.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="fastapi-jwt">
+    <AccordionTrigger>4. Where is the OIDC access token checked, and what stays off the authorizer?</AccordionTrigger>
+    <AccordionContent>
+
+      - The API is a **resource server**. Terraform takes `oidc_issuer` and `oidc_audience`. There is no Cognito resource in this note.
+      - On Lambda the HTTP API **JWT authorizer** verifies `iss`, `aud`, and the JWKS signature before Mangum runs. On Fargate, `require_user` does the same with `PyJWKClient`.
+      - Keep `/api/health` and `OPTIONS` **off** the authorizer. Identity is `sub`, never `X-User-Id`.
+      - Authorization (roles, org, RLS) stays in the app. The ID token is not an API credential.
+      - **Failure:** a wildcard CORS origin with credentials, or skipping the authorizer and paying to invoke on every junk bearer token.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="fastapi-terraform">
+    <AccordionTrigger>5. How does Terraform wire both runtimes, and what is out of scope?</AccordionTrigger>
+    <AccordionContent>
+
+      - One container image. Lambda overrides `command` to `app.lambda_handler.handler` via `awslambdaric`. Fargate keeps the Dockerfile `CMD` (`uvicorn`).
+      - HTTP API `$default` goes through the JWT authorizer. The ECS service sits behind an ALB with WAFv2. RDS + RDS Proxy are shared.
+      - This is a slim example: no MSK, no Aurora Global, no purchase cells. Ticketing scale is a different note. This site’s own stacks stay on SST.
+      - Alarm on Lambda `Errors` and ALB `5xx`. Durable state is Postgres. Compute is an image tag.
+      - Do not call it production-ready until a restore drill matches the RPO/RTO you wrote down.
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>
