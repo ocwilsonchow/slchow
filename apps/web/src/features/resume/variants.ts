@@ -1,5 +1,5 @@
 export const resumeVariants = {
-  frontend: "resume-v4-frontend",
+  frontend: "resume-v5-frontend",
   "full-stack": "resume-v5-full-stack",
 } as const
 
