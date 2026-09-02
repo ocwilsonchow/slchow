@@ -1,0 +1,94 @@
+---
+title: 简历 — 前端
+---
+
+## Wilson, Chow Sin Long
+
+**Senior product frontend engineer**，拥有 **5 年**经验，负责 React 与 React Native 产品流程——从 Figma 到类型安全 API 与上线——覆盖 **15+** 个正式产品。最强证明：agent 聊天与电商 UI、编辑发布／搜索，以及上架 App Store／Play Store 的学生／会员应用。
+
+---
+
+## 工作经历
+
+### Frontend Developer，Vioo Company Limited，2022 年 5 月至今
+
+担任多个并行客户产品的主要前端：与设计及相关方厘清 UX，再把产品流程做到上线。
+
+### 医疗保健 AI Agent，2025 年 7 月至 2026 年 4 月
+
+- 负责面向客户的聊天与后台流程——文件上传、对话内问卷、商品与购物车操作——以 **Better Auth** HttpOnly cookies 与 RBAC 区分 client 与 admin 角色。
+- 交付对话内问卷（以及含条件逻辑的 form builder）、商品卡与购物车操作，让推荐留在同一流程。
+- 拆开后台列表状态：URL 负责可分享的筛选与分页，**TanStack Query** 负责 server cache，**TanStack Table** 负责呈现——避免表格每次交互都重新请求。
+
+### 高性能编辑平台，2025 年 11 月
+
+担任内容与搜索型编辑平台的前端负责人——性能、Strapi CMS、Meilisearch、**Next.js**。为下方工作室 WordPress → headless 迁移中的其中一个站点。
+
+- 内容与搜索页未预留图片空间导致版面位移、LCP 变慢；改为预留空间、缓存与图片优化：**LCP &lt; 0.5s**、**CLS &lt; 0.1**，PageSpeed Insights **>90**（实验室数据）。
+- 选择混合 ISR 而非全量 SSG 或纯按需：主要页面与最新 100 篇文章在构建时生成，其余按需。Strapi **GraphQL** 以 **Next.js** cache tags 标记；webhook revalidation 让发布无需完整重建即可上线。
+- 将键盘可操作的导航与表单错误、语义化结构，以及 Lighthouse + axe 检查设为上线门槛——而非上线后补做。
+- 将交互状态与页面数据分开：**XState** + **TanStack Form**／**Zod** 管多步流程，locale 放在路由（文案、日期、数字），内容走混合 ISR。
+
+### React Native 会员平台，2024 年 4 月上线
+
+- 负责会员流程（电子会员卡、积分、优惠），从 Figma 做到 iOS／Android App Store 与 Play Store 上架；同时负责 **Next.js** 管理后台。
+- 会话风险：refresh tokens 存于 **SecureStore**／Keychain，Face ID／指纹解锁；以 **OpenAPI** 生成类型安全 **REST** 客户端。
+- 上线后维持 **99%** crash-free sessions，以 **Sentry** 诊断崩溃、设备兼容性与 API 瓶颈。
+- 改善动态列表滚动卡顿：**Sentry** 显示长列表与全分辨率图片卡住 JS thread；改用 **FlashList** + 行 memoization，缓存／缩小动态列表图片，并以 **Reanimated**／**Moti** 在原生线程做转场。冻结非活动标签页并延迟挂载（那些标签页会较晚绘制）。稳定 **60fps**（实验室数据，RN Perf Monitor）。
+- 以 Firebase Cloud Messaging deep links，把促销与会员里程碑通知导向对应画面。
+
+跨客户产品：
+
+- 负责共用 **Radix**／**Tailwind**／**shadcn/ui** 组件与 hook API，以 **Storybook**／Fumadocs／MDX 提供用法文档与示例，并在客户应用采用以去掉重复 UI；以 **Vitest** 与 **Playwright**／**Cypress** 作为共享 UI 及其消费流程的质量关卡。
+- 在所有客户 Web／移动应用及其 API 上运行 **Sentry**，让生产崩溃、设备问题与 API 错误在上线后可见。
+- 主导采用 **tRPC** 与 Scalar docs，将 API 集成时间缩短 **50%**，并消除 schema 不符错误，让产品工作不被契约漂移卡住。
+- 以 headless CMS（Strapi／Sanity）与统一搜索（Meilisearch／Algolia）在 **Next.js** 上取代各客户站点的 WordPress：加载时间缩短 **80%**、搜索延迟降低 **90%**，PageSpeed Insights **>95**。
+- 通过结对编程、代码审查与共同交付正式 UI，指导暑期实习生与初级开发者。
+
+<br />
+
+---
+
+## 其他工作
+
+此外还交付了学生应用与餐厅忠诚度应用（React Native）、居家长者照护应用（Flutter）、活动／电商 storefronts（Next.js、Shopify **GraphQL**）、CMS 内容站点，以及拍照亭活动应用（React Native、Skia）。
+
+<br />
+
+---
+
+## 技能
+
+- **前端**：TypeScript、React、Next.js、React Native、Expo、HTML/CSS、Tailwind CSS、shadcn/ui、Figma
+- **UI 行为**：TanStack Query、TanStack Form、React Hook Form、XState、TanStack Table、next-intl
+- **架构**：state modeling（URL／server／local）、component APIs、routing、SSR/ISR、GraphQL、tRPC、OpenAPI clients、Storybook、Fumadocs
+- **后端**：Node.js、Hono、Drizzle、Prisma、OpenAPI、tRPC、Postgres、DynamoDB、Better Auth
+- **AWS 与 DevOps**：SST、Docker、ECS Fargate、CloudFront／CDN、GitHub Actions、AWS
+- **质量**：Vitest、Playwright、Cypress、React Testing Library、Lighthouse、axe、Sentry
+- **移动端**：FlashList、Reanimated、Moti、Skia、Unistyles、SecureStore／biometrics、FCM
+
+<br />
+
+---
+
+## 认证
+
+- AWS Solutions Architect Associate，2026
+- AWS Cloud Practitioner，2025
+
+<br />
+
+---
+
+## 教育背景
+
+### University College London
+
+- MPharm 药学（本科），2016 至 2020 年 — 一等荣誉学位
+- 从药剂转行至软件开发。
+
+<br />
+
+---
+
+你也可以在[这里](/resume-full-stack.pdf)下载我的简历。
