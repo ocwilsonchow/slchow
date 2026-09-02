@@ -23,14 +23,14 @@
     "@repo/auth": "workspace:*",
     "@repo/db": "workspace:*",
     "@repo/infra": "workspace:*",
-    "@scalar/hono-api-reference": "^0.11.12",
+    "@scalar/hono-api-reference": "^0.12.0",
     "ai": "^7.0.56",
     "hono": "^4.13.0",
     "mastra": "^1.23.0",
     "zod": "^4"
   },
   "devDependencies": {
-    "@types/node": "^22.15.30",
+    "@types/node": "^26.4.0",
     "tsx": "^4.23.10"
   }
 }
