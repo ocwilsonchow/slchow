@@ -1,0 +1,410 @@
+---
+title: SOLID 作为变更隔离
+description: 五条轴 ——「X 变时什么不该跟着坏」—— modules 与 types，不是 class 图
+date: 2026-09-03
+category: computer-science
+---
+
+**SOLID** 不是五条 object-oriented programming（OOP）诫命。这个名字是五条原则：Single Responsibility、Open-Closed、Liskov Substitution、Interface Segregation、Dependency Inversion。它是五条轴：**X 变时什么不该跟着坏**。在这套 stack 里，单位是 module 与 type，不是 class。
+
+需要 `instanceof` 或一份可变 lifetime 时，class 才值得写 —— [TypeScript Class 与 Runtime Identity](/notes/typescript-classes-and-runtime-identity)。从 signature 里消失的 `throw` 见 [TypeScript Error Handling](/notes/typescript-error-handling)。这篇 note 讲的是变更。
+
+<br />
+
+---
+
+## Pattern Map
+
+| Letter | 不该 cascade 的变更 | Keep | Failure |
+| --- | --- | --- | --- |
+| SRP — Single Responsibility | 谁来要求这次改 | 一个 module 一个 actor | 上帝 `notify`，或「只做一件事」的微文件 |
+| OCP — Open-Closed | 一条新 channel | 新文件 + 在 root 注册 | dispatcher 里越长的 `if (channel)` |
+| LSP — Liskov Substitution | 一个可替换的 deliverer | 同样的 success / failure / idempotency | 永远回 ok 的安静 no-operation（`Noop`） |
+| ISP — Interface Segregation | 只寄 email 的 client | 小的 `Deliver` | 肥的 `NotificationChannel` |
+| DIP — Dependency Inversion | Vendor 的 SDK（software development kit） | 依赖 `Deliver`；在 root compose | 在 `notify` 里 `import { Resend }` |
+
+<br />
+
+Spine 是一个 notifier。Welcome mail、password reset，之后 Slack。每一个 letter 是对这个 module 的不同一刀。
+
+<br />
+
+---
+
+## 1. 一个 function，三个理由
+
+Signup。你寄一封 welcome email。第一稿看起来没问题。
+
+<br />
+
+```ts
+import { Resend } from "resend"
+
+const resend = new Resend(process.env.RESEND_API_KEY)
+
+export async function notify(event: {
+  user: { email: string; name: string }
+  type: "welcome" | "password-reset"
+}) {
+  const subject =
+    event.type === "welcome"
+      ? `Welcome, ${event.user.name}`
+      : "Reset your password"
+  const html =
+    event.type === "welcome"
+      ? `<p>Hi ${event.user.name}</p>`
+      : `<p>Click to reset</p>`
+
+  await resend.emails.send({
+    from: "hello@example.com",
+    to: event.user.email,
+    subject,
+    html,
+  })
+}
+```
+
+<br />
+
+Product 要 Slack。Marketing 要改问候。Infra 要轮换 application programming interface（API）key。三个 actor。一个 function。改文案，你碰到 send。加 channel，你碰到 Resend。轮换 key，你打开拥有散文的那份文件。
+
+<br />
+
+**Failure:** 因为它是一个 function，就把「它寄出 email」当成一个变更理由。
+
+<br />
+
+---
+
+## 2. SRP —— 谁来问
+
+**Single Responsibility Principle（SRP）**：一个 module 有 **一个 actor**，一个变更理由。不是「一件事」。「只做一件事」会产出 `getSubject.ts` 与 `getHtml.ts`，marketing 重写问候时它们还是一起改。那不是 SRP。那是一个 folder。
+
+<br />
+
+```ts
+export type Notification = {
+  to: string
+  subject: string
+  body: string
+}
+
+export function formatNotification(event: SignupEvent): Notification {
+  if (event.type === "welcome") {
+    return {
+      to: event.user.email,
+      subject: `Welcome, ${event.user.name}`,
+      body: `<p>Hi ${event.user.name}</p>`,
+    }
+  }
+
+  return {
+    to: event.user.email,
+    subject: "Reset your password",
+    body: "<p>Click to reset</p>",
+  }
+}
+
+export async function deliverEmail(
+  message: Notification,
+): Promise<DeliverResult> {
+  const sent = await resend.emails.send({
+    from: "hello@example.com",
+    to: message.to,
+    subject: message.subject,
+    html: message.body,
+  })
+
+  return sent.error
+    ? { ok: false, error: sent.error.message }
+    : { ok: true }
+}
+
+export async function notify(event: SignupEvent): Promise<DeliverResult> {
+  return deliverEmail(formatNotification(event))
+}
+```
+
+<br />
+
+Marketing 拥有 `formatNotification`。Infra 拥有 `deliverEmail`。`notify` 是 use case：它不拥有文案，也不拥有 vendor。切开的是谁会来问，不是每个文件有几行。
+
+<br />
+
+**Failure:** 因为有两个 `if` 就拆 function，或因为 copy 与 SDK 在同一次 call 里跑就把它们留在同一个 module。
+
+<br />
+
+---
+
+## 3. OCP —— 一条新 channel
+
+**Open-Closed Principle（OCP）**：对扩充开放，对修改封闭。在这套 stack 里那不是 subclass。它是一个 **port** 加上一份 **register**。加 Slack 是一个新文件，加上 composition root 的一行。`notify` 不会变长。
+
+<br />
+
+```ts
+export type DeliverResult = { ok: true } | { ok: false; error: string }
+
+export type Deliver = (message: Notification) => Promise<DeliverResult>
+
+export async function notify(
+  event: SignupEvent,
+  deliverers: readonly Deliver[],
+): Promise<DeliverResult[]> {
+  const message = formatNotification(event)
+  return Promise.all(deliverers.map((deliver) => deliver(message)))
+}
+```
+
+<br />
+
+```ts
+// composition root — a route, an entry module, a test harness
+const deliverers: Deliver[] = [deliverEmail, deliverWebhook, deliverInApp]
+```
+
+<br />
+
+`deliverSlack.ts` 实现 `Deliver`。推进 `deliverers`。Dispatcher 从不点名 Slack。Dispatcher 也不点名 email —— 那是下一个 letter。
+
+<br />
+
+对修改封闭的 failure，是知道每一条 channel 的 switch：
+
+<br />
+
+```ts
+if (channel === "email") await deliverEmail(message)
+else if (channel === "webhook") await deliverWebhook(message)
+else if (channel === "slack") await deliverSlack(message)
+```
+
+<br />
+
+Discriminated union 加上 exhaustive `switch`，在集合 **封闭** 时是诚实的 —— 这个 repo 的三个 locales、上面两种 event types。Compiler 逼每一个 call site 更新。那不是古典 OCP。当你不想要 plugin 时，那是对的 TS。OCP 用于 **开放** 集合：你会一直加 channel，而不去改 dispatcher。
+
+<br />
+
+**Failure:** product 每要一次 Slack、SMS（文字消息）、push，就在 `notify` 里把 `if (channel)` 加长。
+
+<br />
+
+---
+
+## 4. LSP —— Deliver contract
+
+**Liskov Substitution Principle（LSP）**：没有 `Bird` / `Penguin`。可替换性仍然在。任何你当成 `Deliver` 传进去的东西，都必须遵守同一组结果：caller 能 branch 的 result、同一套 idempotency、不多余的 throw。
+
+<br />
+
+```ts
+export const deliverNoop: Deliver = async () => ({ ok: true })
+```
+
+<br />
+
+Production 的 `deliverEmail` 在 429 回 `{ ok: false }`。Callers retry。永远回 ok 的 no-operation（`Noop`）代表 retry 从不跑，operator 以为寄出了。Type 过了。Contract 没过。
+
+<br />
+
+测试用的 fake 若记录 messages 并回同一种 `DeliverResult`，就是可替换的。Type 说 Result 却 `throw` 的 fake 则不是 —— 那一半见 [TypeScript Error Handling](/notes/typescript-error-handling)。
+
+<br />
+
+Idempotency 是 contract 的一部分。若 `deliverEmail` 用同一则 message 呼叫两次是安全的，`deliverSlack` 也必须如此，否则 dispatcher 不能 retry 其中一条而不让另一条翻倍。
+
+<br />
+
+**Failure:** 安静的 `Noop`，或一条会 throw 的 channel，而其他 `Deliver` 都回 result。
+
+<br />
+
+---
+
+## 5. ISP —— 小的 port
+
+**Interface Segregation Principle（ISP）**：Client 不得依赖它不用的 methods。在这套 stack 里，那是 arguments 与 fields，不是带空 stubs 的 class。
+
+<br />
+
+```ts
+type NotificationChannel = {
+  sendEmail: (to: string, html: string) => Promise<DeliverResult>
+  sendPush: (deviceToken: string, title: string) => Promise<DeliverResult>
+  sendWebhook: (url: string, body: unknown) => Promise<DeliverResult>
+}
+
+export const emailChannel: NotificationChannel = {
+  sendEmail: (to, html) => deliverEmail({ to, subject: "", body: html }),
+  sendPush: async () => ({ ok: false, error: "not supported" }),
+  sendWebhook: async () => ({ ok: false, error: "not supported" }),
+}
+```
+
+<br />
+
+Email 被迫假装它能 push。Push 被迫存在，email 才能 compile。把 `deviceToken` 加进 `Notification`，好让一个 `Deliver` 服务所有人，format 就拥有 marketing 从没要过的 field。
+
+<br />
+
+让 `Deliver` 保持小：`to`、`subject`、`body`。需要 device token 的 push sender 是 **另一个 port**，在另一个 root 注册 —— 或根本不在这里注册。
+
+<br />
+
+```ts
+type DeliverEmail = (message: Notification) => Promise<DeliverResult>
+type DeliverPush = (message: PushMessage) => Promise<DeliverResult>
+```
+
+<br />
+
+**Failure:** 肥的 `NotificationChannel`，或把 `deviceToken` 塞进 `Notification`，好让一个 function signature 为每一条 channel 说谎。
+
+<br />
+
+---
+
+## 6. DIP —— 在 root compose
+
+**Dependency Inversion Principle（DIP）**：依赖 abstractions，不是 concretes。Dependency injection —— 把 dependency 传进来 —— 是这里的做法：传 `Deliver`，不是 `Resend`。没有 container。Composition root 才 import SDK。
+
+<br />
+
+OCP 说加 Slack 不必改 `notify`。DIP 说就算 email 是唯一 channel，`notify` 也从不 import Resend。
+
+<br />
+
+```ts
+import { Resend } from "resend"
+
+export function createEmailDeliverer(resend: Resend): Deliver {
+  return async (message) => {
+    const sent = await resend.emails.send({
+      from: "hello@example.com",
+      to: message.to,
+      subject: message.subject,
+      html: message.body,
+    })
+
+    return sent.error
+      ? { ok: false, error: sent.error.message }
+      : { ok: true }
+  }
+}
+```
+
+<br />
+
+```ts
+// composition root
+const resend = new Resend(process.env.RESEND_API_KEY)
+
+const deliverers: Deliver[] = [
+  createEmailDeliverer(resend),
+  deliverWebhook,
+  deliverInApp,
+]
+
+await notify(event, deliverers)
+```
+
+<br />
+
+`notify.ts` import `Deliver` 与 `formatNotification`。Tests 传一个会记录的 fake。Route module 可以认识 Resend。Domain module 不行。
+
+<br />
+
+**Failure:** 在决定 *要不要* notify 的 module 里 `import { Resend }`。Vendor 一变，就落在 use case 上。
+
+<br />
+
+---
+
+## 7. 何时 SOLID 是错的 frame
+
+Port 是第二个 caller。第二条 channel。第二个 actor。在那之前，第一稿才是 keep。
+
+<br />
+
+- 四十行 script、一条 channel、一个 caller：把 email 寄出去。`Deliver` 是一个名字，不是隔离。
+- 不会变的 module —— `slugify`、date formatter —— 已经只有一个 actor。再拆就是「只做一件事」。
+- 你要 compiler 穷尽的封闭集合：union 加 `switch`，不是 register。OCP 用于开放集合。
+- 第二个实现出现之前就 DIP：你用 `Deliver` 包住 Resend，而你仍然只有 Resend。等到 fake，或等到 Slack。
+
+<br />
+
+这些 letters 背起来便宜，发明得太早则贵。先说出不该 cascade 的变更。还没有的话，就不要切。
+
+<br />
+
+**Failure:** 为只有一个 caller 的 module 抽出 port，再把这层 indirection 当成像是隔离了什么。
+
+<br />
+
+---
+
+## Recap Q&A
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="solid-srp">
+    <AccordionTrigger>1. SRP 隔离的是什么，「只做一件事」又是什么？</AccordionTrigger>
+    <AccordionContent>
+
+      - 一个 **actor**，一个变更理由。Marketing 拥有文案。Infra 拥有 vendor。Use case 两边都不拥有。
+      - 「只做一件事」把 `getSubject` 从 `getHtml` 拆开，它们还是一起改。那是 folder，不是 SRP。
+      - **Failure:** 因为 copy 与 SDK 在同一次 call 里跑就把它们留在一个 `notify`，或因为有两个 `if` 就拆 function。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="solid-ocp-dip">
+    <AccordionTrigger>2. OCP 隔离的是什么，那又怎么不是 DIP？</AccordionTrigger>
+    <AccordionContent>
+
+      - OCP：新 channel 不必改 dispatcher。`Deliver` 加上 composition root 的 register。新文件，root 一行。
+      - DIP：dispatcher 从不 import SDK。传 `Deliver`。Root 建构 `Resend` 与 `createEmailDeliverer`。
+      - 你可以有 OCP，register 里的 `deliverEmail` 仍然 import Resend。你可以有 DIP，只有一条 channel、没有 register。那是不同的一刀。
+      - 封闭集合要 exhaustive `switch`，不是 plugin。那不是古典 OCP。那是诚实的 TypeScript。
+      - **Failure:** 在 `notify` 里把 `if (channel)` 加长，或在 use case 里 `import { Resend }`。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="solid-lsp">
+    <AccordionTrigger>3. LSP 要求 `Deliver` 什么？</AccordionTrigger>
+    <AccordionContent>
+
+      - 同一组结果：caller 能 branch 的 `DeliverResult`、同一套 idempotency、不多余的 throw。
+      - 回 `{ ok: true } | { ok: false; error: string }` 的 recording fake 是可替换的。永远回 ok 的安静 `Noop` 不是 —— retry 消失，operator 以为寄出了。
+      - Type 说 Result 却 `throw` 的 channel 不可替换。那一半见 [TypeScript Error Handling](/notes/typescript-error-handling)。
+      - **Failure:** 送出一个对 success 说谎的 `Noop`，或在 channels 之间把 throw 与 result 混在一起。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="solid-isp">
+    <AccordionTrigger>4. ISP 把什么挡在 `Deliver` 外面？</AccordionTrigger>
+    <AccordionContent>
+
+      - `to`、`subject`、`body`。不是 `deviceToken`，不是 `smtpCc`（email carbon copy），不是 `sendPush`。
+      - 带 email、push、webhook methods 的肥 `NotificationChannel`，逼每一个 implementer stub 剩下的。
+      - 需要 device token 的 push 是另一个 port，或不活在这个 dispatcher 上。
+      - **Failure:** 把每一条 channel 的 fields 塞进 `Notification`，好让一个 signature 假装服务所有人。
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="solid-coda">
+    <AccordionTrigger>5. 何时 SOLID 是错的 frame？</AccordionTrigger>
+    <AccordionContent>
+
+      - 一个 caller、一条 channel、四十行 script：把 email 寄出去。Port 是第二个 caller。
+      - 不会变的 module 已经只有一个 actor。不要拆到它「只做一件事」。
+      - 封闭集合：union 加 exhaustive `switch`。Register 用于开放的 channel 集合。
+      - 第二个实现出现之前的 DIP，是套在 Resend 上的名字，不是隔离。
+      - **Failure:** 为只有一个 caller 的 module 抽出 port，再把这层 indirection 当成像是隔离了什么。
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>
