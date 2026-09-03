@@ -1,0 +1,410 @@
+---
+title: SOLID as Change Isolation
+description: Five axes of “what should not break when X changes” — modules and types, not class diagrams
+date: 2026-09-03
+category: computer-science
+---
+
+**SOLID** is not five object-oriented programming (OOP) commandments. The name is five principles: Single Responsibility, Open-Closed, Liskov Substitution, Interface Segregation, Dependency Inversion. It is five axes of **what should not break when X changes**. In this stack the unit is a module and a type, not a class.
+
+A class earns a keep when `instanceof` or a mutable lifetime is required — [TypeScript Classes and Runtime Identity](/notes/typescript-classes-and-runtime-identity). A `throw` that vanishes from the signature is [TypeScript Error Handling](/notes/typescript-error-handling). This note is the change.
+
+<br />
+
+---
+
+## Pattern Map
+
+| Letter | Change that must not cascade | Keep | Failure |
+| --- | --- | --- | --- |
+| SRP — Single Responsibility | Who asks for the change | One actor per module | God `notify`, or “does one thing” micro-files |
+| OCP — Open-Closed | A new channel | New file + register at the root | Growing `if (channel)` in the dispatcher |
+| LSP — Liskov Substitution | A substitute deliverer | Same success / failure / idempotency | Silent no-operation (`Noop`) that always reports ok |
+| ISP — Interface Segregation | A client that only emails | A small `Deliver` | Fat `NotificationChannel` |
+| DIP — Dependency Inversion | The vendor SDK (software development kit) | Depend on `Deliver`; compose at the root | `import { Resend }` inside `notify` |
+
+<br />
+
+The spine is one notifier. Welcome mail, password reset, later Slack. Each letter is a different cut through that module.
+
+<br />
+
+---
+
+## 1. One function, three reasons
+
+Signup. You send a welcome email. The first draft looks fine.
+
+<br />
+
+```ts
+import { Resend } from "resend"
+
+const resend = new Resend(process.env.RESEND_API_KEY)
+
+export async function notify(event: {
+  user: { email: string; name: string }
+  type: "welcome" | "password-reset"
+}) {
+  const subject =
+    event.type === "welcome"
+      ? `Welcome, ${event.user.name}`
+      : "Reset your password"
+  const html =
+    event.type === "welcome"
+      ? `<p>Hi ${event.user.name}</p>`
+      : `<p>Click to reset</p>`
+
+  await resend.emails.send({
+    from: "hello@example.com",
+    to: event.user.email,
+    subject,
+    html,
+  })
+}
+```
+
+<br />
+
+Product wants Slack. Marketing wants the greeting. Infra rotates the application programming interface (API) key. Three actors. One function. Edit copy, you risk the send. Add a channel, you touch Resend. Rotate the key, you open the file that owns the prose.
+
+<br />
+
+**Failure:** treating “it sends the email” as one reason to change because it is one function.
+
+<br />
+
+---
+
+## 2. SRP — who asks
+
+The **Single Responsibility Principle (SRP)**: a module has **one actor**, one reason to change. Not “one thing.” “Does one thing” produces `getSubject.ts` and `getHtml.ts` that still change together when marketing rewrites the greeting. That is not SRP. That is a folder.
+
+<br />
+
+```ts
+export type Notification = {
+  to: string
+  subject: string
+  body: string
+}
+
+export function formatNotification(event: SignupEvent): Notification {
+  if (event.type === "welcome") {
+    return {
+      to: event.user.email,
+      subject: `Welcome, ${event.user.name}`,
+      body: `<p>Hi ${event.user.name}</p>`,
+    }
+  }
+
+  return {
+    to: event.user.email,
+    subject: "Reset your password",
+    body: "<p>Click to reset</p>",
+  }
+}
+
+export async function deliverEmail(
+  message: Notification,
+): Promise<DeliverResult> {
+  const sent = await resend.emails.send({
+    from: "hello@example.com",
+    to: message.to,
+    subject: message.subject,
+    html: message.body,
+  })
+
+  return sent.error
+    ? { ok: false, error: sent.error.message }
+    : { ok: true }
+}
+
+export async function notify(event: SignupEvent): Promise<DeliverResult> {
+  return deliverEmail(formatNotification(event))
+}
+```
+
+<br />
+
+Marketing owns `formatNotification`. Infra owns `deliverEmail`. `notify` is the use case: it does not own copy and it does not own the vendor. The split is who will ask, not how many lines each file has.
+
+<br />
+
+**Failure:** splitting a function because it has two `if`s, or leaving copy and the SDK in one module because they run in one call.
+
+<br />
+
+---
+
+## 3. OCP — a new channel
+
+The **Open-Closed Principle (OCP)**: open for extension, closed for modification. In this stack that is not a subclass. It is a **port** plus a **register**. Adding Slack is a new file and a line at the composition root. `notify` does not grow.
+
+<br />
+
+```ts
+export type DeliverResult = { ok: true } | { ok: false; error: string }
+
+export type Deliver = (message: Notification) => Promise<DeliverResult>
+
+export async function notify(
+  event: SignupEvent,
+  deliverers: readonly Deliver[],
+): Promise<DeliverResult[]> {
+  const message = formatNotification(event)
+  return Promise.all(deliverers.map((deliver) => deliver(message)))
+}
+```
+
+<br />
+
+```ts
+// composition root — a route, an entry module, a test harness
+const deliverers: Deliver[] = [deliverEmail, deliverWebhook, deliverInApp]
+```
+
+<br />
+
+`deliverSlack.ts` implements `Deliver`. Push it onto `deliverers`. The dispatcher never names Slack. The dispatcher never names email either — that is the next letter.
+
+<br />
+
+The closed-for-modification failure is the switch that knows every channel:
+
+<br />
+
+```ts
+if (channel === "email") await deliverEmail(message)
+else if (channel === "webhook") await deliverWebhook(message)
+else if (channel === "slack") await deliverSlack(message)
+```
+
+<br />
+
+A discriminated union plus an exhaustive `switch` is honest when the set is **closed** — the three locales in this repo, the two event types above. The compiler forces every call site to update. That is not classical OCP. It is the right TypeScript when you do not want a plugin. OCP is for an **open** set: channels you will keep adding without editing the dispatcher.
+
+<br />
+
+**Failure:** growing `if (channel)` inside `notify` each time product asks for Slack, SMS (text message), push.
+
+<br />
+
+---
+
+## 4. LSP — the Deliver contract
+
+The **Liskov Substitution Principle (LSP)**: there is no `Bird` / `Penguin`. Substitutability still exists. Anything you pass as `Deliver` must honor the same outcomes: a result the caller can branch on, the same idempotency story, no extra throws.
+
+<br />
+
+```ts
+export const deliverNoop: Deliver = async () => ({ ok: true })
+```
+
+<br />
+
+Production `deliverEmail` returns `{ ok: false }` on a 429. Callers retry. A no-operation (`Noop`) that always reports ok means retries never run and the operator thinks it sent. The type checks. The contract does not.
+
+<br />
+
+A fake for tests that records messages and returns the same `DeliverResult` is substitutable. A fake that `throw`s when the type says Result is not — that half is [TypeScript Error Handling](/notes/typescript-error-handling).
+
+<br />
+
+Idempotency is part of the contract. If `deliverEmail` is safe to call twice with the same message, `deliverSlack` must be too, or the dispatcher cannot retry one without doubling the other.
+
+<br />
+
+**Failure:** a silent `Noop`, or a channel that throws, when every other `Deliver` returns a result.
+
+<br />
+
+---
+
+## 5. ISP — a small port
+
+The **Interface Segregation Principle (ISP)**: clients must not depend on methods they do not use. In this stack that is arguments and fields, not a class with empty stubs.
+
+<br />
+
+```ts
+type NotificationChannel = {
+  sendEmail: (to: string, html: string) => Promise<DeliverResult>
+  sendPush: (deviceToken: string, title: string) => Promise<DeliverResult>
+  sendWebhook: (url: string, body: unknown) => Promise<DeliverResult>
+}
+
+export const emailChannel: NotificationChannel = {
+  sendEmail: (to, html) => deliverEmail({ to, subject: "", body: html }),
+  sendPush: async () => ({ ok: false, error: "not supported" }),
+  sendWebhook: async () => ({ ok: false, error: "not supported" }),
+}
+```
+
+<br />
+
+Email is forced to pretend it can push. Push is forced to exist so email can compile. Add `deviceToken` to `Notification` so one `Deliver` can serve everyone, and format now owns a field marketing never asked for.
+
+<br />
+
+Keep `Deliver` small: `to`, `subject`, `body`. A push sender that needs a device token is a **different port**, registered at a different root — or not registered here at all.
+
+<br />
+
+```ts
+type DeliverEmail = (message: Notification) => Promise<DeliverResult>
+type DeliverPush = (message: PushMessage) => Promise<DeliverResult>
+```
+
+<br />
+
+**Failure:** a fat `NotificationChannel`, or stuffing `deviceToken` onto `Notification` so one function signature can lie for every channel.
+
+<br />
+
+---
+
+## 6. DIP — compose at the root
+
+The **Dependency Inversion Principle (DIP)**: depend on abstractions, not concretes. Dependency injection — passing the dependency in — is how you do it here: pass a `Deliver`, not a `Resend`. There is no container. The composition root imports the SDK.
+
+<br />
+
+OCP said adding Slack does not edit `notify`. DIP says `notify` never imported Resend, even when email was the only channel.
+
+<br />
+
+```ts
+import { Resend } from "resend"
+
+export function createEmailDeliverer(resend: Resend): Deliver {
+  return async (message) => {
+    const sent = await resend.emails.send({
+      from: "hello@example.com",
+      to: message.to,
+      subject: message.subject,
+      html: message.body,
+    })
+
+    return sent.error
+      ? { ok: false, error: sent.error.message }
+      : { ok: true }
+  }
+}
+```
+
+<br />
+
+```ts
+// composition root
+const resend = new Resend(process.env.RESEND_API_KEY)
+
+const deliverers: Deliver[] = [
+  createEmailDeliverer(resend),
+  deliverWebhook,
+  deliverInApp,
+]
+
+await notify(event, deliverers)
+```
+
+<br />
+
+`notify.ts` imports `Deliver` and `formatNotification`. Tests pass a recording fake. The route module is allowed to know Resend. The domain module is not.
+
+<br />
+
+**Failure:** `import { Resend }` in the module that decides *whether* to notify. The vendor change then lands in the use case.
+
+<br />
+
+---
+
+## 7. When SOLID is the wrong frame
+
+Ports are a second caller. A second channel. A second actor. Before that, the first draft is the keep.
+
+<br />
+
+- A 40-line script with one channel and one caller: send the email. `Deliver` is a name, not an isolation.
+- A module that will not change — `slugify`, a date formatter — already has one actor. Splitting it is “does one thing.”
+- A closed set you want the compiler to exhaust: a union and a `switch`, not a register. OCP is for the open set.
+- DIP before a second implementation: you wrap Resend in `Deliver` and still only have Resend. Wait for the fake, or for Slack.
+
+<br />
+
+The letters are cheap to recite and expensive to invent early. Name the change that must not cascade. If there is not one yet, do not cut.
+
+<br />
+
+**Failure:** extracting a port for a module with one caller, then maintaining the indirection as if it had isolated something.
+
+<br />
+
+---
+
+## Recap Q&A
+
+<Accordion type="single" collapsible>
+  <AccordionItem value="solid-srp">
+    <AccordionTrigger>1. What does SRP isolate, and what is “does one thing”?</AccordionTrigger>
+    <AccordionContent>
+
+      - One **actor**, one reason to change. Marketing owns copy. Infra owns the vendor. The use case owns neither.
+      - “Does one thing” splits `getSubject` from `getHtml` that still change together. That is a folder, not SRP.
+      - **Failure:** leaving copy and the SDK in one `notify` because they run in one call, or splitting a function because it has two `if`s.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="solid-ocp-dip">
+    <AccordionTrigger>2. What does OCP isolate, and how is that not DIP?</AccordionTrigger>
+    <AccordionContent>
+
+      - OCP: a new channel does not edit the dispatcher. `Deliver` plus a register at the composition root. New file, one line at the root.
+      - DIP: the dispatcher never imports the SDK. Pass a `Deliver`. The root constructs `Resend` and `createEmailDeliverer`.
+      - You can have OCP with a register that still imports Resend inside `deliverEmail`. You can have DIP with one channel and no register. They are different cuts.
+      - A closed set wants an exhaustive `switch`, not a plugin. That is not classical OCP. It is honest TypeScript.
+      - **Failure:** growing `if (channel)` in `notify`, or `import { Resend }` in the use case.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="solid-lsp">
+    <AccordionTrigger>3. What does LSP require of `Deliver`?</AccordionTrigger>
+    <AccordionContent>
+
+      - Same outcomes: a `DeliverResult` the caller can branch on, the same idempotency story, no extra throws.
+      - A recording fake that returns `{ ok: true } | { ok: false; error: string }` is substitutable. A silent `Noop` that always reports ok is not — retries vanish and the operator thinks it sent.
+      - A channel that `throw`s when the type says Result is not substitutable. That half is [TypeScript Error Handling](/notes/typescript-error-handling).
+      - **Failure:** shipping a `Noop` that lies about success, or mixing throws with results across channels.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="solid-isp">
+    <AccordionTrigger>4. What does ISP keep off `Deliver`?</AccordionTrigger>
+    <AccordionContent>
+
+      - `to`, `subject`, `body`. Not `deviceToken`, not `smtpCc` (email carbon copy), not `sendPush`.
+      - A fat `NotificationChannel` with email, push, and webhook methods forces every implementer to stub the rest.
+      - Push that needs a device token is a different port, or it does not live on this dispatcher.
+      - **Failure:** stuffing every channel’s fields onto `Notification` so one signature can pretend to serve all of them.
+
+    </AccordionContent>
+  </AccordionItem>
+
+  <AccordionItem value="solid-coda">
+    <AccordionTrigger>5. When is SOLID the wrong frame?</AccordionTrigger>
+    <AccordionContent>
+
+      - One caller, one channel, a 40-line script: send the email. A port is a second caller.
+      - A module that will not change already has one actor. Do not split it so it “does one thing.”
+      - A closed set: union plus exhaustive `switch`. A register is for an open set of channels.
+      - DIP before a second implementation is a name around Resend, not an isolation.
+      - **Failure:** extracting a port for a module with one caller, then maintaining the indirection as if it had isolated something.
+
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>
