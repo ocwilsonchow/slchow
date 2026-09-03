@@ -37,7 +37,7 @@ Signup。你寄一封 welcome email。第一稿看起来没问题。
 
 <br />
 
-```ts
+```ts title="Failure — first draft: copy, send, and vendor in one function"
 import { Resend } from "resend"
 
 const resend = new Resend(process.env.RESEND_API_KEY)
@@ -74,15 +74,7 @@ Product 要 Slack。Marketing 要改问候。Infra 要轮换 application program
 
 <br />
 
----
-
-## 2. SRP —— 谁来问
-
-**Single Responsibility Principle（SRP）**：一个 module 有 **一个 actor**，一个变更理由。不是「一件事」。「只做一件事」会产出 `getSubject.ts` 与 `getHtml.ts`，marketing 重写问候时它们还是一起改。那不是 SRP。那是一个 folder。
-
-<br />
-
-```ts
+```ts title="Keep — one actor per module"
 export type Notification = {
   to: string
   subject: string
@@ -127,7 +119,67 @@ export async function notify(event: SignupEvent): Promise<DeliverResult> {
 
 <br />
 
-Marketing 拥有 `formatNotification`。Infra 拥有 `deliverEmail`。`notify` 是 use case：它不拥有文案，也不拥有 vendor。切开的是谁会来问，不是每个文件有几行。
+Marketing 拥有 `formatNotification`。Infra 拥有 `deliverEmail`。`notify` 是 use case：它不拥有文案，也不拥有 vendor。
+
+<br />
+
+---
+
+## 2. SRP —— 谁来问
+
+**Single Responsibility Principle（SRP）**：一个 module 有 **一个 actor**，一个变更理由。不是「一件事」。「只做一件事」会产出 `getSubject.ts` 与 `getHtml.ts`，marketing 重写问候时它们还是一起改。那不是 SRP。那是一个 folder。
+
+<br />
+
+```ts title="Failure — split by line count, not by actor"
+export function getSubject(event: SignupEvent): string {
+  return event.type === "welcome"
+    ? `Welcome, ${event.user.name}`
+    : "Reset your password"
+}
+
+export function getHtml(event: SignupEvent): string {
+  return event.type === "welcome"
+    ? `<p>Hi ${event.user.name}</p>`
+    : "<p>Click to reset</p>"
+}
+
+export async function notify(event: SignupEvent): Promise<DeliverResult> {
+  return deliverEmail({
+    to: event.user.email,
+    subject: getSubject(event),
+    body: getHtml(event),
+  })
+}
+```
+
+<br />
+
+```ts title="Keep — split by who asks, not by how many lines"
+export function formatNotification(event: SignupEvent): Notification {
+  if (event.type === "welcome") {
+    return {
+      to: event.user.email,
+      subject: `Welcome, ${event.user.name}`,
+      body: `<p>Hi ${event.user.name}</p>`,
+    }
+  }
+
+  return {
+    to: event.user.email,
+    subject: "Reset your password",
+    body: "<p>Click to reset</p>",
+  }
+}
+
+export async function notify(event: SignupEvent): Promise<DeliverResult> {
+  return deliverEmail(formatNotification(event))
+}
+```
+
+<br />
+
+切开的是谁会来问，不是每个文件有几行。
 
 <br />
 
@@ -143,7 +195,22 @@ Marketing 拥有 `formatNotification`。Infra 拥有 `deliverEmail`。`notify` �
 
 <br />
 
-```ts
+```ts title="Failure — dispatcher grows with every channel"
+export async function notify(
+  event: SignupEvent,
+  channel: "email" | "webhook" | "slack",
+): Promise<DeliverResult> {
+  const message = formatNotification(event)
+
+  if (channel === "email") return deliverEmail(message)
+  if (channel === "webhook") return deliverWebhook(message)
+  return deliverSlack(message)
+}
+```
+
+<br />
+
+```ts title="Keep — dispatcher closed for modification"
 export type DeliverResult = { ok: true } | { ok: false; error: string }
 
 export type Deliver = (message: Notification) => Promise<DeliverResult>
@@ -159,7 +226,7 @@ export async function notify(
 
 <br />
 
-```ts
+```ts title="Keep — register channels at the composition root"
 // composition root — a route, an entry module, a test harness
 const deliverers: Deliver[] = [deliverEmail, deliverWebhook, deliverInApp]
 ```
@@ -167,18 +234,6 @@ const deliverers: Deliver[] = [deliverEmail, deliverWebhook, deliverInApp]
 <br />
 
 `deliverSlack.ts` 实现 `Deliver`。推进 `deliverers`。Dispatcher 从不点名 Slack。Dispatcher 也不点名 email —— 那是下一个 letter。
-
-<br />
-
-对修改封闭的 failure，是知道每一条 channel 的 switch：
-
-<br />
-
-```ts
-if (channel === "email") await deliverEmail(message)
-else if (channel === "webhook") await deliverWebhook(message)
-else if (channel === "slack") await deliverSlack(message)
-```
 
 <br />
 
@@ -198,13 +253,37 @@ Discriminated union 加上 exhaustive `switch`，在集合 **封闭** 时是诚�
 
 <br />
 
-```ts
+```ts title="Failure — silent Noop breaks the Deliver contract"
 export const deliverNoop: Deliver = async () => ({ ok: true })
 ```
 
 <br />
 
 Production 的 `deliverEmail` 在 429 回 `{ ok: false }`。Callers retry。永远回 ok 的 no-operation（`Noop`）代表 retry 从不跑，operator 以为寄出了。Type 过了。Contract 没过。
+
+<br />
+
+```ts title="Keep — recording fake honors the Deliver contract"
+export function createRecordingDeliverer(sent: Notification[]): Deliver {
+  return async (message) => {
+    sent.push(message)
+    return { ok: true }
+  }
+}
+
+// test
+const sent: Notification[] = []
+await notify(event, [createRecordingDeliverer(sent)])
+expect(sent).toHaveLength(1)
+```
+
+<br />
+
+```ts title="Failure — throw when the type says Result"
+export const deliverThrows: Deliver = async () => {
+  throw new Error("network down")
+}
+```
 
 <br />
 
@@ -228,7 +307,7 @@ Idempotency 是 contract 的一部分。若 `deliverEmail` 用同一则 message 
 
 <br />
 
-```ts
+```ts title="Failure — fat port forces stubs for unused methods"
 type NotificationChannel = {
   sendEmail: (to: string, html: string) => Promise<DeliverResult>
   sendPush: (deviceToken: string, title: string) => Promise<DeliverResult>
@@ -248,11 +327,32 @@ Email 被迫假装它能 push。Push 被迫存在，email 才能 compile。把 `
 
 <br />
 
-让 `Deliver` 保持小：`to`、`subject`、`body`。需要 device token 的 push sender 是 **另一个 port**，在另一个 root 注册 —— 或根本不在这里注册。
+```ts title="Failure — one message type stuffed for every channel"
+export type Notification = {
+  to: string
+  subject: string
+  body: string
+  deviceToken?: string
+}
+
+export type Deliver = (message: Notification) => Promise<DeliverResult>
+```
 
 <br />
 
-```ts
+```ts title="Keep — Deliver stays small; push is a different port"
+export type Notification = {
+  to: string
+  subject: string
+  body: string
+}
+
+export type PushMessage = {
+  deviceToken: string
+  title: string
+  body: string
+}
+
 type DeliverEmail = (message: Notification) => Promise<DeliverResult>
 type DeliverPush = (message: PushMessage) => Promise<DeliverResult>
 ```
@@ -275,7 +375,40 @@ OCP 说加 Slack 不必改 `notify`。DIP 说就算 email 是唯一 channel，`n
 
 <br />
 
-```ts
+```ts title="Failure — use case imports the vendor SDK"
+import { Resend } from "resend"
+
+export async function notify(event: SignupEvent): Promise<DeliverResult> {
+  const message = formatNotification(event)
+  const resend = new Resend(process.env.RESEND_API_KEY)
+
+  const sent = await resend.emails.send({
+    from: "hello@example.com",
+    to: message.to,
+    subject: message.subject,
+    html: message.body,
+  })
+
+  return sent.error
+    ? { ok: false, error: sent.error.message }
+    : { ok: true }
+}
+```
+
+<br />
+
+```ts title="Keep — use case depends on Deliver, not Resend"
+export async function notify(
+  event: SignupEvent,
+  deliver: Deliver,
+): Promise<DeliverResult> {
+  return deliver(formatNotification(event))
+}
+```
+
+<br />
+
+```ts title="Keep — concrete SDK stays in the adapter factory"
 import { Resend } from "resend"
 
 export function createEmailDeliverer(resend: Resend): Deliver {
@@ -296,7 +429,7 @@ export function createEmailDeliverer(resend: Resend): Deliver {
 
 <br />
 
-```ts
+```ts title="Keep — composition root wires concretes to the use case"
 // composition root
 const resend = new Resend(process.env.RESEND_API_KEY)
 

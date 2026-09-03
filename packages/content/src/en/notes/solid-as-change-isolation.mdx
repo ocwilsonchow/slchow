@@ -37,7 +37,7 @@ Signup. You send a welcome email. The first draft looks fine.
 
 <br />
 
-```ts
+```ts title="Failure — first draft: copy, send, and vendor in one function"
 import { Resend } from "resend"
 
 const resend = new Resend(process.env.RESEND_API_KEY)
@@ -74,15 +74,7 @@ Product wants Slack. Marketing wants the greeting. Infra rotates the application
 
 <br />
 
----
-
-## 2. SRP — who asks
-
-The **Single Responsibility Principle (SRP)**: a module has **one actor**, one reason to change. Not “one thing.” “Does one thing” produces `getSubject.ts` and `getHtml.ts` that still change together when marketing rewrites the greeting. That is not SRP. That is a folder.
-
-<br />
-
-```ts
+```ts title="Keep — one actor per module"
 export type Notification = {
   to: string
   subject: string
@@ -127,7 +119,67 @@ export async function notify(event: SignupEvent): Promise<DeliverResult> {
 
 <br />
 
-Marketing owns `formatNotification`. Infra owns `deliverEmail`. `notify` is the use case: it does not own copy and it does not own the vendor. The split is who will ask, not how many lines each file has.
+Marketing owns `formatNotification`. Infra owns `deliverEmail`. `notify` is the use case: it does not own copy and it does not own the vendor.
+
+<br />
+
+---
+
+## 2. SRP — who asks
+
+The **Single Responsibility Principle (SRP)**: a module has **one actor**, one reason to change. Not “one thing.” “Does one thing” produces `getSubject.ts` and `getHtml.ts` that still change together when marketing rewrites the greeting. That is not SRP. That is a folder.
+
+<br />
+
+```ts title="Failure — split by line count, not by actor"
+export function getSubject(event: SignupEvent): string {
+  return event.type === "welcome"
+    ? `Welcome, ${event.user.name}`
+    : "Reset your password"
+}
+
+export function getHtml(event: SignupEvent): string {
+  return event.type === "welcome"
+    ? `<p>Hi ${event.user.name}</p>`
+    : "<p>Click to reset</p>"
+}
+
+export async function notify(event: SignupEvent): Promise<DeliverResult> {
+  return deliverEmail({
+    to: event.user.email,
+    subject: getSubject(event),
+    body: getHtml(event),
+  })
+}
+```
+
+<br />
+
+```ts title="Keep — split by who asks, not by how many lines"
+export function formatNotification(event: SignupEvent): Notification {
+  if (event.type === "welcome") {
+    return {
+      to: event.user.email,
+      subject: `Welcome, ${event.user.name}`,
+      body: `<p>Hi ${event.user.name}</p>`,
+    }
+  }
+
+  return {
+    to: event.user.email,
+    subject: "Reset your password",
+    body: "<p>Click to reset</p>",
+  }
+}
+
+export async function notify(event: SignupEvent): Promise<DeliverResult> {
+  return deliverEmail(formatNotification(event))
+}
+```
+
+<br />
+
+The split is who will ask, not how many lines each file has.
 
 <br />
 
@@ -143,7 +195,22 @@ The **Open-Closed Principle (OCP)**: open for extension, closed for modification
 
 <br />
 
-```ts
+```ts title="Failure — dispatcher grows with every channel"
+export async function notify(
+  event: SignupEvent,
+  channel: "email" | "webhook" | "slack",
+): Promise<DeliverResult> {
+  const message = formatNotification(event)
+
+  if (channel === "email") return deliverEmail(message)
+  if (channel === "webhook") return deliverWebhook(message)
+  return deliverSlack(message)
+}
+```
+
+<br />
+
+```ts title="Keep — dispatcher closed for modification"
 export type DeliverResult = { ok: true } | { ok: false; error: string }
 
 export type Deliver = (message: Notification) => Promise<DeliverResult>
@@ -159,7 +226,7 @@ export async function notify(
 
 <br />
 
-```ts
+```ts title="Keep — register channels at the composition root"
 // composition root — a route, an entry module, a test harness
 const deliverers: Deliver[] = [deliverEmail, deliverWebhook, deliverInApp]
 ```
@@ -167,18 +234,6 @@ const deliverers: Deliver[] = [deliverEmail, deliverWebhook, deliverInApp]
 <br />
 
 `deliverSlack.ts` implements `Deliver`. Push it onto `deliverers`. The dispatcher never names Slack. The dispatcher never names email either — that is the next letter.
-
-<br />
-
-The closed-for-modification failure is the switch that knows every channel:
-
-<br />
-
-```ts
-if (channel === "email") await deliverEmail(message)
-else if (channel === "webhook") await deliverWebhook(message)
-else if (channel === "slack") await deliverSlack(message)
-```
 
 <br />
 
@@ -198,7 +253,7 @@ The **Liskov Substitution Principle (LSP)**: there is no `Bird` / `Penguin`. Sub
 
 <br />
 
-```ts
+```ts title="Failure — silent Noop breaks the Deliver contract"
 export const deliverNoop: Deliver = async () => ({ ok: true })
 ```
 
@@ -208,7 +263,31 @@ Production `deliverEmail` returns `{ ok: false }` on a 429. Callers retry. A no-
 
 <br />
 
-A fake for tests that records messages and returns the same `DeliverResult` is substitutable. A fake that `throw`s when the type says Result is not — that half is [TypeScript Error Handling](/notes/typescript-error-handling).
+```ts title="Keep — recording fake honors the Deliver contract"
+export function createRecordingDeliverer(sent: Notification[]): Deliver {
+  return async (message) => {
+    sent.push(message)
+    return { ok: true }
+  }
+}
+
+// test
+const sent: Notification[] = []
+await notify(event, [createRecordingDeliverer(sent)])
+expect(sent).toHaveLength(1)
+```
+
+<br />
+
+```ts title="Failure — throw when the type says Result"
+export const deliverThrows: Deliver = async () => {
+  throw new Error("network down")
+}
+```
+
+<br />
+
+A fake that records messages and returns the same `DeliverResult` is substitutable. A fake that `throw`s when the type says Result is not — that half is [TypeScript Error Handling](/notes/typescript-error-handling).
 
 <br />
 
@@ -228,7 +307,7 @@ The **Interface Segregation Principle (ISP)**: clients must not depend on method
 
 <br />
 
-```ts
+```ts title="Failure — fat port forces stubs for unused methods"
 type NotificationChannel = {
   sendEmail: (to: string, html: string) => Promise<DeliverResult>
   sendPush: (deviceToken: string, title: string) => Promise<DeliverResult>
@@ -248,11 +327,32 @@ Email is forced to pretend it can push. Push is forced to exist so email can com
 
 <br />
 
-Keep `Deliver` small: `to`, `subject`, `body`. A push sender that needs a device token is a **different port**, registered at a different root — or not registered here at all.
+```ts title="Failure — one message type stuffed for every channel"
+export type Notification = {
+  to: string
+  subject: string
+  body: string
+  deviceToken?: string
+}
+
+export type Deliver = (message: Notification) => Promise<DeliverResult>
+```
 
 <br />
 
-```ts
+```ts title="Keep — Deliver stays small; push is a different port"
+export type Notification = {
+  to: string
+  subject: string
+  body: string
+}
+
+export type PushMessage = {
+  deviceToken: string
+  title: string
+  body: string
+}
+
 type DeliverEmail = (message: Notification) => Promise<DeliverResult>
 type DeliverPush = (message: PushMessage) => Promise<DeliverResult>
 ```
@@ -275,7 +375,40 @@ OCP said adding Slack does not edit `notify`. DIP says `notify` never imported R
 
 <br />
 
-```ts
+```ts title="Failure — use case imports the vendor SDK"
+import { Resend } from "resend"
+
+export async function notify(event: SignupEvent): Promise<DeliverResult> {
+  const message = formatNotification(event)
+  const resend = new Resend(process.env.RESEND_API_KEY)
+
+  const sent = await resend.emails.send({
+    from: "hello@example.com",
+    to: message.to,
+    subject: message.subject,
+    html: message.body,
+  })
+
+  return sent.error
+    ? { ok: false, error: sent.error.message }
+    : { ok: true }
+}
+```
+
+<br />
+
+```ts title="Keep — use case depends on Deliver, not Resend"
+export async function notify(
+  event: SignupEvent,
+  deliver: Deliver,
+): Promise<DeliverResult> {
+  return deliver(formatNotification(event))
+}
+```
+
+<br />
+
+```ts title="Keep — concrete SDK stays in the adapter factory"
 import { Resend } from "resend"
 
 export function createEmailDeliverer(resend: Resend): Deliver {
@@ -296,7 +429,7 @@ export function createEmailDeliverer(resend: Resend): Deliver {
 
 <br />
 
-```ts
+```ts title="Keep — composition root wires concretes to the use case"
 // composition root
 const resend = new Resend(process.env.RESEND_API_KEY)
 
