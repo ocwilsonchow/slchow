@@ -121,16 +121,36 @@ Host view tree   UIView / android.view.View on the UI thread
 
 在 New Architecture 之前，JavaScript 与 native code 通过 asynchronous queue 通信。Calls 被序列化成 JSON、post 过 bridge，并在另一端 decode。Layout 无法在 render 期间被同步读取。Native modules 被 eager 初始化。Concurrent React 无法 commit 一棵连贯的 native tree。
 
+那条 queue 坐在更紧的耦合上：React Native 是对着 **JavaScriptCore** 的 C API 写的。Engine call sites 冗长、要手管 memory，换 engine 意味着 fork framework。**JSI**（JavaScript Interface）是打破那层耦合的 C++ wrapper。Hermes、JSC、V8 与 Chakra 都可以实现同一份 Runtime。Hermes 存在，是因为有这条缝。
+
 New Architecture 用 **JSI** 取代 queue，用 **Fabric** 取代 renderer，用 **TurboModules**（在 Expo 里还有 **Expo Modules API**）取代 native modules。Expo SDK 55 丢掉了 legacy architecture。SDK 57 不把它作为 runtime 选项提供。
 
-**JSI**（JavaScript Interface）是一个 C++ API，让 JavaScript engine 持有 native object 的 reference，也让 native code 持有 JavaScript function 的 reference。JS 对 native 的 call 可以是 **synchronous**。Hot path 上没有 JSON round-trip。
+JSI 让 JavaScript engine 持有 native object 的 reference，也让 native code 持有 JavaScript function 的 reference。JS 对 native 的 call 可以是 **synchronous**。Hot path 上没有 JSON round-trip。写进 C++ shared memory 的 updates，JavaScript 立刻可见。
+
+Runtime 是一等对象，不是口号。几乎每次 JSI call 都要带一份。它只能在 **JS thread** 上读和写；离 thread 访问是 undefined behavior。Framework 拥有它的 lifecycle，可以 tear down 再 restart。Capture 它意味着你自己管那份 lifecycle。它不是 singleton。
+
+<br />
+
+```text
+jsi::Runtime     engine-backed JS environment; JS-thread only
+jsi::Value       C++ representation of a JS value
+jsi::Object      Value with property get / set
+jsi::Function    callable Value; how native creates a JS Promise
+host function    C++ function installed into JS
+host object      C++ object whose get / set run when JS reads a property
+```
+
+<br />
 
 - 那是 Fabric 在 render 期间创建 shadow nodes 所用的契约，也是 TurboModules 与 Expo Modules 暴露 `SecureStore`、camera frames 与 filesystem handles 所用的契约。
+- **Host function** 是装进 JS 的 C++ function。早期 JSI native modules 走这条路：`jsi::Value` → C++ `dynamic`（一只 generic bag）→ native types。**Host object** 是 C++ object，JS 读 property 时跑它的 `get` / `set`。TurboModules、Fabric UIManager 与 Expo Modules 都是 host objects。
+- Fabric 更快，是因为它丢掉了 deserialization hops，不是因为 JSI 有魔法。Legacy UIManager 是 native module：dynamic → generic prop map → 再 deserialize 一次 → native view。Fabric 的 UIManager 是 host object：把 JSI value wrap 成 RawProps → 一次转成 native props。
+- iOS 多赢这一 hop，因为 Objective-C++ 能更直接地把 JSI values bridge 到 native types。Android 仍要在 Java/Kotlin 与 C++ 之间付 **JNI**。JSI 不是银弹。
 - 像 VisionCamera 这样的 library 可以在不把约 30 MB 的 pixels 每秒六十次复制进 JSON string 的情况下处理 frame buffers。
 - Synchronous 不代表免费，也不代表「在另一条 thread」。JS thread 上一次重的 JSI call 仍会 stall React。若工作属于 UI thread，module 必须显式 hop 过去。
 - JSI 不是 React API。应用代码应继续调用已文档化的 modules。那些 modules 是 JSI host objects 这一事实解释 latency；它不是你在 screen 里该去 reach 的 type。
 
-「Bridge」这个词仍出现在 blog posts 与旧 modules 的 interop layers 里。它不是 framework 所建立的契约。
+「Bridge」这个词仍出现在 blog posts 与旧 modules 的 interop layers 里。它不是 framework 所建立的契约。这些 Runtime 与 host-object 名字是实现观察。Phillip Pan 的 [React Native under the hood](https://www.youtube.com/watch?v=oLmGInjKU2U)（App.js Conf 2024）走一遍它们。
 
 ---
 
@@ -154,6 +174,7 @@ JS thread                         UI thread
 - **UI thread**（main thread）是唯一可以 create、update 或 destroy host views 的 thread。
 - 高优先级的 native events 可以在 **UI thread** 上跑 render pipeline，这样 gesture 不会卡在 in-flight JS render 后面。较低优先级的工作可以被 interrupt。
 - C++ state updates，例如 `ScrollView` offset，可以完全跳过 React 的 render phase。
+- **CallInvoker** 是 native code 从 UI thread 或 background thread **hop 上 JS thread** 的方式。Dispatch 是 asynchronous。它不让你 block 当前 thread 等到 JS 跑完。这就是 camera 与 animation libraries 仍需要自己的 UI-thread worklets，而不是从 UI thread 调 JSI 的原因。
 - Hermes 不会给你第二条 JS thread。Concurrent React 可以在 JS thread 上 pause 并 restart 一次 render。它不会把 JavaScript 挪到 UI thread 上，除非 renderer 显式在那里跑一次高优先级 pass。
 
 **失败：** 把「应用很慢」当成一种诊断。一次长的 React render 占用 JS thread。一次 layout-thrashing 的 animation 占用 Yoga。一个 main-thread native module 占用 UI thread 并推迟 mount。Reanimated worklets 存在，是因为有些工作根本不能等 JS。
@@ -267,7 +288,9 @@ Legacy native modules 事先注册。Startup 为 camera、maps 与 analytics 付
 
 **TurboModules** 通过 JSI 懒加载。第一次 JS access 才构造 module。**Codegen** 读取 TypeScript 或 Flow specs 并生成 native bindings，这样 JS/native interface 在 build time 被检查。
 
-Expo 的 **Expo Modules API** 坐在同一层 JSI 上。`expo-secure-store`、`expo-camera`、`expo-font` 与 `expo-image` 是带 JavaScript entry points 的 native modules。它们不是 `fetch` 外面的可选 wrappers。
+Expo 的 **Expo Modules API** 坐在同一层 JSI 上。它的 Swift 与 Kotlin DSL compile 成 JSI host bindings。`expo-secure-store`、`expo-camera`、`expo-font` 与 `expo-image` 是带 JavaScript entry points 的 native modules。它们不是 `fetch` 外面的可选 wrappers。Screen 仍调用已文档化的 module，不是 `jsi::Runtime`。
+
+C++ TurboModules 收到一份 Runtime，因为它们的 methods 默认跑在 JS thread 上。那是实现观察，不是从 screen 安装 raw bindings 的理由。
 
 <br />
 
@@ -417,6 +440,8 @@ React 永远不会 rewrite 已经跑过的 handler 里的 `pressed` binding。�
 - **Expo Go 不是 production 怎么运作。** Production 是你的 EAS binary，加上可选的、fit 那份 binary 的 OTA JavaScript bundle。
 - **Managed 不代表没有 native。** Expo generate native project。应用仍是 UIKit 与 Android views。Config plugins 是 native edits。Expo Modules 是 native code。
 - **Bridge 不是 SDK 57 上 JS 与 native 怎么说话。** JSI 是契约。Interop 可能为旧 modules 存在。
+- **JSI 不代表零 serialization。** 早期 JSI modules 仍经过 C++ `dynamic` 转换。Android 仍要在 Java/Kotlin 与 C++ 之间付 JNI。
+- **不要 stash Runtime。** 它只属于 JS thread。Framework 可以 tear down 再 restart。
 - **JSI 不代表 JavaScript 并行跑。** JSI 是 shared-memory calling。Hermes 仍是一条 JS thread。
 - **Fabric 不是新的 React。** Fabric 是 React Native 的 renderer。React 的 reconciler 是 [深入理解 React](/notes/understanding-react-in-depth) 描述的同一 core。
 - **EAS Update 不能 ship 新的 native module。** 它 ship JavaScript。Native surface changes 需要新 build。
@@ -451,7 +476,7 @@ React Native 不会取代 React 的 rendering model。Expo 不会取代 React Na
 
 至于 React 自己的 queues、lanes 与 commit phase，继续看 [深入理解 React](/notes/understanding-react-in-depth)。Web 对照见 [Browser 中的 Critical Rendering Path](/notes/critical-rendering-path-in-the-browser)。Server/document 侧对应的 orchestrator 见 [深入理解 Next.js](/notes/understanding-next-js-in-depth)。Device threat model（extractable bundle、SecureStore、WebView bridges）见 [React Native 里的 Security](/notes/security-in-react-native)。
 
-主要参考：Expo 的 [SDK 57 changelog](https://expo.dev/changelog/sdk-57)，以及 React Native 的 [architecture overview](https://reactnative.dev/architecture/overview)、[render pipeline](https://reactnative.dev/architecture/render-pipeline)、[threading model](https://reactnative.dev/architecture/threading-model) 与 [New Architecture](https://reactnative.dev/docs/the-new-architecture/landing-page) notes。公开的 Expo 与 React Native 契约是耐用的 API。Shadow-node internals 与 Metro 细节是今天 toolchain 的 debugging 证据，不是要 hard-code 的 API。
+主要参考：Expo 的 [SDK 57 changelog](https://expo.dev/changelog/sdk-57)；React Native 的 [architecture overview](https://reactnative.dev/architecture/overview)、[render pipeline](https://reactnative.dev/architecture/render-pipeline)、[threading model](https://reactnative.dev/architecture/threading-model) 与 [New Architecture](https://reactnative.dev/docs/the-new-architecture/landing-page) notes；以及 Phillip Pan 的 [React Native under the hood](https://www.youtube.com/watch?v=oLmGInjKU2U)（App.js Conf 2024），讲 JSI Runtime、host functions 与 host objects。公开的 Expo 与 React Native 契约是耐用的 API。Shadow-node internals 与 Metro 细节是今天 toolchain 的 debugging 证据，不是要 hard-code 的 API。
 
 这篇文章中的实现观察对应 **Expo SDK 57** 与 React Native **0.86.2**（Hermes V1、New Architecture）。React Native 0.87 是下一个 Expo canary line，不是这个 SDK 的 runtime。
 
@@ -477,10 +502,13 @@ React Native 不会取代 React 的 rendering model。Expo 不会取代 React Na
     <AccordionTrigger>2. Bridge 破坏了什么，JSI 又是什么？</AccordionTrigger>
     <AccordionContent>
 
-      - Legacy Bridge 是一条 **message bus**：JSON 走 async queue。New Architecture 是这个 SDK line 的默认。
-      - **JSI** 是一个 C++ API，让 engine 持有 native object，也让 native code 持有 JS function。JS 对 native 的 call 可以是 **synchronous**。Hot path 上没有 JSON round-trip。
+      - Legacy Bridge 是一条 **message bus**：JSON 走 async queue，坐在耦合 JSC C API 的 framework 上。New Architecture 是这个 SDK line 的默认。
+      - **JSI** 是一个 C++ API，让 engine 持有 native object，也让 native code 持有 JS function。JS 对 native 的 call 可以是 **synchronous**。Hot path 上没有 JSON round-trip。Hermes 存在，是因为 JSI 让 engine 可换。
+      - Runtime 只属于 JS thread，由 framework 拥有。它不是 singleton。离 thread 访问是 undefined behavior。
+      - 早期 JSI modules 是 **host functions**，仍经过 C++ `dynamic` 转换。TurboModules、Fabric UIManager 与 Expo Modules 是 **host objects**：JS 读 property 时跑 `get` / `set`，Fabric 把 RawProps 转一次，而不是 deserialize 两次。
+      - iOS 多赢这一 hop。Android 仍付 **JNI**。JSI 不是银弹。
       - Fabric 用这种方式创建 shadow nodes。VisionCamera 可以处理 frames，而不把约 30 MB 的 pixels 每秒六十次复制进 JSON。
-      - Synchronous 不代表免费。JS thread 上一次重的 JSI call 仍会 stall React。若工作属于 UI thread，module 必须 hop 过去。
+      - Synchronous 不代表免费。JS thread 上一次重的 JSI call 仍会 stall React。若工作属于 UI thread，module 经 **CallInvoker**（async、non-blocking）或 UI-thread worklet hop 过去。
       - 应用代码应继续调用已文档化的 modules。JSI 解释 latency；它不是你在 screen 里该去 reach 的 type。
 
     </AccordionContent>
@@ -493,6 +521,7 @@ React Native 不会取代 React 的 rendering model。Expo 不会取代 React Na
       - **JS thread** 跑 Hermes、React 的 render phase，以及大部分 Yoga。**UI thread** 是唯一可以 create、update 或 destroy host views 的 thread。
       - 高优先级的 native events 可以在 **UI thread** 上跑 render pipeline，这样 gesture 不会卡在 in-flight JS render 后面。
       - C++ state，例如 `ScrollView` offset，可以完全跳过 React 的 render。
+      - **CallInvoker** 异步 hop 上 JS thread。它不能 block 当前 thread 等到 JS 跑完。
       - 一次长的 React render 占用 JS。一次 layout-thrashing 的 animation 占用 Yoga。一个 main-thread native module 占用 UI thread 并推迟 mount。
       - Reanimated worklets 存在，是因为有些工作不能等 JS。Hermes 不会给你第二条 JS thread。Concurrent React 可以在 JS thread 上 pause 一次 render；它不会把 JavaScript 挪到 UI thread 上，除非 renderer 显式在那里跑一次高优先级 pass。
 
