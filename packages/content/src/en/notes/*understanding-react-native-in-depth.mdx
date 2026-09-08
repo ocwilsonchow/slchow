@@ -121,16 +121,36 @@ Host view tree   UIView / android.view.View on the UI thread
 
 Before the New Architecture, JavaScript and native code talked through an asynchronous queue. Calls were serialized to JSON, posted across the bridge, and decoded on the other side. Layout could not be read synchronously during render. Native modules were initialized eagerly. Concurrent React could not commit a coherent native tree.
 
-The New Architecture replaces that queue with **JSI**, the renderer with **Fabric**, and native modules with **TurboModules** (and, in Expo, the **Expo Modules API**). Expo SDK 55 dropped the legacy architecture. SDK 57 does not offer it as a runtime option.
+That queue sat on a tighter coupling: React Native was written against **JavaScriptCore**'s C API. The engine call sites were verbose, they managed memory by hand, and swapping engines meant forking the framework. **JSI** (JavaScript Interface) is the C++ wrapper that broke that coupling. Hermes, JSC, V8, and Chakra can each implement the same Runtime. Hermes exists because of this seam.
 
-**JSI** (JavaScript Interface) is a C++ API that lets a JavaScript engine hold a reference to a native object, and native code hold a reference to a JavaScript function. A JS call into native can be **synchronous**. There is no JSON round-trip on the hot path.
+The New Architecture replaces the queue with **JSI**, the renderer with **Fabric**, and native modules with **TurboModules** (and, in Expo, the **Expo Modules API**). Expo SDK 55 dropped the legacy architecture. SDK 57 does not offer it as a runtime option.
+
+JSI lets a JavaScript engine hold a reference to a native object, and native code hold a reference to a JavaScript function. A JS call into native can be **synchronous**. There is no JSON round-trip on the hot path. Updates written in C++ shared memory are visible to JavaScript immediately.
+
+The Runtime is a first-class object, not a slogan. Almost every JSI call takes one. It may be read and written only on the **JS thread**; off-thread access is undefined behavior. The framework owns its lifecycle and can tear it down and restart it. Capturing it means you own that lifecycle. It is not a singleton.
+
+<br />
+
+```text
+jsi::Runtime     engine-backed JS environment; JS-thread only
+jsi::Value       C++ representation of a JS value
+jsi::Object      Value with property get / set
+jsi::Function    callable Value; how native creates a JS Promise
+host function    C++ function installed into JS
+host object      C++ object whose get / set run when JS reads a property
+```
+
+<br />
 
 - That is the contract Fabric uses to create shadow nodes during render, and the contract TurboModules and Expo Modules use to expose `SecureStore`, camera frames, and filesystem handles.
+- A **host function** is a C++ function installed into JS. Early JSI native modules used this path: `jsi::Value` → a C++ `dynamic` (a generic bag) → native types. A **host object** is a C++ object whose `get` / `set` run when JS reads a property. TurboModules, the Fabric UIManager, and Expo Modules are host objects.
+- Fabric is faster because it dropped deserialization hops, not because JSI is magic. The legacy UIManager was a native module: dynamic → generic prop map → another deserialize → native view. Fabric's UIManager is a host object: wrap the JSI value as RawProps → convert once to native props.
+- iOS wins more of that hop because Objective-C++ can bridge JSI values to native types more directly. Android still pays **JNI** between Java/Kotlin and C++. JSI is not a silver bullet.
 - A library such as VisionCamera can process frame buffers without copying ~30 MB of pixels into a JSON string sixty times a second.
 - Synchronous does not mean free, and it does not mean "on another thread." A heavy JSI call on the **JS thread** still stalls React. If the work belongs on the UI thread, the module must hop there explicitly.
 - JSI is not a React API. Application code should keep calling documented modules. The fact that those modules are JSI host objects explains latency; it is not a type to reach for in a screen.
 
-The word "bridge" still appears in blog posts and in interop layers for old modules. It is not the contract the framework is built on.
+The word "bridge" still appears in blog posts and in interop layers for old modules. It is not the contract the framework is built on. These Runtime and host-object names are implementation observations. Phillip Pan's [React Native under the hood](https://www.youtube.com/watch?v=oLmGInjKU2U) (App.js Conf 2024) walks them.
 
 ---
 
@@ -154,6 +174,7 @@ JS thread                         UI thread
 - The **UI thread** (main thread) is the only thread that may create, update, or destroy host views.
 - High-priority native events can run the render pipeline **on the UI thread** so a gesture is not stuck behind an in-flight JS render. Lower-priority work can be interrupted.
 - C++ state updates, such as a `ScrollView` offset, can skip React's render phase entirely.
+- **CallInvoker** is how native code hops **onto the JS thread** from the UI thread or a background thread. The dispatch is asynchronous. It does not let you block the current thread until JS finishes. That is why camera and animation libraries still need their own UI-thread worklets rather than calling JSI from the UI thread.
 - Hermes does not give you a second JS thread. Concurrent React can pause and restart a render on the JS thread. It does not move JavaScript onto the UI thread unless the renderer explicitly runs a high-priority pass there.
 
 **Failure:** treating "the app is slow" as one diagnosis. A long React render occupies the JS thread. A layout-thrashing animation occupies Yoga. A main-thread native module occupies the UI thread and delays mount. Reanimated worklets exist because some work must not wait for JS at all.
@@ -267,7 +288,9 @@ Legacy native modules were registered up front. Startup paid for camera, maps, a
 
 **TurboModules** load lazily through JSI. The first JS access constructs the module. **Codegen** reads TypeScript or Flow specs and generates the native bindings so the JS/native interface is checked at build time.
 
-Expo's **Expo Modules API** sits on the same JSI layer. `expo-secure-store`, `expo-camera`, `expo-font`, and `expo-image` are native modules with JavaScript entry points. They are not optional wrappers around `fetch`.
+Expo's **Expo Modules API** sits on the same JSI layer. Its Swift and Kotlin DSL compiles to JSI host bindings. `expo-secure-store`, `expo-camera`, `expo-font`, and `expo-image` are native modules with JavaScript entry points. They are not optional wrappers around `fetch`. The screen still calls a documented module, not `jsi::Runtime`.
+
+C++ TurboModules receive a Runtime because their methods run on the JS thread by default. That is an implementation observation, not a reason to install raw bindings from a screen.
 
 <br />
 
@@ -417,6 +440,8 @@ Common misconceptions:
 - **Expo Go is not how production works.** Production is your EAS binary plus, optionally, an OTA JavaScript bundle that fits that binary.
 - **Managed does not mean no native.** Expo generates the native project. The app is still UIKit and Android views. Config plugins are native edits. Expo Modules are native code.
 - **The Bridge is not how JS talks to native on SDK 57.** JSI is the contract. Interop may exist for old modules.
+- **JSI does not mean zero serialization.** Early JSI modules still converted through a C++ `dynamic`. Android still pays JNI between Java/Kotlin and C++.
+- **Do not stash the Runtime.** It is JS-thread only. The framework can tear it down and restart it.
 - **JSI does not mean JavaScript runs in parallel.** JSI is shared-memory calling. Hermes is still one JS thread.
 - **Fabric is not a new React.** Fabric is React Native's renderer. React's reconciler is the same core described in [Understanding React in Depth](/notes/understanding-react-in-depth).
 - **EAS Update cannot ship a new native module.** It ships JavaScript. Native surface changes need a new build.
@@ -451,7 +476,7 @@ Keep rendering pure because Fabric may restart it. Keep strings in `Text` becaus
 
 For React's own queues, lanes, and commit phase, continue with [Understanding React in Depth](/notes/understanding-react-in-depth). For the web contrast, see [The Critical Rendering Path in the Browser](/notes/critical-rendering-path-in-the-browser). For Next.js as the analogous orchestrator on the server/document side, see [Understanding Next.js in Depth](/notes/understanding-next-js-in-depth). For the device threat model (extractable bundle, SecureStore, WebView bridges), see [Security in React Native](/notes/security-in-react-native).
 
-Primary references: Expo's [SDK 57 changelog](https://expo.dev/changelog/sdk-57), and React Native's [architecture overview](https://reactnative.dev/architecture/overview), [render pipeline](https://reactnative.dev/architecture/render-pipeline), [threading model](https://reactnative.dev/architecture/threading-model), and [New Architecture](https://reactnative.dev/docs/the-new-architecture/landing-page) notes. Public Expo and React Native contracts are the durable API. Shadow-node internals and Metro details are debugging evidence for today's toolchain, not an API to hard-code.
+Primary references: Expo's [SDK 57 changelog](https://expo.dev/changelog/sdk-57); React Native's [architecture overview](https://reactnative.dev/architecture/overview), [render pipeline](https://reactnative.dev/architecture/render-pipeline), [threading model](https://reactnative.dev/architecture/threading-model), and [New Architecture](https://reactnative.dev/docs/the-new-architecture/landing-page) notes; and Phillip Pan's [React Native under the hood](https://www.youtube.com/watch?v=oLmGInjKU2U) (App.js Conf 2024) for JSI Runtime, host functions, and host objects. Public Expo and React Native contracts are the durable API. Shadow-node internals and Metro details are debugging evidence for today's toolchain, not an API to hard-code.
 
 The implementation observations in this article correspond to **Expo SDK 57** with React Native **0.86.2** (Hermes V1, New Architecture). React Native 0.87 is the next Expo canary line, not this SDK's runtime.
 
@@ -477,10 +502,13 @@ The implementation observations in this article correspond to **Expo SDK 57** wi
     <AccordionTrigger>2. What did the Bridge break, and what is JSI instead?</AccordionTrigger>
     <AccordionContent>
 
-      - The legacy Bridge was a **message bus**: JSON over an async queue. The New Architecture is the default in this SDK line.
-      - **JSI** is a C++ API that lets the engine hold a native object and native code hold a JS function. A JS call into native can be **synchronous**. There is no JSON round-trip on the hot path.
+      - The legacy Bridge was a **message bus**: JSON over an async queue, on a framework coupled to JSC's C API. The New Architecture is the default in this SDK line.
+      - **JSI** is a C++ API that lets the engine hold a native object and native code hold a JS function. A JS call into native can be **synchronous**. There is no JSON round-trip on the hot path. Hermes exists because JSI made the engine swappable.
+      - The Runtime is JS-thread only and framework-owned. It is not a singleton. Off-thread access is undefined behavior.
+      - Early JSI modules were **host functions** that still converted through a C++ `dynamic`. TurboModules, the Fabric UIManager, and Expo Modules are **host objects**: `get` / `set` run when JS reads a property, and Fabric converts RawProps once instead of deserializing twice.
+      - iOS wins more of that hop. Android still pays **JNI**. JSI is not a silver bullet.
       - Fabric creates shadow nodes this way. VisionCamera can process frames without copying ~30 MB of pixels into JSON sixty times a second.
-      - Synchronous does not mean free. A heavy JSI call on the **JS thread** still stalls React. If the work belongs on the UI thread, the module must hop there.
+      - Synchronous does not mean free. A heavy JSI call on the **JS thread** still stalls React. If the work belongs on the UI thread, the module hops via **CallInvoker** (async, non-blocking) or a UI-thread worklet.
       - Application code should keep calling documented modules. JSI explains latency; it is not a type you reach for in a screen.
 
     </AccordionContent>
@@ -493,6 +521,7 @@ The implementation observations in this article correspond to **Expo SDK 57** wi
       - The **JS thread** runs Hermes, React's render phase, and most Yoga. The **UI thread** is the only thread that may create, update, or destroy host views.
       - High-priority native events can run the render pipeline **on the UI thread** so a gesture is not stuck behind an in-flight JS render.
       - C++ state, such as a `ScrollView` offset, can skip React's render entirely.
+      - **CallInvoker** hops onto the JS thread asynchronously. It cannot block the current thread until JS finishes.
       - A long React render occupies JS. A layout-thrashing animation occupies Yoga. A main-thread native module occupies the UI thread and delays mount.
       - Reanimated worklets exist because some work must not wait for JS. Hermes does not give you a second JS thread. Concurrent React can pause a render on the JS thread; it does not move JavaScript onto the UI thread unless the renderer explicitly runs a high-priority pass there.
 
