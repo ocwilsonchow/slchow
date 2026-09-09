@@ -27,7 +27,7 @@
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.13.0",
-    "@types/aws-lambda": "8.10.162",
+    "@types/aws-lambda": "8.10.163",
     "@types/node": "^26.3.0",
     "husky": "^9.1.7",
     "lint-staged": "^17.3.0",
