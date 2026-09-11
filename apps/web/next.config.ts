@@ -22,6 +22,11 @@ const nextConfig: NextConfig = {
         permanent: true,
       },
       {
+        source: "/:locale/notes/frontend-ci-cd-for-react-and-react-native",
+        destination: "/:locale/notes/frontend-ci-cd-for-react",
+        permanent: true,
+      },
+      {
         source: "/:locale/resume",
         destination: "/:locale/resume/full-stack",
         permanent: true,

@@ -7,7 +7,7 @@ category: devops
 
 **DevSecOps** integrates security into the software delivery lifecycle. Instead of treating security as a final review before release, teams include security decisions in design, development, continuous integration, deployment, and runtime operations.
 
-This note focuses on the delivery process. Application-level risks are covered in [Web Security and the OWASP Top 10](/notes/web-security-owasp-top-10), the broader delivery pipeline is described in [Frontend CI/CD for React and React Native](/notes/frontend-ci-cd-for-react-and-react-native), and stage-based infrastructure is covered in [Using SST to Manage AWS Infrastructure and DevOps](/notes/using-sst-for-aws-infra-and-devops).
+This note focuses on the delivery process. Application-level risks are covered in [Web Security and the OWASP Top 10](/notes/web-security-owasp-top-10), the broader delivery pipeline is described in [Frontend CI/CD for React](/notes/frontend-ci-cd-for-react), React Native / Expo delivery is [React Native CI/CD with EAS Workflows](/notes/react-native-ci-cd-with-eas-workflows), and stage-based infrastructure is covered in [Using SST to Manage AWS Infrastructure and DevOps](/notes/using-sst-for-aws-infra-and-devops).
 
 <br />
 
@@ -138,7 +138,7 @@ jobs:
 - A project-level security script provides a local and CI entry point for the selected scans.
 - Third-party actions can be pinned to full commit SHAs so that a mutable version tag cannot change the executed code unexpectedly.
 
-The detailed CI/CD structure, including previews and artifact promotion, is covered in the [Frontend CI/CD note](/notes/frontend-ci-cd-for-react-and-react-native).
+The detailed CI/CD structure, including previews and artifact promotion, is covered in the [Frontend CI/CD note](/notes/frontend-ci-cd-for-react).
 
 <br />
 
@@ -213,7 +213,7 @@ Practical controls include:
 - **Generate an SBOM** to record included components.
 - **Record provenance** to link an artifact to its source commit, workflow, and builder.
 
-SBOMs and provenance improve traceability; they do not replace code review, testing, or vulnerability management. React Native also includes native dependencies managed through Gradle and CocoaPods, so its supply-chain review must cover more than the JavaScript dependency graph. See [Security in React Native](/notes/security-in-react-native).
+SBOMs and provenance improve traceability; they do not replace code review, testing, or vulnerability management. React Native also includes native dependencies managed through Gradle and CocoaPods, so its supply-chain review must cover more than the JavaScript dependency graph. See [Security in React Native](/notes/security-in-react-native). Applying Build / Run / Verify to EAS Workflows, stage secrets, and OTA promotion is [React Native CI/CD with EAS Workflows](/notes/react-native-ci-cd-with-eas-workflows).
 
 <br />
 
