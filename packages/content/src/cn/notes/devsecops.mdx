@@ -7,7 +7,7 @@ category: devops
 
 **DevSecOps** 是把信息安全整合到软件交付生命周期的实践。安全不再只是发布前的最后一次检查，而是覆盖设计、开发、持续集成、部署与日常运维的一系列决策和控制。
 
-本文集中讨论交付流程。应用层风险见 [Web Security and the OWASP Top 10](/notes/web-security-owasp-top-10)，完整的交付管线见 [React 与 React Native 的 Frontend CI/CD](/notes/frontend-ci-cd-for-react-and-react-native)，以 stage 管理基础设施则见 [用 SST 管理 AWS 基础设施与 DevOps](/notes/using-sst-for-aws-infra-and-devops)。
+本文集中讨论交付流程。应用层风险见 [Web Security and the OWASP Top 10](/notes/web-security-owasp-top-10)，完整的交付管线见 [React 的 Frontend CI/CD](/notes/frontend-ci-cd-for-react)，React Native / Expo 交付见 [用 EAS Workflows 做 React Native CI/CD](/notes/react-native-ci-cd-with-eas-workflows)，以 stage 管理基础设施则见 [用 SST 管理 AWS 基础设施与 DevOps](/notes/using-sst-for-aws-infra-and-devops)。
 
 <br />
 
@@ -138,7 +138,7 @@ jobs:
 - Project-level security script 为本地和 CI 提供一致的扫描入口。
 - 第三方 actions 可以 pin 到完整 commit SHA，避免可变的 version tag 在未经审查时改变实际执行的代码。
 
-Preview 与 artifact promotion 等完整结构见 [Frontend CI/CD 文章](/notes/frontend-ci-cd-for-react-and-react-native)。
+Preview 与 artifact promotion 等完整结构见 [Frontend CI/CD 文章](/notes/frontend-ci-cd-for-react)。
 
 <br />
 
@@ -213,7 +213,7 @@ OWASP **A03 Software Supply Chain Failures** 涵盖被入侵的依赖和 build p
 - **生成 SBOM**，记录 artifact 包含哪些组件。
 - **记录 provenance**，把 artifact 关联到来源 commit、workflow 和 builder。
 
-SBOM 和 provenance 改善可追溯性，但不取代代码审查、测试或漏洞管理。React Native 也包含由 Gradle 和 CocoaPods 管理的 native dependencies，因此供应链审查不能只检查 JavaScript dependency graph。详见 [React Native 里的 Security](/notes/security-in-react-native)。
+SBOM 和 provenance 改善可追溯性，但不取代代码审查、测试或漏洞管理。React Native 也包含由 Gradle 和 CocoaPods 管理的 native dependencies，因此供应链审查不能只检查 JavaScript dependency graph。详见 [React Native 里的 Security](/notes/security-in-react-native)。把 Build / Run / Verify 套用到 EAS Workflows、stage secrets 与 OTA promotion，见 [用 EAS Workflows 做 React Native CI/CD](/notes/react-native-ci-cd-with-eas-workflows)。
 
 <br />
 
